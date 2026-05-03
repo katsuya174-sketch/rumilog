@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>るみろぐ</title>
+    <link href="https://fonts.googleapis.com/css2?family=Kosugi+Maru&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        body.lab-page {
+            font-family: "Hiragino Maru Gothic ProN", sans-serif;
+            background: linear-gradient(135deg, #fff8fa 0%, #ffe8ee 100%);
+            margin: 0;
+            padding: 40px 0;
+            min-height: 100vh;
+            overflow-y: auto;
+            position: relative;
+            max-width: none;
+        }
+
+.bg-bubble {
+    position: fixed;
+    bottom: -120px;
+    border-radius: 50%;
+    animation: rise linear infinite;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0.9;
+    filter: blur(0.2px);
+    border: 1.5px solid rgba(255, 255, 255, 0.55);
+    box-shadow:
+        inset -8px -12px 18px rgba(255,255,255,0.45),
+        inset 6px 6px 10px rgba(255,180,200,0.14),
+        0 8px 24px rgba(255, 170, 190, 0.18);
+}
+
+@keyframes rise {
+    0% {
+        transform: translateY(0) translateX(0) scale(0.9);
+        opacity: 0;
+    }
+
+    10% {
+        opacity: 0.7;
+    }
+
+    25% {
+        transform: translateY(-25vh) translateX(-20px) scale(1);
+    }
+
+    50% {
+        transform: translateY(-50vh) translateX(25px) scale(1.05);
+    }
+
+    75% {
+        transform: translateY(-80vh) translateX(-15px) scale(0.95);
+    }
+
+    100% {
+        transform: translateY(-120vh) translateX(20px) scale(0.9);
+        opacity: 0;
+    }
+}
+
+.bg-sparkle {
+    position: fixed;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    pointer-events: none;
+    opacity: 0.75;
+    z-index: 1;
+    animation: twinkle 2.8s infinite ease-in-out;
+
+}
+.bg-sparkle.white {
+    background: rgba(255, 255, 255, 0.95);
+}
+
+.bg-sparkle.pink {
+    background: rgba(255, 214, 226, 0.95);
+    box-shadow: 0 0 10px rgba(255, 214, 226, 0.95);
+}
+
+.bg-sparkle.lavender {
+    background: rgba(232, 224, 255, 0.95);
+    box-shadow: 0 0 10px rgba(232, 224, 255, 0.95);
+}
+
+.bg-sparkle.blue {
+    background: rgba(219, 232, 255, 0.95);
+    box-shadow: 0 0 10px rgba(219, 232, 255, 0.95);
+}
+
+.bg-sparkle.gold {
+background: rgba(255,230,180,0.95);
+box-shadow: 0 0 12px rgba(255,230,180,0.9);
+}
+
+.bg-sparkle.silver {
+background: rgba(230,230,240,0.95);
+box-shadow: 0 0 12px rgba(230,230,240,0.9);
+}
+
+@keyframes twinkle {
+    0% {
+        opacity: 0.18;
+        transform: scale(0.7) rotate(0deg);
+    }
+    50% {
+        opacity: 1;
+        transform: scale(1.8) rotate(20deg);
+    }
+    100% {
+        opacity: 0.18;
+        transform: scale(0.7) rotate(0deg);
+    }
+}
+#bgEffects {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    z-index: 0;
+    pointer-events: none;
+}
+
+.container {
+            width: min(420px, calc(100% - 32px));
+    max-width:420px;
+    margin:0 auto;
+    padding:24px 16px;
+    background:rgba(255,255,255,0.95);
+    border-radius:24px;
+    box-sizing:border-box;
+    position: relative;
+    z-index: 2;
+        }
+
+        h1 {
+    color: #FF85A2;
+    font-family: 'Kosugi Maru', sans-serif;
+    font-size: clamp(2rem, 10vw, 3rem);
+    margin-bottom: 12px;
+    letter-spacing: 2px;
+    line-height: 1.2;
+    text-align: center;
+}
+
+.form-note{
+    font-size: 12.5px;
+    color:#b88b96;
+    margin-top:6px;
+    margin-bottom:18px;
+    line-height:1.6;
+}
+
+.subtitle {
+    text-align: center;
+    font-size: clamp(11px, 3.8vw, 16px);
+    color: #FFB3C7;
+    margin-top: 0;
+    margin-bottom: 24px;
+    line-height: 1.5;
+    padding: 0 12px;
+}
+
+@media (min-width:600px){
+    .subtitle{
+        font-size:16px;
+    }
+}
+
+        .form-group {
+            margin-bottom: 20px;
+            text-align: left;
+        }
+
+        label {
+            display: block;
+            font-size: 0.95rem;
+            color: #8f6f78;
+            margin-bottom: 8px;
+            font-weight: 600;
+            font-family: 'Kosugi Maru', sans-serif;
+            letter-spacing: 0.02em;
+        }
+
+        input, select, textarea {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #ffe0e5;
+            border-radius: 15px;
+            box-sizing: border-box;
+            font-size: 1rem;
+            background-color: white;
+            outline: none;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 110px;
+        }
+
+        button {
+            background: #FF85A2;
+            color: white;
+            border: none;
+            padding: 18px;
+            border-radius: 35px;
+            width: 100%;
+            font-weight: bold;
+            font-size: 1.1rem;
+            margin-top: 10px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(255, 133, 162, 0.3);
+        }
+
+        .photo-option-label {
+            display: block;
+            font-size: 0.82rem;
+            color: #b88b96;
+            margin-top: 10px;
+            margin-bottom: 6px;
+            font-weight: 600;
+            font-family: 'Kosugi Maru', sans-serif;
+            letter-spacing: 0.02em;
+        }
+
+        .photo-mode-select {
+            width: 100%;
+            padding: 13px 15px;
+            border: 2px solid #ffe0e5;
+            border-radius: 15px;
+            box-sizing: border-box;
+            font-size: 0.95rem;
+            background-color: #fffafc;
+            outline: none;
+            margin-bottom: 10px;
+            color: #8f6f78;
+            font-family: 'Kosugi Maru', sans-serif;
+        }
+
+        .photo-input-label {
+            display: block;
+            font-size: 0.85rem;
+            color: #b88b96;
+            margin-bottom: 6px;
+            font-family: 'Kosugi Maru', sans-serif;
+        }
+      /* =========================
+   ローディング全体
+========================= */
+.loading-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(255, 238, 245, 0.93);
+    backdrop-filter: blur(10px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.loading-inner {
+    text-align: center;
+    width: 220px;
+}
+
+.loading-text-main {
+    font-size: 20px;
+    font-weight: bold;
+    color: #ff7fa0;
+    margin-bottom: 10px;
+    letter-spacing: 0.04em;
+}
+
+.loading-text-sub {
+    min-height: 12px;
+    margin-bottom: 18px;
+}
+
+.loader {
+    display: none;
+    width: 150px;
+    height: 150px;
+    margin: 0 auto;
+    position: relative;
+}
+
+
+/* =========================
+   ② バブル強化版
+========================= */
+.loader-bubbles {
+    display: none;
+}
+
+.loader-bubble-item {
+    position: absolute;
+    border-radius: 50%;
+    background: radial-gradient(circle at 30% 25%,
+        rgba(255,255,255,1) 0%,
+        rgba(255,170,205,0.95) 38%,
+        rgba(255,110,165,0.82) 68%,
+        rgba(255,70,145,0.65) 100%
+    );
+    border: 2px solid rgba(255,255,255,0.9);
+    box-shadow:
+        inset -8px -10px 18px rgba(255,255,255,0.72),
+        0 10px 26px rgba(255,90,150,0.45),
+        0 0 18px rgba(255,120,175,0.6),
+        0 0 34px rgba(255,105,170,0.28);
+}
+
+.bubble1 { width: 34px; height: 34px; left: 56px;  bottom: 6px;  animation: bubbleDance 3.8s infinite ease-in-out 0s; }
+.bubble2 { width: 18px; height: 18px; left: 102px; bottom: 10px; animation: bubbleDance 3.1s infinite ease-in-out 0.8s; }
+.bubble3 { width: 26px; height: 26px; left: 22px;  bottom: 0;  animation: bubbleDance 4.0s infinite ease-in-out 1.2s; }
+.bubble4 { width: 14px; height: 14px; left: 88px;  bottom: 28px; animation: bubbleDance 2.8s infinite ease-in-out 1.7s; }
+.bubble5 { width: 22px; height: 22px; left: 44px;  bottom: 30px; animation: bubbleDance 3.5s infinite ease-in-out 2.1s; }
+.bubble6 { width: 12px; height: 12px; left: 118px; bottom: 40px; animation: bubbleDance 2.7s infinite ease-in-out 2.5s; }
+
+.bubble1 { animation-duration: 3.8s; }
+.bubble2 { animation-duration: 3.0s; }
+.bubble3 { animation-duration: 4.2s; }
+.bubble4 { animation-duration: 2.6s; }
+.bubble5 { animation-duration: 3.5s; }
+.bubble6 { animation-duration: 2.9s; }
+
+@keyframes bubbleDance {
+    0% {
+        transform: translateY(0) translateX(0) scale(0.75);
+        opacity: 0;
+    }
+    15% {
+        opacity: 0.7;
+    }
+    35% {
+        transform: translateY(-26px) translateX(-8px) scale(1);
+        opacity: 0.9;
+    }
+    60% {
+        transform: translateY(-58px) translateX(10px) scale(1.18);
+        opacity: 0.85;
+    }
+    82% {
+        transform: translateY(-92px) translateX(-4px) scale(0.96);
+        opacity: 0.45;
+    }
+    100% {
+        transform: translateY(-112px) translateX(6px) scale(1.28);
+        opacity: 0;
+    }
+}
+
+.photo-action-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 14px;
+}
+
+.photo-action-btn {
+    width: 100%;
+    margin-top: 0;
+    padding: 14px 12px;
+    border-radius: 16px;
+    font-size: 0.95rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #ff9fba, #ff6f9c);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(255, 120, 160, 0.25);
+    transition: all 0.2s ease;
+}
+
+.photo-action-btn.secondary {
+    background: #fff0f4;
+    color: #d96b8c;
+    box-shadow: none;
+    border: 2px solid #ffd8e2;
+}
+.photo-action-btn.is-active {
+    background: linear-gradient(135deg, #ff9fba, #ff6f9c);
+    color: #fff;
+    box-shadow: 0 4px 12px rgba(255, 120, 160, 0.25);
+    border: none;
+}
+
+.photo-action-btn:not(.is-active) {
+    background: #fff0f4;
+    color: #d96b8c;
+    box-shadow: none;
+    border: 2px solid #ffd8e2;
+}
+
+.capture-guide {
+    background: linear-gradient(135deg, #fff7fa, #fff1f5);
+    border: 2px solid #ffe0e8;
+    border-radius: 16px;
+    padding: 14px;
+    margin-bottom: 14px;
+}
+
+.capture-step-text {
+    font-size: 0.92rem;
+    color: #8f6f78;
+    font-weight: 700;
+    margin-bottom: 10px;
+    line-height: 1.5;
+}
+
+.capture-progress {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.capture-chip {
+    padding: 7px 12px;
+    border-radius: 999px;
+    background: #fff;
+    border: 2px solid #ffe0e5;
+    color: #b88b96;
+    font-size: 0.8rem;
+    font-weight: 700;
+    transition: all 0.2s ease;
+}
+
+.capture-chip.active {
+    background: #ffedf3;
+    border-color: #ff9fba;
+    color: #d95a82;
+    box-shadow: 0 0 10px rgba(255, 150, 180, 0.25);
+}
+
+.capture-chip.done {
+    background: linear-gradient(135deg, #ff85a2, #ff5f8f);
+    border-color: #ff85a2;
+    color: #fff;
+}
+
+.camera-buttons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.photo-preview-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 12px;
+}
+
+.photo-preview-card {
+    background: #fffafc;
+    border: 2px solid #ffe0e5;
+    border-radius: 16px;
+    padding: 10px;
+    text-align: center;
+    transition: all 0.2s ease;
+}
+
+.photo-preview-card.active {
+    border-color: #ff9fba;
+    box-shadow: 0 0 10px rgba(255, 150, 180, 0.2);
+}
+
+.photo-preview-title {
+    font-size: 0.8rem;
+    color: #8f6f78;
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+
+.photo-preview-image {
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    object-fit: cover;
+    border-radius: 12px;
+    background: #fff;
+    display: none;
+}
+
+.photo-preview-image.show {
+    display: block;
+}
+
+.photo-preview-status {
+    margin-top: 6px;
+    font-size: 0.75rem;
+    color: #b88b96;
+}
+
+@media (max-width: 480px) {
+    .photo-action-row,
+    .camera-buttons {
+        grid-template-columns: 1fr;
+    }
+
+    .photo-preview-grid {
+        gap: 8px;
+    }
+
+    .photo-action-btn,
+    .camera-btn,
+    .gallery-btn {
+        font-size: 0.9rem;
+        padding: 13px 10px;
+    }
+
+    .capture-chip {
+        font-size: 0.75rem;
+        padding: 6px 10px;
+    }
+}
+
+#error-box {
+    margin-top: 16px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: #fff1f3;
+    color: #c2185b;
+    font-size: 14px;
+    line-height: 1.6;
+}
+    </style>
+</head>
+<body class="lab-page">
+   
+    <div id="bgEffects"></div>
+    <div class="container">
+        <h1>るみろぐ</h1>
+    
+<p class="subtitle">
+    AIがあなたの肌状態を分析し、<br>
+    最適なスキンケアを提案します</p>
+
+    
+    {% if DISABLE_USAGE_LIMIT %}
+      <p style="font-size:14px; color:#666; margin-top:8px;">
+        開発中：回数制限なし
+      </p>
+    {% elif remaining_free_count is defined %}
+      <p style="font-size:14px; color:#666; margin-top:8px;">
+        今月の無料診断残り回数：{{ remaining_free_count }}回
+      </p>
+    {% endif %}
+    
+    <a href="/pricing" style="font-size:13px; color:#b88b96; text-decoration:underline;">
+      無制限で使う（有料プラン）
+    </a>
+
+    <div style="text-align:center; margin: 10px 0 22px;">
+      <a href="/history"
+         style="
+            display:inline-block;
+            padding: 9px 14px;
+            border-radius: 999px;
+            background: #fff0f4;
+            color: #d96b8c;
+            font-size: 14px;
+            font-weight: bold;
+            text-decoration: none;
+            border: 2px solid #ffd8e2;
+         ">
+        📈 過去の診断記録を見る
+      </a>
+    </div>
+
+    {% if error %}
+      <p style="color:red; font-size:14px; margin-top:8px;">
+        {{ error }}
+      </p>
+    {% endif %}
+
+    <form id="diagnosisForm" method="POST" enctype="multipart/form-data" onsubmit="return handleSubmit(event)">
+        <div class="form-group">
+          <div class="form-group">
+            <label>📷 顔写真</label>
+        
+            <div class="photo-action-row">
+              <button type="button" id="cameraModeBtn" class="photo-action-btn" onclick="openCameraPanel()">
+                  📸 3枚まとめて撮影
+              </button>
+              
+              <button type="button" id="galleryModeBtn" class="photo-action-btn" onclick="openGalleryMode()">
+                  🖼 写真を選ぶ
+              </button>
+            </div>
+        
+            <div id="captureGuide" class="capture-guide">
+                <div id="captureStepText" class="capture-step-text">
+                    正面・左頬・右頬の3枚を登録します
+                </div>
+                <div class="capture-progress">
+                    <span id="stepFront" class="capture-chip">正面</span>
+                    <span id="stepLeft" class="capture-chip">左頬</span>
+                    <span id="stepRight" class="capture-chip">右頬</span>
+                </div>
+            </div>
+        
+            <div id="cameraPanel" class="camera-panel" style="display:none;">
+                <div class="camera-frame">
+                    <video id="cameraVideo" autoplay playsinline muted></video>
+                    <canvas id="cameraCanvas" style="display:none;"></canvas>
+        
+                    <div class="camera-overlay">
+                        <div class="camera-overlay-text" id="cameraOverlayText">正面を枠に合わせてください</div>
+                        <div class="face-guide"></div>
+                    </div>
+                </div>
+        
+                <div class="camera-buttons">
+                    <button type="button" class="camera-btn secondary" onclick="switchCamera()">カメラ切替</button>
+                    <button type="button" class="camera-btn secondary" onclick="closeCameraPanel()">閉じる</button>
+                    <button type="button" class="camera-btn" onclick="captureCurrentPhoto()">この写真を使う</button>
+                </div>
+            </div>
+        
+            <div id="galleryPanel" class="gallery-panel" style="display:none;">
+                <div class="gallery-row">
+                    <button type="button" class="gallery-btn" onclick="openGalleryInput('front_photo')">正面を選ぶ</button>
+                    <button type="button" class="gallery-btn" onclick="openGalleryInput('left_photo')">左頬を選ぶ</button>
+                    <button type="button" class="gallery-btn" onclick="openGalleryInput('right_photo')">右頬を選ぶ</button>
+                </div>
+            </div>
+        
+            <div class="photo-preview-grid">
+                <div id="front_card" class="photo-preview-card">
+                    <div class="photo-preview-title">正面</div>
+                    <img id="front_preview" class="photo-preview-image" alt="正面プレビュー">
+                    <div id="front_status" class="photo-preview-status">未登録</div>
+                </div>
+        
+                <div id="left_card" class="photo-preview-card">
+                    <div class="photo-preview-title">左頬</div>
+                    <img id="left_preview" class="photo-preview-image" alt="左頬プレビュー">
+                    <div id="left_status" class="photo-preview-status">未登録</div>
+                </div>
+        
+                <div id="right_card" class="photo-preview-card">
+                    <div class="photo-preview-title">右頬</div>
+                    <img id="right_preview" class="photo-preview-image" alt="右頬プレビュー">
+                    <div id="right_status" class="photo-preview-status">未登録</div>
+                </div>
+            </div>
+        
+            <input type="file" id="front_photo" name="front_photo" accept="image/*" hidden required onchange="handleGalleryPhotoSelected('front')">
+<input type="file" id="left_photo" name="left_photo" accept="image/*" hidden required onchange="handleGalleryPhotoSelected('left')">
+<input type="file" id="right_photo" name="right_photo" accept="image/*" hidden required onchange="handleGalleryPhotoSelected('right')">
+        
+            <p class="form-note">
+                ※顔全体がわかる正面、左頬、右頬の3枚を登録してください<br>
+                ※正確な診断のため、メイクをしていない状態で撮影してください
+            </p>
+        </div>
+
+            <div class="form-group">
+                <label>🎂 年齢</label>
+                <input type="number" name="age">
+            </div>
+
+            <div class="form-group">
+                <label>💧 肌質（現在の状態）</label>
+                <select name="oil_status">
+                    <option value="" selected></option>
+                    <option value="dry">乾燥肌</option>
+                    <option value="oily">脂性肌</option>
+                    <option value="mixed">混合肌</option>
+                    <option value="normal">普通肌</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>🌿 敏感度</label>
+                <select name="sensitivity">
+                    <option value="" selected></option>
+                    <option value="low">低い</option>
+                    <option value="middle">普通</option>
+                    <option value="high">高い</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="retinol_exp">🧴 レチノール使用経験</label>
+                <select name="retinol_exp" id="retinol_exp" required>
+                    <option value="">選択してください</option>
+                    <option value="beginner">なし</option>
+                    <option value="middle">少しある</option>
+                    <option value="high">慣れている</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>💴 月間スキンケア予算</label>
+            
+                <select name="budget_type" id="budget_type">
+                    <option value="monthly_total">月間トータル</option>
+                    <option value="per_item">1アイテムあたり</option>
+                </select>
+            
+                <input type="text" name="budget" id="budget" placeholder="例：5000（円）">
+            
+                <p class="form-note">
+                    ※月間トータルを選んだ場合は、朝・夜・週ケアを含む合計予算です
+                </p>
+            </div>
+              
+
+            <button id="submitBtn" type="submit">診断する</button>
+
+            {% if error_message %}
+              <div style="
+                margin: 16px 0;
+                padding: 12px 14px;
+                border-radius: 12px;
+                background: #fff1f3;
+                color: #c2185b;
+                font-size: 14px;
+                line-height: 1.6;
+              ">
+                {{ error_message }}
+              </div>
+            {% endif %}
+
+          </form>
+
+          <div id="error-box" style="display:none;"></div>
+
+            <div id="loadingOverlay" class="loading-overlay" style="display:none;">
+            <div class="loading-inner">
+                <div class="loading-text-main" id="loadingTextMain">診断中です…</div>
+                
+        
+                <div id="loadingAnimation">
+                    <!-- ② バブル -->
+                    <div class="loader loader-bubbles">
+                        <div class="loader-bubble-item bubble1"></div>
+                        <div class="loader-bubble-item bubble2"></div>
+                        <div class="loader-bubble-item bubble3"></div>
+                        <div class="loader-bubble-item bubble4"></div>
+                        <div class="loader-bubble-item bubble5"></div>
+                        <div class="loader-bubble-item bubble6"></div>
+                    </div>
+        
+                    
+                    
+                </div>
+            </div>
+        </div>
+        
+    </div>
+    <script>
+      let starInterval;
+      let loadingTimer = null;
+      let loadingStartTime = null;
+      const captureOrder = [
+          {
+              key: "front",
+              inputId: "front_photo",
+              previewId: "front_preview",
+              statusId: "front_status",
+              cardId: "front_card",
+              chipId: "stepFront",
+              label: "正面"
+          },
+          {
+              key: "left",
+              inputId: "left_photo",
+              previewId: "left_preview",
+              statusId: "left_status",
+              cardId: "left_card",
+              chipId: "stepLeft",
+              label: "左頬"
+          },
+          {
+              key: "right",
+              inputId: "right_photo",
+              previewId: "right_preview",
+              statusId: "right_status",
+              cardId: "right_card",
+              chipId: "stepRight",
+              label: "右頬"
+          }
+      ];
+  
+      let currentCaptureIndex = 0;
+      let currentStream = null;
+      let currentFacingMode = "user";
+  
+      function handleSubmit(event) {
+          event.preventDefault();
+  
+          const form = document.getElementById("diagnosisForm");
+          if (!form.checkValidity()) {
+              form.reportValidity();
+              return false;
+          }
+  
+          showLoading();
+  
+          setTimeout(() => {
+              HTMLFormElement.prototype.submit.call(form);
+          }, 120);
+  
+          return false;
+      }
+  
+      function resetCaptureChips() {
+          captureOrder.forEach(item => {
+              const chip = document.getElementById(item.chipId);
+              if (chip) chip.classList.remove("active", "done");
+          });
+      }
+  
+      function updateGuideText(text) {
+          const el = document.getElementById("captureStepText");
+          if (el) el.textContent = text;
+      }
+  
+      function getNextMissingIndex() {
+          for (let i = 0; i < captureOrder.length; i++) {
+              const input = document.getElementById(captureOrder[i].inputId);
+              if (!input || !input.files || input.files.length === 0) {
+                  return i;
+              }
+          }
+          return 3;
+      }
+  
+      function refreshStepUI() {
+          resetCaptureChips();
+  
+          let completed = 0;
+  
+          captureOrder.forEach((item, index) => {
+              const input = document.getElementById(item.inputId);
+              const chip = document.getElementById(item.chipId);
+  
+              if (input && input.files && input.files.length > 0) {
+                  if (chip) chip.classList.add("done");
+                  completed++;
+              } else if (index === getNextMissingIndex()) {
+                  if (chip) chip.classList.add("active");
+              }
+          });
+  
+          if (completed === 3) {
+              updateGuideText("3枚の登録が完了しました");
+              return;
+          }
+  
+          const nextIndex = getNextMissingIndex();
+          if (nextIndex === 0) updateGuideText("まずは「正面」を登録してください");
+          if (nextIndex === 1) updateGuideText("次は「左頬」を登録してください");
+          if (nextIndex === 2) updateGuideText("最後に「右頬」を登録してください");
+      }
+  
+      async function startCameraStream() {
+          const video = document.getElementById("cameraVideo");
+          if (!video) return;
+  
+          stopCameraStream();
+  
+          try {
+              let stream;
+  
+              try {
+                  stream = await navigator.mediaDevices.getUserMedia({
+                      video: {
+                          facingMode: { ideal: currentFacingMode },
+                          width: { ideal: 1080 },
+                          height: { ideal: 1440 }
+                      },
+                      audio: false
+                  });
+              } catch (firstError) {
+                  stream = await navigator.mediaDevices.getUserMedia({
+                      video: true,
+                      audio: false
+                  });
+              }
+  
+              currentStream = stream;
+              video.srcObject = stream;
+              await video.play();
+  
+              if (currentFacingMode === "user") {
+                  video.style.transform = "scaleX(-1)";
+              } else {
+                  video.style.transform = "none";
+              }
+          } catch (error) {
+              console.error("camera error:", error);
+              alert("カメラを起動できませんでした。ブラウザのカメラ許可を確認してください。");
+              closeCameraPanel();
+          }
+      }
+  
+      function setPhotoMode(mode) {
+          const cameraBtn = document.getElementById("cameraModeBtn");
+          const galleryBtn = document.getElementById("galleryModeBtn");
+
+          if (cameraBtn) cameraBtn.classList.remove("is-active");
+          if (galleryBtn) galleryBtn.classList.remove("is-active");
+
+          if (mode === "camera" && cameraBtn) {
+              cameraBtn.classList.add("is-active");
+          }
+
+          if (mode === "gallery" && galleryBtn) {
+              galleryBtn.classList.add("is-active");
+          }
+      }
+
+      async function openCameraPanel() {
+          setPhotoMode("camera");
+          const galleryPanel = document.getElementById("galleryPanel");
+          const cameraPanel = document.getElementById("cameraPanel");
+          const overlayText = document.getElementById("cameraOverlayText");
+  
+          if (galleryPanel) galleryPanel.style.display = "none";
+          if (cameraPanel) cameraPanel.style.display = "block";
+  
+          currentCaptureIndex = getNextMissingIndex();
+          if (currentCaptureIndex >= 3) currentCaptureIndex = 0;
+  
+          const currentLabel = captureOrder[currentCaptureIndex].label;
+          if (overlayText) {
+              overlayText.textContent = `${currentLabel}を枠に合わせてください`;
+          }
+  
+          currentFacingMode = "user";
+          await startCameraStream();
+      }
+  
+      async function switchCamera() {
+          currentFacingMode = currentFacingMode === "user" ? "environment" : "user";
+          await startCameraStream();
+      }
+  
+      function closeCameraPanel() {
+          stopCameraStream();
+          const cameraPanel = document.getElementById("cameraPanel");
+          if (cameraPanel) cameraPanel.style.display = "none";
+          refreshStepUI();
+      }
+  
+      function stopCameraStream() {
+          if (currentStream) {
+              currentStream.getTracks().forEach(track => track.stop());
+              currentStream = null;
+          }
+      }
+  
+      function captureCurrentPhoto() {
+          const video = document.getElementById("cameraVideo");
+          const canvas = document.getElementById("cameraCanvas");
+          const overlayText = document.getElementById("cameraOverlayText");
+  
+          if (!video || !canvas) return;
+  
+          if (!video.videoWidth || !video.videoHeight) {
+              alert("カメラ映像の準備ができていません");
+              return;
+          }
+  
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+  
+          const ctx = canvas.getContext("2d");
+  
+          if (currentFacingMode === "user") {
+              ctx.save();
+              ctx.translate(canvas.width, 0);
+              ctx.scale(-1, 1);
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+              ctx.restore();
+          } else {
+              ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          }
+  
+          canvas.toBlob(function(blob) {
+              if (!blob) {
+                  alert("写真の保存に失敗しました");
+                  return;
+              }
+  
+              const item = captureOrder[currentCaptureIndex];
+              const file = new File([blob], `${item.key}.jpg`, { type: "image/jpeg" });
+              setFileToInput(item.inputId, file);
+              showPreviewFromFile(item, file);
+  
+              currentCaptureIndex++;
+  
+              if (currentCaptureIndex < captureOrder.length) {
+                  const nextLabel = captureOrder[currentCaptureIndex].label;
+                  if (overlayText) {
+                      overlayText.textContent = `${nextLabel}を枠に合わせてください`;
+                  }
+                  refreshStepUI();
+              } else {
+                  closeCameraPanel();
+              }
+          }, "image/jpeg", 0.92);
+      }
+  
+      function setFileToInput(inputId, file) {
+          const input = document.getElementById(inputId);
+          if (!input) return;
+  
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          input.files = dt.files;
+      }
+  
+      function showPreviewFromFile(item, file) {
+          const preview = document.getElementById(item.previewId);
+          const status = document.getElementById(item.statusId);
+          const card = document.getElementById(item.cardId);
+  
+          const reader = new FileReader();
+          reader.onload = function(e) {
+              if (preview) {
+                  preview.src = e.target.result;
+                  preview.classList.add("show");
+              }
+          };
+          reader.readAsDataURL(file);
+  
+          if (status) status.textContent = `${item.label}を登録済み`;
+          if (card) card.classList.add("active");
+  
+          refreshStepUI();
+      }
+  
+      function handleGalleryPhotoSelected(key) {
+          const item = captureOrder.find(p => p.key === key);
+          if (!item) return;
+
+          const input = document.getElementById(item.inputId);
+          if (!input || !input.files || input.files.length === 0) {
+              refreshStepUI();
+              return;
+          }
+
+          const file = input.files[0];
+          showPreviewFromFile(item, file);
+      }
+
+      function bindFilePreview(inputId, previewId, statusId, cardId, label) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+
+    input.addEventListener("change", function() {
+        const file = input.files && input.files[0];
+
+        const item = {
+            inputId: inputId,
+            previewId: previewId,
+            statusId: statusId,
+            cardId: cardId,
+            label: label
+        };
+
+        if (!file) {
+            const preview = document.getElementById(previewId);
+            const status = document.getElementById(statusId);
+            const card = document.getElementById(cardId);
+
+            if (preview) {
+                preview.src = "";
+                preview.classList.remove("show");
+            }
+
+            if (status) status.textContent = "未登録";
+            if (card) card.classList.remove("active");
+
+            refreshStepUI();
+            return;
+        }
+
+        showPreviewFromFile(item, file);
+    });
+}
+  
+      function openGalleryMode() {
+          setPhotoMode("gallery");
+          closeCameraPanel();
+          const galleryPanel = document.getElementById("galleryPanel");
+          if (galleryPanel) galleryPanel.style.display = "block";
+          refreshStepUI();
+      }
+  
+      function openGalleryInput(inputId) {
+          const input = document.getElementById(inputId);
+          if (!input) return;
+
+          input.removeAttribute("capture");
+
+          // 同じ写真を選び直しても change が発火するようにする
+          input.value = "";
+
+          input.click();
+      }
+  
+      function createBubble(container) {
+          const bubble = document.createElement("div");
+          bubble.className = "bg-bubble";
+  
+          const size = Math.random() * 70 + 12;
+          const left = Math.random() * 100;
+          const duration = Math.random() * 10 + 6;
+          const delay = Math.random() * 8;
+          const bubbleColors = [
+              ["#ffb3cf", "rgba(255,70,145,0.65)"],
+              ["#cfe3ff", "rgba(90,145,255,0.58)"],
+              ["#ddc7ff", "rgba(145,95,255,0.58)"],
+              ["#ffe0a8", "rgba(255,185,65,0.58)"],
+              ["#ccffe0", "rgba(65,210,135,0.52)"],
+              ["#ffc2ee", "rgba(255,70,200,0.58)"]
+          ];
+  
+          const c = bubbleColors[Math.floor(Math.random() * bubbleColors.length)];
+  
+          bubble.style.width = `${size}px`;
+          bubble.style.height = `${size}px`;
+          bubble.style.left = `${left}%`;
+          bubble.style.animationDuration = `${duration}s`;
+          bubble.style.animationDelay = `${delay}s`;
+          bubble.style.background = `radial-gradient(circle at 30% 25%, #fff, ${c[0]} 40%, ${c[1]} 70%)`;
+  
+          container.appendChild(bubble);
+      }
+  
+      function createSparkle(container) {
+          const sparkle = document.createElement("div");
+          const sparkleColors = [
+              "white", "white", "white", "white",
+              "pink", "pink", "pink",
+              "lavender", "lavender",
+              "blue",
+              "gold", "gold",
+              "silver"
+          ];
+          const sparkleClass = sparkleColors[Math.floor(Math.random() * sparkleColors.length)];
+  
+          sparkle.className = `bg-sparkle ${sparkleClass}`;
+  
+          const size = Math.random() * 4 + 3;
+          const top = Math.random() * 100;
+          const left = Math.random() * 100;
+          const duration = Math.random() * 2.5 + 1.8;
+          const delay = Math.random() * 4;
+  
+          sparkle.style.width = `${size}px`;
+          sparkle.style.height = `${size}px`;
+          sparkle.style.top = `${top}%`;
+          sparkle.style.left = `${left}%`;
+          sparkle.style.animationDuration = `${duration}s`;
+          sparkle.style.animationDelay = `${delay}s`;
+  
+          container.appendChild(sparkle);
+      }
+  
+      function applyBubbleColors() {
+          const bubbleColors = [
+              ["#ffd1dc", "rgba(255,150,190,0.3)"],
+              ["#d6eaff", "rgba(120,180,255,0.3)"],
+              ["#e5d6ff", "rgba(170,140,255,0.3)"],
+              ["#ffe9c9", "rgba(255,200,120,0.3)"],
+              ["#d6ffe5", "rgba(120,255,180,0.3)"],
+              ["#ffd6f5", "rgba(255,120,220,0.3)"]
+          ];
+  
+          document.querySelectorAll(".loader-bubble-item").forEach(b => {
+              const c = bubbleColors[Math.floor(Math.random() * bubbleColors.length)];
+              b.style.background = `radial-gradient(circle at 30% 25%, #fff, ${c[0]} 40%, ${c[1]} 70%)`;
+          });
+      }
+  
+      function showLoading() {
+          const overlay = document.getElementById("loadingOverlay");
+          const bubbles = document.querySelector(".loader-bubbles");
+          const submitBtn = document.getElementById("submitBtn");
+          const bg = document.getElementById("bgEffects");
+          const mainText = document.getElementById("loadingTextMain");
+          const subText = document.getElementById("loadingTextSub");
+
+          if (!overlay || !bubbles) return;
+
+          if (bg) bg.style.opacity = "0.25";
+
+          applyBubbleColors();
+
+          bubbles.style.display = "block";
+          overlay.style.display = "flex";
+
+          if (mainText) mainText.textContent = "診断中です…";
+          if (subText) subText.textContent = "経過 0秒";
+
+          loadingStartTime = Date.now();
+
+          if (loadingTimer) {
+              clearInterval(loadingTimer);
+          }
+
+          if (submitBtn) {
+              submitBtn.disabled = true;
+              submitBtn.innerText = "診断中…";
+          }
+      }
+  </script>
+</body>
+</html>

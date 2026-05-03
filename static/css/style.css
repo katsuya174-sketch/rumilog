@@ -1,0 +1,439 @@
+/* ==============================
+rumilog UI
+==============================*/
+
+body{
+    font-family:sans-serif;
+    background:#fff8fb;
+    margin:0;
+    padding:20px;
+    max-width:500px;
+    margin:auto;
+    }
+    
+    /* タイトル */
+    
+    .title{
+    text-align:center;
+    color:#e6789a;
+    margin-bottom:20px;
+    }
+    
+    /* カード */
+    
+    .card{
+    background:white;
+    padding:20px;
+    border-radius:18px;
+    margin-bottom:18px;
+    box-shadow:0 6px 16px rgba(0,0,0,0.06);
+    }
+    
+    /* スコア */
+    
+    .score-card{
+    text-align:center;
+    }
+    
+    .score{
+    font-size:48px;
+    font-weight:bold;
+    color:#e6789a;
+    }
+    
+    /* スコアリスト */
+    
+    .score-list{
+    list-style:none;
+    padding:0;
+    }
+    
+    .score-list li{
+    padding:6px 0;
+    border-bottom:1px solid #eee;
+    }
+    
+    /* ルーティン */
+    
+    .routine{
+    margin-bottom:10px;
+    }
+    
+    /* 小さいカード */
+    
+    .small{
+    font-size:12px;
+    opacity:0.7;
+    }
+    
+    /* ボタン */
+    
+    .nav{
+    display:flex;
+    gap:10px;
+    margin-top:20px;
+    }
+    
+    .btn{
+    flex:1;
+    text-align:center;
+    padding:12px;
+    background:#e6789a;
+    color:white;
+    border-radius:12px;
+    text-decoration:none;
+    }
+    
+    .btn.secondary{
+    background:#bbb;
+    }
+    /* 商品カード */
+
+.product-card{
+    display:flex;
+    gap:12px;
+    align-items:center;
+    margin-bottom:14px;
+    }
+    
+    .product-img{
+    width:140px;
+    height:140px;
+    object-fit:cover;
+    border-radius:12px;
+    background:#eee;
+    }
+
+    
+    /* ==============================
+result page
+============================== */
+
+body.result-page {
+    font-family: "Hiragino Maru Gothic ProN", sans-serif;
+    background: linear-gradient(135deg, #fff8fa 0%, #ffe8ee 100%);
+    margin: 0;
+    padding: 40px 0;
+    min-height: 100vh;
+    position: relative;
+    overflow-x: hidden;
+    max-width: none;
+}
+
+.result-bg {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    z-index: 0;
+    pointer-events: none;
+}
+
+.result-container {
+    width: min(920px, calc(100% - 32px));
+    margin: 0 auto;
+    position: relative;
+    z-index: 2;
+}
+
+.result-hero {
+    background: rgba(255,255,255,0.94);
+    border-radius: 28px;
+    padding: 28px 24px;
+    box-shadow: 0 10px 35px rgba(255, 133, 162, 0.12);
+    border: 1px solid rgba(255, 214, 226, 0.75);
+    margin-bottom: 18px;
+    text-align: center;
+}
+
+.result-title {
+    color: #ff85a2;
+    font-family: 'Kosugi Maru', sans-serif;
+    font-size: clamp(2rem, 5vw, 2.8rem);
+    margin: 0 0 8px;
+    letter-spacing: 1px;
+}
+
+.result-subtitle {
+    color: #d88da2;
+    font-size: 14px;
+    margin: 0;
+    line-height: 1.7;
+}
+
+.result-grid {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 18px;
+    margin-bottom: 18px;
+}
+
+.result-card {
+    background: rgba(255,255,255,0.94);
+    border-radius: 24px;
+    padding: 22px 20px;
+    box-shadow: 0 8px 28px rgba(255, 133, 162, 0.10);
+    border: 1px solid rgba(255, 224, 229, 0.9);
+}
+
+.section-title {
+    color: #c96b86;
+    font-size: 20px;
+    margin: 0 0 14px;
+    font-weight: bold;
+}
+
+.skin-score-main {
+    text-align: center;
+    margin-top: 6px;
+}
+
+.skin-score-label {
+    color: #c58b99;
+    font-size: 14px;
+    margin-bottom: 6px;
+}
+
+.skin-score-value {
+    font-size: clamp(2.6rem, 7vw, 4rem);
+    font-weight: bold;
+    color: #ff7f9f;
+    line-height: 1;
+}
+
+.skin-score-caption {
+    font-size: 13px;
+    color: #c79ca7;
+    margin-top: 8px;
+}
+
+.score-mini-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+}
+
+.score-mini {
+    background: linear-gradient(135deg, #fff7f9 0%, #fff0f4 100%);
+    border: 1px solid #ffe1e8;
+    border-radius: 18px;
+    padding: 14px 12px;
+    text-align: center;
+}
+
+.score-mini-name {
+    font-size: 13px;
+    color: #b17687;
+    margin-bottom: 6px;
+}
+
+.score-mini-value {
+    font-size: 24px;
+    font-weight: bold;
+    color: #ff85a2;
+}
+
+.summary-text,
+.reason-text,
+.plan-text {
+    color: #6f5d63;
+    line-height: 1.9;
+    font-size: 14px;
+}
+
+.plan-block {
+    background: #fff8fb;
+    border: 1px solid #ffe3ea;
+    border-radius: 18px;
+    padding: 16px;
+    margin-top: 12px;
+}
+
+.plan-block h3 {
+    margin: 0 0 8px;
+    color: #c96b86;
+    font-size: 16px;
+}
+
+.plan-block ul {
+    margin: 8px 0 0;
+    padding-left: 18px;
+    color: #6f5d63;
+    line-height: 1.8;
+}
+
+.budget-box {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+}
+
+.budget-pill {
+    background: linear-gradient(135deg, #fff7f9 0%, #fff0f4 100%);
+    border: 1px solid #ffe1e8;
+    border-radius: 18px;
+    padding: 14px 12px;
+    text-align: center;
+}
+
+.budget-pill-label {
+    font-size: 12px;
+    color: #b17687;
+    margin-bottom: 6px;
+}
+
+.budget-pill-value {
+    font-size: 18px;
+    font-weight: bold;
+    color: #ff85a2;
+}
+
+.routine-section {
+    margin-bottom: 18px;
+}
+
+.routine-shell {
+    background: rgba(255,255,255,0.94);
+    border-radius: 24px;
+    padding: 22px 20px;
+    box-shadow: 0 8px 28px rgba(255, 133, 162, 0.10);
+    border: 1px solid rgba(255, 224, 229, 0.9);
+}
+
+.routine-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.routine-title {
+    font-size: 22px;
+    font-weight: bold;
+    color: #c96b86;
+    margin: 0;
+}
+
+.routine-chip {
+    background: #ffe9ef;
+    color: #c56c84;
+    border-radius: 999px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.product-card-new {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    padding: 16px;
+    border-radius: 20px;
+    background: linear-gradient(135deg, #fffafb 0%, #fff3f6 100%);
+    border: 1px solid #ffe1e8;
+    margin-bottom: 14px;
+}
+
+.product-img-new {
+    width: 110px;
+    height: 110px;
+    object-fit: cover;
+    border-radius: 16px;
+    background: #f6f0f2;
+    flex-shrink: 0;
+}
+
+.product-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.product-source {
+    display: inline-block;
+    font-size: 11px;
+    color: #b26e80;
+    background: #ffeaf0;
+    border-radius: 999px;
+    padding: 4px 10px;
+    margin-bottom: 8px;
+}
+
+.product-name {
+    font-size: 18px;
+    font-weight: bold;
+    color: #7e5561;
+    margin-bottom: 8px;
+    line-height: 1.5;
+}
+
+.product-meta {
+    font-size: 14px;
+    color: #6f5d63;
+    line-height: 1.8;
+    margin-bottom: 6px;
+}
+
+.product-price {
+    margin-top: 10px;
+    font-weight: bold;
+    color: #ff7f9f;
+}
+
+.product-score {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #a18b92;
+}
+
+.simple-list {
+    margin: 0;
+    padding-left: 18px;
+    color: #6f5d63;
+    line-height: 1.9;
+}
+
+.nav-row {
+    display: flex;
+    gap: 12px;
+    margin-top: 18px;
+}
+
+.result-btn {
+    flex: 1;
+    text-align: center;
+    text-decoration: none;
+    background: #ff85a2;
+    color: white;
+    padding: 14px 16px;
+    border-radius: 18px;
+    font-weight: bold;
+    box-shadow: 0 6px 18px rgba(255, 133, 162, 0.22);
+}
+
+.result-btn.secondary {
+    background: #d8b2bd;
+}
+
+@media (max-width: 768px) {
+    .result-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .budget-box {
+        grid-template-columns: 1fr;
+    }
+
+    .product-card-new {
+        flex-direction: column;
+    }
+
+    .product-img-new {
+        width: 100%;
+        height: 220px;
+    }
+
+    .nav-row {
+        flex-direction: column;
+    }
+}
+    

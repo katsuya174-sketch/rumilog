@@ -1,0 +1,4478 @@
+{
+  "skincare_database": [
+    {
+      "name": "ORBIS ザ クレンジングオイル",
+      "brand": "ORBIS",
+      "category": "クレンジング",
+      "price_ref": "1980",
+      "image": "",
+      "cleansing_tags":[
+        "pore_preventive",
+        "non_stripping",
+        "daily_use_friendly"
+      ],
+      "active_ingredients": [
+      ],
+      "support_ingredients": [
+        "ester_oil",
+        "plant_oil"
+      ],
+      "formulation": [
+        "oil_formula",
+        "low_irritation",
+        "easy_rinse_system",
+        "non_comedogenic"
+      ],
+      "concerns": [
+        "pores",
+        "dryness",
+        "oil_control"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed",
+        "dry",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "qoo10",
+        "official_jp",
+        "store"
+      ],
+      "ingredient_strength": {},
+      "signature_ingredients": [],
+      "main_functions": [
+        "メイク除去",
+        "毛穴詰まり予防",
+        "洗いすぎ防止",
+        "毎日使いやすい"
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "皮脂コントロール"
+      ],
+      "technology": [
+        "easy_rinse_system"
+      ],
+      "texture": "oil",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bd8ede.523ac79d.52bd8edf.c6568135/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Forbis-shop%2Fo0087%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "アヌア ドクダミポアコントロールクレンジングオイル",
+      "brand": "Anua",
+      "category": "クレンジング",
+      "price_ref": "2300",
+      "image": "",
+      "cleansing_tags":[
+        "sebum_cleansing",
+        "pore_preventive",
+        "non_stripping",
+        "daily_use_friendly"
+      ],
+      "active_ingredients": [
+        "heartleaf"
+      ],
+      "support_ingredients": [
+        "plant_oil",
+        "ester_oil"
+      ],
+      "formulation": [
+        "oil_formula",
+        "low_irritation",
+        "barrier_preserving",
+        "easy_rinse_system"
+      ],
+      "concerns": [
+        "pores",
+        "acne",
+        "redness",
+        "oil_control"
+      ],
+      "skin_types": [
+        "sensitive",
+        "oily",
+        "mixed"
+    
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store"
+      ],
+      "ingredient_strength": {"heartleaf":"medium"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "メイク除去",
+        "毛穴詰まり予防",
+        "洗いすぎ防止",
+        "うるおい保持洗浄"
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "赤みケア",
+        "ニキビケア"
+      ],
+      "technology": ["easy_rinse_system"],
+      "texture": "oil",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52cd49a4.fb50cdfa.52cd49a5.07fe221e/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fanuajapan%2Fanua00061%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "シュウ ウエムラ アルティム8∞ スブリム ビューティ クレンジング オイル n",
+      "brand": "シュウ ウエムラ",
+      "category": "クレンジング",
+      "price_ref": "15400",
+      "image": "",
+      "cleansing_tags":[
+        "heavy_makeup_ok",
+        "non_stripping",
+        "barrier_preserving",
+        "essential_oil"
+      ],
+      "active_ingredients": [
+        "plant_oil",
+        "jojoba_oil"
+      ],
+      "support_ingredients": [
+        "squalane",
+        "glycerin",
+        "amino_acid"
+      ],
+      "formulation": [
+        "luxury_formula"
+      ],
+      "concerns": [
+        "pores",
+        "dullness",
+        "dryness",
+        "aging"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "unknown",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{"plant_oil":"medium",
+        "jojoba_oil":"medium"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "毛穴改善",
+        "保湿",
+        "透明感向上"
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "保湿"
+      ],
+      "technology": [],
+      "texture": "oil",
+      "contraindications": [
+        "oily_skin_caution"
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bdf223.e09031a1.52bdf224.d8fb5592/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fshuuemura%2Fshu30001jp%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ONE BY KOSE ボアクリア オイル",
+      "brand": "ONE BY KOSE",
+      "category": "クレンジング",
+      "price_ref": "1980",
+      "image": "",
+      "cleansing_tags":[
+        "heavy_makeup_ok",
+        "blackhead_prevention",
+        "pore_preventive",
+        "sebum_cleansing"
+      ],
+      "active_ingredients": [
+        "ester_oil"
+      ],
+      "support_ingredients": [
+        "plant_oil"
+      ],
+      "formulation": [
+        "oil_formula",
+        "low_irritation",
+        "easy_rinse_system"
+      ],
+      "concerns": [
+        "pores",
+        "blackheads",
+        "oil_control"
+      ],
+      "skin_types": [
+        "mixed",
+        "oily"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "unknown",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength": {"ester_oil":"high"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "メイク除去",
+        "毛穴詰まり予防",
+        "皮脂汚れ除去",
+        "黒ずみ除去"
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "皮脂コントロール"
+      ],
+      "technology": [ "easy_rinse_system"],
+      "texture": "oil",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52cbfae0.986f9893.52cbfae1.0d709d20/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fbeautyeveryday%2F4971710574852%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name":"SKIN1004 センテラ ライトクレンジングオイル",
+      "brand": "SKIN1004",
+      "category": "クレンジング",
+      "price_ref": "2600",
+      "image": "",
+      "cleansing_tags":[
+        "sebum_cleansing",
+        "non_stripping",
+        "residue_free",
+        "daily_use_friendly"
+      ],
+      "active_ingredients": [
+        "cica"
+      ],
+      "support_ingredients": [
+        "ester_oil",
+        "plant_oil"
+      ],
+      "formulation": [
+        "oil_formula",
+        "low_irritation",
+        "barrier_preserving",
+        "easy_rinse_system"
+      ],
+      "concerns": [
+        "redness",
+        "acne",
+        "pores",
+        "dryness"
+      ],
+      "skin_types": [
+        "sensitive",
+        "dry",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{"cica":"medium"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "メイク除去",
+        "毛穴詰まり予防",
+        "洗いすぎ防止",
+        "うるおい保持洗浄"
+      ],
+      "ingredient_focus": [
+        "赤みケア",
+        "ニキビケア",
+        "毛穴ケア"
+      ],
+      "technology": [
+          "easy_rinse_system"
+      ],
+      "texture": "oil",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52c42f0a.e125e9cc.52c42f0b.60734407/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fskin1004-official%2F1003093002%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "N organic Basic スージング クレンジングジェル",
+      "brand": "N organic",
+      "category": "クレンジング",
+      "price_ref": "3850",
+      "image": "",
+      "cleansing_tags":[
+        "low_friction",
+      "non_stripping",
+      "pore_preventive",
+      "essential_oil"
+      ],
+      "active_ingredients": [
+        "vitamin_c",
+        "vitamin_e"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "squalane",
+        "sunflower_oil",
+        "plant_oil"
+      ],
+      "formulation": [
+        "gel_formula",
+        "low_irritation",
+        "gel_to_oil_transform",
+        "low_friction_system",
+        "barrier_preserving"
+      ],
+      "concerns": [
+        "dryness",
+        "redness",
+        "pores"
+      ],
+      "skin_types": [
+        "dry",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "unknown",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength":{ "vitamin_c": "low","vitamin_e": "low"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "メイク落とし",
+        "毛穴詰まり予防",
+        "洗いすぎ防止",
+        "うるおいを守って洗う"  
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "保湿",
+        "赤みケア"
+      ],
+      "technology": [
+        "gel_to_oil_transform",
+        "low_friction_system",
+        "barrier_preserving"
+      ],
+      "texture": "gel",
+      "contraindications": ["essential_oil_caution"],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52ebab84.bc7578f2.52ebab85.7261b370/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fnorganic%2Fnb-cleansinggel-r01%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "アテニア スキンクリア クレンズ オイル アロマタイプ",
+      "brand": "アテニア",
+      "category": "クレンジング",
+      "price_ref": "1980",
+      "image": "",
+      "cleansing_tags":[
+        "blackhead_prevention",
+        "pore_preventive",
+        "non_stripping",
+        "essential_oil"
+      ],
+      "active_ingredients": [
+        "cica"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "ester_oil",
+        "plant_oil",
+        "jojoba_oil",
+        "argan_oil"
+      ],
+      "formulation": [
+        "mild_formula",
+        "low_irritation",
+        "barrier_preserving",
+        "easy_rinse_system"
+      ],
+      "concerns": [
+        "dryness",
+        "pores",
+        "dullness",
+        "redness"
+      ],
+      "skin_types": [
+        "dry",
+        "sensitive",
+        "oily",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength":{"cica":"low"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "メイク除去",
+        "毛穴詰まり予防",
+        "洗いすぎ防止",
+        "うるおい保持洗浄"
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "赤みケア",
+        "保湿"
+      ],
+      "technology": ["easy_rinse_system"],
+      "texture": "oil",
+      "contraindications": [
+        "essential_oil_caution"
+      ],
+      "affiliate_provider": "rakuten",
+      "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52c40796.b23aed60.52c40797.42c037b6/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fattenir%2F166011%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ファンケル マイルド クレンジング オイル",
+      "brand": "ファンケル",
+      "category": "クレンジング",
+      "price_ref": "1980",
+      "image": "",
+      "cleansing_tags":[
+        "low_friction",
+        "non_stripping",
+        "barrier_preserving",
+        "residue_free"
+      ],
+      "active_ingredients": [
+        "ester_oil",
+        "plant_oil"
+        
+      ],
+      "support_ingredients": [
+        
+      ],
+      "formulation": [
+        "oil_formula",
+        "low_irritation",
+        "barrier_preserving",
+        "easy_rinse_system",
+        "non_comedogenic"
+      ],
+      "concerns": [
+        "pores",
+        "dryness",
+        "oil_control"
+      ],
+      "skin_types": [
+        "dry",
+        "oily",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{ "ester_oil": "high","plant_oil": "medium"},
+      "signature_ingredients": [],
+      "main_functions": [
+      "メイク除去",
+      "毛穴詰まり予防",
+      "洗いすぎ防止",
+      "うるおい保持洗浄"
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "皮脂コントロール",
+        "保湿"
+      ],
+      "technology": [
+        "easy_rinse_system"
+      ],
+      "texture": "oil",
+      "contraindications": ["essential_oil_caution"],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bdef1e.8e2e1ad0.52bdef1f.2d8cdfef/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Ffancl-shop%2F3670-21%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ドクターケイ 薬用Cクリアクレンジングジェル",
+      "brand": "ドクターケイ",
+      "category": "クレンジング",
+      "price_ref": "3850",
+      "image": "",
+      "cleansing_tags":[
+        "sebum_cleansing",
+        "pore_preventive",
+        "non_stripping",
+        "daily_use_friendly"
+      ],
+      "active_ingredients": [
+        "vitamin_c",
+        "niacinamide"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "cica",
+        "amino_acid"
+      ],
+      "formulation": [
+        "gel_formula",
+        "low_irritation",
+        "barrier_preserving",
+        "easy_rinse_system"
+      ],
+      "concerns": [
+        "pores",
+        "dullness",
+        "acne",
+        "texture"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon"
+      ],
+      "ingredient_strength":{
+        "vitamin_c": "low",
+        "niacinamide": "low"
+      },
+      "signature_ingredients": [],
+      "main_functions": [
+        "メイク除去",
+        "毛穴詰まり予防",
+        "くすみ除去",
+        "洗いすぎ防止"
+    
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "くすみ改善",
+        "ニキビケア"
+      ],
+      "technology": [
+        "easy_rinse_system"
+      ],
+      "texture": "gel",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+      "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52c46507.bf1f0884.52c46508.bcd49320/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fdoctork-official%2Fdrk-0097%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "Aurelie モイストオイルインクレンジングウォーター",
+      "brand": "Aurelie",
+      "category": "クレンジング",
+      "price_ref": "3960",
+      "image": "",
+      "cleansing_tags":[
+        "low_friction",
+        "non_stripping",
+        "barrier_preserving",
+        "residue_free"
+      ],
+      "active_ingredients": [
+       
+      ],
+      "support_ingredients": [
+        "plant_oil",
+        "glycerin",
+        "probiotic_ferment"
+      ],
+      "formulation": [
+        "water_formula",
+        "oil_formula",
+        "low_irritation",
+        "barrier_preserving",
+        "easy_rinse_system"
+      ],
+      "concerns": [
+        "dryness",
+        "dullness",
+        "pores"
+      ],
+      "skin_types": [
+        "sensitive",
+        "dry",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store"
+      ],
+      "ingredient_strength": [],
+      "signature_ingredients": [],
+      "main_functions": [
+        "メイク除去",
+        "洗いすぎ防止",
+        "うるおい保持洗浄"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "くすみ改善"
+      ],
+      "technology": [
+        "easy_rinse_system"
+      ],
+      "texture": "watery",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+      "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52ebae97.9bc54773.52ebae98.321dd835/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Faurelie-tokyo%2Falcl01%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+
+    {
+      "name": "キュレル 潤浸保湿 泡洗顔料",
+      "brand": "キュレル",
+      "category": "洗顔",
+      "price_ref": "1760",
+      "image": "",
+      "active_ingredients": [
+        
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "ceramide"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "dryness",
+        "sensitive",
+        "redness"
+      ],
+      "skin_types": [
+        "sensitive",
+        "dry"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength": [],
+      "signature_ingredients": [
+        
+      ],
+      "main_functions": [
+        "低刺激洗浄",
+        "洗いすぎ防止",
+        "うるおい保持洗浄"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "バリア修復",
+        "赤みケア"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "foam",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bd5dc1.fa88b2ed.52bd5dc2.5643a3f5/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frakuten24%2Fa001256000164%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "NILE 濃密泡洗顔",
+      "brand":"NILE",
+      "category": "洗顔",
+      "price_ref": "1480",
+      "image": "",
+      "active_ingredients": [
+       
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "amino_acid"
+      ],
+      "formulation": [
+        "non_comedogenic",
+        "low_irritation"
+      ],
+      "concerns": [
+        "pores",
+        "oil_control",
+        "acne"
+      ],
+      "skin_types": [
+        "mixed",
+        "oily"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "unknown",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength": {},
+      "signature_ingredients": [],
+      "main_functions": [
+        "皮脂汚れ除去",
+        "毛穴詰まり予防",
+        "ニキビ予防"
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "皮脂コントロール",
+        "ニキビケア"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "foam",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52ebb60c.a55bb8ac.52ebb60d.967c0f43/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frise-store%2Fnilre_facewash%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ドクターケイ ABC-Gピールウォッシュ",
+      "brand": "ドクターケイ",
+      "category": "洗顔",
+      "price_ref": "4400",
+      "image": "",
+      "active_ingredients": [
+        "glycolic_acid",
+        "niacinamide",
+        "vitamin_c"    
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "amino_acid"
+      ],
+      "formulation": [
+        "low_irritation",
+        "acid_toner"
+      ],
+      "concerns": [
+        "pores",
+        "texture",
+        "dullness",
+        "acne"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "unknown",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength": { "glycolic_acid":"medium", "niacinamide": "low","vitamin_c": "low"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "角質ケア",
+        "毛穴詰まり予防",
+        "くすみ除去"
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "くすみ改善",
+        "角質ケア"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "foam",
+      "contraindications": [
+        "sensitive_skin",
+        "acid_same_routine"
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52c46507.bf1f0884.52c46508.bcd49320/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fdoctork-official%2Fdrk-0104%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "オルビス ユードット フォーミングウォッシュ",
+      "brand": "オルビス",
+      "category": "洗顔",
+      "price_ref": "2310",
+      "image": "",
+      "active_ingredients": [
+        "dipotassium_glycyrrhizate"
+      ],
+      "support_ingredients": [
+        "glycerin"
+      ],
+      "formulation": [
+       "low_irritation",
+        "barrier_preserving",
+        "acid_toner"
+      ],
+      "concerns": [
+        "pores",
+        "dullness",
+        "texture",
+         "dryness"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{"dipotassium_glycyrrhizate": "low"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "角質ケア",
+        "くすみ除去",
+        "毛穴詰まり予防"
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "角質ケア",
+        "くすみ改善"
+      ],
+      "technology": [],
+      "texture": "foam",
+      "contraindications": [
+        
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bd8ede.523ac79d.52bd8edf.c6568135/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Forbis-shop%2Fr4908064090103%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "DoMeCare マイクロクレイウォッシュ",
+      "brand": "DoMeCare",
+      "category": "洗顔",
+      "price_ref": "1980",
+      "image": "",
+      "active_ingredients": [
+        "clay"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "plant_oil"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "pores",
+        "oil_control",
+        "texture",
+        "dullness"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed",
+        "dry",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength":{"clay":"medium"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "皮脂汚れ除去",
+        "毛穴詰まり予防",
+        "洗いすぎ防止"
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "皮脂コントロール",
+        "保湿"
+      ],
+      "technology": [
+        
+      ],
+      "texture":["foam"],
+      "contraindications": [
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52c59c85.4ac6b581.52c59c86.4d21bf34/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fdomecare%2Fdmc_micro-cray-wash%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "アテニア ドレスリフト フェイシャルウォッシュ",
+      "brand": "アテニア",
+      "category": "洗顔",
+      "price_ref": "1980",
+      "image": "",
+      "active_ingredients": [
+        "collagen",
+        "probiotic_ferment"
+      ],
+      "support_ingredients": [
+        "rosehip_oil",
+        "glycerin"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "dryness",
+        "dullness",
+        "aging"
+      ],
+      "skin_types": [
+        "dry",
+        "sensitive",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "unknown",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength": { "collagen":"low","probiotic_ferment": "low"},
+      "signature_ingredients": [
+        
+      ],
+      "main_functions": [
+        "くすみ除去",
+        "洗いすぎ防止",
+        "うるおい保持洗浄"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "くすみ改善",
+        "エイジングケア"
+      ],
+      "technology": [
+      
+      ],
+      "texture": "foam",
+      "contraindications": ["essential_oil_caution"],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52c40796.b23aed60.52c40797.42c037b6/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fattenir%2F159089%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+
+    },
+    {
+      "name": "d プログラム エッセンスイン クレンジングフォーム",
+      "brand": "d プログラム",
+      "category": "洗顔",
+      "price_ref": "2090",
+      "image": "",
+      "active_ingredients": [
+        "dipotassium_glycyrrhizate"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "amino_acid"
+      ],
+      "formulation": [
+        "mild_formula",
+        "barrier_preserving",
+        "low_irritation"
+      ],
+      "concerns": [
+        "dryness",
+        "sensitive",
+        "redness"
+      ],
+      "skin_types": [
+        "sensitive",
+        "dry",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength": { "dipotassium_glycyrrhizate":"low"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "低刺激洗浄",
+        "洗いすぎ防止",
+        "うるおい保持洗浄"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "赤みケア",
+        "バリア修復"
+      ],
+      "technology": [
+       
+      ],
+      "texture": "foam",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bd5dc1.fa88b2ed.52bd5dc2.5643a3f5/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frakuten24%2F4514254977767%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ドクターシーラボ VC 100 KEANA ウォッシング フォーム",
+      "brand": "ドクターシーラボ",
+      "category": "洗顔",
+      "price_ref": "1776",
+      "image": "",
+      "active_ingredients": [
+        "vitamin_c"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "amino_acid"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving"
+      ],
+      "concerns": [
+        "pores",
+        "dullness",
+        "texture",
+        "oil_control"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "unknown",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength": {"vitamin_c":"low"},
+      "signature_ingredients": [
+        
+      ],
+      "main_functions": [
+        "皮脂汚れ除去",
+        "毛穴詰まり予防",
+        "くすみ除去"
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "くすみ改善",
+        "皮脂コントロール"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "foam",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52d78e8d.7eaff694.52d78e8e.f4312f00/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fdrci-labo%2F00113362%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ファンケル 泥ジェル洗顔",
+      "brand": "ファンケル",
+      "category": "洗顔",
+      "price_ref": "1320",
+      "image": "",
+      "active_ingredients": [
+        "clay"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "plant_oil"
+      ],
+      "formulation": [
+        "gel_formula",
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula",
+        "non_comedogenic"
+      ],
+      "concerns": [
+        "pores",
+        "texture",
+        "dryness",
+        "oil_control"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed",
+        "dry",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{"clay":"medium"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "皮脂汚れ除去",
+        "毛穴詰まり予防",
+        "洗いすぎ防止"
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "皮脂コントロール",
+        "くすみ改善"
+      ],
+      "technology": [],
+      "texture": "foam",
+      "contraindications": [
+       
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bdef1e.8e2e1ad0.52bdef1f.2d8cdfef/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Ffancl-shop%2F3671-81%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ファンケル 洗顔パウダー",
+      "brand": "ファンケル",
+      "category": "洗顔",
+      "price_ref": "1320",
+      "image": "",
+      "active_ingredients": [
+         "enzyme"
+      ],
+      "support_ingredients": [
+        "amino_acid",
+        "glycerin"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula",
+        "non_comedogenic"
+      ],
+      "concerns": [
+        "pores",
+        "texture",
+        "acne",
+        "dryness"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed",
+        "dry",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{"enzyme": "medium"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "角質ケア",
+        "毛穴詰まり予防",
+        "洗いすぎ防止"
+      ],
+      "ingredient_focus": [
+        "角質ケア",
+        "毛穴ケア",
+        "ニキビケア"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "powder",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bdef1e.8e2e1ad0.52bdef1f.2d8cdfef/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Ffancl-shop%2F3670-11%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "COSRX RX ザ・6 ペプチド スキン ブースターセラム",
+      "brand": "COSRX",
+      "category": "ブースター",
+      "price_ref": "2480",
+      "image": "",
+      "active_ingredients": [
+       "peptide"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "niacinamide",
+        "panthenol"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving"
+      ],
+      "concerns": [
+        "aging",
+        "dryness",
+        "dullness",
+        "firmness"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength": {"peptide": "medium"},
+      "signature_ingredients": [
+       "peptide_complex"
+      ],
+      "main_functions": [
+        "ハリ改善",
+        "エイジングケア",
+        "保湿"
+      ],
+      "ingredient_focus": [
+        "ハリ改善",
+        "保湿",
+        "エイジングケア"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "essence",
+      "contraindications": [
+       
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52c5db56.13c0c963.52c5db57.04f68121/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fcosrx-official%2Fpeptide_booster%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "無印良品 発酵導入美容液",
+      "brand": "無印良品",
+      "category": "ブースター",
+      "price_ref": "1990",
+      "image": "",
+      "active_ingredients": [
+        "probiotic_ferment"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "amino_acid"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving",
+        "fermentation"
+      ],
+      "concerns": [
+        "dryness",
+        "barrier",
+        "dullness"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength": {"probiotic_ferment": "medium"},
+      "signature_ingredients": [
+        "fermented_yeast_complex"
+      ],
+      "main_functions": [
+        "保湿",
+        "バリア強化",
+        "くすみ改善"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "バリア修復",
+        "くすみ改善"
+      ],
+      "technology": [
+        "fermentation"
+      ],
+      "texture": "essence",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52ef767d.078b889c.52ef767e.47e7d038/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fmujirushi-ryohin%2F4550583451295%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "コスメデコルテ リポソームアドバンストリペアセラム",
+      "brand": "コスメデコルテ",
+      "category": "ブースター",
+      "price_ref": "8620",
+      "image": "",
+      "active_ingredients": [
+        "ceramide",
+        "peptide"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "amino_acid",
+        "cholesterol"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving",
+        "liposome"
+      ],
+      "concerns": [
+        "dryness",
+        "barrier",
+        "aging",
+        "dullness"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength": { "ceramide": "medium","peptide": "low"},
+      "signature_ingredients": [
+        "multi_ceramide_complex",
+        "liposome"
+      ],
+      "main_functions": [
+        "保湿",
+        "バリア修復",
+        "エイジングケア"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "バリア修復",
+        "エイジングケア"
+      ],
+      "technology": [
+        "liposome"
+      ],
+      "texture": "essence",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52cc15c9.9a946cc9.52cc15ca.1af1de41/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fcosme-venus%2F4971710521917%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "アテニア プライマーショット",
+      "brand": "アテニア",
+      "category": "ブースター",
+      "price_ref": "3960",
+      "image": "",
+      "active_ingredients": [
+        "probiotic_ferment",
+        "peptide"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "amino_acid",
+        "plant_oil"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving",
+        "fermentation"
+      ],
+      "concerns": [
+        "dryness",
+        "dryness",
+        "aging",
+        "dullness",
+        "barrier"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength": {"probiotic_ferment": "medium","peptide": "low"},
+      "signature_ingredients": [
+        "fermented_yeast_complex",
+        "peptide_complex"
+      ],
+      "main_functions": [
+        "保湿",
+        "バリア強化",
+        "エイジングケア"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "バリア修復",
+        "エイジングケア"
+      ],
+      "technology": [
+        "fermentation"
+      ],
+      "texture": "essence",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52c40796.b23aed60.52c40797.42c037b6/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fattenir%2F116141%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "FATUITE ブライテスト ファーストエッセンスa",
+      "brand": "FATUITE",
+      "category": "ブースター",
+      "price_ref": "10300",
+      "image": "",
+      "active_ingredients": [
+        "niacinamide",
+        "probiotic_ferment"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "amino_acid",
+        "panthenol"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving",
+        "fermentation"
+      ],
+      "concerns": [
+        "dullness",
+        "dryness",
+        "barrier",
+        "whitening"
+      ],
+      "skin_types": [
+        "dry",
+        "sensitive",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength":{ "niacinamide": "medium","probiotic_ferment": "medium"},
+      "signature_ingredients": [
+        "fermented_yeast_complex",
+        "tone_up_complex"
+      ],
+      "main_functions": [
+        "くすみ改善",
+        "保湿",
+        "バリア強化"
+      ],
+      "ingredient_focus": [
+        "くすみ改善",
+        "保湿",
+        "バリア修復"
+      ],
+      "technology": ["fermentation"],
+      "texture": "essence",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52c92eb6.8617e71b.52c92eb7.c93ff37f/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Ffatuite%2Fbrightest-firstessence-a%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "KINUI タマヌピュアオイルセラム",
+      "brand": "KINUI",
+      "category": "ブースター",
+      "price_ref": "3960",
+      "image": "",
+      "active_ingredients": [
+        "plant_oil"
+      ],
+      "support_ingredients": [
+        "fatty_acid",
+        "vitamin_e"
+      ],
+      "formulation": [
+        "oil_formula",
+        "barrier_preserving",
+        "low_irritation"
+      ],
+      "concerns": [
+        "dryness",
+        "barrier",
+        "redness",
+        "aging"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength": {"plant_oil": "high", "fatty_acid": "medium"},
+      "signature_ingredients": [
+        
+      ],
+      "main_functions": [
+          "保湿",
+          "バリア修復",
+          "赤みケア"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "バリア修復",
+        "赤みケア"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "oil",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52c5ef44.90860fca.52c5ef45.7a12acba/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fkinui%2Fkinui-pure-oil-serum%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "CELNIS ブースターセラム",
+      "brand": "CELNIS",
+      "category": "ブースター",
+      "price_ref": "3630",
+      "image": "",
+      "active_ingredients": [
+        "probiotic_ferment",
+        "ceramide"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "glycerin",
+        "squalane",
+        "amino_acid"
+      ],
+      "formulation": [
+        "fermentation",
+        "essence_texture"
+      ],
+      "concerns": [
+        "dryness",
+        "barrier"
+      ],
+      "skin_types": [
+        "dry",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store"
+      ],
+      "ingredient_strength": "medium",
+      "signature_ingredients": [
+        "probiotic_complex"
+      ],
+      "main_functions": [
+        "保湿",
+        "バリア強化"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "バリア修復"
+      ],
+      "technology": [
+        "fermentation"
+      ],
+      "texture": "essence",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52cc0d1d.ae1b8909.52cc0d1e.ef258bc5/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Flevante%2Fce001%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "idio エクソソーム導入美容液",
+      "brand": "idio",
+      "category": "ブースター",
+      "price_ref": "3980",
+      "image": "",
+      "active_ingredients": [
+        "peptide"
+      ],
+      "support_ingredients": [
+        "niacinamide",
+        "hyaluronic_acid",
+        "panthenol"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving"
+      ],
+      "concerns": [
+        "aging",
+        "firmness",
+        "dryness",
+        "dullness"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon"
+        
+      ],
+      "ingredient_strength": { "peptide": "medium"},
+      "signature_ingredients": [
+        
+      ],
+      "main_functions": [
+        "ハリ改善",
+        "エイジングケア",
+        "保湿"
+      ],
+      "ingredient_focus": [
+        "ハリ改善",
+        "エイジングケア",
+        "保湿"
+      ],
+      "technology": ["exosome"],
+      "texture": "essence",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52ef7deb.4d41ef21.52ef7dec.ffc644c6/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Ffineday%2Fid-01%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ONE BY KOSE セラムヴェール ディープリペア",
+      "brand": "ONE BY KOSE",
+      "category": "ブースター",
+      "price_ref": "4780",
+      "image": "",
+      "active_ingredients": [
+        "rice_power_no11"
+      ],
+      "support_ingredients": [
+        "ceramide",
+        "hyaluronic_acid",
+        "glycerin"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving"
+      ],
+      "concerns": [
+        "dryness",
+        "barrier",
+        "aging",
+        "dullness"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength": {"rice_power_no11": "high"},
+      "signature_ingredients": [
+        "rice_power_no11"
+      ],
+      "main_functions": [
+        "保湿",
+        "バリア修復",
+        "エイジングケア"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "バリア修復",
+        "エイジングケア"
+      ],
+      "technology": [
+       
+      ],
+      "texture": "essence",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52cbfae0.986f9893.52cbfae1.0d709d20/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fbeautyeveryday%2F4971710577341%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ランコム ジェニフィック アルティメセラム",
+      "brand": "ランコム",
+      "category": "ブースター",
+      "price_ref": "12430",
+      "image": "",
+      "active_ingredients": [
+        "probiotic_ferment"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "glycerin",
+        "amino_acid"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving",
+        "fermentation"
+      ],
+      "concerns": [
+        "barrier",
+        "dryness",
+        "dullness",
+        "aging"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{"probiotic_ferment": "high"},
+      "signature_ingredients": ["microbiome_complex"],
+      "main_functions": [
+        "バリア強化",
+        "保湿",
+        "エイジングケア"
+      ],
+      "ingredient_focus": [
+        "バリア修復",
+        "保湿",
+        "エイジングケア"
+      ],
+      "technology": [
+        "microbiome_complex"
+      ],
+      "texture": "essence",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52ef7fde.204733d2.52ef7fdf.1146b0ad/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Flancome%2Fjp-lan-000329%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "SK-II フェイシャル トリートメント エッセンス",
+      "brand": "SK-II",
+      "category": "化粧水",
+      "price_ref": "12650",
+      "image": "",
+      "active_ingredients": [
+        "probiotic_ferment"
+      ],
+      "support_ingredients": [
+        "amino_acid"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "fermentation"
+      ],
+      "concerns": [
+        "dullness",
+        "dryness",
+        "texture",
+        "aging"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{ "probiotic_ferment": "high"},
+      "signature_ingredients": [
+       "pitera"
+      ],
+      "main_functions": [
+        "透明感向上",
+        "美白ケア",
+        "キメ改善"
+      ],
+      "ingredient_focus": [
+        "くすみ改善",
+        "キメ改善",
+        "エイジングケア"
+      ],
+      "technology": [
+        "fermentation"
+      ],
+      "texture": "essence",
+      "contraindications": [
+        
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52cc2c2f.23fe7fe0.52cc2c30.a22bc097/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fsk-ii%2Ffte_230-sgl%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "dプログラム モイストケア ローション EX",
+      "brand": "dプログラム",
+      "category": "化粧水",
+      "price_ref": "3300",
+      "image": "",
+      "active_ingredients": [
+        "tranexamic_acid"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "glycerin",
+        "probiotic_ferment"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "redness",
+        "dryness",
+        "barrier"
+      ],
+      "skin_types": [
+        "sensitive",
+        "dry"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{ "tranexamic_acid": "medium"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "保湿",
+        "バリア強化",
+        "赤みケア"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "赤みケア",
+        "バリア修復"
+      ],
+      "technology": [
+        "barrier_formula",
+        "derma_formula"
+      ],
+      "texture": ["essence"],
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bd5dc1.fa88b2ed.52bd5dc2.5643a3f5/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frakuten24%2F406486%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ANUA ドクダミ 77スージングトナー",
+      "brand": "ANUA",
+      "category": "化粧水",
+      "price_ref": "2800",
+      "image": "",
+      "active_ingredients": [
+        "heartleaf"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "panthenol",
+        "beta_glucan"
+      ],
+      "formulation": [
+        "watery",
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "redness",
+        "acne",
+        "dryness",
+        "barrier"
+      ],
+      "skin_types": [
+        "sensitive",
+        "oily",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp",
+        "store"
+      ],
+      "ingredient_strength":{"heartleaf": "high"},
+      "signature_ingredients": [
+        
+      ],
+      "main_functions": [
+        "赤みケア",
+        "ニキビケア",
+        "保湿"
+      ],
+      "ingredient_focus": [
+        "ニキビケア",
+        "赤みケア",
+        "保湿"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "watery",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52cd49a4.fb50cdfa.52cd49a5.07fe221e/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fanuajapan%2Fanua00023%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "キュレル 潤浸保湿 化粧水III とてもしっとり",
+      "brand": "キュレル",
+      "category": "化粧水",
+      "price_ref": "1815",
+      "image": "",
+      "active_ingredients": [
+        "ceramide"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "allantoin"
+      ],
+      "formulation": [
+        "watery",
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "dryness",
+        "barrier",
+        "redness"
+      ],
+      "skin_types": [
+        "sensitive",
+        "dry"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength": {"ceramide": "medium"},
+      "signature_ingredients": [
+        "ceramide_complex_ex"
+      ],
+      "main_functions": [
+        "保湿",
+        "バリア修復",
+        "赤みケア"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "バリア修復",
+        "赤みケア"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "watery",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52ef8661.1a56acb1.52ef8662.dc8949de/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fladydrugplus%2F4901301236180%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "肌ラボ 極潤 ヒアルロン液",
+      "brand": "肌ラボ",
+      "category": "化粧水",
+      "price_ref": "900",
+      "image": "",
+      "active_ingredients": [
+        "hyaluronic_acid"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "polyglutamic_acid"
+      ],
+      "formulation": [
+        "watery",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "dryness",
+        "barrier"
+      ],
+      "skin_types": [
+        "dry",
+        "sensitive",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength": {"hyaluronic_acid": "high"},
+      "signature_ingredients": [
+        "hyaluronic_5d_complex"
+      ],
+      "main_functions": [
+        "保湿",
+        "バリア強化"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "バリア修復"
+      ],
+      "technology": [],
+      "texture": "watery",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bd5dc1.fa88b2ed.52bd5dc2.5643a3f5/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frakuten24%2Fe518877h%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "無印良品 化粧水 敏感肌用 高保湿",
+      "brand": "無印良品",
+      "category": "化粧水",
+      "price_ref": "1190",
+      "image": "",
+      "active_ingredients": [
+      
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "amino_acid",
+        "beta_glucan"
+      ],
+      "formulation": [
+        "watery",
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "dryness",
+        "barrier",
+        "redness"
+      ],
+      "skin_types": [
+        "sensitive",
+        "dry",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength": [],
+      "signature_ingredients": [],
+      "main_functions": [
+        "保湿",
+        "バリア強化",
+        "低刺激ケア"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "バリア修復",
+        "赤みケア"
+      ],
+      "technology": [
+      
+      ],
+      "texture": "watery",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52ef767d.078b889c.52ef767e.47e7d038/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fmujirushi-ryohin%2F4548076448341%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "オルビス クリアフル ローション M",
+      "brand": "オルビス",
+      "category": "化粧水",
+      "price_ref": "1650",
+      "image": "",
+      "active_ingredients": [
+        "dipotassium_glycyrrhizate"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "glycerin"
+      ],
+      "formulation": [
+        "watery",
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula",
+        "non_comedogenic"
+      ],
+      "concerns": [
+        "acne",
+        "redness",
+        "oil_control",
+        "pores"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{"dipotassium_glycyrrhizate": "medium"},
+      "signature_ingredients": [
+        
+      ],
+      "main_functions": [
+        "ニキビケア",
+        "赤みケア",
+        "皮脂バランス調整"
+      ],
+      "ingredient_focus": [
+        "ニキビケア",
+        "赤みケア",
+        "皮脂コントロール"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "watery",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bd8ede.523ac79d.52bd8edf.c6568135/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Forbis-shop%2Fo0044%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "肌美精 薬用美白化粧水",
+      "brand": "肌美精",
+      "category": "化粧水",
+      "price_ref": "1400",
+      "image": "",
+      "active_ingredients": [
+        "tranexamic_acid"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "glycerin",
+        "dipotassium_glycyrrhizate"
+      ],
+      "formulation": [
+        "watery",
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "whitening",
+        "dullness",
+        "dryness",
+        "redness"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":  { "tranexamic_acid": "medium"},
+      "signature_ingredients": [
+        
+      ],
+      "main_functions": [
+        "美白ケア",
+        "くすみ改善",
+        "赤みケア"
+      ],
+      "ingredient_focus": [
+        "美白ケア",
+        "くすみ改善",
+        "赤みケア"
+      ],
+      "technology": [],
+      "texture": "watery",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bdbfe3.e21a6f3d.52bdbfe4.9a4230d7/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frakuten24-cosmetics%2F4901417621580%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "Obagi オバジC クリアアドバンスドローション",
+      "brand": "Obagi",
+      "category": "化粧水",
+      "price_ref": "4800",
+      "image": "",
+      "active_ingredients": [
+        "vitamin_c"
+      ],
+      "support_ingredients": [
+        "niacinamide",
+        "hyaluronic_acid",
+        "glycerin"
+      ],
+      "formulation": [
+        "watery",
+        "low_irritation",
+        "barrier_preserving"
+      ],
+      "concerns": [
+        "dullness",
+        "pores",
+        "whitening",
+        "oil_control"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "unknown",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp",
+        "store"
+      ],
+      "ingredient_strength":{ "vitamin_c": "medium"},
+      "signature_ingredients": [
+        
+      ],
+      "main_functions": [
+        "くすみ改善",
+        "毛穴ケア",
+        "美白ケア"
+      ],
+      "ingredient_focus": [
+        "くすみ改善",
+        "毛穴ケア",
+        "美白ケア"
+      ],
+      "technology": [
+        "vitamin_c_booster_complex"
+      ],
+      "texture": "watery",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52be283b.40a6e919.52be283c.5af393a3/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Ffancylifecosme%2F4987241173273%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name":"トゥヴェール  バランシングGAローション",
+      "brand": "トゥヴェール",
+      "category": "化粧水",
+      "price_ref": "2000",
+      "image": "",
+      "active_ingredients": [
+        "glycolic_acid",
+        "niacinamide"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "glycerin",
+        "panthenol"
+      ],
+      "formulation": [
+        "watery",
+        "low_irritation",
+        "acid_toner"
+      ],
+      "concerns": [
+        "pores",
+        "texture",
+        "dullness",
+        "acne"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "unknown",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength":{"glycolic_acid": "medium","niacinamide": "medium"},
+      "signature_ingredients": [
+        
+      ],
+      "main_functions": [
+        "角質ケア",
+        "毛穴ケア",
+        "くすみ改善"
+      ],
+      "ingredient_focus": [
+        "角質ケア",
+        "毛穴ケア",
+        "くすみ改善"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "watery",
+      "contraindications": [
+        "acid_same_routine",
+        "sensitive_skin"
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52d42cb6.f5152c4d.52d42cb7.ee00e2d2/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Ftvert%2F352%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "Anua PDRNヒアルロン酸カプセル100セラム",
+      "brand": "Anua",
+      "category": "美容液",
+      "price_ref": "3450",
+      "image": "",
+      "active_ingredients": [
+        "hyaluronic_acid"
+      ],
+      "support_ingredients": [
+        "beta_glucan",
+        "panthenol",
+        "glycerin"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "dryness",
+        "barrier",
+        "redness"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{ "hyaluronic_acid": "high"},
+      "signature_ingredients": [
+        
+      ],
+      "main_functions": [
+        "保湿",
+        "バリア修復",
+        "赤みケア"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "バリア修復",
+        "赤みケア"
+      ],
+      "technology": [
+      ],
+      "texture": "essence",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52cd49a4.fb50cdfa.52cd49a5.07fe221e/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fanuajapan%2Fanua00118%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "COSRX  ザ  ビタミンC23 セラム",
+      "brand": "COSRX",
+      "category": "美容液",
+      "price_ref": "2600",
+      "image": "",
+      "active_ingredients": [
+        "vitamin_c"
+      ],
+      "support_ingredients": [
+        "vitamin_e",
+        "hyaluronic_acid",
+        "allantoin"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation"
+      ],
+      "concerns": [
+        "whitening",
+        "dullness",
+        "pores",
+        "aging"
+      ],
+      "skin_types": [
+        "mixed",
+        "oily"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "no",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp",
+        "store"
+      ],
+      "ingredient_strength":{"vitamin_c": "high"},
+      "signature_ingredients": [
+         "vitamin_c_booster_complex"
+      ],
+      "main_functions": [
+        "美白ケア",
+        "くすみ改善",
+        "毛穴ケア"
+      ],
+      "ingredient_focus": [
+        "美白ケア",
+        "くすみ改善",
+        "毛穴ケア"
+      ],
+      "technology": [
+        "vitamin_c_booster_complex"
+      ],
+      "texture": "essence",
+      "contraindications": [
+        "sensitive_skin",
+        "retinol_same_routine",
+        "acid_same_routine"
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52c5db56.13c0c963.52c5db57.04f68121/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fcosrx-official%2Ftherx_vitamin23%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "キュレル 潤浸保湿  角層深部バリア美容液",
+      "brand": "キュレル",
+      "category": "美容液",
+      "price_ref": "4950",
+      "image": "",
+      "active_ingredients": [
+        "ceramide"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "allantoin"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "dryness",
+        "barrier",
+        "redness"
+      ],
+      "skin_types": [
+        "sensitive",
+        "dry",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{ "ceramide": "medium"},
+      "signature_ingredients": [ "ceramide_complex_ex"],
+      "main_functions": [
+        "バリア修復",
+        "保湿",
+        "赤みケア"
+      ],
+      "ingredient_focus": [
+        "バリア修復",
+        "保湿",
+        "赤みケア"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "essence",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bd5dc1.fa88b2ed.52bd5dc2.5643a3f5/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frakuten24%2F4901301463937%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ダルバ ホワイトトリュフファーストスプレーセラム",
+      "brand": "ダルバ",
+      "category": "美容液",
+      "price_ref": "2700",
+      "image": "",
+      "active_ingredients": [
+        "probiotic_ferment"
+      ],
+      "support_ingredients": [
+        "plant_oil",
+        "niacinamide",
+        "hyaluronic_acid"
+      ],
+      "formulation": [
+        "oil_water_layer",
+        "low_irritation",
+        "barrier_preserving"
+      ],
+      "concerns": [
+        "dryness",
+        "dullness",
+        "aging",
+        "barrier"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{ "probiotic_ferment": "medium"},
+      "signature_ingredients": [
+      
+      ],
+      "main_functions": [
+        "保湿",
+        "エイジングケア",
+        "ツヤ付与"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "エイジングケア",
+        "ツヤ改善"
+      ],
+      "technology": [
+        "oil_water_layer"
+      ],
+      "texture": "light",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+      "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52dc1c48.58aeb270.52dc1c49.f1e24ec1/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fdalba%2Fdalba_serum-02%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjEwMHgxMDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "COSRX ザ・アルファ アルブチン2ニキビ跡ケア セラム ",
+      "brand": "COSRX",
+      "category": "美容液",
+      "price_ref": "2100",
+      "image": "",
+      "active_ingredients": [
+        "alpha_arbutin",
+        "niacinamide"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "glycerin",
+        "panthenol"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving"
+      ],
+      "concerns": [
+        "whitening",
+        "hyperpigmentation",
+        "acne",
+        "dullness"
+      ],
+      "skin_types": [
+        "mixed",
+        "oily",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon"
+        
+      ],
+      "ingredient_strength":{"alpha_arbutin": "medium","niacinamide": "medium"},
+      "signature_ingredients": [
+        
+      ],
+      "main_functions": [
+        "美白ケア",
+        "ニキビ跡ケア",
+        "くすみ改善"
+      ],
+      "ingredient_focus": [
+        "美白ケア",
+        "ニキビ跡ケア",
+        "くすみ改善"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "essence",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52c5db56.13c0c963.52c5db57.04f68121/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fcosrx-official%2Ftherx_alpha_arbutin%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "SHISEIDO アルティミューン  パワライジング  セラム",
+      "brand": "SHISEIDO",
+      "category": "美容液",
+      "price_ref": "9900",
+      "image": "",
+      "active_ingredients": [
+        "probiotic_ferment"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "beta_glucan",
+        "amino_acid"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving",
+        "fermentation"
+      ],
+      "concerns": [
+        "barrier",
+        "dryness",
+        "aging",
+        "dullness"
+      ],
+      "skin_types": [
+        "dry",
+        "sensitive",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength":{"probiotic_ferment": "medium"},
+      "signature_ingredients": [
+        "multi_care_complex"
+      ],
+      "main_functions": [
+        "バリア強化",
+        "保湿",
+        "エイジングケア"
+      ],
+      "ingredient_focus": [
+        "バリア修復",
+        "保湿",
+        "エイジングケア"
+      ],
+      "technology": [
+         "multi_care_complex"
+      ],
+      "texture": "essence",
+      "contraindications": [],
+      "affiliate_provider": "",
+  	  "affiliate_item_id": ""
+    },
+    {
+      "name": "エリクシール シュペリエル ザ セラム aa",
+      "brand": "エリクシール",
+      "category": "美容液",
+      "price_ref": "8900",
+      "image": "",
+      "active_ingredients": [
+        "niacinamide"
+      ],
+      "support_ingredients": [
+        "peptide",
+        "hyaluronic_acid",
+        "glycerin"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving"
+      ],
+      "concerns": [
+        "aging",
+        "wrinkle",
+        "firmness",
+        "dryness"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{"niacinamide": "medium"},
+      "signature_ingredients": [
+         "firming_complex"
+      ],
+      "main_functions": [
+        "ハリ改善",
+        "エイジングケア",
+        "保湿"
+      ],
+      "ingredient_focus": [
+        "ハリ改善",
+        "エイジングケア",
+        "保湿"
+      ],
+      "technology": [
+        "firming_complex"
+      ],
+      "texture": "essence",
+      "contraindications": [
+        
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bd5dc1.fa88b2ed.52bd5dc2.5643a3f5/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frakuten24%2F4909978204921%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "イニスフリー レチノール PDRN  アドバンスド  セラム",
+      "brand": "イニスフリー",
+      "category": "美容液",
+      "price_ref": "3960",
+      "image": "",
+      "active_ingredients": [
+        "retinol",
+        "pdrn"
+      ],
+      "support_ingredients": [
+        "niacinamide",
+        "panthenol",
+        "hyaluronic_acid"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving"
+      ],
+      "concerns": [
+        "aging",
+        "wrinkle",
+        "acne",
+        "dullness"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed"
+      ],
+      "retinol_level": 2,
+      "sensitive_ok": "no",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{"retinol": "medium","pdrn": "medium"},
+      "signature_ingredients": [
+        "retinol_booster_complex"
+      ],
+      "main_functions": [
+        "シワ改善",
+        "ハリ改善",
+        "ニキビケア"
+      ],
+      "ingredient_focus": [
+        "エイジングケア",
+        "ハリ改善",
+        "ニキビケア"
+      ],
+      "technology": [
+        "retinol_booster_complex"
+      ],
+      "texture": "essence",
+      "contraindications": [
+        "sensitive_skin",
+        "daytime_use_caution",
+        "acid_same_routine"
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52f9c25b.72be1ca7.52f9c25c.88594f0d/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fmatsukiyo%2F8809843703909%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ラロッシュポゼ メラ B3 セラム",
+      "brand": "ラロッシュポゼ",
+      "category": "美容液",
+      "price_ref": "9350",
+      "image": "",
+      "active_ingredients": [
+        "niacinamide"
+      ],
+      "support_ingredients": [
+        "retinoid",
+        "hyaluronic_acid",
+        "glycerin"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving"
+      ],
+      "concerns": [
+        "hyperpigmentation",
+        "dullness",
+        "whitening",
+        "aging"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 1,
+      "sensitive_ok": "unknown",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp",
+        "store"
+      ],
+      "ingredient_strength":{"niacinamide": "high"},
+      "signature_ingredients": [ "melazero_v2"],
+      "main_functions": [
+        "美白ケア",
+        "くすみ改善",
+        "色素沈着ケア"
+      ],
+      "ingredient_focus": [
+        "美白ケア",
+        "くすみ改善",
+        "色素沈着ケア"
+      ],
+      "technology": [],
+      "texture": "essence",
+      "contraindications": [
+        "retinol_same_routine",
+        "sensitive_skin"
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52d3fbfe.d5b06b69.52d3fbff.00517527/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Flarocheposay%2Fl00362%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "NILE パーフェクトセラム",
+      "brand": "NILE",
+      "category": "美容液",
+      "price_ref": "2480",
+      "image": "",
+      "active_ingredients": [
+        "niacinamide"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "ceramide",
+        "panthenol",
+        "vitamin_c",
+        "retinoid"
+      ],
+      "formulation": [
+        "essence_texture",
+        "low_irritation",
+        "barrier_preserving",
+        "multi_function"
+      ],
+      "concerns": [
+        "dryness",
+        "aging",
+        "dullness",
+        "barrier"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "oily"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon"
+      ],
+      "ingredient_strength":{ "niacinamide": "medium"},
+      "signature_ingredients": [
+        
+      ],
+      "main_functions": [
+        "エイジングケア",
+        "バリア修復",
+        "保湿"
+      ],
+      "ingredient_focus": [
+        "エイジングケア",
+        "バリア修復",
+        "保湿"
+      ],
+      "technology": [
+       
+      ],
+      "texture": "essence",
+      "contraindications": [],
+      "affiliate_provider":"rakuten" ,
+  	  "affiliate_item_id":"https://hb.afl.rakuten.co.jp/ichiba/52ebb60c.a55bb8ac.52ebb60d.967c0f43/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frise-store%2Fbiyoueki%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "トゥヴェール ナノエマルジョン",
+      "brand": "トゥヴェール",
+      "category": "乳液",
+      "price_ref": "3000",
+      "image": "",
+      "active_ingredients": [
+         "ceramide"
+      ],
+      "support_ingredients": [
+        "cholesterol",
+        "fatty_acid",
+        "glycerin"
+      ],
+      "formulation": [
+        "emulsion",
+        "low_irritation",
+        "barrier_preserving",
+        "nano_capsule"
+      ],
+      "concerns": [
+        "dryness",
+        "barrier",
+        "aging"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength":{"ceramide": "high"},
+      "signature_ingredients": [
+        "multi_ceramide_complex"
+      ],
+      "main_functions": [
+        "バリア修復",
+        "保湿",
+        "浸透保湿"
+      ],
+      "ingredient_focus": [
+        "バリア修復",
+        "保湿",
+        "浸透保湿"
+      ],
+      "technology": [
+         "nano_capsule"
+      ],
+      "texture": "emulsion",
+      "contraindications": [],
+      "affiliate_provider":"rakuten",
+  	  "affiliate_item_id":"https://hb.afl.rakuten.co.jp/ichiba/52d42cb6.f5152c4d.52d42cb7.ee00e2d2/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Ftvert%2F972273%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ファンケル エンリッチプラス  乳液  II しっとり  ",
+      "brand": "ファンケル",
+      "category": "乳液",
+      "price_ref": "1870",
+      "image": "",
+      "active_ingredients": [
+        "niacinamide"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "collagen",
+        "peptide",
+        "ectoin",
+        "squalane"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "aging",
+        "wrinkle",
+        "firmness",
+        "dryness"
+      ],
+      "skin_types": [
+        "sensitive",
+        "dry",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{ "niacinamide": "medium"},
+      "signature_ingredients": [
+        
+      ],
+      "main_functions": [
+        "シワ改善",
+        "ハリ改善",
+        "保湿"
+      ],
+      "ingredient_focus": [
+        "エイジングケア",
+        "ハリ改善",
+        "保湿"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "cream",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bdef1e.8e2e1ad0.52bdef1f.2d8cdfef/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Ffancl-shop%2F3764-21%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ドクターシーラボ VC100 エマルジョン EX",
+      "brand": "ドクターシーラボ",
+      "category": "乳液",
+      "price_ref": "5390",
+      "image": "",
+      "active_ingredients": [
+        "vitamin_c"
+      ],
+      "support_ingredients": [
+        "niacinamide",
+        "hyaluronic_acid",
+        "glycerin",
+        "tocopherol"
+      ],
+      "formulation": [
+        "emulsion",
+        "low_irritation",
+        "barrier_preserving",
+        "stabilized_vitamin_c"
+      ],
+      "concerns": [
+        "dullness",
+        "whitening",
+        "pores",
+        "dryness"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "unknown",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{ "vitamin_c": "medium"},
+      "signature_ingredients": [
+         "vitamin_c_booster_complex"
+      ],
+      "main_functions": [
+        "くすみ改善",
+        "毛穴ケア",
+        "美白ケア"
+      ],
+      "ingredient_focus": [
+        "くすみ改善",
+        "毛穴ケア",
+        "美白ケア"
+      ],
+      "technology": [
+        "stabilized_vitamin_c"
+      ],
+      "texture": "milky",
+      "contraindications": [
+        
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52d78e8d.7eaff694.52d78e8e.f4312f00/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fdrci-labo%2F00114190%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "アクアレーベル トリートメントミルク とてもしっとり",
+      "brand": "アクアレーベル",
+      "category": "乳液",
+      "price_ref": "1870",
+      "image": "",
+      "active_ingredients": [
+        "niacinamide"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "glycerin",
+        "plant_oil",
+        "collagen"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "dryness",
+        "aging",
+        "dullness",
+        "barrier"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength":{"niacinamide": "medium"},
+      "signature_ingredients": [
+       
+      ],
+      "main_functions": [
+        "保湿",
+        "ハリ改善",
+        "ツヤ改善"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "エイジングケア",
+        "ツヤ改善"
+      ],
+      "technology": [
+         "oil_water_layer"
+      ],
+      "texture": "rich",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bd5dc1.fa88b2ed.52bd5dc2.5643a3f5/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frakuten24%2F4909978180317%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+
+    },
+    {
+      "name": "WHITH WHITE 薬用美白乳液",
+      "brand": "WHITH WHITE",
+      "category": "乳液",
+      "price_ref": "2200",
+      "image": "",
+      "active_ingredients": [
+        "placenta",
+        "dipotassium_glycyrrhizate"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "collagen",
+        "hyaluronic_acid"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "whitening",
+        "dullness",
+        "redness",
+        "dryness"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon"
+      ],
+      "ingredient_strength":{
+         "placenta": "medium",
+         "dipotassium_glycyrrhizate": "medium"
+      },
+      "signature_ingredients": [],
+      "main_functions": [
+        "美白ケア",
+        "くすみ改善",
+        "赤みケア"
+      ],
+      "ingredient_focus": [
+        "美白ケア",
+        "くすみ改善",
+        "赤みケア"
+      ],
+      "technology": [],
+      "texture": "milky",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52d7f965.40fc1703.52d7f966.0b250cdc/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fwhithwhite%2F906b01n8ra2oa%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "AESTURA アトバリア 365 クリーム",
+      "brand": "AESTURA",
+      "category": "クリーム",
+      "price_ref": "3300",
+      "image": "",
+      "active_ingredients": [
+        "ceramide"
+      ],
+      "support_ingredients": [
+        "cholesterol",
+        "fatty_acid",
+        "glycerin"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "dryness",
+        "barrier",
+        "redness",
+        "aging"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength":{"ceramide": "high"},
+      "signature_ingredients": [
+        "ceramide_complex_ex"
+      ],
+      "main_functions": [
+        "バリア修復",
+        "保湿",
+        "赤みケア"
+      ],
+      "ingredient_focus": [
+        "バリア修復",
+        "保湿",
+        "赤みケア"
+      ],
+      "technology": [
+        "encapsulation"
+      ],
+      "texture": "rich",
+      "contraindications": [
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52fdfb70.ce44dc71.52fdfb71.30db4f49/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Faestura-japan%2Fatobarrier365cream%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjEwMHgxMDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+
+    },
+    {
+      "name": "LANEIGE  バウンシースリーピングマスク",
+      "brand": "LANEIGE",
+      "category": "クリーム",
+      "price_ref": "3960",
+      "image": "",
+      "active_ingredients": [
+        "peptide"
+      ],
+      "support_ingredients": [
+        "niacinamide",
+        "hyaluronic_acid",
+        "glycerin",
+        "tocopherol"
+      ],
+      "formulation": [
+        "barrier_preserving",
+        "low_irritation"
+      ],
+      "concerns": [
+        "aging",
+        "firmness",
+        "dullness",
+        "dryness"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength":{"peptide": "medium"},
+      "signature_ingredients": [
+        "firming_complex"
+      ],
+      "main_functions": [
+        "ハリ改善",
+        "ツヤ改善",
+        "保湿"
+      ],
+      "ingredient_focus": [
+        "エイジングケア",
+        "ハリ改善",
+        "保湿"
+      ],
+      "technology": [
+       "slow_release"
+      ],
+      "texture": "cream",
+      "contraindications": [
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52d8437a.85b4cd45.52d8437b.4a258764/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Flaneige-r%2Fbauncy%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+
+    },
+    {
+      "name": "オルビスユー ジェルモイスチャライザー",
+      "brand": "オルビス",
+      "category": "クリーム",
+      "price_ref": "3300",
+      "image": "",
+      "active_ingredients": [
+        "dipotassium_glycyrrhizate"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "glycerin",
+        "collagen"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "aging",
+        "dryness",
+        "redness",
+        "barrier"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength":{ "dipotassium_glycyrrhizate": "medium"},
+      "signature_ingredients": [
+        "collagen_boost_complex"
+      ],
+      "main_functions": [
+        "保湿",
+        "バリア強化",
+        "ハリ改善"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "バリア修復",
+        "エイジングケア"
+      ],
+      "technology": [
+      ],
+      "texture": "gel",
+      "contraindications": [
+        
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bd8ede.523ac79d.52bd8edf.c6568135/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Forbis-shop%2Fr4908064091551%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+
+    },
+    {
+      "name": "ラロッシュポゼ シカプラスト リペアクリーム B5+",
+      "brand": "ラロッシュポゼ",
+      "category": "クリーム",
+      "price_ref": "3190",
+      "image": "",
+      "active_ingredients": [
+        "panthenol"
+      ],
+      "support_ingredients": [
+        "cica",
+        "zinc",
+        "glycerin"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "redness",
+        "barrier",
+        "dryness",
+        "irritation"
+      ],
+      "skin_types": [
+        "sensitive",
+        "dry",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp",
+        "store"
+      ],
+      "ingredient_strength":{ "panthenol": "high"},
+      "signature_ingredients": [
+         "cica_complex"
+      ],
+      "main_functions": [
+        "バリア修復",
+        "赤みケア",
+        "保護"
+      ],
+      "ingredient_focus": [
+        "バリア修復",
+        "赤みケア",
+        "保護"
+      ],
+      "technology": [
+        "barrier_formula"
+      ],
+      "texture": "rich",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52d3fbfe.d5b06b69.52d3fbff.00517527/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Flarocheposay%2Fl00360%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+
+    },
+    {
+      "name": "ソフィーナip ゴールデンタイムリペア  深夜浸透クリーム",
+      "brand": "ソフィーナip",
+      "category": "クリーム",
+      "price_ref": "3000",
+      "image": "",
+      "active_ingredients": [
+        "probiotic_ferment"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "hyaluronic_acid",
+        "amino_acid"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "dryness",
+        "barrier",
+        "dullness",
+        "aging"
+      ],
+      "skin_types": [
+        "dry",
+        "sensitive",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength": {"probiotic_ferment": "medium"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "保湿",
+        "バリア修復",
+        "ハリ改善"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "バリア修復",
+        "エイジングケア"
+      ],
+      "technology": ["slow_release"],
+      "texture": "rich",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bdbfe3.e21a6f3d.52bdbfe4.9a4230d7/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frakuten24-cosmetics%2F4901301446466%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "アリィー クロノビューティ  ジェルUV  EX",
+      "brand": "アリィー",
+      "category": "日焼け止め",
+      "price_ref": "2200",
+      "image": "",
+      "active_ingredients": [
+         "uv_filter"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "glycerin"
+      ],
+      "formulation": [
+        "low_irritation"
+      ],
+      "concerns": [
+        "whitening",
+        "dryness"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed",
+        "dry"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "store",
+        "official_jp",
+        "rakuten",
+        "amazon"
+      ],
+      "ingredient_strength":{"uv_filter": "high"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "紫外線防御",
+        "美白ケア",
+        "エイジングケア"
+      ],
+      "ingredient_focus": [
+        "紫外線防御",
+        "美白"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "gel",
+      "uv_level": {
+        "spf": "50+",
+        "pa": "++++"
+      },
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bd5dc1.fa88b2ed.52bd5dc2.5643a3f5/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frakuten24%2F4973167057742%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+
+    },
+    {
+      "name": "オルナオーガニック 日焼け止めクリーム",
+      "brand": "オルナオーガニック",
+      "category": "日焼け止め",
+      "price_ref": "2200",
+      "image": "",
+      "active_ingredients": [
+        "uv_filter"
+      ],
+      "support_ingredients": [
+        "hyaluronic_acid",
+        "glycerin",
+        "collagen"
+      ],
+      "formulation": [
+        "barrier_preserving",
+        "mild_formula",
+        "low_irritation"
+      ],
+      "concerns": [
+        "whitening",
+        "dryness",
+        "uv_protection"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "rakuten",
+        "amazon",
+        "official_jp"
+      ],
+      "ingredient_strength":{"uv_filter": "high"},
+      "signature_ingredients": [],
+      "main_functions": [
+        "紫外線防御",
+        "保湿"
+      ],
+      "ingredient_focus": [
+        "紫外線防御",
+        "保湿"
+      ],
+      "technology": [],
+      "texture": "cream",
+      "uv_level": {
+        "spf": "50+",
+        "pa": "++++"
+      },
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52fe08ca.b8f71dba.52fe08cb.206eedcd/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Ftsurunishi%2F905b0739kdbmj%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+
+    },
+    {
+      "name": "COSRX  ウルトラライト透明UVクリーム",
+      "brand": "COSRX",
+      "category": "日焼け止め",
+      "price_ref": "1650",
+      "image": "",
+      "active_ingredients": [
+        "uv_filter"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "hyaluronic_acid",
+        "vitamin_e"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "whitening",
+        "dryness"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "amazon",
+        "rakuten"
+      ],
+      "ingredient_strength": {
+        "uv_filter": "high"
+      },
+      "signature_ingredients": [],
+      "main_functions": [
+        "紫外線防御"
+      ],
+      "ingredient_focus": [
+        "紫外線防御"
+      ],
+      "technology": [
+        
+      ],
+      "texture": "light",
+      "contraindications": [],
+    
+      "uv_level": {
+      "spf": "50+",
+      "pa": "++++"
+      },
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52c5db56.13c0c963.52c5db57.04f68121/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fcosrx-official%2Finvisible_suncare%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "アネッサ パーフェクトUV スキンケアジェル NB",
+      "brand": "アネッサ",
+      "category": "日焼け止め",
+      "price_ref": "2500",
+      "image": "",
+      "active_ingredients": [
+        "uv_filter"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "hyaluronic_acid",
+        "tocopherol"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "uv_protection",
+        "whitening",
+        "dryness"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed",
+        "dry"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "amazon",
+        "rakuten",
+        "store",
+        "official_store"
+      ],
+      "ingredient_strength": {
+        "uv_filter": "high"
+      },
+      "signature_ingredients": [],
+      "main_functions": [
+        "紫外線防御"
+      ],
+      "ingredient_focus": [
+        "紫外線防御"
+      ],
+      "technology": [],
+      "texture": "gel",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bd5dc1.fa88b2ed.52bd5dc2.5643a3f5/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frakuten24%2F406689%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9",
+      "uv_level":{
+      "spf": "50+",
+      "pa": "++++"}
+    },
+    {
+      "name": "ダルバ トーンアップサンクリーム（ピンク）",
+      "brand": "ダルバ",
+      "category": "日焼け止め",
+      "price_ref": "2900",
+      "image": "",
+      "active_ingredients": [
+        "uv_filter"
+      ],
+      "support_ingredients": [
+        "niacinamide",
+        "hyaluronic_acid",
+        "glycerin",
+        "plant_oil"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "whitening",
+        "dullness",
+        "dryness"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "amazon",
+        "rakuten",
+        "official_store"
+      ],
+      "ingredient_strength": {
+        "uv_filter": "high"
+      },
+      "signature_ingredients": [],
+      "main_functions": [
+        "紫外線防御",
+        "トーンアップ"
+      ],
+      "ingredient_focus": [
+        "紫外線防御"
+      ],
+      "technology": [],
+      "texture": "light",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+      "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52dc1c48.58aeb270.52dc1c49.f1e24ec1/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fdalba%2F10000072%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjEwMHgxMDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9",
+      "uv_level":{
+      "spf": "50+",
+      "pa": "++++"}
+    },
+    {
+      "name": "LuLuLun  フェイスマスク  ハイドラVマスク",
+      "brand": "LuLuLun",
+      "category": "パック",
+      "price_ref": "770",
+      "image": "",
+      "active_ingredients": [
+        "vitamin_c"
+      ],
+      "support_ingredients": [
+        "niacinamide",
+        "hyaluronic_acid",
+        "glycerin"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "dryness",
+        "dullness",
+        "whitening"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "amazon",
+        "rakuten",
+        "store"
+      ],
+      "ingredient_strength": {
+        "vitamin_c": "medium"
+      },
+      "signature_ingredients": [],
+      "main_functions": [
+        "保湿",
+        "ツヤ改善"
+      ],
+      "ingredient_focus": [
+        "保湿",
+        "美白"
+      ],
+      "technology": [],
+      "texture": "watery",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52fe1fa4.1ad086e5.52fe1fac.d0f3d416/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Flululun-shop%2Fhydra-2212%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+
+    },
+    {
+      "name": "CICIBELLA EXOSOME&高濃度VC200 プレミアムシートマスク",
+      "brand": "CICIBELLA",
+      "category": "パック",
+      "price_ref": "980",
+      "image": "",
+      "active_ingredients": [
+        "vitamin_c"
+      ],
+      "support_ingredients": [
+        "niacinamide",
+        "hyaluronic_acid",
+        "glycerin",
+        "retinoid",
+        "cica"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "dryness",
+        "dullness",
+        "whitening",
+        "acne"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 1,
+      "sensitive_ok": "unknown",
+      "availability_japan": [
+        "amazon",
+        "rakuten",
+        "store"
+      ],
+      "ingredient_strength": {
+        "vitamin_c": "medium"
+      },
+      "signature_ingredients": [
+        "exosome"
+      ],
+      "main_functions": [
+        "保湿"
+      ],
+      "ingredient_focus": [
+        "美白",
+        "保湿",
+        "くすみ改善"
+      ],
+      "technology": [
+        "exosome"
+      ],
+      "texture": "watery",
+      "contraindications": [
+        "sensitive_skin"
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52e772a5.6637c464.52e772a6.f16f5509/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2F999specialtyshop%2Fzhmm30n-3%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+
+    },
+    {
+      "name":"INNISFREE ビタミンC グリーンティーエンザイム ブライトニング セラムゲルマスク",
+      "brand": "INNISFREE",
+      "category": "パック",
+      "price_ref": "880",
+      "image": "",
+      "active_ingredients": [
+        "vitamin_c"
+      ],
+      "support_ingredients": [
+        "niacinamide",
+        "hyaluronic_acid",
+        "glycerin",
+        "enzyme"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "dullness",
+        "whitening",
+        "pores",
+        "dryness"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "amazon",
+        "rakuten"
+      ],
+      "ingredient_strength": {
+        "vitamin_c": "medium"
+      },
+      "signature_ingredients": [],
+      "main_functions": [
+        "くすみ改善",
+        "毛穴ケア",
+        "保湿"
+      ],
+      "ingredient_focus": [
+        "美白",
+        "毛穴ケア",
+        "保湿"
+      ],
+      "technology": [],
+      "texture": "watery",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52e79571.d98f2bdc.52e79572.a1a88809/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Finnisfree-official%2F131174576%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+
+    },
+    {
+      "name": "RISM デイリーケアマスク プレシャス",
+      "brand": "RISM",
+      "category": "パック",
+      "price_ref": "770",
+      "image": "",
+      "active_ingredients": [
+        "niacinamide"
+      ],
+      "support_ingredients": [
+        "bakuchiol",
+        "hyaluronic_acid",
+        "glycerin"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "aging",
+        "firmness",
+        "dullness",
+        "dryness"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "amazon",
+        "rakuten",
+        "store"
+      ],
+      "ingredient_strength": {
+        "niacinamide": "medium"
+      },
+      "signature_ingredients": [],
+      "main_functions": [
+        "ハリ改善",
+        "保湿"
+      ],
+      "ingredient_focus": [
+        "エイジングケア",
+        "ハリ改善",
+        "保湿"
+      ],
+      "technology": [],
+      "texture": "watery",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52e777ba.f00d714d.52e777bb.8d0c42be/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frismofficial%2Frism-msk-daily%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "メラノCC+AZ  mask ",
+      "brand": "メラノCC",
+      "category": "パック",
+      "price_ref": "880",
+      "image": "",
+      "active_ingredients": [
+        "vitamin_c",
+        "azelaic_acid"
+      ],
+      "support_ingredients": [
+        "niacinamide",
+        "hyaluronic_acid",
+        "glycerin"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "pores",
+        "acne",
+        "dullness",
+        "whitening"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "no",
+      "availability_japan": [
+        "amazon",
+        "rakuten",
+        "store"
+      ],
+      "ingredient_strength": {
+        "vitamin_c": "medium",
+        "azelaic_acid": "medium"
+      },
+      "signature_ingredients": [],
+      "main_functions": [
+        "毛穴改善",
+        "ニキビ予防",
+        "トーンアップ"
+      ],
+      "ingredient_focus": [
+        "毛穴ケア",
+        "ニキビケア",
+        "美白"
+      ],
+      "technology": [],
+      "texture": "watery",
+      "contraindications": [
+        "sensitive_skin"
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bdbfe3.e21a6f3d.52bdbfe4.9a4230d7/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Frakuten24-cosmetics%2F4987241203208%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+
+    },
+    {
+      "name": "The Ordinary AHA 30% + BHA 2% Peeling  olution",
+      "brand": "The Ordinary",
+      "category": "ピーリング",
+      "price_ref": "3500",
+      "image": "",
+      "active_ingredients": [
+        "aha",
+        "bha"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "hyaluronic_acid"
+      ],
+      "formulation": [
+        "low_irritation"
+      ],
+      "concerns": [
+        "pores",
+        "dullness",
+        "acne"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "no",
+      "availability_japan": [
+        "amazon",
+        "rakuten"
+      ],
+      "ingredient_strength": {
+        "aha": "high",
+        "bha": "medium"
+      },
+      "signature_ingredients": [],
+      "main_functions": [
+        "毛穴改善",
+        "トーンアップ",
+        "なめらか肌"
+      ],
+      "ingredient_focus": [
+        "角質ケア",
+        "毛穴ケア",
+        "美白"
+      ],
+      "technology": [],
+      "texture": "watery",
+      "contraindications": [
+        "sensitive_skin"
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bdb94f.712b4af9.52bdb950.0aa73304/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Ftheordinary%2For-39%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+
+    },
+    {
+      "name": "タカミスキンピール",
+      "brand": "タカミ",
+      "category": "ピーリング",
+      "price_ref": "5720",
+      "image": "",
+      "active_ingredients": [
+        "aha"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "amino_acid"
+      ],
+      "formulation": [
+        "low_irritation",
+        "mild_formula"
+      ],
+      "concerns": [
+        "dullness",
+        "dryness",
+        "pores"
+      ],
+      "skin_types": [
+        "dry",
+        "sensitive",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "amazon",
+        "rakuten",
+        "official_store"
+      ],
+      "ingredient_strength": {
+        "aha": "low"
+      },
+      "signature_ingredients": [],
+      "main_functions": [
+        "なめらか肌",
+        "キメ改善",
+        "保湿"
+      ],
+      "ingredient_focus": [
+        "角質ケア",
+        "保湿",
+        "バリア修復"
+      ],
+      "technology": [],
+      "texture": "watery",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52bd82f4.11daa5d9.52bd82f5.80d2b3fc/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Ftakami-labo%2Fr-s009%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "Anua ドクダミLHAピーリングジェル",
+      "brand": "Anua",
+      "category": "ピーリング",
+      "price_ref": "2300",
+      "image": "",
+      "active_ingredients": [
+        "lha"
+      ],
+      "support_ingredients": [
+        "cica",
+        "glycerin",
+        "hyaluronic_acid"
+      ],
+      "formulation": [
+        "low_irritation",
+        "mild_formula",
+        "barrier_preserving"
+      ],
+      "concerns": [
+        "acne",
+        "redness",
+        "dullness"
+      ],
+      "skin_types": [
+        "sensitive",
+        "oily",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "amazon",
+        "rakuten"
+      ],
+      "ingredient_strength": {
+        "lha": "low"
+      },
+      "signature_ingredients": [],
+      "main_functions": [
+        "なめらか肌",
+        "鎮静ケア"
+      ],
+      "ingredient_focus": [
+        "角質ケア",
+        "ニキビケア",
+        "保湿"
+      ],
+      "technology": [],
+      "texture": "gel",
+      "contraindications": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52cd49a4.fb50cdfa.52cd49a5.07fe221e/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fanuajapan%2Fanua00071%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ナチュレーヌ アクアピールモイスチャー  ピーリングジェル",
+      "brand": "ナチュレーヌ",
+      "category": "ピーリング",
+      "price_ref": "2400",
+      "image": "",
+      "active_ingredients": [
+        "aha"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "hyaluronic_acid",
+        "collagen",
+        "squalane"
+      ],
+      "formulation": [
+        "low_irritation",
+        "mild_formula",
+        "barrier_preserving"
+      ],
+      "concerns": [
+        "dullness",
+        "dryness",
+        "pores"
+      ],
+      "skin_types": [
+        "dry",
+        "mixed",
+        "sensitive"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "yes",
+      "availability_japan": [
+        "amazon",
+        "rakuten",
+        "store"
+      ],
+      "ingredient_strength": {
+        "aha": "low"
+      },
+      "signature_ingredients": [],
+      "main_functions": [
+        "なめらか肌",
+        "トーンアップ",
+        "保湿"
+      ],
+      "ingredient_focus": [
+        "角質ケア",
+        "保湿",
+        "くすみ改善"
+      ],
+      "technology": [],
+      "texture": "gel",
+      "contraindications": [],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52e109df.bfdeeb00.52e109e0.b1e5baa8/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fnatureine%2F10000000%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    },
+    {
+      "name": "ラロッシュポゼ エファクラ  ピールケア  セラム",
+      "brand": "ラロッシュポゼ",
+      "category": "ピーリング",
+      "price_ref": "5280",
+      "image": "",
+      "active_ingredients": [
+        "aha",
+        "bha",
+        "niacinamide"
+      ],
+      "support_ingredients": [
+        "glycerin",
+        "hyaluronic_acid"
+      ],
+      "formulation": [
+        "low_irritation",
+        "barrier_preserving",
+        "mild_formula"
+      ],
+      "concerns": [
+        "pores",
+        "acne",
+        "dullness",
+        "whitening"
+      ],
+      "skin_types": [
+        "oily",
+        "mixed"
+      ],
+      "retinol_level": 0,
+      "sensitive_ok": "no",
+      "availability_japan": [
+        "amazon",
+        "rakuten",
+        "store",
+        "official_jp"
+      ],
+      "ingredient_strength": {
+        "aha": "medium",
+        "bha": "medium",
+        "niacinamide": "medium"
+      },
+      "signature_ingredients": [],
+      "main_functions": [
+        "なめらか肌",
+        "毛穴改善",
+        "鎮静ケア"
+      ],
+      "ingredient_focus": [
+        "角質ケア",
+        "毛穴ケア",
+        "美白"
+      ],
+      "technology": [],
+      "texture": "watery",
+      "contraindications": [
+        "sensitive_skin"
+      ],
+      "affiliate_provider": "rakuten",
+  	  "affiliate_item_id": "https://hb.afl.rakuten.co.jp/ichiba/52e109df.bfdeeb00.52e109e0.b1e5baa8/?pc=https%3A%2F%2Fitem.rakuten.co.jp%2Fnatureine%2F10000000%2F&link_type=hybrid_url&ut=eyJwYWdlIjoiaXRlbSIsInR5cGUiOiJoeWJyaWRfdXJsIiwic2l6ZSI6IjI0MHgyNDAiLCJuYW0iOjEsIm5hbXAiOiJyaWdodCIsImNvbSI6MSwiY29tcCI6ImRvd24iLCJwcmljZSI6MSwiYm9yIjoxLCJjb2wiOjEsImJidG4iOjEsInByb2QiOjAsImFtcCI6ZmFsc2V9"
+    }
+    
+  ]
+}

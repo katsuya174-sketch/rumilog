@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>診断詳細</title>
+</head>
+<body style="font-family:sans-serif; line-height:1.8; padding:24px; max-width:900px; margin:auto;">
+
+    <h1>診断詳細</h1>
+
+    <div style="
+        border:1px solid #ddd;
+        border-radius:16px;
+        padding:20px;
+        margin-bottom:24px;
+        box-shadow:0 4px 12px rgba(0,0,0,0.05);
+    ">
+        <div><strong>ID:</strong> {{ data.id }}</div>
+        <div><strong>記録日:</strong> {{ data.record_date }}</div>
+        <div><strong>保存日時:</strong> {{ data.saved_at }}</div>
+
+        <div style="font-size:28px; font-weight:bold; margin-top:12px;">
+            Skin Score: {{ data.skin_score }}
+        </div>
+    </div>
+
+    {% if comparison %}
+    <div style="
+        border:1px solid #ddd;
+        border-radius:16px;
+        padding:20px;
+        margin-bottom:24px;
+        box-shadow:0 4px 12px rgba(0,0,0,0.05);
+    ">
+        <h2 style="margin-bottom:12px;">前回比較</h2>
+    
+        <div><strong>前回ID:</strong> {{ previous.id }}</div>
+        <div><strong>前回記録日:</strong> {{ previous.record_date }}</div>
+    
+        <hr>
+    
+        {% set skin_color = 'green' if comparison.skin_score_diff > 0 else 'red' if comparison.skin_score_diff < 0 else 'gray' %}
+        {% set oil_color = 'green' if comparison.oil_balance_diff > 0 else 'red' if comparison.oil_balance_diff < 0 else 'gray' %}
+        {% set redness_color = 'green' if comparison.redness_diff > 0 else 'red' if comparison.redness_diff < 0 else 'gray' %}
+        {% set pores_color = 'green' if comparison.pores_diff > 0 else 'red' if comparison.pores_diff < 0 else 'gray' %}
+        {% set hydration_color = 'green' if comparison.hydration_diff > 0 else 'red' if comparison.hydration_diff < 0 else 'gray' %}
+        {% set firmness_color = 'green' if comparison.firmness_diff > 0 else 'red' if comparison.firmness_diff < 0 else 'gray' %}
+        {% set acne_color = 'green' if comparison.acne_diff > 0 else 'red' if comparison.acne_diff < 0 else 'gray' %}
+        {% set dullness_color = 'green' if comparison.dullness_diff > 0 else 'red' if comparison.dullness_diff < 0 else 'gray' %}
+        {% set barrier_color = 'green' if comparison.barrier_diff > 0 else 'red' if comparison.barrier_diff < 0 else 'gray' %}
+        {% set texture_color = 'green' if comparison.texture_diff > 0 else 'red' if comparison.texture_diff < 0 else 'gray' %}
+        {% set tone_evenness_color = 'green' if comparison.tone_evenness_diff > 0 else 'red' if comparison.tone_evenness_diff < 0 else 'gray' %}
+        <div>
+            <strong>Skin Score差分:</strong>
+            {% if comparison.skin_score_diff > 0 %}
+                <span style="font-weight:bold; color: green;">+{{ comparison.skin_score_diff }}</span>
+            {% elif comparison.skin_score_diff < 0 %}
+                <span style="font-weight:bold; color: red;">{{ comparison.skin_score_diff }}</span>
+            {% else %}
+                <span style="font-weight:bold; color: gray;">{{ comparison.skin_score_diff }}</span>
+            {% endif %}
+        </div>
+    
+        <div>
+            <strong>皮脂バランス差分:</strong>
+            {% if comparison.oil_balance_diff > 0 %}
+                <span style="font-weight:bold; color: green;">+{{ comparison.oil_balance_diff }}</span>
+            {% elif comparison.oil_balance_diff < 0 %}
+                <span style="font-weight:bold; color: red;">{{ comparison.oil_balance_diff }}</span>
+            {% else %}
+                <span style="font-weight:bold; color: gray;">{{ comparison.oil_balance_diff }}</span>
+            {% endif %}
+        </div>
+    
+        <div>
+            <strong>赤み差分:</strong>
+            {% if comparison.redness_diff > 0 %}
+                <span style="font-weight:bold; color: green;">+{{ comparison.redness_diff }}</span>
+            {% elif comparison.redness_diff < 0 %}
+                <span style="font-weight:bold; color: red;">{{ comparison.redness_diff }}</span>
+            {% else %}
+                <span style="font-weight:bold; color: gray;">{{ comparison.redness_diff }}</span>
+            {% endif %}
+        </div>
+    
+        <div>
+            <strong>毛穴差分:</strong>
+            {% if comparison.pores_diff > 0 %}
+                <span style="font-weight:bold; color: green;">+{{ comparison.pores_diff }}</span>
+            {% elif comparison.pores_diff < 0 %}
+                <span style="font-weight:bold; color: red;">{{ comparison.pores_diff }}</span>
+            {% else %}
+                <span style="font-weight:bold; color: gray;">{{ comparison.pores_diff }}</span>
+            {% endif %}
+        </div>
+    
+        <div>
+            <strong>保湿差分:</strong>
+            {% if comparison.hydration_diff > 0 %}
+                <span style="font-weight:bold; color: green;">+{{ comparison.hydration_diff }}</span>
+            {% elif comparison.hydration_diff < 0 %}
+                <span style="font-weight:bold; color: red;">{{ comparison.hydration_diff }}</span>
+            {% else %}
+                <span style="font-weight:bold; color: gray;">{{ comparison.hydration_diff }}</span>
+            {% endif %}
+        </div>
+    
+        <div>
+            <strong>ハリ差分:</strong>
+            {% if comparison.firmness_diff > 0 %}
+                <span style="font-weight:bold; color: green;">+{{ comparison.firmness_diff }}</span>
+            {% elif comparison.firmness_diff < 0 %}
+                <span style="font-weight:bold; color: red;">{{ comparison.firmness_diff }}</span>
+            {% else %}
+                <span style="font-weight:bold; color: gray;">{{ comparison.firmness_diff }}</span>
+            {% endif %}
+        </div>
+        <div>
+            <strong>ニキビ差分:</strong>
+            {% if comparison.acne_diff > 0 %}
+                <span style="font-weight:bold; color: green;">+{{ comparison.acne_diff }}</span>
+            {% elif comparison.acne_diff < 0 %}
+                <span style="font-weight:bold; color: red;">{{ comparison.acne_diff }}</span>
+            {% else %}
+                <span style="font-weight:bold; color: gray;">{{ comparison.acne_diff }}</span>
+            {% endif %}
+        </div>
+        
+        <div>
+            <strong>くすみ差分:</strong>
+            {% if comparison.dullness_diff > 0 %}
+                <span style="font-weight:bold; color: green;">+{{ comparison.dullness_diff }}</span>
+            {% elif comparison.dullness_diff < 0 %}
+                <span style="font-weight:bold; color: red;">{{ comparison.dullness_diff }}</span>
+            {% else %}
+                <span style="font-weight:bold; color: gray;">{{ comparison.dullness_diff }}</span>
+            {% endif %}
+        </div>
+        
+        <div>
+            <strong>バリア差分:</strong>
+            {% if comparison.barrier_diff > 0 %}
+                <span style="font-weight:bold; color: green;">+{{ comparison.barrier_diff }}</span>
+            {% elif comparison.barrier_diff < 0 %}
+                <span style="font-weight:bold; color: red;">{{ comparison.barrier_diff }}</span>
+            {% else %}
+                <span style="font-weight:bold; color: gray;">{{ comparison.barrier_diff }}</span>
+            {% endif %}
+        </div>
+        
+        <div>
+            <strong>キメ差分:</strong>
+            {% if comparison.texture_diff > 0 %}
+                <span style="font-weight:bold; color: green;">+{{ comparison.texture_diff }}</span>
+            {% elif comparison.texture_diff < 0 %}
+                <span style="font-weight:bold; color: red;">{{ comparison.texture_diff }}</span>
+            {% else %}
+                <span style="font-weight:bold; color: gray;">{{ comparison.texture_diff }}</span>
+            {% endif %}
+        </div>
+        
+        <div>
+            <strong>色ムラ差分:</strong>
+            {% if comparison.tone_evenness_diff > 0 %}
+                <span style="font-weight:bold; color: green;">+{{ comparison.tone_evenness_diff }}</span>
+            {% elif comparison.tone_evenness_diff < 0 %}
+                <span style="font-weight:bold; color: red;">{{ comparison.tone_evenness_diff }}</span>
+            {% else %}
+                <span style="font-weight:bold; color: gray;">{{ comparison.tone_evenness_diff }}</span>
+            {% endif %}
+        </div>
+        <hr>
+    
+        <h3>比較コメント</h3>
+        <p>
+            {% if comparison.skin_score_diff > 0 %}
+                前回より全体スコアが改善しています。今のケア方針は良い流れです。
+            {% elif comparison.skin_score_diff < 0 %}
+                前回より全体スコアが低下しています。刺激の強いケアや乾燥を見直す余地があります。
+            {% else %}
+                前回から全体スコアは横ばいです。安定維持か次の一手を考える段階です。
+            {% endif %}
+        </p>
+    </div>
+    {% endif %}
+
+    <div style="
+        border:1px solid #ddd;
+        border-radius:16px;
+        padding:20px;
+        margin-bottom:24px;
+        box-shadow:0 4px 12px rgba(0,0,0,0.05);
+    ">
+        <h2>項目別スコア</h2>
+        <ul>
+            <li>皮脂バランス: {{ data.scores.oil_balance }}</li>
+            <li>赤み: {{ data.scores.redness }}</li>
+            <li>毛穴: {{ data.scores.pores }}</li>
+            <li>保湿: {{ data.scores.hydration }}</li>
+            <li>ハリ: {{ data.scores.firmness }}</li>
+            <li>ニキビ: {{ data.scores.acne }}</li>
+            <li>くすみ: {{ data.scores.dullness }}</li>
+            <li>バリア: {{ data.scores.barrier }}</li>
+            <li>キメ: {{ data.scores.texture }}</li>
+            <li>色ムラ: {{ data.scores.tone_evenness }}</li>
+        </ul>
+    </div>
+
+    <div style="
+        border:1px solid #ddd;
+        border-radius:16px;
+        padding:20px;
+        margin-bottom:24px;
+        box-shadow:0 4px 12px rgba(0,0,0,0.05);
+    ">
+        <h2>肌状態</h2>
+        <p>{{ data.skin_summary }}</p>
+    </div>
+
+    <div style="
+        border:1px solid #ddd;
+        border-radius:16px;
+        padding:20px;
+        margin-bottom:24px;
+        box-shadow:0 4px 12px rgba(0,0,0,0.05);
+    ">
+        <h2>予算チェック</h2>
+        <ul>
+            <li>
+                入力予算:
+                {% if data.input_budget and data.input_budget > 0 %}
+                    ¥{{ data.input_budget }}
+                {% else %}
+                    未入力
+                {% endif %}
+            </li>
+            <li>推定合計: ¥{{ data.total_price }}</li>
+            <li>判定: {{ data.budget_status }}</li>
+        </ul>
+    </div>
+
+    {% if data.improvement_plan %}
+    <div style="
+        border:1px solid #ddd;
+        border-radius:16px;
+        padding:20px;
+        margin-bottom:24px;
+        box-shadow:0 4px 12px rgba(0,0,0,0.05);
+    ">
+        <h2>🚀 100点改善プラン</h2>
+
+        <h3>🔥 今すぐ（1週間）</h3>
+        <p><strong>目標:</strong> {{ data.improvement_plan.immediate.goal }}</p>
+        <ul>
+            {% for action in data.improvement_plan.immediate.actions %}
+                <li>{{ action }}</li>
+            {% endfor %}
+        </ul>
+        <p><strong>重要成分:</strong>
+            {% for ing in data.improvement_plan.immediate.key_ingredients %}
+                {{ ing }}{% if not loop.last %}、{% endif %}
+            {% endfor %}
+        </p>
+        <p><strong>注意点:</strong> {{ data.improvement_plan.immediate.note }}</p>
+
+        <hr>
+
+        <h3>⚡ 1〜4週間</h3>
+        <p><strong>目標:</strong> {{ data.improvement_plan.short_term.goal }}</p>
+        <ul>
+            {% for action in data.improvement_plan.short_term.actions %}
+                <li>{{ action }}</li>
+            {% endfor %}
+        </ul>
+        <p><strong>重要成分:</strong>
+            {% for ing in data.improvement_plan.short_term.key_ingredients %}
+                {{ ing }}{% if not loop.last %}、{% endif %}
+            {% endfor %}
+        </p>
+        <p><strong>注意点:</strong> {{ data.improvement_plan.short_term.note }}</p>
+
+        <hr>
+
+        <h3>🌱 1〜3ヶ月</h3>
+        <p><strong>目標:</strong> {{ data.improvement_plan.long_term.goal }}</p>
+        <ul>
+            {% for action in data.improvement_plan.long_term.actions %}
+                <li>{{ action }}</li>
+            {% endfor %}
+        </ul>
+        <p><strong>重要成分:</strong>
+            {% for ing in data.improvement_plan.long_term.key_ingredients %}
+                {{ ing }}{% if not loop.last %}、{% endif %}
+            {% endfor %}
+        </p>
+        <p><strong>注意点:</strong> {{ data.improvement_plan.long_term.note }}</p>
+    </div>
+    {% endif %}
+
+    <h2>📈 改善予測</h2>
+    <ul>
+        <li>1週間後: {{ data.get("improvement_plan", {}).get("score_projection", {}).get("1week", 0) }}</li>
+        <li>1ヶ月後: {{ data.get("improvement_plan", {}).get("score_projection", {}).get("1month", 0) }}</li>
+        <li>3ヶ月後: {{ data.get("improvement_plan", {}).get("score_projection", {}).get("3month", 0) }}</li>
+    </ul>
+
+    <h2>🧭 改善ステップ</h2>
+    <ul>
+        {% for s in data.get("improvement_plan", {}).get("improvement_steps", []) %}
+            <li>{{ s }}</li>
+        {% endfor %}
+    </ul>
+
+    <div style="
+        border:1px solid #ddd;
+        border-radius:16px;
+        padding:20px;
+        margin-bottom:24px;
+        box-shadow:0 4px 12px rgba(0,0,0,0.05);
+    ">
+        <h2>朝のスキンケア</h2>
+        <ul style="padding-left:0;">
+            {% for step in data.morning.steps %}
+                <li style="
+                    list-style:none;
+                    border:1px solid #eee;
+                    border-radius:16px;
+                    padding:16px;
+                    margin-bottom:16px;
+                ">
+                    <div style="display:flex; gap:16px; align-items:flex-start;">
+                        <div>
+                            <img src="{{ step.image }}" alt="{{ step.product }}" width="100" style="border-radius:12px;">
+                        </div>
+                        <div>
+                            <div style="font-size:18px; font-weight:bold;">{{ step.product }}</div>
+                            <div>カテゴリ: {{ step.category }}</div>
+                            <div>目的: {{ step.purpose }}</div>
+                            <div>成分方針: {{ step.ingredient_focus }}</div>
+                            <div>理由: {{ step.recommend_reason }}</div>
+                            <div style="margin-top:8px; font-weight:bold;">参考価格: ¥{{ step.price }}</div>
+                        </div>
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <div style="
+        border:1px solid #ddd;
+        border-radius:16px;
+        padding:20px;
+        margin-bottom:24px;
+        box-shadow:0 4px 12px rgba(0,0,0,0.05);
+    ">
+        <h2>夜のスキンケア</h2>
+        <ul style="padding-left:0;">
+            {% for step in data.night.steps %}
+                <li style="
+                    list-style:none;
+                    border:1px solid #eee;
+                    border-radius:16px;
+                    padding:16px;
+                    margin-bottom:16px;
+                ">
+                    <div style="display:flex; gap:16px; align-items:flex-start;">
+                        <div>
+                            <img src="{{ step.image }}" alt="{{ step.product }}" width="100" style="border-radius:12px;">
+                        </div>
+                        <div>
+                            <div style="font-size:18px; font-weight:bold;">{{ step.product }}</div>
+                            <div>カテゴリ: {{ step.category }}</div>
+                            <div>目的: {{ step.purpose }}</div>
+                            <div>成分方針: {{ step.ingredient_focus }}</div>
+                            <div>理由: {{ step.recommend_reason }}</div>
+                            <div style="margin-top:8px; font-weight:bold;">参考価格: ¥{{ step.price }}</div>
+                        </div>
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <div style="
+        border:1px solid #ddd;
+        border-radius:16px;
+        padding:20px;
+        margin-bottom:24px;
+        box-shadow:0 4px 12px rgba(0,0,0,0.05);
+    ">
+        <h2>週ケア</h2>
+        <ul style="padding-left:0;">
+            {% for step in data.weekly_care %}
+                <li style="
+                    list-style:none;
+                    border:1px solid #eee;
+                    border-radius:16px;
+                    padding:16px;
+                    margin-bottom:16px;
+                ">
+                    <div style="display:flex; gap:16px; align-items:flex-start;">
+                        <div>
+                            <img src="{{ step.image }}" alt="{{ step.product }}" width="100" style="border-radius:12px;">
+                        </div>
+                        <div>
+                            <div style="font-size:18px; font-weight:bold;">{{ step.product }}</div>
+                            <div>カテゴリ: {{ step.category }}</div>
+                            <div>頻度: {{ step.frequency }}</div>
+                            <div>目的: {{ step.purpose }}</div>
+                            <div>成分方針: {{ step.ingredient_focus }}</div>
+                            <div>理由: {{ step.recommend_reason }}</div>
+                            <div style="margin-top:8px; font-weight:bold;">参考価格: ¥{{ step.price }}</div>
+                        </div>
+                    </div>
+                </li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <div style="
+        border:1px solid #ddd;
+        border-radius:16px;
+        padding:20px;
+        margin-bottom:24px;
+        box-shadow:0 4px 12px rgba(0,0,0,0.05);
+    ">
+        <h2>注意点</h2>
+        <ul>
+            {% for warning in data.warnings %}
+                <li>{{ warning }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+
+    <p>
+        <a href="/history">← 履歴一覧に戻る</a>
+    </p>
+    <p>
+        <a href="/lab">← 診断に戻る</a>
+    </p>
+
+</body>
+</html>

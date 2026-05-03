@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>診断履歴</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body style="font-family:sans-serif; line-height:1.8; padding:24px; max-width:900px; margin:auto;">
+    <h1>診断履歴</h1>
+
+    <div style="
+        border:1px solid #ddd;
+        border-radius:16px;
+        padding:16px;
+        margin-bottom:24px;
+        box-shadow:0 4px 12px rgba(0,0,0,0.05);
+    ">
+        <h2>Skin Score 推移</h2>
+        <canvas id="scoreChart"></canvas>
+    </div>
+
+    {% if history %}
+        {% for item in history %}
+            <div style="
+                border:1px solid #ddd;
+                border-radius:16px;
+                padding:16px;
+                margin-bottom:16px;
+                box-shadow:0 4px 12px rgba(0,0,0,0.05);
+            ">
+                <div><strong>ID:</strong> {{ item.id }}</div>
+                <div><strong>記録日:</strong> {{ item.record_date }}</div>
+                <div><strong>保存日時:</strong> {{ item.saved_at }}</div>
+
+                <div style="font-size:20px; font-weight:bold;">
+                    Skin Score: {{ item.skin_score }}
+                </div>
+
+                <div><strong>肌状態:</strong> {{ item.skin_summary }}</div>
+
+                <hr>
+
+                <div><strong>予算:</strong> ¥{{ item.input_budget }}</div>
+                <div><strong>合計:</strong> ¥{{ item.total_price }}</div>
+                <div><strong>判定:</strong> {{ item.budget_status }}</div>
+                <div style="margin-top:12px;">
+                    <a href="/history/{{ item.id }}" style="
+                        display:inline-block;
+                        padding:8px 12px;
+                        background:#333;
+                        color:#fff;
+                        border-radius:8px;
+                        text-decoration:none;
+                        font-size:14px;
+                    ">
+                        詳細を見る →
+                    </a>
+                </div>
+
+            </div>
+        {% endfor %}
+    {% else %}
+        <p>まだ診断履歴はありません。</p>
+    {% endif %}
+
+    <p><a href="/lab">← 診断に戻る</a></p>
+
+    <script id="chart-labels" type="application/json">{{ labels | tojson }}</script>
+    <script id="chart-scores" type="application/json">{{ scores | tojson }}</script>
+
+<script>
+    const chartLabels = JSON.parse(document.getElementById("chart-labels").textContent);
+    const chartScores = JSON.parse(document.getElementById("chart-scores").textContent);
+
+    const canvas = document.getElementById("scoreChart");
+
+    if (canvas) {
+        const ctx = canvas.getContext("2d");
+
+        new Chart(ctx, {
+            type: "line",
+            data: {
+                labels: chartLabels,
+                datasets: [{
+                    label: "Skin Score",
+                    data: chartScores,
+                    tension: 0.3,
+                    fill: false
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        display: true
+                    }
+                },
+                scales: {
+                    y: {
+                        min: 0,
+                        max: 100
+                    }
+                }
+            }
+        });
+    }
+</script>
+</body>
+</html>

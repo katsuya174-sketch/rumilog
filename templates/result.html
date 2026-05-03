@@ -1,0 +1,838 @@
+<!DOCTYPE html>
+<html lang="ja">
+<style>
+    .role-badge {
+        background: linear-gradient(135deg, #ffe6ee, #ffd6e8);
+        color: #d46a8c;
+        padding: 4px 10px;
+        border-radius: 10px;
+        font-size: 0.8rem;
+        font-family: 'Kosugi Maru', sans-serif;
+    }
+    .score-detail-box {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(255, 240, 245, 0.8);
+    border: 1px solid #f3c9d2;
+}
+
+.score-detail-title {
+    font-weight: bold;
+    font-size: 13px;
+    margin-bottom: 6px;
+    color: #d46a8c;
+}
+
+.score-detail-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    padding: 2px 0;
+}
+
+.score-detail-row.total {
+    font-weight: bold;
+    color: #a63d5c;
+    border-top: 1px dashed #e7b8c5;
+    margin-top: 6px;
+    padding-top: 6px;
+}
+.sub-candidates-box.compact {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: rgba(255, 250, 252, 0.75);
+    border: 1px solid #f1d5dd;
+}
+
+.sub-candidates-title {
+    font-size: 12px;
+    font-weight: bold;
+    color: #cc6f90;
+    margin-bottom: 4px;
+}
+
+.sub-candidate-names {
+    font-size: 12px;
+    color: #666;
+    line-height: 1.6;
+}
+
+.sub-candidate-name-only {
+    color: #555;
+}
+
+.sub-candidate-sep {
+    color: #c9a8b5;
+}
+.score-detail-compact {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #8a7a80;
+    line-height: 1.5;
+}
+.product-source {
+    display: inline-block;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 8px;
+    font-weight: bold;
+    margin-bottom: 6px;
+    letter-spacing: 0.5px;
+}
+
+/* DB */
+.product-source.db {
+    background: rgba(255, 182, 193, 0.25);
+    color: #c75b7a;
+}
+
+/* AI */
+.product-source.ai {
+    background: rgba(200, 210, 255, 0.25);
+    color: #5a6fd6;
+}
+
+/* fallback */
+.product-source {
+    background: rgba(220, 220, 220, 0.3);
+    color: #777;
+}
+
+.product-img-new {
+    width: 100%;
+    height: 140px;
+    object-fit: cover;
+    border-radius: 10px;
+    display: block;
+    background: #f8f8f8;
+}
+
+.buy-buttons {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.buy-buttons button {
+    flex: 1;
+    padding: 8px;
+    border-radius: 8px;
+    border: none;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.amazon-btn {
+    background: #ff9900;
+    color: white;
+}
+
+.rakuten-btn {
+    background: #bf0000;
+    color: white;
+}
+
+.buy-lead {
+    margin-top: 10px;
+    font-size: 13px;
+    font-weight: bold;
+    color: #c75b7a;
+    background: rgba(255, 240, 245, 0.75);
+    border: 1px solid #f3c9d2;
+    border-radius: 10px;
+    padding: 7px 10px;
+}
+
+.buy-buttons a {
+    flex: 1;
+    text-decoration: none;
+}
+
+.buy-buttons button {
+    width: 100%;
+}
+
+.product-score {
+    margin-top: 8px;
+    font-size: 12px;
+    color: #777;
+}
+.premium-lock-box {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: rgba(255, 248, 252, 0.9);
+    border: 1px dashed #e7b8c5;
+    color: #9b6b78;
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.premium-link {
+    display: inline-block;
+    margin-left: 6px;
+    color: #c75b7a;
+    font-weight: bold;
+    text-decoration: underline;
+}
+</style>
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>診断結果 | るみろぐ</title>
+    <link href="https://fonts.googleapis.com/css2?family=Kosugi+Maru&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="result-page">
+    <div class="result-bg" id="bgEffects"></div>
+
+    <div class="result-container">
+        <section class="result-hero">
+            <h1 class="result-title">診断結果</h1>
+            <p class="result-subtitle">
+                AIがあなたの肌状態を分析し、<br>
+                今の肌に合うスキンケアをまとめました
+            </p>
+        </section>
+
+        <section class="result-grid">
+            <div class="result-card">
+                <h2 class="section-title">Skin Score</h2>
+                <div class="skin-score-main">
+                    <div class="skin-score-label">総合スコア</div>
+                    <div class="skin-score-value">{{ data.get("skin_score", "-") }}</div>
+                    <div class="skin-score-caption">今日の肌コンディションの目安です</div>
+                </div>
+            </div>
+            
+            <div class="result-card">
+                <h2 class="section-title">項目別スコア</h2>
+                <div class="score-mini-grid">
+                        <div class="score-mini">
+                            <div class="score-mini-name">皮脂バランス</div>
+                            <div class="score-mini-value">{{ data.get("scores", {}).get("oil_balance", "-") }}</div>
+                        </div>
+                        
+                        <div class="score-mini">
+                            <div class="score-mini-name">赤み</div>
+                            <div class="score-mini-value">{{ data.get("scores", {}).get("redness", "-") }}</div>
+                        </div>
+                        
+                        <div class="score-mini">
+                            <div class="score-mini-name">毛穴</div>
+                            <div class="score-mini-value">{{ data.get("scores", {}).get("pores", "-") }}</div>
+                        </div>
+                        
+                        <div class="score-mini">
+                            <div class="score-mini-name">保湿</div>
+                            <div class="score-mini-value">{{ data.get("scores", {}).get("hydration", "-") }}</div>
+                        </div>
+                        
+                        <div class="score-mini">
+                            <div class="score-mini-name">ハリ</div>
+                            <div class="score-mini-value">{{ data.get("scores", {}).get("firmness", "-") }}</div>
+                        </div>
+                        
+                        <div class="score-mini">
+                            <div class="score-mini-name">ニキビ</div>
+                            <div class="score-mini-value">{{ data.get("scores", {}).get("acne", "-") }}</div>
+                        </div>
+                        
+                        <div class="score-mini">
+                            <div class="score-mini-name">くすみ</div>
+                            <div class="score-mini-value">{{ data.get("scores", {}).get("dullness", "-") }}</div>
+                        </div>
+                        
+                        <div class="score-mini">
+                            <div class="score-mini-name">バリア</div>
+                            <div class="score-mini-value">{{ data.get("scores", {}).get("barrier", "-") }}</div>
+                        </div>
+                        
+                        <div class="score-mini">
+                            <div class="score-mini-name">キメ</div>
+                            <div class="score-mini-value">{{ data.get("scores", {}).get("texture", "-") }}</div>
+                        </div>
+                        
+                        <div class="score-mini">
+                            <div class="score-mini-name">色ムラ</div>
+                            <div class="score-mini-value">{{ data.get("scores", {}).get("tone_evenness", "-") }}</div>
+                        </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="result-card">
+            <h2 class="section-title">肌状態のまとめ</h2>
+            <div class="summary-text">{{ data.get("skin_summary", "") }}</div>
+        </section>
+
+        {% set plan = data.get("improvement_plan", {}) %}
+        {% if plan %}
+        <section class="result-card">
+            <h2 class="section-title">100点改善プラン</h2>
+
+            {% set immediate = plan.get("immediate", {}) %}
+            {% if immediate %}
+            <div class="plan-block">
+                <h3>🔥 今すぐ（1週間）</h3>
+                <p>{{ immediate.get("goal", "") }}</p>
+                {% if immediate.get("actions", []) %}
+                <ul>
+                    {% for a in immediate.get("actions", []) %}
+                    <li>{{ a }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% set short = plan.get("short_term", {}) %}
+            {% if short %}
+            <div class="plan-block">
+                <h3>⚡ 1〜4週間</h3>
+                <p>{{ short.get("goal", "") }}</p>
+                {% if short.get("actions", []) %}
+                <ul>
+                    {% for a in short.get("actions", []) %}
+                    <li>{{ a }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% set long_term = plan.get("long_term", {}) %}
+            {% if long_term %}
+            <div class="plan-block">
+                <h3>🌱 1〜3ヶ月</h3>
+                <p>{{ long_term.get("goal", "") }}</p>
+                {% if long_term.get("actions", []) %}
+                <ul>
+                    {% for a in long_term.get("actions", []) %}
+                    <li>{{ a }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% set projection = plan.get("score_projection", {}) %}
+            {% if projection %}
+            <div class="plan-block">
+                <h3>📈 スコア改善予測</h3>
+                <ul>
+                    <li>1週間後: {{ projection.get("1week", 0) }}</li>
+                    <li>1か月後: {{ projection.get("1month", 0) }}</li>
+                    <li>3か月後: {{ projection.get("3month", 0) }}</li>
+                </ul>
+            </div>
+            {% endif %}
+
+            {% set improvement_steps = plan.get("improvement_steps", []) %}
+            {% if improvement_steps %}
+            <div class="plan-block">
+                <h3>🪜 改善の順番</h3>
+                <ul>
+                    {% for s in improvement_steps %}
+                    <li>{{ s }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+        </section>
+        {% endif %}
+
+        <section class="result-card">
+            <h2 class="section-title">予算チェック</h2>
+            <div class="budget-box">
+                <div class="budget-pill">
+                    <div class="budget-pill-label">入力予算</div>
+                    <div class="budget-pill-value">
+                        {% if data.get("input_budget", 0) > 0 %}
+                            ¥{{ data.get("input_budget", 0) }}
+                        {% else %}
+                            未入力
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="budget-pill">
+                    <div class="budget-pill-label">推定合計</div>
+                    <div class="budget-pill-value">¥{{ data.get("total_price", 0) }}</div>
+                </div>
+
+                <div class="budget-pill">
+                    <div class="budget-pill-label">判定</div>
+                    <div class="budget-pill-value">{{ data.get("budget_status", "未判定") }}</div>
+                </div>
+            </div>
+
+            <div class="plan-block" style="margin-top:16px;">
+                <h3>予算内おすすめ構成</h3>
+                <ul>
+                    {% for step in data.get("budget_fit_plan", {}).get("morning", {}).get("steps", []) %}
+                    <li>
+                        朝: {{ step.get("product", "") }} / {{ step.get("purpose", "") }} /
+                        {% if step.get("price", 0) > 0 %}
+                            約¥{{ step.get("price", 0) }}
+                        {% else %}
+                            {{ step.get("price_band", "価格不明") }}
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+
+                    {% for step in data.get("budget_fit_plan", {}).get("night", {}).get("steps", []) %}
+                    <li>
+                        夜: {{ step.get("product", "") }} / {{ step.get("purpose", "") }} /
+                        {% if step.get("price", 0) > 0 %}
+                            約¥{{ step.get("price", 0) }}
+                        {% else %}
+                            {{ step.get("price_band", "価格不明") }}
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+
+                    {% for step in data.get("budget_fit_plan", {}).get("weekly_care", []) %}
+                    <li>
+                        週ケア: {{ step.get("product", "") }} / {{ step.get("purpose", "") }} /
+                        {% if step.get("price", 0) > 0 %}
+                            約¥{{ step.get("price", 0) }}
+                        {% else %}
+                            {{ step.get("price_band", "価格不明") }}
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+
+                <p style="margin-top:10px; font-weight:bold; color:#ff7f9f;">
+                    予算内プラン合計: ¥{{ data.get("budget_fit_total", 0) }}
+                </p>
+            </div>
+        </section>
+
+        <section class="routine-shell">
+            <div class="routine-header">
+                <h2 class="routine-title">朝のスキンケア</h2>
+                <div class="routine-chip">Morning</div>
+            </div>
+
+            {% for step in data.get("morning", {}).get("steps", []) %}
+            <div class="product-card-new">
+                <img src="{{ step.get('image', '') }}" alt="{{ step.get('product', '') }}" class="product-img-new">
+                <div class="product-body">
+                    <div class="product-source {{ step.get('product_source', '') }}">
+                        {% if step.get("product_source", "") == "db" %}
+                            DB選定
+                        {% elif step.get("product_source", "") == "ai" %}
+                            AI候補
+                        {% else %}
+                            カテゴリ提案
+                        {% endif %}
+                    </div>
+
+                    <div class="product-name">{{ step.get("product", "") }}</div>
+
+                    <div class="product-meta">
+                        役割: <span class="role-badge">{{ step.get("display_role", step.get("category", "")) }}</span>
+                    </div>
+
+                    <div class="product-meta">目的: {{ step.get("purpose", "") }}</div>
+
+                    <div class="product-meta">
+                        <div class="reason-label">理由</div>
+                        <div class="reason-text">{{ step.get("recommend_reason", "") }}</div>
+                    </div>
+                    {% if step.get("top_impacts", []) %}
+                    <div class="product-meta">
+                        <div class="reason-label">改善期待</div>
+                        <div class="reason-text">
+                            {% for item in step.get("top_impacts", []) %}
+                                {{ item.get("label", "") }} +{{ item.get("value", 0) }}{% if not loop.last %} / {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if step.get("price", 0) > 0 %}
+                    <div class="product-price">参考価格: ¥{{ step.get("price", 0) }}</div>
+                    {% elif step.get("price_band", "") %}
+                    <div class="product-price">{{ step.get("price_band", "") }}</div>
+                    {% endif %}
+                    <div class="buy-lead">
+                        {{ step.get("buy_lead", "") }}
+                    </div>
+                    <div class="buy-buttons">
+                        <a href="/click?source=amazon&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.amazon_link|urlencode }}" target="_blank" rel="noopener noreferrer">
+                            <button type="button" class="amazon-btn">Amazonで見る</button>
+                        </a>
+                        <a href="/click?source=rakuten&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.rakuten_link|urlencode }}" target="_blank" rel="noopener noreferrer">
+                            <button type="button" class="rakuten-btn">楽天で見る</button>
+                        </a>
+                    </div>
+                    <div class="product-score">
+                        適合: {{ step.get("base_score", 0) }} / 改善: {{ step.get("improve_score", 0) }}
+                    </div>
+
+                    {% if step.get("score_detail") %}
+                    <div class="score-detail-compact">
+                        ベース {{ step.score_detail.base }} / 改善 {{ step.score_detail.improve }} / 最終 {{ step.score_detail.final }}
+                    </div>
+                    {% endif %}
+
+                    {% if step.get("top_candidates", [])|length > 1 %}
+                    <div class="sub-candidates-box compact">
+                        <div class="sub-candidates-title">次点候補</div>
+                        <div class="sub-candidate-names">
+                            {% for c in step.get("top_candidates", [])[1:3] %}
+                                <span class="sub-candidate-name-only">
+                                    {% if loop.index == 1 %}2位{% elif loop.index == 2 %}3位{% endif %} {{ c.get("name", "") }}
+                                </span>{% if not loop.last %}<span class="sub-candidate-sep"> / </span>{% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                {% if data.get("is_premium") %}
+                    {% if step.get("score_detail") %}
+                    <div class="score-detail-box">
+                        <div class="score-detail-title">選定スコア詳細</div>
+
+                        <div class="score-detail-row">
+                            <span>ベース</span>
+                            <span>{{ step.score_detail.base }}</span>
+                        </div>
+
+                        <div class="score-detail-row">
+                            <span>改善</span>
+                            <span>{{ step.score_detail.improve }}</span>
+                        </div>
+
+                        <div class="score-detail-row total">
+                            <span>最終</span>
+                            <span>{{ step.score_detail.final }}</span>
+                        </div>
+                    </div>
+                    {% endif %}
+                {% else %}
+                    <div class="premium-lock-box">
+                        詳細スコアは有料プランで確認できます
+                        <a href="/pricing?source=result" class="premium-link">詳しく見る</a>
+                    </div>
+                {% endif %}
+                </div>
+                </div>
+                {% endfor %}                                      
+
+
+        <section class="routine-shell">
+            <div class="routine-header">
+                <h2 class="routine-title">夜のスキンケア</h2>
+                <div class="routine-chip">Night</div>
+            </div>
+
+            {% for step in data.get("night", {}).get("steps", []) %}
+            <div class="product-card-new">
+                <img src="{{ step.get('image', '') }}" alt="{{ step.get('product', '') }}" class="product-img-new">
+                <div class="product-body">
+                    <div class="product-source {{ step.get('product_source', '') }}">
+                        {% if step.get("product_source", "") == "db" %}
+                            DB選定
+                        {% elif step.get("product_source", "") == "ai" %}
+                            AI候補
+                        {% else %}
+                            カテゴリ提案
+                        {% endif %}
+                    </div>
+
+                    <div class="product-name">{{ step.get("product", "") }}</div>
+
+                    <div class="product-meta">
+                        役割: <span class="role-badge">{{ step.get("display_role", step.get("category", "")) }}</span>
+                    </div>
+
+                    <div class="product-meta">目的: {{ step.get("purpose", "") }}</div>
+
+                    <div class="product-meta">
+                        <div class="reason-label">理由</div>
+                        <div class="reason-text">{{ step.get("recommend_reason", "") }}</div>
+                    </div>
+                    {% if step.get("top_impacts", []) %}
+                    <div class="product-meta">
+                        <div class="reason-label">改善期待</div>
+                        <div class="reason-text">
+                            {% for item in step.get("top_impacts", []) %}
+                                {{ item.get("label", "") }} +{{ item.get("value", 0) }}{% if not loop.last %} / {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                    {% if step.get("price", 0) > 0 %}
+                    <div class="product-price">参考価格: ¥{{ step.get("price", 0) }}</div>
+                    {% elif step.get("price_band", "") %}
+                    <div class="product-price">{{ step.get("price_band", "") }}</div>
+                    {% endif %}
+                    <div class="buy-lead">
+                        {{ step.get("buy_lead", "") }}
+                    </div>
+                    <div class="buy-buttons">
+                        <a href="/click?source=amazon&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.amazon_link|urlencode }}" target="_blank" rel="noopener noreferrer">
+                            <button type="button" class="amazon-btn">Amazonで見る</button>
+                        </a>
+                        <a href="/click?source=rakuten&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.rakuten_link|urlencode }}" target="_blank" rel="noopener noreferrer">
+                            <button type="button" class="rakuten-btn">楽天で見る</button>
+                        </a>
+                    </div>
+                    <div class="product-score">
+                        適合: {{ step.get("base_score", 0) }} / 改善: {{ step.get("improve_score", 0) }}
+                    </div>
+
+                    {% if step.get("score_detail") %}
+                    <div class="score-detail-compact">
+                        ベース {{ step.score_detail.base }} / 改善 {{ step.score_detail.improve }} / 最終 {{ step.score_detail.final }}
+                    </div>
+                    {% endif %}
+                {% if data.get("is_premium") %}
+                    {% if step.get("top_candidates", [])|length > 1 %}
+                    <div class="sub-candidates-box compact">
+                        <div class="sub-candidates-title">次点候補</div>
+                        <div class="sub-candidate-names">
+                            {% for c in step.get("top_candidates", [])[1:3] %}
+                                <span class="sub-candidate-name-only">
+                                    {% if loop.index == 1 %}2位{% elif loop.index == 2 %}3位{% endif %} {{ c.get("name", "") }}
+                                </span>{% if not loop.last %}<span class="sub-candidate-sep"> / </span>{% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                {% else %}
+                    <div class="premium-lock-box">
+                        代替候補は有料プランで確認できます
+                        <a href="/pricing?source=result" class="premium-link">詳しく見る</a>
+                    </div>
+                {% endif %}
+
+
+                    {% if step.get("score_detail") %}
+                    <div class="score-detail-box">
+                        <div class="score-detail-title">選定スコア詳細</div>
+
+                        <div class="score-detail-row">
+                            <span>ベース</span>
+                            <span>{{ step.score_detail.base }}</span>
+                        </div>
+
+                        <div class="score-detail-row">
+                            <span>改善</span>
+                            <span>{{ step.score_detail.improve }}</span>
+                        </div>
+
+                        <div class="score-detail-row total">
+                            <span>最終</span>
+                            <span>{{ step.score_detail.final }}</span>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </section>
+
+        <section class="routine-shell">
+            <div class="routine-header">
+                <h2 class="routine-title">週ケア</h2>
+                <div class="routine-chip">Weekly</div>
+            </div>
+
+            {% for step in data.get("weekly_care", []) %}
+            <div class="product-card-new">
+                <img src="{{ step.get('image', '') }}" alt="{{ step.get('product', '') }}" class="product-img-new">
+                <div class="product-body">
+                    <div class="product-source {{ step.get('product_source', '') }}">
+                        {% if step.get("product_source", "") == "db" %}
+                            DB選定
+                        {% elif step.get("product_source", "") == "ai" %}
+                            AI候補
+                        {% else %}
+                            カテゴリ提案
+                        {% endif %}
+                    </div>
+
+                    <div class="product-name">{{ step.get("product", "") }}</div>
+                    <div class="product-meta">頻度: {{ step.get("frequency", "") }}</div>
+
+                    <div class="product-meta">
+                        役割: <span class="role-badge">{{ step.get("display_role", step.get("category", "")) }}</span>
+                    </div>
+
+                    <div class="product-meta">目的: {{ step.get("purpose", "") }}</div>
+
+                    <div class="product-meta">
+                        <div class="reason-label">理由</div>
+                        <div class="reason-text">{{ step.get("recommend_reason", "") }}</div>
+                    </div>
+                    {% if step.get("top_impacts", []) %}
+                    <div class="product-meta">
+                        <div class="reason-label">改善期待</div>
+                        <div class="reason-text">
+                            {% for item in step.get("top_impacts", []) %}
+                                {{ item.get("label", "") }} +{{ item.get("value", 0) }}{% if not loop.last %} / {% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if step.get("price", 0) > 0 %}
+                    <div class="product-price">参考価格: ¥{{ step.get("price", 0) }}</div>
+                    {% elif step.get("price_band", "") %}
+                    <div class="product-price">{{ step.get("price_band", "") }}</div>
+                    {% endif %}
+                    <div class="buy-lead">
+                        {{ step.get("buy_lead", "") }}
+                    </div>
+                        <div class="buy-buttons">
+                            <a href="/click?source=amazon&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.amazon_link|urlencode }}" target="_blank" rel="noopener noreferrer">
+                                <button type="button" class="amazon-btn">Amazonで見る</button>
+                            </a>
+                            <a href="/click?source=rakuten&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.rakuten_link|urlencode }}" target="_blank" rel="noopener noreferrer">
+                                <button type="button" class="rakuten-btn">楽天で見る</button>
+                            </a>
+                        </div>
+                    <div class="product-score">
+                        適合: {{ step.get("base_score", 0) }} / 改善: {{ step.get("improve_score", 0) }}
+                    </div>
+
+                    {% if step.get("score_detail") %}
+                    <div class="score-detail-compact">
+                        ベース {{ step.score_detail.base }} / 改善 {{ step.score_detail.improve }} / 最終 {{ step.score_detail.final }}
+                    </div>
+                    {% endif %}
+
+                    {% if step.get("top_candidates", [])|length > 1 %}
+                    <div class="sub-candidates-box compact">
+                        <div class="sub-candidates-title">次点候補</div>
+                        <div class="sub-candidate-names">
+                            {% for c in step.get("top_candidates", [])[1:3] %}
+                                <span class="sub-candidate-name-only">
+                                    {% if loop.index == 1 %}2位{% elif loop.index == 2 %}3位{% endif %} {{ c.get("name", "") }}
+                                </span>{% if not loop.last %}<span class="sub-candidate-sep"> / </span>{% endif %}
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if step.get("score_detail") %}
+                    <div class="score-detail-box">
+                        <div class="score-detail-title">選定スコア詳細</div>
+
+                        <div class="score-detail-row">
+                            <span>ベース</span>
+                            <span>{{ step.score_detail.base }}</span>
+                        </div>
+
+                        <div class="score-detail-row">
+                            <span>改善</span>
+                            <span>{{ step.score_detail.improve }}</span>
+                        </div>
+
+                        <div class="score-detail-row total">
+                            <span>最終</span>
+                            <span>{{ step.score_detail.final }}</span>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endfor %}
+        </section>
+
+        <section class="result-card">
+            <h2 class="section-title">注意点</h2>
+            <ul class="simple-list">
+                {% for warning in data.get("warnings", []) %}
+                <li>{{ warning }}</li>
+                {% endfor %}
+            </ul>
+        </section>
+
+        <section class="result-card">
+            <h2 class="section-title">保存情報</h2>
+            <ul class="simple-list">
+                <li>ID: {{ data.get("id", "") }}</li>
+                <li>記録日: {{ data.get("record_date", "") }}</li>
+                <li>保存日時: {{ data.get("saved_at", "") }}</li>
+            </ul>
+
+            <div style="text-align:center; margin: 18px 0 10px;">
+              <a href="/pricing?source=result"
+                 style="font-size:13px; color:#b88b96; text-decoration:underline;">
+                もっと詳しく分析したい方はこちら
+              </a>
+            </div>
+
+            <div class="nav-row">
+                <a href="/lab" class="result-btn secondary">← 戻る</a>
+                <a href="/history" class="result-btn">📈 履歴を見る</a>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        function createBubble(container) {
+            const bubble = document.createElement("div");
+            bubble.className = "bubble";
+
+            const size = Math.random() * 70 + 12;
+            const left = Math.random() * 100;
+            const duration = Math.random() * 10 + 6;
+            const delay = Math.random() * 8;
+            const colors = [
+                "rgba(255,160,185,0.42)",
+                "rgba(255,235,242,0.55)",
+                "rgba(245,170,195,0.40)",
+                "rgba(220,220,245,0.40)",
+                "rgba(205,225,255,0.38)",
+                "rgba(255,255,255,0.62)"
+            ];
+            const color = colors[Math.floor(Math.random() * colors.length)];
+
+            bubble.style.width = `${size}px`;
+            bubble.style.height = `${size}px`;
+            bubble.style.left = `${left}%`;
+            bubble.style.background = color;
+            bubble.style.animationDuration = `${duration}s`;
+            bubble.style.animationDelay = `${delay}s`;
+
+            container.appendChild(bubble);
+        }
+
+        function createSparkle(container) {
+            const sparkle = document.createElement("div");
+            const sparkleColors = ["white", "pink", "lavender", "blue", "gold", "silver"];
+            const sparkleClass = sparkleColors[Math.floor(Math.random() * sparkleColors.length)];
+            sparkle.className = `sparkle ${sparkleClass}`;
+
+            const size = Math.random() * 4 + 3;
+            const top = Math.random() * 100;
+            const left = Math.random() * 100;
+            const duration = Math.random() * 2.5 + 1.8;
+            const delay = Math.random() * 4;
+
+            sparkle.style.width = `${size}px`;
+            sparkle.style.height = `${size}px`;
+            sparkle.style.top = `${top}%`;
+            sparkle.style.left = `${left}%`;
+            sparkle.style.animationDuration = `${duration}s`;
+            sparkle.style.animationDelay = `${delay}s`;
+
+            container.appendChild(sparkle);
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            const bgEffects = document.getElementById("bgEffects");
+            for (let i = 0; i < 16; i++) createBubble(bgEffects);
+            for (let i = 0; i < 14; i++) createSparkle(bgEffects);
+        });
+    </script>
+</body>
+</html>

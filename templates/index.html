@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>るみろぐ</title>
+    <style>
+        /* デザイン・バブル設定はそのまま維持 */
+        body {
+            font-family: "Hiragino Maru Gothic ProN", sans-serif;
+            background: linear-gradient(135deg, #fff5f7 0%, #ffe0e5 100%);
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 40px 0;
+            min-height: 100vh;
+            overflow-y: auto; 
+            position: relative;
+        }
+        .bubble {
+            position: fixed;
+            bottom: -150px;
+            border-radius: 50%;
+            z-index: -1;
+            animation: rise infinite linear;
+        }
+        @keyframes rise {
+            0% { transform: translateY(0) translateX(0); opacity: 0; }
+            10% { opacity: 0.6; }
+            50% { transform: translateY(-50vh) translateX(30px); }
+            90% { opacity: 0.6; }
+            100% { transform: translateY(-110vh) translateX(-20px); opacity: 0; }
+        }
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: 40px;
+            box-shadow: 0 15px 35px rgba(255, 182, 193, 0.3);
+            width: 85%;
+            max-width: 400px;
+            text-align: center;
+            margin-bottom: 40px; 
+        }
+        h1 { color: #FF85A2; font-size: 3rem; margin-bottom: 5px; letter-spacing: 5px; }
+        .subtitle { color: #FFB3C1; font-size: 0.9rem; margin-bottom: 25px; }
+        .form-group { margin-bottom: 20px; text-align: left; }
+        label { display: block; font-size: 0.9rem; color: #666; margin-bottom: 8px; font-weight: bold; }
+        input, select {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid #ffe0e5;
+            border-radius: 15px;
+            box-sizing: border-box;
+            font-size: 1rem;
+            background-color: white;
+        }
+        button {
+            background: #FF85A2; color: white; border: none; padding: 18px;
+            border-radius: 35px; width: 100%; font-weight: bold; font-size: 1.1rem;
+            margin-top: 10px; cursor: pointer; box-shadow: 0 4px 15px rgba(255, 133, 162, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="bubble" style="width:40px; height:40px; left:5%; background: rgba(255, 182, 193, 0.6); animation-duration: 6s;"></div>
+    <div class="bubble" style="width:90px; height:90px; left:20%; background: rgba(255, 240, 243, 0.5); animation-duration: 9s;"></div>
+    <div class="bubble" style="width:25px; height:25px; left:50%; background: rgba(230, 230, 250, 0.6); animation-duration: 4.5s;"></div>
+    <div class="bubble" style="width:70px; height:70px; left:65%; background: rgba(255, 255, 255, 0.7); animation-duration: 8s;"></div>
+    <div class="bubble" style="width:50px; height:50px; left:80%; background: rgba(255, 182, 193, 0.5); animation-duration: 7.5s;"></div>
+
+    <div class="container">
+        <h1>るみろぐ</h1>
+        <a href="/lab" style="color: #FFB3C1; text-decoration: none; font-size: 0.8rem;">🧪 実験モードへ</a>
+        <p class="subtitle">AI戦略的肌鑑定システム</p>
+        <form action="/" method="post" enctype="multipart/form-data">
+            <div class="form-group">
+                <label>📷 肌の解析（正面・左右）</label>
+                <input type="file" name="skin_photo">
+            </div>
+            <div class="form-group">
+                <label>📅 鑑定日</label> <input type="date" name="record_date">
+            </div>
+            <div class="form-group">
+                <label>🎂 年齢</label>
+                <input type="number" name="age">
+            </div>
+            <div class="form-group">
+                <label>📍 現在地</label>
+                <input type="text" name="location">
+            </div>
+            <div class="form-group">
+                <label>💧 肌質（現在の状態）</label>
+                <select name="oil_status">
+                    <option value="" selected></option>
+                    <option value="dry">乾燥肌</option>
+                    <option value="oily">脂性肌</option>
+                    <option value="mixed">混合肌</option>
+                    <option value="normal">普通肌</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>🧪 レチノール耐性</label>
+                <select name="retinol_exp">
+                    <option value="" selected></option>
+                    <option value="beginner">初めて</option>
+                    <option value="middle">使ったことがある</option>
+                </select>
+            </div>
+            <button type="submit">鑑定する</button>
+        </form>
+    </div>
+</body>
+</html>
