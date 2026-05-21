@@ -4824,6 +4824,7 @@ def get_analysis_schema():
 
             "root_causes": {
                 "type": "array",
+                "maxItems": 3,
                 "items": {
                     "type": "object",
                     "properties": {
@@ -4857,7 +4858,8 @@ def get_analysis_schema():
                                 "priority": {"type": "integer"},
                                 "product_candidates": {
                                     "type": "array",
-                                    "items": {"type": "string"}
+                                    "items": {"type": "string"},
+                                    "maxItems": 3
                                 },
                                 "selection_reason": {"type": "string"},
                                 "estimated_price": {"type": "integer"},
@@ -4894,7 +4896,8 @@ def get_analysis_schema():
                                 "priority": {"type": "integer"},
                                 "product_candidates": {
                                     "type": "array",
-                                    "items": {"type": "string"}
+                                    "items": {"type": "string"},
+                                    "maxItems": 3
                                 },
                                 "selection_reason": {"type": "string"},
                                 "estimated_price": {"type": "integer"},
@@ -4928,7 +4931,8 @@ def get_analysis_schema():
                         "priority": {"type": "integer"},
                         "product_candidates": {
                             "type": "array",
-                            "items": {"type": "string"}
+                            "items": {"type": "string"},
+                            "maxItems": 3
                         },
                         "selection_reason": {"type": "string"},
                         "estimated_price": {"type": "integer"},
@@ -5150,7 +5154,7 @@ image_confidence:
 
 【root_causes 出力ルール】
 root_causes には、観察結果とユーザー情報から推定される根本原因を入れること。
-必ず3〜5個出すこと。
+最大3個まで出すこと。
 
 各項目:
 cause: 原因名
