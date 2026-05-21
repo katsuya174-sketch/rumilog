@@ -4805,76 +4805,22 @@ def get_analysis_schema():
             "observation": {
                 "type": "object",
                 "properties": {
-                    "front": {
-                        "type": "object",
-                        "properties": {
-                            "redness": {"type": "string"},
-                            "pores": {"type": "string"},
-                            "oiliness": {"type": "string"},
-                            "dryness": {"type": "string"},
-                            "texture": {"type": "string"},
-                            "tone": {"type": "string"},
-                            "note": {"type": "string"}
-                        },
-                        "required": [
-                            "redness",
-                            "pores",
-                            "oiliness",
-                            "dryness",
-                            "texture",
-                            "tone",
-                            "note"
-                        ]
-                    },
-                    "left_cheek": {
-                        "type": "object",
-                        "properties": {
-                            "redness": {"type": "string"},
-                            "pores": {"type": "string"},
-                            "acne_marks": {"type": "string"},
-                            "pigmentation": {"type": "string"},
-                            "texture": {"type": "string"},
-                            "note": {"type": "string"}
-                        },
-                        "required": [
-                            "redness",
-                            "pores",
-                            "acne_marks",
-                            "pigmentation",
-                            "texture",
-                            "note"
-                        ]
-                    },
-                    "right_cheek": {
-                        "type": "object",
-                        "properties": {
-                            "redness": {"type": "string"},
-                            "pores": {"type": "string"},
-                            "acne_marks": {"type": "string"},
-                            "pigmentation": {"type": "string"},
-                            "texture": {"type": "string"},
-                            "note": {"type": "string"}
-                        },
-                        "required": [
-                            "redness",
-                            "pores",
-                            "acne_marks",
-                            "pigmentation",
-                            "texture",
-                            "note"
-                        ]
+                    "summary": {"type": "string"},
+                    "visible_concerns": {
+                        "type": "array",
+                        "items": {"type": "string"}
                     },
                     "symmetry": {"type": "string"},
                     "image_confidence": {"type": "integer"}
                 },
                 "required": [
-                    "front",
-                    "left_cheek",
-                    "right_cheek",
+                    "summary",
+                    "visible_concerns",
                     "symmetry",
                     "image_confidence"
                 ]
             },
+                    
 
             "root_causes": {
                 "type": "array",
@@ -5272,15 +5218,10 @@ PHA
 各ステップの product_candidates:
 
 ・必ず実在商品
-・5〜8個
+・3〜5個
 ・空配列禁止
-・日本で入手しやすい商品優先
-・ドラッグストア
-・韓国コスメ
-・通販定番
-・バラエティショップ
+・日本で入手しやすく、目的に合う商品を優先する。
 
-を混ぜる。
 
 禁止:
 おすすめ美容液
