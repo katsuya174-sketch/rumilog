@@ -4443,7 +4443,7 @@ def prepare_result_for_view(result):
 # トップページ
 @app.route("/", methods=["GET", "POST"])
 def home():
-    return render_template("index.html")
+    return redirect("/lab")
 
 
 def translate_to_japanese(data):
