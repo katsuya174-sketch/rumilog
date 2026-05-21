@@ -4255,6 +4255,69 @@ def finalize_result_data(data, user_data):
     if not isinstance(data.get("skin_score", 0), (int, float)):
         data["skin_score"] = safe_price(data.get("skin_score", 0))
 
+    # observation
+    if not isinstance(data.get("observation"), dict):
+        data["observation"] = {}
+
+    obs = data["observation"]
+
+    default_part = {
+        "redness": "",
+        "pores": "",
+        "oiliness": "",
+        "dryness": "",
+        "texture": "",
+        "tone": "",
+        "note": ""
+    }
+
+    default_cheek = {
+        "redness": "",
+        "pores": "",
+        "acne_marks": "",
+        "pigmentation": "",
+        "texture": "",
+        "note": ""
+    }
+
+    if not isinstance(obs.get("front"), dict):
+        obs["front"] = dict(default_part)
+
+    if not isinstance(obs.get("left_cheek"), dict):
+        obs["left_cheek"] = dict(default_cheek)
+
+    if not isinstance(obs.get("right_cheek"), dict):
+        obs["right_cheek"] = dict(default_cheek)
+
+    for key, default_value in default_part.items():
+        obs["front"][key] = str(obs["front"].get(key, default_value) or "")
+
+    for cheek_key in ["left_cheek", "right_cheek"]:
+        for key, default_value in default_cheek.items():
+            obs[cheek_key][key] = str(obs[cheek_key].get(key, default_value) or "")
+
+    obs["symmetry"] = str(obs.get("symmetry", "") or "")
+    obs["image_confidence"] = safe_price(obs.get("image_confidence", 0))
+
+    data["observation"] = obs
+
+    # root_causes
+    if not isinstance(data.get("root_causes"), list):
+        data["root_causes"] = []
+
+    cleaned_causes = []
+    for item in data.get("root_causes", []):
+        if not isinstance(item, dict):
+            continue
+
+        cleaned_causes.append({
+            "cause": str(item.get("cause", "") or ""),
+            "evidence": str(item.get("evidence", "") or ""),
+            "priority": safe_price(item.get("priority", 0)),
+            "care_direction": str(item.get("care_direction", "") or "")
+        })
+
+    data["root_causes"] = cleaned_causes
     # warnings
     if not isinstance(data.get("warnings"), list):
         data["warnings"] = []
@@ -4299,6 +4362,8 @@ def normalize_result(raw_data, image_path=""):
             "tone_evenness": raw_data.get("scores", {}).get("tone_evenness", 0)
         },
         "skin_summary": raw_data.get("skin_summary", ""),
+        "observation": raw_data.get("observation", {}),
+        "root_causes": raw_data.get("root_causes", []),
         "morning": {
             "steps": [
                 {
@@ -4737,6 +4802,98 @@ def get_analysis_schema():
             },
 
             "skin_summary": {"type": "string"},
+            "observation": {
+                "type": "object",
+                "properties": {
+                    "front": {
+                        "type": "object",
+                        "properties": {
+                            "redness": {"type": "string"},
+                            "pores": {"type": "string"},
+                            "oiliness": {"type": "string"},
+                            "dryness": {"type": "string"},
+                            "texture": {"type": "string"},
+                            "tone": {"type": "string"},
+                            "note": {"type": "string"}
+                        },
+                        "required": [
+                            "redness",
+                            "pores",
+                            "oiliness",
+                            "dryness",
+                            "texture",
+                            "tone",
+                            "note"
+                        ]
+                    },
+                    "left_cheek": {
+                        "type": "object",
+                        "properties": {
+                            "redness": {"type": "string"},
+                            "pores": {"type": "string"},
+                            "acne_marks": {"type": "string"},
+                            "pigmentation": {"type": "string"},
+                            "texture": {"type": "string"},
+                            "note": {"type": "string"}
+                        },
+                        "required": [
+                            "redness",
+                            "pores",
+                            "acne_marks",
+                            "pigmentation",
+                            "texture",
+                            "note"
+                        ]
+                    },
+                    "right_cheek": {
+                        "type": "object",
+                        "properties": {
+                            "redness": {"type": "string"},
+                            "pores": {"type": "string"},
+                            "acne_marks": {"type": "string"},
+                            "pigmentation": {"type": "string"},
+                            "texture": {"type": "string"},
+                            "note": {"type": "string"}
+                        },
+                        "required": [
+                            "redness",
+                            "pores",
+                            "acne_marks",
+                            "pigmentation",
+                            "texture",
+                            "note"
+                        ]
+                    },
+                    "symmetry": {"type": "string"},
+                    "image_confidence": {"type": "integer"}
+                },
+                "required": [
+                    "front",
+                    "left_cheek",
+                    "right_cheek",
+                    "symmetry",
+                    "image_confidence"
+                ]
+            },
+
+            "root_causes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "cause": {"type": "string"},
+                        "evidence": {"type": "string"},
+                        "priority": {"type": "integer"},
+                        "care_direction": {"type": "string"}
+                    },
+                    "required": [
+                        "cause",
+                        "evidence",
+                        "priority",
+                        "care_direction"
+                    ]
+                }
+            },
 
             "morning": {
                 "type": "object",
@@ -4946,6 +5103,8 @@ def get_analysis_schema():
             "skin_score",
             "scores",
             "skin_summary",
+            "observation",
+            "root_causes",
             "morning",
             "night",
             "weekly_care",
@@ -5023,6 +5182,45 @@ def build_analysis_prompt(user_data):
 ⑤商品候補
 product_candidates は候補収集のみ。
 最終決定しない。
+
+【observation 出力ルール】
+observation には画像から確認できる事実だけを入れること。
+推測や原因は observation に入れないこと。
+
+front:
+正面画像から、赤み、毛穴、皮脂、乾燥、キメ、色ムラ、全体印象を記載する。
+
+left_cheek:
+左頬画像から、赤み、毛穴、ニキビ跡、色素沈着、キメを記載する。
+
+right_cheek:
+右頬画像から、赤み、毛穴、ニキビ跡、色素沈着、キメを記載する。
+
+symmetry:
+左右差を簡潔に記載する。
+
+image_confidence:
+画像から判断できる信頼度を0〜100の整数で入れること。
+
+【root_causes 出力ルール】
+root_causes には、観察結果とユーザー情報から推定される根本原因を入れること。
+必ず3〜5個出すこと。
+
+各項目:
+cause: 原因名
+evidence: そう判断した根拠
+priority: 改善優先度。1が最優先
+care_direction: ケア方針
+
+例:
+炎症後赤み
+色素沈着
+皮脂過多
+毛穴目立ち
+バリア低下
+乾燥
+刺激リスク
+紫外線影響
 
 【カテゴリ固定】
 category は必ず以下のみ。
