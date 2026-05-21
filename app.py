@@ -5142,6 +5142,7 @@ def build_analysis_prompt(user_data):
 ⑤商品候補
 product_candidates は候補収集のみ。
 最終決定しない。
+商品選定は後続処理で行う。
 
 【observation 出力ルール】
 observation には画像から確認できる事実だけを入れること。
@@ -5337,7 +5338,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
     response = call_gemini_with_retry(
         client,
         "gemini-2.5-flash",
-        contents=[prompt, front_img, left_img, right_img],
+        contents=[prompt, front_img],
         config=types.GenerateContentConfig(
             temperature=0,
             top_p=1,
