@@ -4869,7 +4869,7 @@ def get_analysis_schema():
                                 "product_candidates": {
                                     "type": "array",
                                     "items": {"type": "string"},
-                                    "maxItems": 3
+                                    "maxItems": 5
                                 },
                                 "selection_reason": {"type": "string"},
                                 "estimated_price": {"type": "integer"},
@@ -4907,7 +4907,7 @@ def get_analysis_schema():
                                 "product_candidates": {
                                     "type": "array",
                                     "items": {"type": "string"},
-                                    "maxItems": 3
+                                    "maxItems": 5
                                 },
                                 "selection_reason": {"type": "string"},
                                 "estimated_price": {"type": "integer"},
@@ -4942,7 +4942,7 @@ def get_analysis_schema():
                         "product_candidates": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "maxItems": 3
+                            "maxItems": 5
                         },
                         "selection_reason": {"type": "string"},
                         "estimated_price": {"type": "integer"},
@@ -5231,17 +5231,19 @@ PHA
 
 各ステップの product_candidates:
 
-・必ず実在商品
-・3〜5個
-・空配列禁止
-・日本で入手しやすく、目的に合う商品を優先する。
+・具体的な実在商品名を3〜5個入れる
+・空配列は禁止
+・日本で入手しやすい商品を優先する
+・目的、成分、肌質、敏感度、予算に合う候補を優先する
+・同じブランドばかりに偏らせない
+・商品名はブランド名を含める
 
 
 禁止:
 おすすめ美容液
 レチノール系候補
 カテゴリ名のみ
-
+架空の商品名
 selection_reason 必須。
 
 説明内容:
