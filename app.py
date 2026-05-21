@@ -94,7 +94,7 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=5):
     raise last_error
 
 from datetime import datetime, date
-from PIL import Image
+from PIL import Image,ImageOps
 from flask import Flask, render_template, request,jsonify,redirect
 from google import genai
 from google.genai import types
@@ -4733,6 +4733,16 @@ def extract_user_data(request):
     }
 
 
+def resize_for_gemini(file, max_size=768):
+    img = Image.open(io.BytesIO(file.read()))
+    img = ImageOps.exif_transpose(img)
+    img = img.convert("RGB")
+
+    img.thumbnail((max_size, max_size))
+
+    return img.copy()
+
+
 def load_uploaded_images(request):
     front_file = request.files.get("front_photo")
     left_file = request.files.get("left_photo")
@@ -4747,9 +4757,9 @@ def load_uploaded_images(request):
     if not right_file or right_file.filename == "":
         raise ValueError("右頬画像を選択してください")
 
-    front_img = Image.open(io.BytesIO(front_file.read())).convert("RGB")
-    left_img = Image.open(io.BytesIO(left_file.read())).convert("RGB")
-    right_img = Image.open(io.BytesIO(right_file.read())).convert("RGB")
+    front_img = resize_for_gemini(front_file)
+    left_img = resize_for_gemini(left_file)
+    right_img = resize_for_gemini(right_file)
 
     return front_img, left_img, right_img
 
