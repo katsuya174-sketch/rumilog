@@ -2751,8 +2751,8 @@ def build_candidate_collection_prompt(user_data, analyzed_data):
 まだ絞り込まない。比較候補をできるだけ広く集める。
 
 【収集ルール】
-・各ステップごとに product_candidates を 8〜10 個出すこと
-・最低でも 8 個以上出すこと
+・各ステップごとに product_candidates を 3〜5 個出すこと
+・最低でも 3 個以上出すこと
 ・異なるブランドから幅広く出すこと
 ・同じブランドは最大1個まで
 ・同じシリーズばかりに偏らないこと
@@ -5338,7 +5338,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
     response = call_gemini_with_retry(
         client,
         "gemini-2.5-flash",
-        contents=[prompt, front_img],
+        contents=[prompt, front_img,left_img,right_img],
         config=types.GenerateContentConfig(
             temperature=0,
             top_p=1,
@@ -5510,7 +5510,7 @@ def build_rich_candidate_collection_prompt(user_data, analyzed_data):
 ・DB商品と同じ基準で比較できるように、情報不足の商品にしない
 ・曖昧な場合でも、現実的に推定して埋める
 ・日本で比較的入手しやすい商品を優先する
-・10〜15個の候補を返す
+・3〜5個の候補を返す
 ・JSONのみで返す
 
 【concerns候補】
