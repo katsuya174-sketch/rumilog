@@ -4420,21 +4420,25 @@ def append_result(raw_data, image_path=""):
 
     normalized = normalize_result(raw_data, image_path=image_path)
 
-    record_id = None
-    if isinstance(normalized, dict):
-        record_id = normalized.get("id")
+    if not isinstance(normalized, dict):
+        normalized = {}
+
+    record_id = normalized.get("id")
 
     if not record_id:
         record_id = generate_result_id(history)
 
     record = {
+        **normalized,
         "id": record_id,
         "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        **normalized
     }
 
     history.append(record)
     save_results(history)
+
+    print("[RESULT SAVED]", record_id, flush=True)
+
     return record
 
 def update_result_deep_analysis(result_id, deep):
