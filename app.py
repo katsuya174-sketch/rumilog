@@ -6052,13 +6052,11 @@ def lab_test_function():
                 print("===== USAGE SAVE ERROR =====")
                 print(e)
 
-            print("STEP7-1 Save start")
-            saved_record = None
+            
+            print("STEP7 Save start")
             try:
-                saved_record = append_result(data)
-                if isinstance(saved_record, dict) and saved_record.get("id"):
-                    data["id"] = saved_record["id"]
-                print("STEP7-2 Save done")   
+                print("STEP7-1 Save skipped temporarily")
+                saved_record = None 
             except Exception as e:
                 print("===== RESULT SAVE ERROR =====")
                 print(e)
