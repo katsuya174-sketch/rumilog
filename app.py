@@ -4437,6 +4437,19 @@ def append_result(raw_data, image_path=""):
     save_results(history)
     return record
 
+def update_result_deep_analysis(result_id, deep):
+
+    records = load_results()
+
+    for r in records:
+
+        if r.get("id") == result_id:
+
+            r["deep_analysis"] = deep
+
+            break
+
+    save_results(records)
 def safe_int(value, default=0):
     try:
         if value is None or value == "":
@@ -5379,6 +5392,53 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
 
         raise ValueError("AIの診断結果JSONが壊れています。もう一度診断してください。")
 
+def detailed_analysis_with_gemini(client, user_data, result_data):
+
+    prompt = f"""
+あなたは皮膚分析AIです。
+
+以下の既存診断結果をもとに、
+より詳細な分析だけ行ってください。
+
+【基本情報】
+{user_data}
+
+【既存診断】
+{result_data}
+
+返却JSON:
+
+{{
+"deep_analysis": {{
+"root_causes": [],
+"priority_concerns": [],
+"skin_age_comment": "",
+"barrier_score": 0,
+"acne_score": 0,
+"pigment_score": 0,
+"wrinkle_score": 0,
+"pore_type": "",
+"improvement_plan": {{
+"immediate": [],
+"short_term": [],
+"long_term": []
+}},
+"extra_advice": []
+}}
+}}
+"""
+
+    response = call_gemini_with_retry(
+        client=client,
+        model="gemini-2.5-flash",
+        contents=prompt,
+        config={
+            "temperature": 0.2
+        }
+    )
+
+    return extract_json(response.text)
+
 def get_rich_candidate_collection_schema():
     return {
         "type": "object",
@@ -6283,6 +6343,46 @@ def history_detail(result_id):
         traceback.print_exc()
         print("================================")
         return "履歴詳細の読み込みに失敗しました", 500
+
+def deep_analysis(result_id):
+
+    results = load_results()
+
+    target = next(
+        (
+            r for r in results
+            if r.get("id") == result_id
+        ),
+        None
+    )
+
+    if not target:
+        return "not found"
+
+    if target.get("deep_analysis"):
+
+        return render_template(
+            "deep_analysis.html",
+            data=target
+        )
+
+    deep = detailed_analysis_with_gemini(
+        client,
+        target,
+        target
+    )
+
+    target["deep_analysis"] = deep
+
+    update_result_deep_analysis(
+        result_id,
+        deep
+    )
+
+    return render_template(
+        "deep_analysis.html",
+        data=target
+    )
 # ==========================================
 # Flaskサーバー起動
 # ==========================================
