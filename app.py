@@ -50,7 +50,7 @@ from constants import (
     AI_INGREDIENT_MAP,
     CONCERN_MAP
 )
-def call_gemini_with_retry(client, model, contents, config=None, max_retries=5):
+def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
     import time
     from google.genai import errors
 
@@ -71,7 +71,7 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=5):
             last_error = e
             msg = str(e)
 
-            print(f"[Gemini retry] attempt={attempt+1}/{max_retries} error={msg}")
+            print(f"[Gemini retry] attempt={attempt+1}/{max_retries} error={msg}",flush=True)
 
             retryable = (
                 "503" in msg or
@@ -86,11 +86,11 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=5):
             if attempt == max_retries - 1:
                 raise
 
-            wait_seconds = min(12, 2 * (attempt + 1))
+            wait_seconds = min(5, 2 * (attempt + 1))
             time.sleep(wait_seconds)
 
         except Exception as e:
-            print(f"[Gemini fatal] {e}")
+            print(f"[Gemini fatal] {e}",flush=True)
             raise
 
     raise last_error
@@ -6053,10 +6053,11 @@ def lab_test_function():
                 print(e)
 
             
-            print("STEP7 Save start")
+            saved_record = None
             try:
-                print("STEP7-1 Save skipped temporarily")
-                saved_record = None 
+                saved_record = append_result(data)
+                if isinstance(saved_record, dict) and saved_record.get("id"):
+                    data["id"] = saved_record["id"]
             except Exception as e:
                 print("===== RESULT SAVE ERROR =====")
                 print(e)
@@ -6064,7 +6065,6 @@ def lab_test_function():
                 print("=============================")
                 # 保存に失敗しても結果表示は止めない
             PRODUCT_LOG_FILE = "product_log.json"
-            print("STEP8 Product log start")
             def log_displayed_products(data):
                 logs = []
 
@@ -6101,7 +6101,6 @@ def lab_test_function():
             # ⑫ 表示
             # =========================
             html = render_template("result.html", data=data)
-            print("STEP9 Render done")
             if is_ajax:
                 return jsonify({
                     "success": True,
