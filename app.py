@@ -3988,7 +3988,7 @@ def load_results():
         print(e)
         print("======================================")
         return []
-print("STEP7 Save start")
+
 # 履歴保存
 def save_results(data):
     if not isinstance(data, list):
@@ -6052,12 +6052,13 @@ def lab_test_function():
                 print("===== USAGE SAVE ERROR =====")
                 print(e)
 
+            print("STEP7-1 Save start")
             saved_record = None
             try:
                 saved_record = append_result(data)
-                print("STEP7-2 Save done")
                 if isinstance(saved_record, dict) and saved_record.get("id"):
                     data["id"] = saved_record["id"]
+                print("STEP7-2 Save done")   
             except Exception as e:
                 print("===== RESULT SAVE ERROR =====")
                 print(e)
@@ -6065,7 +6066,7 @@ def lab_test_function():
                 print("=============================")
                 # 保存に失敗しても結果表示は止めない
             PRODUCT_LOG_FILE = "product_log.json"
-
+            print("STEP8 Product log start")
             def log_displayed_products(data):
                 logs = []
 
@@ -6102,7 +6103,7 @@ def lab_test_function():
             # ⑫ 表示
             # =========================
             html = render_template("result.html", data=data)
-
+            print("STEP9 Render done")
             if is_ajax:
                 return jsonify({
                     "success": True,
@@ -6212,9 +6213,9 @@ def result_detail(result_id):
             if str(item.get("id")) == str(result_id):
                 data = prepare_result_for_view(item)
                 data["is_premium"] = is_premium_user()
-                print("STEP8 Render start")
+
                 html = render_template("result.html", data=data)
-        print("STEP9 Render done")
+
         return "結果が見つかりません", 404
 
     except Exception as e:
