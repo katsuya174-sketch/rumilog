@@ -56,7 +56,6 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=5):
 
     last_error = None
 
-    print("STEP1: Gemini request start")
     
     for attempt in range(max_retries):
         try:
@@ -65,7 +64,7 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=5):
                 contents=contents,
                 config=config
             )
-            print("STEP2 Gemini response received")
+            
             return response
 
         except (errors.ServerError, errors.APIError) as e:
@@ -2563,9 +2562,9 @@ def apply_moisture_plan(data):
     import json
 
     if isinstance(data, str):
-        print("STEP3 JSON parse start")
+        
         data = json.loads(data)
-        print("STEP4 JSON parse done")
+
 
     moisture_plan = data.get("moisture_plan", {})
     need_emulsion = moisture_plan.get("need_emulsion", False)
@@ -3075,7 +3074,7 @@ def pick_best_db_fallback_product(step, products, user_data, budget_value, exclu
 
     candidates.sort(key=sort_key, reverse=True)
     return candidates[0]
-print("STEP5 Product assignment start")
+
 def assign_products_to_all_steps(data, products, user_data, budget_value):
     print("MARKET VERSION assign_products_to_all_steps")
 
@@ -3190,7 +3189,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             weekly_steps[idx] = assign_one_step(step, used_weekly_names, "weekly_care")
 
     return data
-print("STEP6 Product assignment done")
+
 def build_recommend_reason(product, step, user_data):
     reasons = []
 
@@ -6056,6 +6055,7 @@ def lab_test_function():
             saved_record = None
             try:
                 saved_record = append_result(data)
+                print("STEP7-2 Save done")
                 if isinstance(saved_record, dict) and saved_record.get("id"):
                     data["id"] = saved_record["id"]
             except Exception as e:
@@ -6212,8 +6212,9 @@ def result_detail(result_id):
             if str(item.get("id")) == str(result_id):
                 data = prepare_result_for_view(item)
                 data["is_premium"] = is_premium_user()
-                return render_template("result.html", data=data)
-
+                print("STEP8 Render start")
+                html = render_template("result.html", data=data)
+        print("STEP9 Render done")
         return "結果が見つかりません", 404
 
     except Exception as e:
@@ -6271,7 +6272,6 @@ def history_detail(result_id):
         else:
             for key in current_scores.keys():
                 score_diff[key] = None
-        print("STEP8: History detail completed")
         return render_template(
             "history_detail.html",
             data=current,
