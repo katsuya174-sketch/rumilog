@@ -475,199 +475,238 @@ def clean_rakuten_keyword(text):
 
     # 長すぎると楽天APIで弾かれやすいので短くする
     return text[:80]
-def fetch_rakuten_item(product_name, category="",brand=""):
+
+def build_rakuten_search_keywords(product_name, brand=""):
+    name = clean_rakuten_keyword(product_name)
+    brand = clean_rakuten_keyword(brand)
+
+    keywords = []
+
+    # 1. 商品名そのまま
+    if name:
+        keywords.append(name)
+
+    # 2. brand が name の先頭に入っていたら除去
+    if brand and name.startswith(brand):
+        without_brand = name[len(brand):].strip()
+        if without_brand:
+            keywords.append(without_brand)
+
+    # 3. 記号ゆるめ
+    loose = (
+        name
+        .replace("・", " ")
+        .replace("　", " ")
+        .replace("(", " ")
+        .replace(")", " ")
+        .replace("（", " ")
+        .replace("）", " ")
+    )
+    loose = " ".join(loose.split())
+
+    if loose and loose not in keywords:
+        keywords.append(loose)
+
+    # 4. 長い商品名は前半2〜3語だけ
+    parts = loose.split()
+
+    if len(parts) >= 3:
+        keywords.append(" ".join(parts[:3]))
+
+    if len(parts) >= 2:
+        keywords.append(" ".join(parts[:2]))
+
+    # 重複除去
+    return list(dict.fromkeys([k for k in keywords if k]))[:5]
+
+def score_rakuten_item(item, product_name, brand="", category=""):
+    title = str(item.get("itemName", "") or "")
+    title_norm = title.lower()
+
+    name = clean_rakuten_keyword(product_name).lower()
+    brand = clean_rakuten_keyword(brand).lower()
+    category = str(category or "")
+
+    score = 0
+
+    if name and name.lower() in title_norm:
+        score += 60
+
+    for word in name.split():
+        if word and word in title_norm:
+            score += 12
+
+    if brand and brand in title_norm:
+        score += 20
+
+    if category and category in title:
+        score += 8
+
+    ng_words = [
+        "詰替",
+        "詰め替え",
+        "セット",
+        "まとめ買い",
+        "サンプル",
+        "ミニ",
+        "トライアル",
+        "中古"
+    ]
+
+    for ng in ng_words:
+        if ng in title:
+            score -= 25
+
+    if item.get("mediumImageUrls"):
+        score += 10
+
+    if item.get("affiliateUrl") or item.get("itemUrl"):
+        score += 5
+
+    return score
+
+def fetch_rakuten_item(product_name, category="", brand=""):
     if not product_name:
-        print("[RAKUTEN API] product_name empty")
+        print("[RAKUTEN API] product_name empty", flush=True)
         return None
 
     if not RAKUTEN_APP_ID:
-        print("[RAKUTEN API] RAKUTEN_APP_ID is empty")
+        print("[RAKUTEN API] RAKUTEN_APP_ID is empty", flush=True)
         return None
 
     if not RAKUTEN_ACCESS_KEY:
-        print("[RAKUTEN API] RAKUTEN_ACCESS_KEY is empty")
-        return None
-
-    keyword = clean_rakuten_keyword(product_name)
-
-    if not keyword:
-        print("[RAKUTEN API] keyword empty after clean", flush=True)
+        print("[RAKUTEN API] RAKUTEN_ACCESS_KEY is empty", flush=True)
         return None
 
     endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20220601"
 
-    print("[RAKUTEN CLEAN KEYWORD]", keyword, flush=True)
-    params = {
-        "applicationId": RAKUTEN_APP_ID,
-        "accessKey": RAKUTEN_ACCESS_KEY,
-        "keyword": keyword,
-        "hits": 3,
-        "format": "json",
-        "formatVersion": 2,
-        "imageFlag": 1,
+    headers = {
+        "Referer": "http://example.com/",
+        "Origin": "http://example.com/",
+        "User-Agent": "Mozilla/5.0"
     }
 
-    if RAKUTEN_AFFILIATE_ID:
-        params["affiliateId"] = RAKUTEN_AFFILIATE_ID
+    keywords = build_rakuten_search_keywords(product_name, brand)
 
-    try:
-        print(f"[RAKUTEN API REQUEST] keyword={keyword}")
-        wait_for_rakuten_rate_limit()
-        headers = {
-            "Referer": "http://example.com/",
-            "Origin": "http://example.com/",
-            "User-Agent": "Mozilla/5.0"
-        }
+    for keyword in keywords:
+        try:
+            print(f"[RAKUTEN TRY KEYWORD] {keyword}", flush=True)
 
-        res = requests.get(endpoint, params=params, headers=headers, timeout=10)
-        print(f"[RAKUTEN API STATUS] {res.status_code}")
-        print(f"[RAKUTEN API URL] {res.url}")
+            wait_for_rakuten_rate_limit()
 
-        # 400 の中身を見やすくする
-        if res.status_code != 200:
-            print("[RAKUTEN API ERROR BODY]", res.text)
+            params = {
+                "applicationId": RAKUTEN_APP_ID,
+                "accessKey": RAKUTEN_ACCESS_KEY,
+                "keyword": keyword,
+                "hits": 5,
+                "format": "json",
+                "formatVersion": 2,
+                "imageFlag": 1,
+            }
 
-        res.raise_for_status()
+            if RAKUTEN_AFFILIATE_ID:
+                params["affiliateId"] = RAKUTEN_AFFILIATE_ID
 
-        payload = res.json()
-        items = payload.get("items", [])
+            res = requests.get(
+                endpoint,
+                params=params,
+                headers=headers,
+                timeout=10
+            )
 
-        print(f"[RAKUTEN API ITEMS] count={len(items)}")
+            print(f"[RAKUTEN API STATUS] {res.status_code}", flush=True)
 
-        if not items:
-            print(f"[RAKUTEN API] no items for keyword={keyword}")
-            return None
+            if res.status_code != 200:
+                print("[RAKUTEN API ERROR BODY]", res.text, flush=True)
+                continue
 
-        best = items[0]
+            payload = res.json()
+            items = payload.get("items", [])
 
-        image_url = ""
-        medium_images = best.get("mediumImageUrls", [])
-        if isinstance(medium_images, list) and medium_images:
-            first_image = medium_images[0]
-            if isinstance(first_image, str):
-                image_url = first_image
-            elif isinstance(first_image, dict):
-                image_url = first_image.get("imageUrl", "")
+            print(f"[RAKUTEN API ITEMS] count={len(items)}", flush=True)
 
-        result = {
-            "name": best.get("itemName", ""),
-            "price": best.get("itemPrice", 0),
-            "rakuten_link": best.get("affiliateUrl") or best.get("itemUrl") or "#",
-            "image": clean_rakuten_image_url(image_url),
-        }
+            if not items:
+                continue
 
-        print("[RAKUTEN API BEST ITEM]", {
-            "name": result["name"],
-            "price": result["price"],
-            "image": result["image"],
-            "rakuten_link_exists": result["rakuten_link"] != "#"
-        })
+            scored_items = sorted(
+                items,
+                key=lambda item: score_rakuten_item(
+                    item,
+                    product_name=product_name,
+                    brand=brand,
+                    category=category
+                ),
+                reverse=True
+            )
 
-        return result
+            best = scored_items[0]
 
-    except requests.exceptions.RequestException as e:
-        print("[RAKUTEN API REQUEST ERROR]", e)
-        return None
-    except Exception as e:
-        print("[RAKUTEN API UNKNOWN ERROR]", repr(e))
-        return None
-def verify_product_with_rakuten(candidate):
+            best_score = score_rakuten_item(
+                best,
+                product_name=product_name,
+                brand=brand,
+                category=category
+            )
 
-    if not isinstance(candidate, dict):
-        return None
+            print(
+                "[RAKUTEN BEST SCORE]",
+                best_score,
+                best.get("itemName", ""),
+                flush=True
+            )
 
-    name = candidate.get("name", "").strip()
-    brand = candidate.get("brand", "").strip()
-
-    if not name:
-        return None
-
-    query = f"{brand} {name}".strip()
-
-    try:
-
-        items = search_rakuten_items(query)
-
-        if not items:
-            return None
-
-        best = None
-        best_score = -999
-
-        for item in items[:10]:
-
-            title = item.get("itemName", "")
-            score = 0
-
-            title_lower = title.lower()
-
-            if brand.lower() in title_lower:
-                score += 30
-
-            for word in name.lower().split():
-
-                if word in title_lower:
-                    score += 10
-
-            NG = [
-                "詰替",
-                "セット",
-                "まとめ買い",
-                "福袋",
-                "サンプル",
-                "ミニ"
-            ]
-
-            for ng in NG:
-                if ng.lower() in title_lower:
-                    score -= 20
-
-            if score > best_score:
-                best = item
-                best_score = score
-
-        if not best:
-            return None
-
-        return {
-            "name": clean_product_title(
-                best.get(
-                    "itemName",
-                    name
+            if best_score < 20:
+                print(
+                    "[RAKUTEN BEST REJECTED]",
+                    best_score,
+                    best.get("itemName", ""),
+                    flush=True
                 )
-            ),
+                continue
 
-            "image": (
-                best.get(
-                    "mediumImageUrls",
-                    [{}]
-                )[0].get(
-                    "imageUrl",
-                    ""
-                ).replace(
-                    "http://",
-                    "https://"
-                )
-            ),
+            image_url = ""
+            medium_images = best.get("mediumImageUrls", [])
 
-            "price":
-                best.get("itemPrice"),
+            if isinstance(medium_images, list) and medium_images:
+                first_image = medium_images[0]
 
-            "url":
-                best.get("itemUrl"),
+                if isinstance(first_image, str):
+                    image_url = first_image
 
-            "verified": True
-        }
+                elif isinstance(first_image, dict):
+                    image_url = first_image.get("imageUrl", "")
 
-    except Exception as e:
+            result = {
+                "name": best.get("itemName", ""),
+                "price": best.get("itemPrice", 0),
+                "rakuten_link": best.get("affiliateUrl") or best.get("itemUrl") or "#",
+                "image": clean_rakuten_image_url(image_url),
+            }
 
-        print(
-            "[RAKUTEN VERIFY]",
-            e,
-            flush=True
-        )
+            print("[RAKUTEN API BEST ITEM]", {
+                "name": result["name"],
+                "price": result["price"],
+                "image": result["image"],
+                "rakuten_link_exists": result["rakuten_link"] != "#"
+            }, flush=True)
 
-        return None
+            return result
+
+        except requests.exceptions.RequestException as e:
+            print("[RAKUTEN API REQUEST ERROR]", e, flush=True)
+            continue
+
+        except Exception as e:
+            print("[RAKUTEN API UNKNOWN ERROR]", repr(e), flush=True)
+            continue
+
+    print(
+        f"[RAKUTEN API] no items for product={product_name}",
+        flush=True
+    )
+
+    return None
+
 def clean_product_title(text):
 
     remove = [
@@ -694,10 +733,33 @@ def apply_rakuten_image_and_link(step):
     if not isinstance(step, dict):
         return step
 
-    product_name = step.get("product", "")
+    product_name = (
+        step.get("product")
+        or step.get("name")
+        or step.get("product_name")
+        or step.get("item_name")
+        or step.get("title")
+        or ""
+    )
+
+    print(
+        "[RAKUTEN STEP KEYS]",
+        list(step.keys()),
+        flush=True
+    )
+
+    print(
+        "[RAKUTEN PRODUCT NAME]",
+        product_name,
+        flush=True
+    )
     category = step.get("category", "")
 
-    rakuten_item = fetch_rakuten_item(product_name=step.get("name", ""),category=step.get("category", ""),brand=step.get("brand", ""))
+    rakuten_item = fetch_rakuten_item(
+        product_name=product_name,
+        category=step.get("category", ""),
+        brand=step.get("brand", "")
+    )
     if not rakuten_item:
         print(f"[RAKUTEN IMAGE] no rakuten item: product={product_name}, category={category}")
         return step
@@ -2733,32 +2795,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         for c in top_candidates
     ]
 
-    if best.get("_source") == "ai_virtual":
-
-        verified = verify_product_with_rakuten(best)
-
-        if verified:
-            best["original_ai_name"] = best.get("name", "")
-            best["name"] = verified.get("name", best.get("name", ""))
-            best["image"] = verified.get("image")
-            print(
-                "[RAKUTEN IMAGE]",
-                best.get("image"),
-                flush=True
-            )
-            best["price_ref"] = verified.get("price")
-            best["rakuten_link"] = verified.get("url")
-            best["_verified"] = True
-            best["_source"] = "ai_rakuten_verified"
-
-        else:
-            print(
-                "[RAKUTEN VERIFY FAILED]",
-                best.get("name", ""),
-                flush=True
-            )
-
-            return None
+    
 
     log_candidate_battle(step, sorted_candidates, best)
 
