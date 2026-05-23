@@ -574,32 +574,31 @@ def verify_product_with_rakuten(candidate):
             return None
 
         return {
+            "name": clean_product_title(
+                best.get(
+                    "itemName",
+                    name
+                )
+            ),
 
-            "name":
-                clean_product_title(
-                    best.get(
-                        "itemName",
-                        name
-                    )
-                ),
-
-            "image":
+            "image": (
                 best.get(
                     "mediumImageUrls",
                     [{}]
                 )[0].get(
-                    "imageUrl"
-                ),
+                    "imageUrl",
+                    ""
+                ).replace(
+                    "http://",
+                    "https://"
+                )
+            ),
 
             "price":
-                best.get(
-                    "itemPrice"
-                ),
+                best.get("itemPrice"),
 
             "url":
-                best.get(
-                    "itemUrl"
-                ),
+                best.get("itemUrl"),
 
             "verified": True
         }
@@ -2679,6 +2678,11 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             best["original_ai_name"] = best.get("name", "")
             best["name"] = verified.get("name", best.get("name", ""))
             best["image"] = verified.get("image")
+            print(
+                "[RAKUTEN IMAGE]",
+                best.get("image"),
+                flush=True
+            )
             best["price_ref"] = verified.get("price")
             best["rakuten_link"] = verified.get("url")
             best["_verified"] = True
