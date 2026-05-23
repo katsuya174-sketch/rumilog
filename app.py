@@ -20,6 +20,7 @@ import json
 import traceback
 import urllib.parse
 import requests
+import re
 # ===== DEV_MODE_START =====
 DEV_MODE = False  # ← 開発中はTrue / 公開時はFalseにするか削除
 # ===== DEV_MODE_END =====
