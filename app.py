@@ -3231,7 +3231,7 @@ def normalize_candidate_name_for_merge(name):
     return text
 
 
-def merge_candidate_lists(original, extra, max_items=20):
+def merge_candidate_list(original, extra, max_items=20):
     merged = []
     seen = set()
 
@@ -3316,10 +3316,10 @@ def normalize_ai_candidates(step):
 
         seen.add(norm_name)
         normalized.append(item)
-    
+    candidate_list = step.get("product_candidates",[])
     filtered = []
 
-    for c in candidates_list:
+    for c in candidate_list:
 
         if not isinstance(c, dict):
             continue
@@ -3396,7 +3396,7 @@ def enrich_steps_with_market_candidates(data, candidate_data):
                     break
 
             if matched:
-                step["product_candidates"] = merge_candidate_lists(
+                step["product_candidates"] = merge_candidate_list(
                     step.get("product_candidates", []),
                     matched.get("product_candidates", []),
                     max_items=80
