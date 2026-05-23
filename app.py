@@ -419,7 +419,20 @@ def clean_rakuten_image_url(url):
         url = "https:" + url
     return url
 
+import time
 
+_last_rakuten_request_time = 0
+
+def wait_for_rakuten_rate_limit():
+    global _last_rakuten_request_time
+
+    now = time.time()
+    elapsed = now - _last_rakuten_request_time
+
+    if elapsed < 1.2:
+        time.sleep(1.2 - elapsed)
+
+    _last_rakuten_request_time = time.time()
 def fetch_rakuten_item(product_name, category=""):
     if not product_name:
         print("[RAKUTEN API] product_name empty")
@@ -456,7 +469,7 @@ def fetch_rakuten_item(product_name, category=""):
 
     try:
         print(f"[RAKUTEN API REQUEST] keyword={keyword}")
-
+        wait_for_rakuten_rate_limit()
         headers = {
             "Referer": "http://example.com/",
             "Origin": "http://example.com/",
@@ -650,12 +663,19 @@ def apply_rakuten_image_and_link(step):
         step["rakuten_link"] = rakuten_item["rakuten_link"]
 
     current_image = step.get("image", "")
+    print(
+        "[IMAGE BEFORE]",
+        current_image,
+        flush=True
+    )
     if (not current_image) or ("/static/images/products/" in str(current_image)):
         if rakuten_item.get("image"):
             step["image"] = rakuten_item["image"]
-            print(f"[RAKUTEN IMAGE APPLIED] {product_name} -> {rakuten_item['image']}")
+            print("[RAKUTEN IMAGE APPLIED]",product_name,"->",step["image"],flush=True)
         else:
-            print(f"[RAKUTEN IMAGE EMPTY] {product_name}")
+            print("[RAKUTEN IMAGE EMPTY]",product_name,flush=True)
+    else:
+        print("[RAKUTEN IMAGE EMPTY]",current_image,flush=True)
 
     if rakuten_item.get("price"):
         step["price"] = safe_price(rakuten_item["price"])
@@ -3290,6 +3310,9 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
                 apply_db_product_to_step(step, best, user_data)
                 step["product_source"] = source if source else "db"
 
+            print("[FINAL PRODUCT]", step.get("product"), flush=True)
+            print("[FINAL IMAGE]", step.get("image"), flush=True)
+            
             return normalize_step_price_fields(step)
 
         # 2) 通常選定でダメなら、DBからカテゴリ一致だけで最低1個強制取得
