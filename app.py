@@ -3316,10 +3316,10 @@ def normalize_ai_candidates(step):
 
         seen.add(norm_name)
         normalized.append(item)
-
+    
     filtered = []
 
-    for c in candidates:
+    for c in candidates_list:
 
         if not isinstance(c, dict):
             continue
@@ -3545,7 +3545,7 @@ def pick_best_db_fallback_product(step, products, user_data, budget_value, exclu
         c["brand"] = brand
         c["name"] = name
 
-    return candidates[0]
+    return filtered[0]
 
 def assign_products_to_all_steps(data, products, user_data, budget_value):
     print("MARKET VERSION assign_products_to_all_steps")
