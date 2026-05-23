@@ -6985,15 +6985,27 @@ def deep_analysis(result_id):
     )
 @app.route("/rakuten-test")
 def rakuten_test():
+    endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401"
 
-    item = fetch_rakuten_item(
-        product_name="オバジ",
-        category="美容液",
-        brand="オバジ"
-    )
+    params = {
+        "applicationId": RAKUTEN_APP_ID,
+        "accessKey": RAKUTEN_ACCESS_KEY,
+        "keyword": "オバジ",
+        "hits": 5,
+        "format": "json",
+        "formatVersion": 2,
+        "imageFlag": 1,
+    }
+
+    if RAKUTEN_AFFILIATE_ID:
+        params["affiliateId"] = RAKUTEN_AFFILIATE_ID
+
+    res = requests.get(endpoint, params=params, timeout=10)
 
     return {
-        "item": item
+        "status": res.status_code,
+        "url": res.url,
+        "body": res.text[:3000],
     }
 # ==========================================
 # Flaskサーバー起動
