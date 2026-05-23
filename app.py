@@ -6995,9 +6995,12 @@ def rakuten_test():
         "format": "json",
         "imageFlag": 1,
     }
-
-    if RAKUTEN_AFFILIATE_ID:
-        params["affiliateId"] = RAKUTEN_AFFILIATE_ID
+    headers = {
+        "Referer": "http://example.com/",
+        "Origin": "http://example.com/",
+        "User-Agent": "Mozilla/5.0"
+    }
+    
 
     res = requests.get(endpoint, params=params, timeout=10)
 
