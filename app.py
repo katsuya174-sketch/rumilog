@@ -515,7 +515,125 @@ def fetch_rakuten_item(product_name, category=""):
     except Exception as e:
         print("[RAKUTEN API UNKNOWN ERROR]", repr(e))
         return None
+def verify_product_with_rakuten(candidate):
 
+    if not isinstance(candidate, dict):
+        return None
+
+    name = candidate.get("name", "").strip()
+    brand = candidate.get("brand", "").strip()
+
+    if not name:
+        return None
+
+    query = f"{brand} {name}".strip()
+
+    try:
+
+        items = search_rakuten_items(query)
+
+        if not items:
+            return None
+
+        best = None
+        best_score = -999
+
+        for item in items[:10]:
+
+            title = item.get("itemName", "")
+            score = 0
+
+            title_lower = title.lower()
+
+            if brand.lower() in title_lower:
+                score += 30
+
+            for word in name.lower().split():
+
+                if word in title_lower:
+                    score += 10
+
+            NG = [
+                "詰替",
+                "セット",
+                "まとめ買い",
+                "福袋",
+                "サンプル",
+                "ミニ"
+            ]
+
+            for ng in NG:
+                if ng.lower() in title_lower:
+                    score -= 20
+
+            if score > best_score:
+                best = item
+                best_score = score
+
+        if not best:
+            return None
+
+        return {
+
+            "name":
+                clean_product_title(
+                    best.get(
+                        "itemName",
+                        name
+                    )
+                ),
+
+            "image":
+                best.get(
+                    "mediumImageUrls",
+                    [{}]
+                )[0].get(
+                    "imageUrl"
+                ),
+
+            "price":
+                best.get(
+                    "itemPrice"
+                ),
+
+            "url":
+                best.get(
+                    "itemUrl"
+                ),
+
+            "verified": True
+        }
+
+    except Exception as e:
+
+        print(
+            "[RAKUTEN VERIFY]",
+            e,
+            flush=True
+        )
+
+        return None
+def clean_product_title(text):
+
+    remove = [
+
+        "送料無料",
+        "公式",
+        "正規品",
+        "ポイント10倍",
+        "レビュー",
+
+    ]
+
+    if not text:
+        return ""
+
+    for r in remove:
+        text = text.replace(r, "")
+
+    return " ".join(
+        text.split()
+    )
 
 def apply_rakuten_image_and_link(step):
     if not isinstance(step, dict):
@@ -2552,6 +2670,28 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         }
         for c in top_candidates
     ]
+
+    if best.get("_source") == "ai_virtual":
+
+        verified = verify_product_with_rakuten(best)
+
+        if verified:
+            best["original_ai_name"] = best.get("name", "")
+            best["name"] = verified.get("name", best.get("name", ""))
+            best["image"] = verified.get("image")
+            best["price_ref"] = verified.get("price")
+            best["rakuten_link"] = verified.get("url")
+            best["_verified"] = True
+            best["_source"] = "ai_rakuten_verified"
+
+        else:
+            print(
+                "[RAKUTEN VERIFY FAILED]",
+                best.get("name", ""),
+                flush=True
+            )
+
+            return None
 
     log_candidate_battle(step, sorted_candidates, best)
 
