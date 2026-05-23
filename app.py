@@ -6989,8 +6989,7 @@ def rakuten_test():
 
     params = {
         "applicationId": RAKUTEN_APP_ID,
-        "accessKey": RAKUTEN_ACCESS_KEY,
-        "keyword": "オバジ",
+        "keyword": "化粧水",
         "hits": 5,
         "format": "json",
         "formatVersion": 2,
