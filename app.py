@@ -51,7 +51,7 @@ from constants import (
     AI_INGREDIENT_MAP,
     CONCERN_MAP
 )
-def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
+def call_gemini_with_retry(client, model, contents, config=None, max_retries=6):
     import time
     from google.genai import errors
 
@@ -78,7 +78,8 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
                 "503" in msg or
                 "UNAVAILABLE" in msg or
                 "429" in msg or
-                "RESOURCE_EXHAUSTED" in msg
+                "RESOURCE_EXHAUSTED" in msg or
+                "429" in msg
             )
 
             if not retryable:
@@ -87,7 +88,7 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
             if attempt == max_retries - 1:
                 raise
 
-            wait_seconds = min(5, 2 * (attempt + 1))
+            wait_seconds = min(45, (attempt + 1) ** 2)
             time.sleep(wait_seconds)
 
         except Exception as e:
@@ -5639,7 +5640,8 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
             top_p=1,
             response_mime_type="application/json",
             response_schema=schema
-        )
+        ),
+        max_retries=6
     )
 
     raw_text = response.text.strip()
