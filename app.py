@@ -697,7 +697,7 @@ def apply_rakuten_image_and_link(step):
     product_name = step.get("product", "")
     category = step.get("category", "")
 
-    rakuten_item = fetch_rakuten_item(product_name=best.get("name", ""),brand=best.get("brand", ""))
+    rakuten_item = fetch_rakuten_item(product_name=step.get("name", ""),category=step.get("category", ""),brand=step.get("brand", ""))
     if not rakuten_item:
         print(f"[RAKUTEN IMAGE] no rakuten item: product={product_name}, category={category}")
         return step
