@@ -483,17 +483,10 @@ def build_rakuten_search_keywords(product_name, brand=""):
 
     keywords = []
 
-    # 1. 商品名そのまま
     if name:
         keywords.append(name)
 
-    # 2. brand が name の先頭に入っていたら除去
-    if brand and name.startswith(brand):
-        without_brand = name[len(brand):].strip()
-        if without_brand:
-            keywords.append(without_brand)
-
-    # 3. 記号ゆるめ
+    # 記号をゆるめる
     loose = (
         name
         .replace("・", " ")
@@ -508,17 +501,44 @@ def build_rakuten_search_keywords(product_name, brand=""):
     if loose and loose not in keywords:
         keywords.append(loose)
 
-    # 4. 長い商品名は前半2〜3語だけ
     parts = loose.split()
 
+    # 先頭語を落とすパターン
+    # 例: ファンケル マイルドクレンジング オイル
+    # → マイルドクレンジング オイル
+    if len(parts) >= 2:
+        drop_first = " ".join(parts[1:])
+        if drop_first not in keywords:
+            keywords.append(drop_first)
+
+    # 先頭2語を落とすパターン
+    # 例: 資生堂 エリクシール シュペリエル エンリッチド...
+    # → シュペリエル エンリッチド...
     if len(parts) >= 3:
-        keywords.append(" ".join(parts[:3]))
+        drop_first_two = " ".join(parts[2:])
+        if drop_first_two not in keywords:
+            keywords.append(drop_first_two)
+
+    # 最後に主要語だけ
+    if len(parts) >= 3:
+        key3 = " ".join(parts[:3])
+        if key3 not in keywords:
+            keywords.append(key3)
 
     if len(parts) >= 2:
-        keywords.append(" ".join(parts[:2]))
+        key2 = " ".join(parts[:2])
+        if key2 not in keywords:
+            keywords.append(key2)
 
-    # 重複除去
-    return list(dict.fromkeys([k for k in keywords if k]))[:5]
+    # brandが別で渡ってきた場合だけ、brand + nameも試す
+    if brand and name and not name.startswith(brand):
+        brand_name = f"{brand} {name}"
+        if brand_name not in keywords:
+            keywords.append(brand_name)
+
+    print("[RAKUTEN KEYWORDS]", keywords, flush=True)
+
+    return list(dict.fromkeys([k for k in keywords if k]))[:7]
 
 def score_rakuten_item(item, product_name, brand="", category=""):
     title = str(item.get("itemName", "") or "")
