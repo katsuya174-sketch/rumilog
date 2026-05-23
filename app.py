@@ -411,6 +411,27 @@ def build_rakuten_link(name):
         f"https://hb.afl.rakuten.co.jp/hgc/{RAKUTEN_AFFILIATE_ID}/"
         f"?pc=https://search.rakuten.co.jp/search/mall/{urllib.parse.quote(name)}"
     )
+def build_rakuten_keywords(product_name, brand=""):
+    name = clean_rakuten_keyword(product_name)
+    brand = clean_rakuten_keyword(brand)
+
+    keywords = []
+
+    if name:
+        keywords.append(name)
+
+    compact = name.replace("　", " ").replace("・", " ")
+    compact = " ".join(compact.split())
+
+    if compact and compact not in keywords:
+        keywords.append(compact)
+
+    parts = compact.split()
+
+    if len(parts) >= 2:
+        keywords.append(" ".join(parts[:2]))
+
+    return list(dict.fromkeys(keywords))[:3]
 
 def clean_rakuten_image_url(url):
     if not url:
@@ -454,7 +475,7 @@ def clean_rakuten_keyword(text):
 
     # 長すぎると楽天APIで弾かれやすいので短くする
     return text[:80]
-def fetch_rakuten_item(product_name, category=""):
+def fetch_rakuten_item(product_name, category="",brand=""):
     if not product_name:
         print("[RAKUTEN API] product_name empty")
         return None
@@ -676,7 +697,7 @@ def apply_rakuten_image_and_link(step):
     product_name = step.get("product", "")
     category = step.get("category", "")
 
-    rakuten_item = fetch_rakuten_item(product_name, category)
+    rakuten_item = fetch_rakuten_item(product_name=best.get("name", ""),brand=best.get("brand", ""))
     if not rakuten_item:
         print(f"[RAKUTEN IMAGE] no rakuten item: product={product_name}, category={category}")
         return step
@@ -3259,6 +3280,32 @@ def pick_best_db_fallback_product(step, products, user_data, budget_value, exclu
         )
 
     candidates.sort(key=sort_key, reverse=True)
+    for c in candidates:
+
+        if not isinstance(c, dict):
+            continue
+
+        brand = str(
+            c.get("brand", "")
+        ).strip()
+
+        name = str(
+            c.get("name", "")
+        ).strip()
+
+        if (
+            brand
+            and name
+            and name.startswith(brand)
+        ):
+            name = (
+                name[len(brand):]
+                .strip()
+            )
+
+        c["brand"] = brand
+        c["name"] = name
+
     return candidates[0]
 
 def assign_products_to_all_steps(data, products, user_data, budget_value):
