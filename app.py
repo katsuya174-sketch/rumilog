@@ -3317,7 +3317,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
                         step["price"] = safe_price(found_price)
                         step["estimated_price"] = safe_price(found_price)
 
-                step["image"] = image_path if image_path else get_product_image(category)
+                step["image"] = image_path if image_path else ""
                 step["match_score"] = best.get("_score", 0) or 0
                 step["base_score"] = best.get("_base_score", 0) or 0
                 step["improve_score"] = best.get("_improve_score", 0) or 0
@@ -4249,7 +4249,7 @@ def finalize_step_data(step, user_data):
             step["product_source"] = "missing"
         # image
         if not step.get("image"):
-            step["image"] = get_product_image(category)
+            step["image"] = ""
 
     # recommend_reason
     if not step.get("recommend_reason"):
@@ -5920,7 +5920,7 @@ def apply_db_product_to_step(step, product, user_data):
     if image_file:
         step["image"] = f"/static/images/products/{image_file}"
     else:
-        step["image"] = get_product_image(category)
+        step["image"] = ""
 
     step["affiliate_provider"] = product.get("affiliate_provider", "")
     step["affiliate_item_id"] = product.get("affiliate_item_id", "")
@@ -5952,7 +5952,7 @@ def apply_ai_candidate_to_step(step, user_data, ai_image_db=None):
     if ai_image_db:
         image_path, price = find_ai_candidate_data(best.get("name"), ai_image_db)
 
-    step["image"] = image_path if image_path else get_product_image(category)
+    step["image"] = image_path if image_path else ""
     step["price"] = price if price else best.get("price_ref", 0)
 
     step["match_score"] = 0
@@ -6012,7 +6012,7 @@ def apply_category_fallback_to_step(step, user_data):
     step["price"] = final_price
     step["estimated_price"] = final_price
     step["price_band"] = build_price_band(final_price) if final_price > 0 else "価格不明"
-    step["image"] = get_product_image(category)
+    step["image"] = ""
 
     if not step.get("recommend_reason"):
         if ingredient_focus:

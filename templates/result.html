@@ -455,7 +455,13 @@
 
             {% for step in data.get("morning", {}).get("steps", []) %}
             <div class="product-card-new">
-                <img src="{{ step.get('image', '') }}" alt="{{ step.get('product', '') }}" class="product-img-new">
+                {% if step.get('image') %}
+                    <img
+                        src="{{ step.get('image') }}"
+                        alt="{{ step.get('product', '') }}"
+                        class="product-img-new"
+                    >
+                {% endif %}
                 <div class="product-body">
                     <div class="product-source {{ step.get('product_source', '') }}">
                         {% if step.get("product_source", "") == "db" %}
@@ -567,7 +573,13 @@
 
             {% for step in data.get("night", {}).get("steps", []) %}
             <div class="product-card-new">
-                <img src="{{ step.get('image', '') }}" alt="{{ step.get('product', '') }}" class="product-img-new">
+              {% if step.get('image') %}
+                  <img
+                      src="{{ step.get('image') }}"
+                      alt="{{ step.get('product', '') }}"
+                      class="product-img-new"
+                  >
+              {% endif %}
                 <div class="product-body">
                     <div class="product-source {{ step.get('product_source', '') }}">
                         {% if step.get("product_source", "") == "db" %}
@@ -680,7 +692,13 @@
 
             {% for step in data.get("weekly_care", []) %}
             <div class="product-card-new">
-                <img src="{{ step.get('image', '') }}" alt="{{ step.get('product', '') }}" class="product-img-new">
+              {% if step.get('image') %}
+                  <img
+                      src="{{ step.get('image') }}"
+                      alt="{{ step.get('product', '') }}"
+                      class="product-img-new"
+                  >
+              {% endif %}
                 <div class="product-body">
                     <div class="product-source {{ step.get('product_source', '') }}">
                         {% if step.get("product_source", "") == "db" %}
