@@ -6987,7 +6987,7 @@ def deep_analysis(result_id):
 def rakuten_test():
 
     item = fetch_rakuten_item(
-        product_name="オバジ C10セラム",
+        product_name="オバジ",
         category="美容液",
         brand="オバジ"
     )
