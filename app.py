@@ -629,7 +629,7 @@ def fetch_rakuten_item(product_name, category="", brand=""):
         print("[RAKUTEN CACHE HIT]", cache_key, flush=True)
         return cache[cache_key]
 
-    endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20220601"
+    endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401"
 
     headers = {
         "Referer": "http://example.com/",
