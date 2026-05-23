@@ -586,6 +586,29 @@ def score_rakuten_item(item, product_name, brand="", category=""):
 
     return score
 
+RAKUTEN_CACHE_FILE = "rakuten_cache.json"
+
+
+def load_rakuten_cache():
+    try:
+        with open(RAKUTEN_CACHE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_rakuten_cache(cache):
+    try:
+        with open(RAKUTEN_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("[RAKUTEN CACHE SAVE ERROR]", e, flush=True)
+
+
+def make_rakuten_cache_key(product_name, brand=""):
+    return f"{brand}::{product_name}".strip()
+
 def fetch_rakuten_item(product_name, category="", brand=""):
     if not product_name:
         print("[RAKUTEN API] product_name empty", flush=True)
@@ -598,6 +621,13 @@ def fetch_rakuten_item(product_name, category="", brand=""):
     if not RAKUTEN_ACCESS_KEY:
         print("[RAKUTEN API] RAKUTEN_ACCESS_KEY is empty", flush=True)
         return None
+
+    cache = load_rakuten_cache()
+    cache_key = make_rakuten_cache_key(product_name, brand)
+
+    if cache_key in cache:
+        print("[RAKUTEN CACHE HIT]", cache_key, flush=True)
+        return cache[cache_key]
 
     endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20220601"
 
@@ -710,7 +740,10 @@ def fetch_rakuten_item(product_name, category="", brand=""):
                 "image": result["image"],
                 "rakuten_link_exists": result["rakuten_link"] != "#"
             }, flush=True)
+            cache[cache_key] = result
+            save_rakuten_cache(cache)
 
+            print("[RAKUTEN CACHE SAVED]", cache_key, flush=True)
             return result
 
         except requests.exceptions.RequestException as e:
@@ -2802,8 +2835,99 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         reverse=True
     )
 
-    top_candidates = sorted_candidates[:3]
-    best = dict(top_candidates[0])
+    top_candidates = sorted_candidates[:5]
+
+    verified_best = None
+
+    for candidate in top_candidates:
+
+        product_name = candidate.get("name", "")
+        brand = candidate.get("brand", "")
+        category = candidate.get("category", category)
+
+        print(
+            "[VERIFY START]",
+            product_name,
+            flush=True
+        )
+
+        rakuten = fetch_rakuten_item(
+            product_name=product_name,
+            category=category,
+            brand=brand
+        )
+
+        if not rakuten:
+
+            print(
+                "[VERIFY FAILED]",
+                product_name,
+                flush=True
+            )
+
+            continue
+
+        verified_best = dict(candidate)
+
+        verified_best["original_name"] = (
+            candidate.get("name")
+        )
+
+        verified_best["name"] = (
+            rakuten.get(
+                "name",
+                candidate.get("name")
+            )
+        )
+
+        verified_best["image"] = (
+            rakuten.get(
+                "image",
+                ""
+            )
+        )
+
+        verified_best["price_ref"] = (
+            rakuten.get(
+                "price",
+                candidate.get(
+                    "price_ref",
+                    0
+                )
+            )
+        )
+
+        verified_best["rakuten_link"] = (
+            rakuten.get(
+                "rakuten_link",
+                ""
+            )
+        )
+
+        verified_best["_verified"] = True
+
+        print(
+            "[VERIFY SUCCESS]",
+            verified_best["name"],
+            flush=True
+        )
+
+        break
+
+
+    if not verified_best:
+
+        print(
+            "[NO VERIFIED PRODUCT]",
+            category,
+            flush=True
+        )
+
+        return None
+
+
+    best = verified_best
+
     best["_top_candidates"] = [
         {
             "name": c.get("name", ""),
@@ -2816,9 +2940,11 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         for c in top_candidates
     ]
 
-    
-
-    log_candidate_battle(step, sorted_candidates, best)
+    log_candidate_battle(
+        step,
+        sorted_candidates,
+        best
+    )
 
     return best
 
@@ -3191,7 +3317,62 @@ def normalize_ai_candidates(step):
         seen.add(norm_name)
         normalized.append(item)
 
-    return normalized
+    filtered = []
+
+    for c in candidates:
+
+        if not isinstance(c, dict):
+            continue
+
+        confidence = float(
+            c.get("confidence", 0)
+            or 0
+        )
+
+        if confidence < 70:
+            print(
+                "[AI CONFIDENCE]",
+                confidence,
+                c.get("name"),
+                flush=True
+            )
+            continue
+
+        brand = (
+            str(
+                c.get("brand", "")
+            )
+            .strip()
+        )
+
+        name = (
+            str(
+                c.get("name", "")
+            )
+            .strip()
+        )
+
+        if (
+            brand
+            and name.startswith(brand)
+        ):
+            name = (
+                name[len(brand):]
+                .strip()
+            )
+
+        c["brand"] = brand
+        c["name"] = name
+
+        filtered.append(c)
+
+    print(
+        "[AI FILTERED]",
+        len(filtered),
+        flush=True
+    )
+
+    return filtered
 
 def enrich_steps_with_market_candidates(data, candidate_data):
     extra_steps = candidate_data.get("steps", [])
@@ -3408,7 +3589,58 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             if source in ["db", "ai+db", "fallback_db"]:
                 apply_db_product_to_step(step, best, user_data)
                 step["product_source"] = source if source else "db"
+                # 楽天検証済なら正式情報で上書き
+                if best.get("_verified"):
 
+                    step["product"] = (
+                        best.get(
+                            "name",
+                            step.get(
+                                "product",
+                                ""
+                            )
+                        )
+                    )
+
+                    step["image"] = (
+                        best.get(
+                            "image",
+                            ""
+                        )
+                    )
+
+                    step["price"] = (
+                        safe_price(
+                            best.get(
+                                "price_ref",
+                                0
+                            )
+                        )
+                    )
+
+                    step["estimated_price"] = (
+                        safe_price(
+                            best.get(
+                                "price_ref",
+                                0
+                            )
+                        )
+                    )
+
+                    step["rakuten_link"] = (
+                        best.get(
+                            "rakuten_link",
+                            ""
+                        )
+                    )
+
+                    step["verified"] = True
+
+                    print(
+                        "[STEP VERIFIED]",
+                        step["product"],
+                        flush=True
+                    )
             elif source == "ai":
                 # ここでは best を直接使って AI候補を適用
                 step["product"] = best.get("name", category)
@@ -3442,26 +3674,24 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
             return normalize_step_price_fields(step)
 
-        # 2) 通常選定でダメなら、DBからカテゴリ一致だけで最低1個強制取得
-        fallback_db = pick_best_db_fallback_product(
-            step=step,
-            products=products,
-            user_data=user_data,
-            budget_value=budget_value,
-            exclude_names=used_product_names
+        # 2) 楽天検証まで通る商品がない場合は、無理に商品を出さない
+        print(
+            "[NO PRODUCT SHOWN]",
+            section_name,
+            category,
+            flush=True
         )
 
-        if fallback_db:
-            used_product_names.add(fallback_db.get("name"))
-            step["top_candidates"] = []
-            apply_db_product_to_step(step, fallback_db, user_data)
-            step["product_source"] = "fallback"
-            return normalize_step_price_fields(step)
-
-        # 3) DBにも無いなら最後に汎用fallback
         step["top_candidates"] = []
-        apply_category_fallback_to_step(step, user_data)
-        step["product_source"] = "fallback"
+        step["product"] = ""
+        step["price"] = 0
+        step["estimated_price"] = 0
+        step["image"] = ""
+        step["rakuten_link"] = ""
+        step["amazon_link"] = ""
+        step["product_source"] = "none"
+        step["recommend_reason"] = "現在確認できる商品候補が見つかりませんでした。"
+
         return normalize_step_price_fields(step)
 
     # 朝・夜
@@ -4408,7 +4638,11 @@ def finalize_step_data(step, user_data):
     # product_candidates
     if not isinstance(step.get("product_candidates"), list):
         step["product_candidates"] = []
-
+    print(
+        "[AI FINAL CANDIDATES]",
+        step["product_candidates"],
+        flush=True
+    )
     # top_candidates
     if not isinstance(step.get("top_candidates"), list):
         step["top_candidates"] = []
@@ -5630,6 +5864,73 @@ JSONキーは英語。
 商品名は実在商品。
 
 必ず日本語出力。
+
+【商品出力ルール（厳守）】
+
+目的:
+商品名の創作禁止。
+
+出力商品は、
+現在日本国内で販売中であり、
+正式名称に高い確信がある商品のみ。
+
+出力形式:
+
+{
+ "brand":"",
+ "name":"",
+ "confidence":0
+}
+
+制約:
+
+brand:
+ブランド名のみ
+
+name:
+商品名のみ
+
+nameにブランド名を含めない
+
+禁止:
+・商品名の創作
+・旧名称
+・リニューアル前名称
+・略称
+・シリーズ名のみ
+・存在確認できない商品
+
+confidence:
+0〜100
+
+confidence < 70 は出力禁止
+
+正式名称に自信がない場合:
+null
+
+良い例:
+
+{
+ "brand":"オバジ",
+ "name":"C10セラム",
+ "confidence":95
+}
+
+悪い例:
+
+{
+ "brand":"ロート製薬",
+ "name":"ロート製薬 オバジC10セラム",
+ "confidence":80
+}
+
+悪い例:
+
+{
+ "brand":"無印良品",
+ "name":"エイジングケア薬用リンクルケア美容液",
+ "confidence":65
+}
 """
 
 
