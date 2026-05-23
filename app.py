@@ -433,6 +433,26 @@ def wait_for_rakuten_rate_limit():
         time.sleep(1.2 - elapsed)
 
     _last_rakuten_request_time = time.time()
+
+    import re
+
+def clean_rakuten_keyword(text):
+    if not text:
+        return ""
+
+    text = str(text)
+
+    # 改行・タブ除去
+    text = text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+
+    # 記号を少し整理
+    text = re.sub(r"[【】\[\]（）()「」『』|｜/／]", " ", text)
+
+    # 余分な空白を整理
+    text = " ".join(text.split())
+
+    # 長すぎると楽天APIで弾かれやすいので短くする
+    return text[:80]
 def fetch_rakuten_item(product_name, category=""):
     if not product_name:
         print("[RAKUTEN API] product_name empty")
@@ -446,14 +466,15 @@ def fetch_rakuten_item(product_name, category=""):
         print("[RAKUTEN API] RAKUTEN_ACCESS_KEY is empty")
         return None
 
-    keyword_parts = [str(product_name).strip()]
-    if category:
-        keyword_parts.append(str(category).strip())
+    keyword = clean_rakuten_keyword(product_name)
 
-    keyword = " ".join([p for p in keyword_parts if p])
+    if not keyword:
+        print("[RAKUTEN API] keyword empty after clean", flush=True)
+        return None
 
     endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20220601"
 
+    print("[RAKUTEN CLEAN KEYWORD]", keyword, flush=True)
     params = {
         "applicationId": RAKUTEN_APP_ID,
         "accessKey": RAKUTEN_ACCESS_KEY,
@@ -3312,7 +3333,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
             print("[FINAL PRODUCT]", step.get("product"), flush=True)
             print("[FINAL IMAGE]", step.get("image"), flush=True)
-            
+
             return normalize_step_price_fields(step)
 
         # 2) 通常選定でダメなら、DBからカテゴリ一致だけで最低1個強制取得
