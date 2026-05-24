@@ -2795,6 +2795,28 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         candidate_name = candidate.get("name", "")
         brand = candidate.get("brand", "")
 
+        # name自体がJSON文字列になっている場合の補正
+        if isinstance(candidate_name, str):
+            text = candidate_name.strip()
+
+            if text.startswith("{") and text.endswith("}"):
+                try:
+                    parsed = json.loads(text)
+
+                    if isinstance(parsed, dict):
+                        candidate["brand"] = parsed.get("brand", brand)
+                        candidate["name"] = parsed.get("name", "")
+                        candidate["confidence"] = parsed.get("confidence", candidate.get("confidence"))
+
+                        candidate_name = candidate.get("name", "")
+                        brand = candidate.get("brand", "")
+
+                except Exception as e:
+                    print("[CANDIDATE JSON PARSE ERROR]", e, flush=True)
+
+        candidate_name = str(candidate_name or "").strip()
+        brand = str(brand or "").strip()
+
         if not candidate_name:
             continue
 
@@ -3054,7 +3076,23 @@ def get_candidate_collection_schema():
                         "purpose": {"type": "string"},
                         "product_candidates": {
                             "type": "array",
-                            "items": {"type": "string"}
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "brand": {
+                                        "type": "string"
+                                    },
+                                    "name": {
+                                        "type": "string"
+                                    },
+                                    "confidence": {
+                                        "type": "number"
+                                    }
+                                },
+                                "required": [
+                                    "name"
+                                ]
+                            }
                         }
                     },
                     "required": [
@@ -3275,7 +3313,7 @@ def normalize_ai_candidates(step):
         normalized.append(item)
 
     print("[AI NORMALIZED]", normalized, flush=True)
-    print("[RAW PRODUCT CANDIDATES]", raw_candidates, flush=True)
+    
     return normalized
 
 def enrich_steps_with_market_candidates(data, candidate_data):
