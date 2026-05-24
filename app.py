@@ -3285,17 +3285,44 @@ def normalize_ai_candidates(step):
 
     for candidate in raw_candidates:
         if isinstance(candidate, dict):
-            name = str(candidate.get("name", "")).strip()
+            raw_name = candidate.get("name", "")
+
+            if isinstance(raw_name, dict):
+                name = str(raw_name.get("name", "")).strip()
+            else:
+                name = str(raw_name).strip()
+
+            brand = str(candidate.get("brand", "") or "").strip()
+
+            if brand and name.startswith(brand):
+                name = name[len(brand):].strip()
+
             if not name:
                 continue
 
+            confidence_raw = candidate.get("confidence", None)
+
+            if confidence_raw is not None:
+                try:
+                    confidence = float(confidence_raw or 0)
+                except Exception:
+                    confidence = 0
+
+                if confidence < 70:
+                    print("[AI CONFIDENCE REJECTED]", confidence, name, flush=True)
+                    continue
+            else:
+                confidence = None
+
             item = {
+                "brand": brand,
                 "name": name,
-                "price_ref": safe_price(candidate.get("price_ref", 0)),
+                "confidence": confidence,
+                "price_ref": safe_price(candidate.get("price_ref", step.get("estimated_price", 0))),
                 "active_ingredients": candidate.get("active_ingredients", []) if isinstance(candidate.get("active_ingredients", []), list) else [],
                 "support_ingredients": candidate.get("support_ingredients", []) if isinstance(candidate.get("support_ingredients", []), list) else [],
                 "signature_ingredients": candidate.get("signature_ingredients", []) if isinstance(candidate.get("signature_ingredients", []), list) else [],
-                "concerns": candidate.get("concerns", []) if isinstance(candidate.get("concerns", []), list) else [],
+                "concerns": candidate.get("concerns", []) if isinstance(candidate.get("concerns", []), list) else purpose_to_concern_tags(step.get("purpose", "")),
                 "skin_types": candidate.get("skin_types", []) if isinstance(candidate.get("skin_types", []), list) else [],
                 "sensitive_ok": candidate.get("sensitive_ok", "unknown"),
                 "retinol_level": int(candidate.get("retinol_level", 0) or 0),
@@ -3304,7 +3331,7 @@ def normalize_ai_candidates(step):
                 "technology": candidate.get("technology", []) if isinstance(candidate.get("technology", []), list) else [],
                 "texture": str(candidate.get("texture", "") or ""),
                 "contraindications": candidate.get("contraindications", []) if isinstance(candidate.get("contraindications", []), list) else [],
-                "reason": str(candidate.get("reason", "") or "")
+                "reason": str(candidate.get("reason", "") or step.get("selection_reason", "") or "")
             }
 
         else:
@@ -3313,7 +3340,9 @@ def normalize_ai_candidates(step):
                 continue
 
             item = {
+                "brand": "",
                 "name": name,
+                "confidence": None,
                 "price_ref": safe_price(step.get("estimated_price", 0)),
                 "active_ingredients": [],
                 "support_ingredients": [],
@@ -3336,63 +3365,10 @@ def normalize_ai_candidates(step):
 
         seen.add(norm_name)
         normalized.append(item)
-    candidate_list = step.get("product_candidates",[])
-    filtered = []
 
-    for c in candidate_list:
+    print("[AI NORMALIZED]", len(normalized), flush=True)
 
-        if not isinstance(c, dict):
-            continue
-
-        confidence = float(
-            c.get("confidence", 0)
-            or 0
-        )
-
-        if confidence < 70:
-            print(
-                "[AI CONFIDENCE]",
-                confidence,
-                c.get("name"),
-                flush=True
-            )
-            continue
-
-        brand = (
-            str(
-                c.get("brand", "")
-            )
-            .strip()
-        )
-
-        name = (
-            str(
-                c.get("name", "")
-            )
-            .strip()
-        )
-
-        if (
-            brand
-            and name.startswith(brand)
-        ):
-            name = (
-                name[len(brand):]
-                .strip()
-            )
-
-        c["brand"] = brand
-        c["name"] = name
-
-        filtered.append(c)
-
-    print(
-        "[AI FILTERED]",
-        len(filtered),
-        flush=True
-    )
-
-    return filtered
+    return normalized
 
 def enrich_steps_with_market_candidates(data, candidate_data):
     extra_steps = candidate_data.get("steps", [])
@@ -3568,10 +3544,30 @@ def pick_best_db_fallback_product(step, products, user_data, budget_value, exclu
     return filtered[0]
 
 def assign_products_to_all_steps(data, products, user_data, budget_value):
-    print("MARKET VERSION assign_products_to_all_steps")
+    print("MARKET VERSION assign_products_to_all_steps", flush=True)
 
     ai_image_db = load_ai_product_images()
     improvement_plan = data.get("improvement_plan", {})
+
+    def apply_verified_rakuten_to_step(step, best):
+        if not isinstance(best, dict):
+            return step
+
+        if best.get("name"):
+            step["product"] = best["name"]
+
+        if best.get("image"):
+            step["image"] = best["image"]
+
+        if best.get("rakuten_link"):
+            step["rakuten_link"] = best["rakuten_link"]
+
+        if best.get("price_ref"):
+            price = safe_price(best.get("price_ref", 0))
+            step["price"] = price
+            step["estimated_price"] = price
+
+        return step
 
     def assign_one_step(step, used_product_names, section_name):
         if not isinstance(step, dict):
@@ -3589,148 +3585,106 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             exclude_names=used_product_names,
         )
 
-        print("====== MARKET BATTLE ======")
-        print("section:", section_name)
-        print("category:", category)
-        print("ingredient_focus:", step.get("ingredient_focus", ""))
-        print("candidates:", step.get("product_candidates", []))
-        print("best:", best.get("name") if best else "なし")
-        print("score:", best.get("_score") if best else "なし")
-        print("source:", best.get("_source") if best else "なし")
-        print("===========================")
+        print("====== MARKET BATTLE ======", flush=True)
+        print("section:", section_name, flush=True)
+        print("category:", category, flush=True)
+        print("ingredient_focus:", step.get("ingredient_focus", ""), flush=True)
+        print("candidates:", step.get("product_candidates", []), flush=True)
+        print("best:", best.get("name") if best else "なし", flush=True)
+        print("score:", best.get("_score") if best else "なし", flush=True)
+        print("source:", best.get("_source") if best else "なし", flush=True)
+        print("===========================", flush=True)
 
-        # 1) 通常選定で勝者がいればそれを採用
-        if best:
-            used_product_names.add(best.get("name"))
+        if not best:
+            print("[NO PRODUCT SHOWN]", section_name, category, flush=True)
 
-            step["top_candidates"] = best.get("_top_candidates", [])
-            source = best.get("_source", "")
+            step["top_candidates"] = []
+            step["product"] = ""
+            step["price"] = 0
+            step["estimated_price"] = 0
+            step["image"] = ""
+            step["rakuten_link"] = ""
+            step["amazon_link"] = ""
+            step["product_source"] = "none"
+            step["recommend_reason"] = "現在確認できる商品候補が見つかりませんでした。"
 
-            if source in ["db", "ai+db", "fallback_db"]:
-                apply_db_product_to_step(step, best, user_data)
-                step["product_source"] = source if source else "db"
-                # 楽天検証済なら正式情報で上書き
-                if best.get("_verified"):
+            return normalize_step_price_fields(step)
 
-                    step["product"] = (
-                        best.get(
-                            "name",
-                            step.get(
-                                "product",
-                                ""
-                            )
-                        )
-                    )
+        product_name = best.get("name")
+        if product_name:
+            used_product_names.add(product_name)
 
-                    if best.get("image"):
+        step["top_candidates"] = best.get("_top_candidates", [])
+        source = best.get("_source", "")
 
-                        step["image"] = (
-                            best["image"]
-                        )
+        if source in ["db", "ai+db", "fallback_db"]:
+            apply_db_product_to_step(step, best, user_data)
+            step["product_source"] = source or "db"
 
-                    
-                    if best.get("price_ref"):
+        elif source in ["ai", "ai_virtual", "ai_rakuten_verified"]:
+            step["product"] = best.get("name", category)
+            step["price"] = safe_price(best.get("price_ref", 0))
+            step["estimated_price"] = safe_price(best.get("price_ref", 0))
 
-                        step["price"] = (
-                            safe_price(
-                                best["price_ref"]
-                            )
-                        )
+            image_path = None
+            if ai_image_db:
+                image_path, found_price = find_ai_candidate_data(
+                    best.get("name", ""),
+                    ai_image_db
+                )
+                if found_price and step["price"] <= 0:
+                    step["price"] = safe_price(found_price)
+                    step["estimated_price"] = safe_price(found_price)
 
-                        step["estimated_price"] = (
-                            safe_price(
-                                best["price_ref"]
-                            )
-                        )
+            step["image"] = image_path or ""
+            step["match_score"] = best.get("_score", 0) or 0
+            step["base_score"] = best.get("_base_score", 0) or 0
+            step["improve_score"] = best.get("_improve_score", 0) or 0
+            step["recommend_reason"] = (
+                best.get("reason")
+                or step.get("selection_reason")
+                or build_ai_reason(step, user_data)
+            )
+            step["product_source"] = source or "ai"
 
-                    if best.get("rakuten_link"):
+            impact = calculate_step_impact(step, best)
+            step["impact_scores"] = impact
+            step["top_impacts"] = format_top_impacts(impact)
 
-                      step["rakuten_link"] = (
-                          best["rakuten_link"]
-                      )
+        else:
+            apply_db_product_to_step(step, best, user_data)
+            step["product_source"] = source or "db"
 
-                    
-            elif source in ["ai", "ai_virtual", "ai_rakuten_verified"]:
-                # ここでは best を直接使って AI候補を適用
-                step["product"] = best.get("name", category)
-                step["price"] = safe_price(best.get("price_ref", 0))
-                step["estimated_price"] = safe_price(best.get("price_ref", 0))
-
-                image_path = None
-                if ai_image_db:
-                    image_path, found_price = find_ai_candidate_data(best.get("name", ""), ai_image_db)
-                    if found_price and step["price"] <= 0:
-                        step["price"] = safe_price(found_price)
-                        step["estimated_price"] = safe_price(found_price)
-
-                step["image"] = image_path if image_path else ""
-                step["match_score"] = best.get("_score", 0) or 0
-                step["base_score"] = best.get("_base_score", 0) or 0
-                step["improve_score"] = best.get("_improve_score", 0) or 0
-                step["recommend_reason"] = best.get("reason") or step.get("selection_reason") or build_ai_reason(step, user_data)
-                step["product_source"] = "ai"
-
-                impact = calculate_step_impact(step, best)
-                step["impact_scores"] = impact
-                step["top_impacts"] = format_top_impacts(impact)
-
-            else:
-                apply_db_product_to_step(step, best, user_data)
-                step["product_source"] = source if source else "db"
-
-            print("[FINAL PRODUCT]", step.get("product"), flush=True)
-            print("[FINAL IMAGE]", step.get("image"), flush=True)
-
-            step = normalize_step_price_fields(step)
-
-            step = apply_rakuten_image_and_link(step)
-
-            return step
-
-        # 2) 楽天検証まで通る商品がない場合は、無理に商品を出さない
-        print(
-            "[NO PRODUCT SHOWN]",
-            section_name,
-            category,
-            flush=True
-        )
-
-        step["top_candidates"] = []
-        step["product"] = ""
-        step["price"] = 0
-        step["estimated_price"] = 0
-        step["image"] = ""
-        step["rakuten_link"] = ""
-        step["amazon_link"] = ""
-        step["product_source"] = "none"
-        step["recommend_reason"] = "現在確認できる商品候補が見つかりませんでした。"
-
+        step = apply_verified_rakuten_to_step(step, best)
         step = normalize_step_price_fields(step)
 
-        step = apply_rakuten_image_and_link(step)
+        print("[FINAL PRODUCT]", step.get("product"), flush=True)
+        print("[FINAL IMAGE]", step.get("image"), flush=True)
 
         return step
 
-    # 朝・夜
     for section in ["morning", "night"]:
         used_product_names = set()
-
         steps = data.get(section, {}).get("steps", [])
+
         if not isinstance(steps, list):
             continue
 
         for idx, step in enumerate(steps):
             steps[idx] = assign_one_step(step, used_product_names, section)
 
-    # 週ケア
     used_weekly_names = set()
     weekly_steps = data.get("weekly_care", [])
+
     if isinstance(weekly_steps, list):
         for idx, step in enumerate(weekly_steps):
-            weekly_steps[idx] = assign_one_step(step, used_weekly_names, "weekly_care")
+            weekly_steps[idx] = assign_one_step(
+                step,
+                used_weekly_names,
+                "weekly_care"
+            )
 
     return data
-
 def build_recommend_reason(product, step, user_data):
     reasons = []
 
