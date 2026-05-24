@@ -2829,7 +2829,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             continue
 
         # DBにないAI候補は仮想商品として評価
-        virtual = build_virtual_product_from_ai_candidate(candidate, step)
+        virtual = build_virtual_product_from_ai_candidate(step, candidates)
 
         # brand/nameを明示的に保持
         virtual["brand"] = brand
