@@ -900,6 +900,7 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
     if "affiliate_links" in step and isinstance(step["affiliate_links"], dict):
         step["amazon_link"] = step["affiliate_links"].get("amazon", "#")
         step["rakuten_link"] = step["affiliate_links"].get("rakuten", "#")
+        print("[BEFORE APPLY RAKUTEN]", step.get("product"), flush=True)
         step = apply_rakuten_image_and_link(step)
         return step
 
