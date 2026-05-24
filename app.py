@@ -6991,18 +6991,7 @@ def deep_analysis(result_id):
         "deep_analysis.html",
         data=target
     )
-@app.route("/rakuten-test")
-def rakuten_test():
 
-    item = fetch_rakuten_item(
-        product_name="オバジ C10セラム",
-        category="美容液",
-        brand="オバジ"
-    )
-
-    return {
-        "item": item
-    }
 # ==========================================
 # Flaskサーバー起動
 # ==========================================
