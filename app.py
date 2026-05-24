@@ -3649,7 +3649,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
                       )
 
                     
-            elif source == "ai":
+            elif source in ["ai", "ai_virtual", "ai_rakuten_verified"]:
                 # ここでは best を直接使って AI候補を適用
                 step["product"] = best.get("name", category)
                 step["price"] = safe_price(best.get("price_ref", 0))
