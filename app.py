@@ -2792,7 +2792,11 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
     # AI候補を全件候補化
     for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+
         candidate_name = candidate.get("name", "")
+        brand = candidate.get("brand", "")
 
         if not candidate_name:
             continue
@@ -2808,6 +2812,10 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         # AI候補名がDBにあるなら、DB詳細を使って昇格
         if db_match:
             product = dict(db_match)
+
+            # AI側brandを保持
+            if brand and not product.get("brand"):
+                product["brand"] = brand
 
             base_score = score_product(product, step, user_data, budget_value)
             improve_score = score_improvement(product, improvement_plan or {})
@@ -2825,11 +2833,17 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
         # DBにないAI候補は仮想商品として評価
         virtual = build_virtual_product_from_ai_candidate(candidate, step)
-        if is_wrong_cleanser_candidate(virtual,step):
+
+        # brand/nameを明示的に保持
+        virtual["brand"] = brand
+        virtual["name"] = candidate_name
+
+        if is_wrong_cleanser_candidate(virtual, step):
             continue
 
         if is_non_cosmetic(virtual):
             continue
+
         base_score = score_product(virtual, step, user_data, budget_value)
         improve_score = score_improvement(virtual, improvement_plan or {})
 
@@ -2842,7 +2856,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         virtual["_source"] = "ai_virtual"
 
         all_candidates.append(virtual)
-        
+
     if not all_candidates:
         return None
 
@@ -2857,95 +2871,45 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         ),
         reverse=True
     )
-  
-    top_candidates = sorted_candidates[:5]
 
+    top_candidates = sorted_candidates[:3]
     verified_best = None
 
     for candidate in top_candidates:
-        product_name = candidate.get("name", "")
-        brand = candidate.get("brand", "")
-        category = candidate.get("category", category)
-        print(
-            "[VERIFY START]",
-            product_name,
-            flush=True
-        )
+        candidate_name = str(candidate.get("name", "") or "").strip()
+        candidate_brand = str(candidate.get("brand", "") or "").strip()
+        candidate_category = candidate.get("category") or category
+
+        if not candidate_name:
+            continue
+
+        print("[VERIFY START]", candidate_brand, candidate_name, flush=True)
 
         rakuten = fetch_rakuten_item(
-            product_name=product_name,
-            category=category,
-            brand=brand
+            product_name=candidate_name,
+            category=candidate_category,
+            brand=candidate_brand
         )
 
         if not rakuten:
-
-            print(
-                "[VERIFY FAILED]",
-                product_name,
-                flush=True
-            )
-
+            print("[VERIFY FAILED]", candidate_brand, candidate_name, flush=True)
             continue
 
         verified_best = dict(candidate)
-
-        verified_best["original_name"] = (
-            candidate.get("name")
-        )
-
-        verified_best["name"] = (
-            rakuten.get(
-                "name",
-                candidate.get("name")
-            )
-        )
-
-        verified_best["image"] = (
-            rakuten.get(
-                "image",
-                ""
-            )
-        )
-
-        verified_best["price_ref"] = (
-            rakuten.get(
-                "price",
-                candidate.get(
-                    "price_ref",
-                    0
-                )
-            )
-        )
-
-        verified_best["rakuten_link"] = (
-            rakuten.get(
-                "rakuten_link",
-                ""
-            )
-        )
-
+        verified_best["original_name"] = candidate_name
+        verified_best["name"] = rakuten.get("name", candidate_name)
+        verified_best["image"] = rakuten.get("image", "")
+        verified_best["price_ref"] = rakuten.get("price", candidate.get("price_ref", 0))
+        verified_best["rakuten_link"] = rakuten.get("rakuten_link", "")
         verified_best["_verified"] = True
+        verified_best["_source"] = candidate.get("_source", "candidate") + "_rakuten_verified"
 
-        print(
-            "[VERIFY SUCCESS]",
-            verified_best["name"],
-            flush=True
-        )
-
+        print("[VERIFY SUCCESS]", verified_best["name"], flush=True)
         break
 
-
     if not verified_best:
-
-        print(
-            "[NO VERIFIED PRODUCT]",
-            category,
-            flush=True
-        )
-
+        print("[NO VERIFIED PRODUCT]", category, flush=True)
         return None
-
 
     best = verified_best
 
@@ -2966,6 +2930,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         sorted_candidates,
         best
     )
+
     return best
    
 
