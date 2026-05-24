@@ -4424,30 +4424,16 @@ def load_results():
         data = json.loads(raw)
 
         if not isinstance(data, list):
-            print("===== RESULTS LOAD WARNING =====")
-            print("results.json is not a list. reset to []")
-            print("================================")
-            return []
+            raise ValueError("results.json is not a list")
 
-        cleaned = []
-        for item in data:
-            if isinstance(item, dict):
-                cleaned.append(item)
-
-        return cleaned
-
-    except (json.JSONDecodeError, OSError) as e:
-        print("===== RESULTS LOAD ERROR =====")
-        print(e)
-        print("results.json is broken or unreadable. return []")
-        print("================================")
-        return []
+        return [
+            item for item in data
+            if isinstance(item, dict)
+        ]
 
     except Exception as e:
-        print("===== RESULTS UNKNOWN LOAD ERROR =====")
-        print(e)
-        print("======================================")
-        return []
+        print("[RESULTS LOAD ERROR]", e, flush=True)
+        raise
 
 # 履歴保存
 def save_results(data):
