@@ -2857,17 +2857,17 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         ),
         reverse=True
     )
-
+    print("[VERIFY BLOCK REACHED]", step.get("category", ""), flush=True)
+    print("[SORTED CANDIDATES COUNT]", len(sorted_candidates), flush=True)
     top_candidates = sorted_candidates[:5]
 
     verified_best = None
 
     for candidate in top_candidates:
-
         product_name = candidate.get("name", "")
         brand = candidate.get("brand", "")
         category = candidate.get("category", category)
-
+        print("[VERIFY LOOP CANDIDATE]", candidate.get("name", ""), flush=True)
         print(
             "[VERIFY START]",
             product_name,
