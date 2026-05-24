@@ -465,38 +465,26 @@
                 data-product="{{ step.get('product', '') }}"
                 data-category="{{ step.get('category', '') }}"
             >
-              {% if step.get("image") %}
+            <img
+                src="{{ step.get('image', '') }}"
+                alt="{{ step.get('product', '') }}"
+                class="product-img-new"
+                loading="lazy"
+                referrerpolicy="no-referrer"
+                {% if not step.get("image") %}
+                style="display:none;"
+                {% endif %}
+            >
 
-              <img
-                  src="{{ step.get('image') }}"
-                  alt="{{ step.get('product', '') }}"
-                  class="product-img-new"
-                  loading="lazy"
-                  referrerpolicy="no-referrer"
-                  onerror="
-                      console.log(
-                          'IMG ERROR',
-                          this.src
-                      );
-                      this.style.display='none';
-                  "
-              >
-              
-              {% else %}
-              
-              <div
-              class="product-img-new"
-              style="
-              display:flex;
-              align-items:center;
-              justify-content:center;
-              color:#999;
-              "
-              >
-              画像なし
-              </div>
-              
-              {% endif %}
+            <div
+            class="product-img-empty"
+
+            {% if step.get("image") %}
+            style="display:none;"
+            {% endif %}
+            >
+            画像読み込み中…
+            </div>
                 <div class="product-body">
                     <div class="product-source {{ step.get('product_source', '') }}">
                         {% if step.get("product_source", "") == "db" %}
@@ -612,37 +600,26 @@
                 data-product="{{ step.get('product', '') }}"
                 data-category="{{ step.get('category', '') }}"
             >
-              {% if step.get("image") %}
-
-              <img
-                  src="{{ step.get('image') }}"
-                  alt="{{ step.get('product', '') }}"
-                  class="product-img-new"
-                  loading="lazy"
-                  referrerpolicy="no-referrer"
-                  onerror="
-                      console.log(
-                          'IMG ERROR',
-                          this.src
-                      );
-                      this.style.display='none';
-                  "
-              >
-              
-              {% else %}
-              
-              <div
-              class="product-img-new"
-              style="
-              display:flex;
-              align-items:center;
-              justify-content:center;
-              color:#999;
-              "
-              >
-              画像なし
-              </div>
-              {% endif %}
+            <img
+                src="{{ step.get('image', '') }}"
+                alt="{{ step.get('product', '') }}"
+                class="product-img-new"
+                loading="lazy"
+                referrerpolicy="no-referrer"
+                {% if not step.get("image") %}
+                style="display:none;"
+                {% endif %}
+            >
+            
+            <div
+            class="product-img-empty"
+            
+            {% if step.get("image") %}
+            style="display:none;"
+            {% endif %}
+            >
+            画像読み込み中…
+            </div>
                 <div class="product-body">
                     <div class="product-source {{ step.get('product_source', '') }}">
                         {% if step.get("product_source", "") == "db" %}
@@ -759,38 +736,26 @@
                 data-product="{{ step.get('product', '') }}"
                 data-category="{{ step.get('category', '') }}"
             >
-              {% if step.get("image") %}
-
-              <img
-                  src="{{ step.get('image') }}"
-                  alt="{{ step.get('product', '') }}"
-                  class="product-img-new"
-                  loading="lazy"
-                  referrerpolicy="no-referrer"
-                  onerror="
-                      console.log(
-                          'IMG ERROR',
-                          this.src
-                      );
-                      this.style.display='none';
-                  "
-              >
-
-              {% else %}
-
-              <div
-              class="product-img-new"
-              style="
-              display:flex;
-              align-items:center;
-              justify-content:center;
-              color:#999;
-              "
-              >
-              画像なし
-              </div>
-
-              {% endif %}
+            <img
+                src="{{ step.get('image', '') }}"
+                alt="{{ step.get('product', '') }}"
+                class="product-img-new"
+                loading="lazy"
+                referrerpolicy="no-referrer"
+                {% if not step.get("image") %}
+                style="display:none;"
+                {% endif %}
+            >
+            
+            <div
+            class="product-img-empty"
+            
+            {% if step.get("image") %}
+            style="display:none;"
+            {% endif %}
+            >
+            画像読み込み中…
+            </div>
                 <div class="product-body">
                     <div class="product-source {{ step.get('product_source', '') }}">
                         {% if step.get("product_source", "") == "db" %}
@@ -1013,9 +978,22 @@
             if (!data.ok) return;
 
             const img = card.querySelector(".product-img-new");
+            const empty = card.querySelector(".product-img-empty");
+
             if (img && data.image) {
+
                 img.src = data.image;
-                img.style.display = "block";
+
+                img.onload = () => {
+
+                    img.style.display = "block";
+
+                    if (empty) {
+                        empty.style.display = "none";
+                    };
+
+                };
+
             }
 
             const priceEl = card.querySelector(".product-price");
