@@ -2758,7 +2758,6 @@ def is_discontinued_or_suspicious_product(product):
     return False
 
 def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None):
-    print("[SELECT START]", flush=True)
     if exclude_names is None:
         exclude_names = set()
 
@@ -2843,7 +2842,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         virtual["_source"] = "ai_virtual"
 
         all_candidates.append(virtual)
-
+        print("[ALL CANDIDATES COUNT]", len(all_candidates), flush=True)
     if not all_candidates:
         return None
 
