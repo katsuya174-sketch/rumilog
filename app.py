@@ -2763,7 +2763,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
     category = step.get("category", "")
     candidates = normalize_ai_candidates(step)
-
+    print("[AI CANDIDATES AFTER NORMALIZE]", candidates, flush=True)
     all_candidates = []
 
     # DB商品を全件候補化
@@ -2842,7 +2842,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         virtual["_source"] = "ai_virtual"
 
         all_candidates.append(virtual)
-        print("[ALL CANDIDATES COUNT]", len(all_candidates), flush=True)
+        
     if not all_candidates:
         return None
 
@@ -7003,7 +7003,18 @@ def deep_analysis(result_id):
         "deep_analysis.html",
         data=target
     )
+@app.route("/rakuten-test")
+def rakuten_test():
 
+    item = fetch_rakuten_item(
+        product_name="オバジ C10セラム",
+        category="美容液",
+        brand="オバジ"
+    )
+
+    return {
+        "item": item
+    }
 # ==========================================
 # Flaskサーバー起動
 # ==========================================
