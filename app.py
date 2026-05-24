@@ -6993,6 +6993,7 @@ def rakuten_test():
         "keyword": "化粧水",
         "hits": 5,
         "format": "json",
+        "formatVersion": 2,
         "imageFlag": 1,
     }
     headers = {
@@ -7002,12 +7003,11 @@ def rakuten_test():
     }
     
 
-    res = requests.get(endpoint, params=params, timeout=10)
+    r = requests.get(endpoint, params=params,headers=headers,timeout=10)
 
     return {
-        "status": res.status_code,
-        "url": res.url,
-        "body": res.text[:3000],
+        "status": r.status_code,
+        "json": r.json()
     }
 # ==========================================
 # Flaskサーバー起動
