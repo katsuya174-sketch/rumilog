@@ -622,19 +622,12 @@ def fetch_rakuten_item(product_name, category="", brand=""):
         print("[RAKUTEN API] RAKUTEN_ACCESS_KEY is empty", flush=True)
         return None
 
-    cache = load_rakuten_cache()
-    cache_key = make_rakuten_cache_key(product_name, brand)
-
-    if cache_key in cache:
-        print("[RAKUTEN CACHE HIT]", cache_key, flush=True)
-        return cache[cache_key]
-
     endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401"
 
     headers = {
-        "Referer": "http://example.com/",
-        "Origin": "http://example.com/",
-        "User-Agent": "Mozilla/5.0"
+        "Referer": "https://rumilog.onrender.com",
+        "Origin": "https://rumilog.onrender.com",
+        "User-Agent": "Mozilla/5.0",
     }
 
     keywords = build_rakuten_search_keywords(product_name, brand)
@@ -672,9 +665,24 @@ def fetch_rakuten_item(product_name, category="", brand=""):
                 continue
 
             payload = res.json()
-            items = payload.get("items", [])
 
-            print(f"[RAKUTEN API ITEMS] count={len(items)}", flush=True)
+            items = (
+                payload.get("items")
+                or payload.get("Items")
+                or []
+            )
+
+            print(
+                "[RAKUTEN PAYLOAD KEYS]",
+                list(payload.keys()),
+                flush=True
+            )
+
+            print(
+                "[RAKUTEN API ITEMS]",
+                len(items),
+                flush=True
+            )
 
             if not items:
                 continue
@@ -682,7 +690,7 @@ def fetch_rakuten_item(product_name, category="", brand=""):
             scored_items = sorted(
                 items,
                 key=lambda item: score_rakuten_item(
-                    item,
+                    item.get("Item", item) if isinstance(item, dict) else item,
                     product_name=product_name,
                     brand=brand,
                     category=category
@@ -691,6 +699,9 @@ def fetch_rakuten_item(product_name, category="", brand=""):
             )
 
             best = scored_items[0]
+
+            if isinstance(best, dict) and "Item" in best:
+                best = best["Item"]
 
             best_score = score_rakuten_item(
                 best,
@@ -716,22 +727,37 @@ def fetch_rakuten_item(product_name, category="", brand=""):
                 continue
 
             image_url = ""
-            medium_images = best.get("mediumImageUrls", [])
 
-            if isinstance(medium_images, list) and medium_images:
-                first_image = medium_images[0]
+            medium_images = (
+                best.get("mediumImageUrls")
+                or []
+            )
 
-                if isinstance(first_image, str):
-                    image_url = first_image
+            if medium_images:
+                first = medium_images[0]
 
-                elif isinstance(first_image, dict):
-                    image_url = first_image.get("imageUrl", "")
+                if isinstance(first, dict):
+                    image_url = (
+                        first.get("imageUrl", "")
+                    )
+
+                elif isinstance(first, str):
+                    image_url = first
+
+            image_url = (
+                str(image_url)
+                .replace("http://", "https://")
+            )
 
             result = {
                 "name": best.get("itemName", ""),
                 "price": best.get("itemPrice", 0),
-                "rakuten_link": best.get("affiliateUrl") or best.get("itemUrl") or "#",
-                "image": clean_rakuten_image_url(image_url),
+                "rakuten_link": (
+                    best.get("affiliateUrl")
+                    or best.get("itemUrl")
+                    or "#"
+                ),
+                "image": image_url,
             }
 
             print("[RAKUTEN API BEST ITEM]", {
@@ -740,10 +766,7 @@ def fetch_rakuten_item(product_name, category="", brand=""):
                 "image": result["image"],
                 "rakuten_link_exists": result["rakuten_link"] != "#"
             }, flush=True)
-            cache[cache_key] = result
-            save_rakuten_cache(cache)
 
-            print("[RAKUTEN CACHE SAVED]", cache_key, flush=True)
             return result
 
         except requests.exceptions.RequestException as e:
@@ -6983,32 +7006,7 @@ def deep_analysis(result_id):
         "deep_analysis.html",
         data=target
     )
-@app.route("/rakuten-test")
-def rakuten_test():
-    endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401"
 
-    params = {
-        "applicationId": RAKUTEN_APP_ID,
-        "accessKey": RAKUTEN_ACCESS_KEY,
-        "keyword": "化粧水",
-        "hits": 5,
-        "format": "json",
-        "formatVersion": 2,
-        "imageFlag": 1,
-    }
-    headers = {
-        "Referer":"https://rumilog.onrender.com",
-        "Origin": "https://rumilog.onrender.com",
-        "User-Agent": "Mozilla/5.0"
-    }
-    
-
-    r = requests.get(endpoint, params=params,headers=headers,timeout=10)
-
-    return {
-        "status": r.status_code,
-        "json": r.json()
-    }
 # ==========================================
 # Flaskサーバー起動
 # ==========================================
