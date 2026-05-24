@@ -901,7 +901,6 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
         step["amazon_link"] = step["affiliate_links"].get("amazon", "#")
         step["rakuten_link"] = step["affiliate_links"].get("rakuten", "#")
         print("[BEFORE APPLY RAKUTEN]", step.get("product"), flush=True)
-        step = apply_rakuten_image_and_link(step)
         return step
 
     # 2. AI候補専用DBで照合
@@ -909,15 +908,13 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
     if matched_links:
         step["amazon_link"] = matched_links.get("amazon", "#")
         step["rakuten_link"] = matched_links.get("rakuten", "#")
-        step = apply_rakuten_image_and_link(step)
         return step
 
     # 3. 見つからなければ検索リンク
     step["amazon_link"] = build_amazon_link(product_name)
     step["rakuten_link"] = build_rakuten_link(product_name)
 
-    # 4. 画像だけは楽天APIから補完
-    step = apply_rakuten_image_and_link(step)
+    
 
     return step
 
@@ -2873,45 +2870,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     )
 
     top_candidates = sorted_candidates[:3]
-    verified_best = None
 
-    for candidate in top_candidates:
-        candidate_name = str(candidate.get("name", "") or "").strip()
-        candidate_brand = str(candidate.get("brand", "") or "").strip()
-        candidate_category = candidate.get("category") or category
-
-        if not candidate_name:
-            continue
-
-        print("[VERIFY START]", candidate_brand, candidate_name, flush=True)
-
-        rakuten = fetch_rakuten_item(
-            product_name=candidate_name,
-            category=candidate_category,
-            brand=candidate_brand
-        )
-
-        if not rakuten:
-            print("[VERIFY FAILED]", candidate_brand, candidate_name, flush=True)
-            continue
-
-        verified_best = dict(candidate)
-        verified_best["original_name"] = candidate_name
-        verified_best["name"] = rakuten.get("name", candidate_name)
-        verified_best["image"] = rakuten.get("image", "")
-        verified_best["price_ref"] = rakuten.get("price", candidate.get("price_ref", 0))
-        verified_best["rakuten_link"] = rakuten.get("rakuten_link", "")
-        verified_best["_verified"] = True
-        verified_best["_source"] = candidate.get("_source", "candidate") + "_rakuten_verified"
-
-        print("[VERIFY SUCCESS]", verified_best["name"], flush=True)
-        break
-
-    if not verified_best:
-        print("[NO VERIFIED PRODUCT]", category, flush=True)
-        return None
-
-    best = verified_best
+    best = dict(top_candidates[0])
 
     best["_top_candidates"] = [
         {
@@ -6905,7 +6865,37 @@ def deep_analysis(result_id):
         "deep_analysis.html",
         data=target
     )
+@app.route("/api/verify-product")
+def api_verify_product():
+    product_name = request.args.get("product", "").strip()
+    category = request.args.get("category", "").strip()
+    brand = request.args.get("brand", "").strip()
 
+    if not product_name:
+        return jsonify({
+            "ok": False,
+            "error": "product is required"
+        })
+
+    item = fetch_rakuten_item(
+        product_name=product_name,
+        category=category,
+        brand=brand
+    )
+
+    if not item:
+        return jsonify({
+            "ok": False,
+            "error": "not found"
+        })
+
+    return jsonify({
+        "ok": True,
+        "name": item.get("name", ""),
+        "price": item.get("price", 0),
+        "image": item.get("image", ""),
+        "rakuten_link": item.get("rakuten_link", "")
+    })
 # ==========================================
 # Flaskサーバー起動
 # ==========================================

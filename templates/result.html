@@ -460,7 +460,11 @@
             </div>
 
             {% for step in data.get("morning", {}).get("steps", []) %}
-            <div class="product-card-new">
+            <div
+                class="product-card-new"
+                data-product="{{ step.get('product', '') }}"
+                data-category="{{ step.get('category', '') }}"
+            >
               {% if step.get("image") %}
 
               <img
@@ -603,7 +607,11 @@
             </div>
 
             {% for step in data.get("night", {}).get("steps", []) %}
-            <div class="product-card-new">
+            <div
+                class="product-card-new"
+                data-product="{{ step.get('product', '') }}"
+                data-category="{{ step.get('category', '') }}"
+            >
               {% if step.get("image") %}
 
               <img
@@ -746,7 +754,11 @@
             </div>
 
             {% for step in data.get("weekly_care", []) %}
-            <div class="product-card-new">
+            <div
+                class="product-card"
+                data-product="{{ step.get('product', '') }}"
+                data-category="{{ step.get('category', '') }}"
+            >
               {% if step.get("image") %}
 
               <img
@@ -982,6 +994,47 @@
             const bgEffects = document.getElementById("bgEffects");
             for (let i = 0; i < 16; i++) createBubble(bgEffects);
             for (let i = 0; i < 14; i++) createSparkle(bgEffects);
+        });
+
+        async function verifyProductCard(card) {
+            const product = card.dataset.product;
+            const category = card.dataset.category || "";
+
+            if (!product) return;
+
+            const params = new URLSearchParams({
+                product: product,
+                category: category
+            });
+
+            const res = await fetch("/api/verify-product?" + params.toString());
+            const data = await res.json();
+
+            if (!data.ok) return;
+
+            const img = card.querySelector(".product-img-new");
+            if (img && data.image) {
+                img.src = data.image;
+                img.style.display = "block";
+            }
+
+            const priceEl = card.querySelector(".product-price");
+            if (priceEl && data.price) {
+                priceEl.textContent = "参考価格：" + data.price.toLocaleString() + "円";
+            }
+
+            const rakutenLink = card.querySelector(".rakuten-link");
+            if (rakutenLink && data.rakuten_link) {
+                rakutenLink.href = data.rakuten_link;
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", () => {
+            document
+                .querySelectorAll("[data-product]")
+                .forEach(card => {
+                    verifyProductCard(card);
+                });
         });
     </script>
 </body>
