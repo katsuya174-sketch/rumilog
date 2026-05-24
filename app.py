@@ -6997,8 +6997,8 @@ def rakuten_test():
         "imageFlag": 1,
     }
     headers = {
-        "Referer": "http://example.com/",
-        "Origin": "http://example.com/",
+        "Referer":"https://rumilog.onrender.com",
+        "Origin": "https://rumilog.onrender.com",
         "User-Agent": "Mozilla/5.0"
     }
     
