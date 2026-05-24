@@ -3209,80 +3209,63 @@ def normalize_ai_candidates(step):
         return []
 
     for candidate in raw_candidates:
-        if isinstance(candidate, dict):
-            raw_name = candidate.get("name", "")
 
-            if isinstance(raw_name, dict):
-                name = str(raw_name.get("name", "")).strip()
-            else:
-                name = str(raw_name).strip()
+        # 文字列JSONならdictに変換
+        if isinstance(candidate, str):
+            text = candidate.strip()
 
-            brand = str(candidate.get("brand", "") or "").strip()
-
-            if brand and name.startswith(brand):
-                name = name[len(brand):].strip()
-
-            if not name:
-                continue
-
-            confidence_raw = candidate.get("confidence", None)
-
-            if confidence_raw is not None:
+            if text.startswith("{") and text.endswith("}"):
                 try:
-                    confidence = float(confidence_raw or 0)
+                    candidate = json.loads(text)
                 except Exception:
-                    confidence = 0
-
-                if confidence < 70:
-                    print("[AI CONFIDENCE REJECTED]", confidence, name, flush=True)
-                    continue
+                    candidate = {"name": text}
             else:
-                confidence = None
+                candidate = {"name": text}
 
-            item = {
-                "brand": brand,
-                "name": name,
-                "confidence": confidence,
-                "price_ref": safe_price(candidate.get("price_ref", step.get("estimated_price", 0))),
-                "active_ingredients": candidate.get("active_ingredients", []) if isinstance(candidate.get("active_ingredients", []), list) else [],
-                "support_ingredients": candidate.get("support_ingredients", []) if isinstance(candidate.get("support_ingredients", []), list) else [],
-                "signature_ingredients": candidate.get("signature_ingredients", []) if isinstance(candidate.get("signature_ingredients", []), list) else [],
-                "concerns": candidate.get("concerns", []) if isinstance(candidate.get("concerns", []), list) else purpose_to_concern_tags(step.get("purpose", "")),
-                "skin_types": candidate.get("skin_types", []) if isinstance(candidate.get("skin_types", []), list) else [],
-                "sensitive_ok": candidate.get("sensitive_ok", "unknown"),
-                "retinol_level": int(candidate.get("retinol_level", 0) or 0),
-                "main_functions": candidate.get("main_functions", []) if isinstance(candidate.get("main_functions", []), list) else [],
-                "formulation": candidate.get("formulation", []) if isinstance(candidate.get("formulation", []), list) else [],
-                "technology": candidate.get("technology", []) if isinstance(candidate.get("technology", []), list) else [],
-                "texture": str(candidate.get("texture", "") or ""),
-                "contraindications": candidate.get("contraindications", []) if isinstance(candidate.get("contraindications", []), list) else [],
-                "reason": str(candidate.get("reason", "") or step.get("selection_reason", "") or "")
-            }
+        if not isinstance(candidate, dict):
+            continue
 
-        else:
-            name = str(candidate).strip()
-            if not name:
+        brand = str(candidate.get("brand", "") or "").strip()
+        name = str(candidate.get("name", "") or "").strip()
+
+        if brand and name.startswith(brand):
+            name = name[len(brand):].strip()
+
+        if not name:
+            continue
+
+        confidence_raw = candidate.get("confidence", None)
+
+        if confidence_raw is not None:
+            try:
+                confidence = float(confidence_raw or 0)
+            except Exception:
+                confidence = 0
+
+            if confidence < 70:
                 continue
+        else:
+            confidence = None
 
-            item = {
-                "brand": "",
-                "name": name,
-                "confidence": None,
-                "price_ref": safe_price(step.get("estimated_price", 0)),
-                "active_ingredients": [],
-                "support_ingredients": [],
-                "signature_ingredients": [],
-                "concerns": purpose_to_concern_tags(step.get("purpose", "")),
-                "skin_types": [],
-                "sensitive_ok": "unknown",
-                "retinol_level": 0,
-                "main_functions": [],
-                "formulation": [],
-                "technology": [],
-                "texture": "",
-                "contraindications": [],
-                "reason": str(step.get("selection_reason", "") or "")
-            }
+        item = {
+            "brand": brand,
+            "name": name,
+            "confidence": confidence,
+            "price_ref": safe_price(candidate.get("price_ref", step.get("estimated_price", 0))),
+            "active_ingredients": candidate.get("active_ingredients", []) if isinstance(candidate.get("active_ingredients", []), list) else [],
+            "support_ingredients": candidate.get("support_ingredients", []) if isinstance(candidate.get("support_ingredients", []), list) else [],
+            "signature_ingredients": candidate.get("signature_ingredients", []) if isinstance(candidate.get("signature_ingredients", []), list) else [],
+            "concerns": candidate.get("concerns", []) if isinstance(candidate.get("concerns", []), list) else purpose_to_concern_tags(step.get("purpose", "")),
+            "skin_types": candidate.get("skin_types", []) if isinstance(candidate.get("skin_types", []), list) else [],
+            "sensitive_ok": candidate.get("sensitive_ok", "unknown"),
+            "retinol_level": int(candidate.get("retinol_level", 0) or 0),
+            "main_functions": candidate.get("main_functions", []) if isinstance(candidate.get("main_functions", []), list) else [],
+            "formulation": candidate.get("formulation", []) if isinstance(candidate.get("formulation", []), list) else [],
+            "technology": candidate.get("technology", []) if isinstance(candidate.get("technology", []), list) else [],
+            "texture": str(candidate.get("texture", "") or ""),
+            "contraindications": candidate.get("contraindications", []) if isinstance(candidate.get("contraindications", []), list) else [],
+            "reason": str(candidate.get("reason", "") or step.get("selection_reason", "") or "")
+        }
 
         norm_name = normalize_candidate_name_for_merge(item["name"])
         if not norm_name or norm_name in seen:
@@ -3291,8 +3274,8 @@ def normalize_ai_candidates(step):
         seen.add(norm_name)
         normalized.append(item)
 
-    print("[AI NORMALIZED]", len(normalized), flush=True)
-
+    print("[AI NORMALIZED]", normalized, flush=True)
+    print("[RAW PRODUCT CANDIDATES]", raw_candidates, flush=True)
     return normalized
 
 def enrich_steps_with_market_candidates(data, candidate_data):
