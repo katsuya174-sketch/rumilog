@@ -2763,7 +2763,6 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
     category = step.get("category", "")
     candidates = normalize_ai_candidates(step)
-    print("[AI CANDIDATES AFTER NORMALIZE]", candidates, flush=True)
     all_candidates = []
 
     # DB商品を全件候補化
@@ -3622,45 +3621,34 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
                         )
                     )
 
-                    step["image"] = (
-                        best.get(
-                            "image",
-                            ""
-                        )
-                    )
+                    if best.get("image"):
 
-                    step["price"] = (
-                        safe_price(
-                            best.get(
-                                "price_ref",
-                                0
+                        step["image"] = (
+                            best["image"]
+                        )
+
+                    
+                    if best.get("price_ref"):
+
+                        step["price"] = (
+                            safe_price(
+                                best["price_ref"]
                             )
                         )
-                    )
 
-                    step["estimated_price"] = (
-                        safe_price(
-                            best.get(
-                                "price_ref",
-                                0
+                        step["estimated_price"] = (
+                            safe_price(
+                                best["price_ref"]
                             )
                         )
-                    )
 
-                    step["rakuten_link"] = (
-                        best.get(
-                            "rakuten_link",
-                            ""
-                        )
-                    )
+                    if best.get("rakuten_link"):
 
-                    step["verified"] = True
+                      step["rakuten_link"] = (
+                          best["rakuten_link"]
+                      )
 
-                    print(
-                        "[STEP VERIFIED]",
-                        step["product"],
-                        flush=True
-                    )
+                    
             elif source == "ai":
                 # ここでは best を直接使って AI候補を適用
                 step["product"] = best.get("name", category)
