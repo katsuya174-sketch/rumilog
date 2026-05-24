@@ -598,12 +598,36 @@
 
             {% for step in data.get("night", {}).get("steps", []) %}
             <div class="product-card-new">
-              {% if step.get('image') %}
-                  <img
-                      src="{{ step.get('image') }}"
-                      alt="{{ step.get('product', '') }}"
-                      class="product-img-new"
-                  >
+              {% if step.get("image") %}
+
+              <img
+                  src="{{ step.get('image') }}"
+                  alt="{{ step.get('product', '') }}"
+                  class="product-img-new"
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                  onerror="
+                      console.log(
+                          'IMG ERROR',
+                          this.src
+                      );
+                      this.style.display='none';
+                  "
+              >
+              
+              {% else %}
+              
+              <div
+              class="product-img-new"
+              style="
+              display:flex;
+              align-items:center;
+              justify-content:center;
+              color:#999;
+              "
+              >
+              画像なし
+              </div>
               {% endif %}
                 <div class="product-body">
                     <div class="product-source {{ step.get('product_source', '') }}">
@@ -717,12 +741,37 @@
 
             {% for step in data.get("weekly_care", []) %}
             <div class="product-card-new">
-              {% if step.get('image') %}
-                  <img
-                      src="{{ step.get('image') }}"
-                      alt="{{ step.get('product', '') }}"
-                      class="product-img-new"
-                  >
+              {% if step.get("image") %}
+
+              <img
+                  src="{{ step.get('image') }}"
+                  alt="{{ step.get('product', '') }}"
+                  class="product-img-new"
+                  loading="lazy"
+                  referrerpolicy="no-referrer"
+                  onerror="
+                      console.log(
+                          'IMG ERROR',
+                          this.src
+                      );
+                      this.style.display='none';
+                  "
+              >
+
+              {% else %}
+
+              <div
+              class="product-img-new"
+              style="
+              display:flex;
+              align-items:center;
+              justify-content:center;
+              color:#999;
+              "
+              >
+              画像なし
+              </div>
+
               {% endif %}
                 <div class="product-body">
                     <div class="product-source {{ step.get('product_source', '') }}">

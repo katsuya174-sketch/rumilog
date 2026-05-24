@@ -3680,7 +3680,11 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             print("[FINAL PRODUCT]", step.get("product"), flush=True)
             print("[FINAL IMAGE]", step.get("image"), flush=True)
 
-            return normalize_step_price_fields(step)
+            step = normalize_step_price_fields(step)
+
+            step = apply_rakuten_image_and_link(step)
+
+            return step
 
         # 2) 楽天検証まで通る商品がない場合は、無理に商品を出さない
         print(
@@ -3700,7 +3704,11 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
         step["product_source"] = "none"
         step["recommend_reason"] = "現在確認できる商品候補が見つかりませんでした。"
 
-        return normalize_step_price_fields(step)
+        step = normalize_step_price_fields(step)
+
+        step = apply_rakuten_image_and_link(step)
+
+        return step
 
     # 朝・夜
     for section in ["morning", "night"]:
