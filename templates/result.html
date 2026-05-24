@@ -476,14 +476,8 @@
                 {% endif %}
             >
 
-            <div
-            class="product-img-empty"
-
-            {% if step.get("image") %}
-            style="display:none;"
-            {% endif %}
-            >
-            画像読み込み中…
+            <div class="product-img-empty">
+                画像読み込み中…
             </div>
                 <div class="product-body">
                     <div class="product-source {{ step.get('product_source', '') }}">
@@ -610,15 +604,9 @@
                 style="display:none;"
                 {% endif %}
             >
-            
-            <div
-            class="product-img-empty"
-            
-            {% if step.get("image") %}
-            style="display:none;"
-            {% endif %}
-            >
-            画像読み込み中…
+
+            <div class="product-img-empty">
+                画像読み込み中…
             </div>
                 <div class="product-body">
                     <div class="product-source {{ step.get('product_source', '') }}">
@@ -746,15 +734,9 @@
                 style="display:none;"
                 {% endif %}
             >
-            
-            <div
-            class="product-img-empty"
-            
-            {% if step.get("image") %}
-            style="display:none;"
-            {% endif %}
-            >
-            画像読み込み中…
+
+            <div class="product-img-empty">
+                画像読み込み中…
             </div>
                 <div class="product-body">
                     <div class="product-source {{ step.get('product_source', '') }}">
@@ -1010,10 +992,79 @@
         document.addEventListener("DOMContentLoaded", () => {
             document
                 .querySelectorAll("[data-product]")
-                .forEach(card => {
-                    verifyProductCard(card);
+            document.addEventListener("DOMContentLoaded", async () => {
+
+                const cards = document.querySelectorAll("[data-product]");
+
+                console.log(
+                    "[VERIFY CARDS]",
+                    cards.length
+                );
+
+                for (const card of cards) {
+
+                    const product =
+                        card.dataset.product;
+
+                    const category =
+                        card.dataset.category || "";
+
+                    if (!product) {
+                        continue;
+                    }
+
+                    try {
+
+                        const url =
+                            "/api/verify-product?"
+                            + new URLSearchParams({
+                                product,
+                                category
+                            });
+
+                        const res =
+                            await fetch(url);
+
+                        const data =
+                            await res.json();
+
+                        if (
+                            !data.ok
+                            || !data.image
+                        ) {
+                            continue;
+                        }
+
+                        const img =
+                            card.querySelector(
+                                ".product-img-new"
+                            );
+
+                        if (!img) {
+                            continue;
+                        }
+
+                        img.src =
+                            data.image;
+
+                        img.style.display =
+                            "block";
+
+                    }
+
+                    catch (e) {
+
+                        console.log(
+                            "[VERIFY ERROR]",
+                            e
+                        );
+
+                    }
+
+                }
+
                 });
         });
     </script>
 </body>
-</html>
+</html> 
