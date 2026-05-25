@@ -67,6 +67,7 @@ def init_results_table():
             e,
             flush=True
         )
+init_results_table()
 # ===== DEV_MODE_START =====
 DEV_MODE = False  # ← 開発中はTrue / 公開時はFalseにするか削除
 # ===== DEV_MODE_END =====
