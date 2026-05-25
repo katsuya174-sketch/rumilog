@@ -1,4 +1,5 @@
 import os
+import psycopg2
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -21,6 +22,7 @@ import traceback
 import urllib.parse
 import requests
 import re
+DATABASE_URL = os.getenv("DATABASE_URL")
 # ===== DEV_MODE_START =====
 DEV_MODE = False  # ← 開発中はTrue / 公開時はFalseにするか削除
 # ===== DEV_MODE_END =====
@@ -6917,6 +6919,37 @@ def api_verify_product():
         "image": item.get("image", ""),
         "rakuten_link": item.get("rakuten_link", "")
     })
+def test_db():
+
+    try:
+
+        conn = psycopg2.connect(
+            DATABASE_URL
+        )
+
+        cur = conn.cursor()
+
+        cur.execute(
+            "SELECT NOW();"
+        )
+
+        print(
+            "[DB CONNECT OK]",
+            cur.fetchone(),
+            flush=True
+        )
+
+        cur.close()
+
+        conn.close()
+
+    except Exception as e:
+
+        print(
+            "[DB CONNECT ERROR]",
+            e,
+            flush=True
+        )
 # ==========================================
 # Flaskサーバー起動
 # ==========================================
