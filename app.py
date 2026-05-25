@@ -6774,12 +6774,12 @@ def result_detail(result_id):
                 data = prepare_result_for_view(item)
                 data["is_premium"] = is_premium_user()
 
-                html = render_template("result.html", data=data)
+                return render_template("result.html", data=data)
 
         return "結果が見つかりません", 404
 
     except Exception as e:
-        print(e)
+        print(e, flush=True)
         return "エラーが発生しました", 500
 
 @app.route("/history/<result_id>")
