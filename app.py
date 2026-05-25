@@ -4940,7 +4940,7 @@ def normalize_result(raw_data, image_path=""):
                 {
                     **step,
                     "display_role": get_step_display_role(step),
-                    "image": step.get("image", get_product_image(step.get("category", "")))
+                    "image": step.get("image", "")
                 }
                 for step in raw_data.get("morning", {}).get("steps", [])
             ]
@@ -4950,7 +4950,7 @@ def normalize_result(raw_data, image_path=""):
                 {
                     **step,
                     "display_role": get_step_display_role(step),
-                    "image": step.get("image", get_product_image(step.get("category", "")))
+                    "image": step.get("image", "")
                 }
                 for step in raw_data.get("night", {}).get("steps", [])
             ]
@@ -4959,7 +4959,7 @@ def normalize_result(raw_data, image_path=""):
             {
                 **step,
                 "display_role": get_step_display_role(step),
-                "image": step.get("image", get_product_image(step.get("category", "")))
+                "image": step.get("image", "")
             }
             for step in raw_data.get("weekly_care", [])
         ],
