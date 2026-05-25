@@ -7052,7 +7052,36 @@ def api_verify_product():
         "image": item.get("image", ""),
         "rakuten_link": item.get("rakuten_link", "")
     })
+@app.route("/admin/import-results")
+def import_results():
 
+    try:
+
+        if not os.path.exists(
+            RESULTS_FILE
+        ):
+            return "results.jsonなし"
+
+        with open(
+            RESULTS_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
+            data = json.load(f)
+
+        save_results(
+            data
+        )
+
+        return (
+            f"移行完了 "
+            f"{len(data)}件"
+        )
+
+    except Exception as e:
+
+        return str(e)
 # ==========================================
 # Flaskサーバー起動
 # ==========================================
