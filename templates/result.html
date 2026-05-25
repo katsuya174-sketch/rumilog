@@ -1077,56 +1077,20 @@
     
     
       async function verifyProductCard(card) {
-          const product = card.dataset.product;
-          const category = card.dataset.category || "";
-      
-          if (!product) return;
-      
-          const params = new URLSearchParams({
-              product: product,
-              category: category
-          });
-      
-          const res = await fetch("/api/verify-product?" + params.toString());
-          const data = await res.json();
-      
-          if (!data.ok) return;
-      
-          const img = card.querySelector("img.product-img-new");
-      
-          if (img && data.image) {
-              img.src = data.image;
-              img.style.display = "block";
-          }
-      
-          const priceEl = card.querySelector(".product-price");
-      
-          if (priceEl && data.price) {
-              priceEl.textContent = "参考価格: ¥" + Number(data.price).toLocaleString();
-          }
-      
-          const rakutenButton = card.querySelector("a[href*='source=rakuten']");
-      
-          if (rakutenButton && data.rakuten_link) {
-              const product = encodeURIComponent(card.dataset.product || "");
-              const category = encodeURIComponent(card.dataset.category || "");
-              const url = encodeURIComponent(data.rakuten_link);
-      
-              rakutenButton.href =
-                  "/click?source=rakuten&product=" +
-                  product +
-                  "&category=" +
-                  category +
-                  "&url=" +
-                  url;
-          }
-      }
-      
-      document.addEventListener("DOMContentLoaded", function () {
+
+            const product =
+                card.dataset.product;
+
+            const category =
+                card.dataset.category || "";
+
+            if (!product) {
+                return;
+            }
           document.querySelectorAll("[data-product]").forEach(function (card) {
               verifyProductCard(card);
           });
-      });
+      };
     </script>
 </body>
 </html> 
