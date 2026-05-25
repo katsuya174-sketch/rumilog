@@ -4468,23 +4468,59 @@ def save_results(data):
     if not isinstance(data, list):
         raise ValueError("save_results: data must be a list")
 
-    tmp_path = RESULTS_FILE + ".tmp"
+    conn = None
+    cur = None
 
     try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
 
-        os.replace(tmp_path, RESULTS_FILE)
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+
+            record_id = str(item.get("id", "")).strip()
+            if not record_id:
+                continue
+
+            saved_at = item.get("saved_at")
+
+            cur.execute(
+                """
+                INSERT INTO results (id, saved_at, payload)
+                VALUES (%s, %s, %s::jsonb)
+                ON CONFLICT (id)
+                DO UPDATE SET
+                    saved_at = EXCLUDED.saved_at,
+                    payload = EXCLUDED.payload;
+                """,
+                (
+                    record_id,
+                    saved_at,
+                    json.dumps(item, ensure_ascii=False)
+                )
+            )
+
+        conn.commit()
+
+        print("[RESULTS SAVED TO DB]", len(data), flush=True)
+
         return True
 
-    except Exception:
-        # tmp が残っていたら消す
-        try:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-        except Exception:
-            pass
+    except Exception as e:
+        if conn:
+            conn.rollback()
+
+        print("[RESULTS DB SAVE ERROR]", e, flush=True)
+
         raise
+
+    finally:
+        if cur:
+            cur.close()
+
+        if conn:
+            conn.close()
 
 # 診断ID生成
 def generate_result_id(history):
