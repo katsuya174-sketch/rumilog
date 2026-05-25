@@ -217,6 +217,22 @@
     text-decoration: none;
     border: 1px solid #f3c9d2;
 }
+.is-hidden {
+    display: none !important;
+}
+
+.product-img-empty {
+    width: 100%;
+    height: 180px;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #fffafd 0%, #fff6f8 100%);
+    border: 1px solid #f7dce4;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #999;
+    font-size: 13px;
+}
 </style>
 
 <head>
@@ -468,15 +484,12 @@
             <img
                 src="{{ step.get('image', '') }}"
                 alt="{{ step.get('product', '') }}"
-                class="product-img-new"
+                class="product-img-new {% if not step.get('image') %}is-hidden{% endif %}"
                 loading="lazy"
                 referrerpolicy="no-referrer"
-                {% if not step.get("image") %}
-                style="display:none;"
-                {% endif %}
             >
 
-            <div class="product-img-empty">
+            <div class="product-img-empty {% if step.get('image') %}is-hidden{% endif %}">
                 画像読み込み中…
             </div>
                 <div class="product-body">
@@ -597,15 +610,12 @@
             <img
                 src="{{ step.get('image', '') }}"
                 alt="{{ step.get('product', '') }}"
-                class="product-img-new"
+                class="product-img-new {% if not step.get('image') %}is-hidden{% endif %}"
                 loading="lazy"
                 referrerpolicy="no-referrer"
-                {% if not step.get("image") %}
-                style="display:none;"
-                {% endif %}
             >
 
-            <div class="product-img-empty">
+            <div class="product-img-empty {% if step.get('image') %}is-hidden{% endif %}">
                 画像読み込み中…
             </div>
                 <div class="product-body">
@@ -727,15 +737,12 @@
             <img
                 src="{{ step.get('image', '') }}"
                 alt="{{ step.get('product', '') }}"
-                class="product-img-new"
+                class="product-img-new {% if not step.get('image') %}is-hidden{% endif %}"
                 loading="lazy"
                 referrerpolicy="no-referrer"
-                {% if not step.get("image") %}
-                style="display:none;"
-                {% endif %}
             >
 
-            <div class="product-img-empty">
+            <div class="product-img-empty {% if step.get('image') %}is-hidden{% endif %}">
                 画像読み込み中…
             </div>
                 <div class="product-body">
@@ -959,24 +966,26 @@
 
             if (!data.ok) return;
 
-            const img = card.querySelector(".product-img-new");
+            const img = card.querySelector("img.product-img-new");
             const empty = card.querySelector(".product-img-empty");
 
             if (img && data.image) {
 
                 img.src = data.image;
 
-                img.onload = () => {
+                img.classList.remove(
+                    "is-hidden"
+                );
 
-                    img.style.display = "block";
+                if (empty) {
 
-                    if (empty) {
-                        empty.style.display = "none";
-                    };
+                    empty.classList.add(
+                        "is-hidden"
+                    );
 
-                };
+                }
 
-            }
+                }
 
             const priceEl = card.querySelector(".product-price");
             if (priceEl && data.price) {
@@ -987,8 +996,8 @@
             if (rakutenLink && data.rakuten_link) {
                 rakutenLink.href = data.rakuten_link;
             }
-        }
-
+        
+          }
         document.addEventListener("DOMContentLoaded", () => {
             document
                 .querySelectorAll("[data-product]")
