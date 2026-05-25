@@ -5063,7 +5063,6 @@ def prepare_result_for_view(result):
     result["saved_at"] = str(result.get("saved_at", "") or "")
     result["skin_summary"] = str(result.get("skin_summary", "") or "")
 
-    # scores の最低保証
     scores = safe_dict(result.get("scores"))
     result["scores"] = {
         "oil_balance": safe_int(scores.get("oil_balance", 0)),
@@ -5080,17 +5079,56 @@ def prepare_result_for_view(result):
 
     result["skin_score"] = safe_int(result.get("skin_score", 0))
 
-    # ルーティンの最低保証
+    def prepare_step(step):
+        if not isinstance(step, dict):
+            return {}
+
+        step = dict(step)
+
+        step["product"] = str(step.get("product", "") or "")
+        step["category"] = str(step.get("category", "") or "")
+        step["purpose"] = str(step.get("purpose", "") or "")
+        step["recommend_reason"] = str(step.get("recommend_reason", "") or "")
+        step["display_role"] = step.get("display_role") or get_step_display_role(step)
+
+        image = str(step.get("image", "") or "")
+
+        # 古いローカルfallback画像は使わない
+        if "/static/images/products/" in image:
+            image = ""
+
+        step["image"] = image
+        step["price"] = safe_price(step.get("price", 0))
+        step["estimated_price"] = safe_price(step.get("estimated_price", step["price"]))
+        step["rakuten_link"] = str(step.get("rakuten_link", "") or "")
+        step["amazon_link"] = str(step.get("amazon_link", "") or "")
+        step["product_source"] = str(step.get("product_source", "") or "")
+        step["top_candidates"] = safe_list(step.get("top_candidates"))
+        step["top_impacts"] = safe_list(step.get("top_impacts"))
+
+        return step
+
     morning = safe_dict(result.get("morning"))
     night = safe_dict(result.get("night"))
 
     result["morning"] = {
-        "steps": safe_list(morning.get("steps"))
+        "steps": [
+            prepare_step(step)
+            for step in safe_list(morning.get("steps"))
+        ]
     }
+
     result["night"] = {
-        "steps": safe_list(night.get("steps"))
+        "steps": [
+            prepare_step(step)
+            for step in safe_list(night.get("steps"))
+        ]
     }
-    result["weekly_care"] = safe_list(result.get("weekly_care"))
+
+    result["weekly_care"] = [
+        prepare_step(step)
+        for step in safe_list(result.get("weekly_care"))
+    ]
 
     return result
 # トップページ
