@@ -6936,7 +6936,7 @@ def history():
             scores=[]
         )
 
-@app.route("/result/<result_id>")
+@app.route("/history/<result_id>")
 def result_detail(result_id):
     try:
         history_data = load_results()
@@ -6954,7 +6954,7 @@ def result_detail(result_id):
         print(e, flush=True)
         return "エラーが発生しました", 500
 
-@app.route("/history/<result_id>")
+@app.route("/result/<result_id>")
 def history_detail(result_id):
     try:
         history_data = load_results()
