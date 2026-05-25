@@ -24,6 +24,49 @@ import requests
 import re
 DATABASE_URL = os.getenv("DATABASE_URL")
 print("[APP START]", flush=True)
+
+def init_results_table():
+
+    try:
+
+        conn = psycopg2.connect(
+            DATABASE_URL
+        )
+
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS results (
+
+                id TEXT PRIMARY KEY,
+
+                saved_at TIMESTAMP,
+
+                payload JSONB
+
+            );
+            """
+        )
+
+        conn.commit()
+
+        cur.close()
+
+        conn.close()
+
+        print(
+            "[DB TABLE READY]",
+            flush=True
+        )
+
+    except Exception as e:
+
+        print(
+            "[DB TABLE ERROR]",
+            e,
+            flush=True
+        )
 # ===== DEV_MODE_START =====
 DEV_MODE = False  # ← 開発中はTrue / 公開時はFalseにするか削除
 # ===== DEV_MODE_END =====
@@ -6920,37 +6963,7 @@ def api_verify_product():
         "image": item.get("image", ""),
         "rakuten_link": item.get("rakuten_link", "")
     })
-def test_db():
 
-    try:
-
-        conn = psycopg2.connect(
-            DATABASE_URL
-        )
-
-        cur = conn.cursor()
-
-        cur.execute(
-            "SELECT NOW();"
-        )
-
-        print(
-            "[DB CONNECT OK]",
-            cur.fetchone(),
-            flush=True
-        )
-
-        cur.close()
-
-        conn.close()
-
-    except Exception as e:
-
-        print(
-            "[DB CONNECT ERROR]",
-            e,
-            flush=True
-        )
 # ==========================================
 # Flaskサーバー起動
 # ==========================================
