@@ -4439,30 +4439,82 @@ def pick_product(category, products):
     return max(candidates, key=lambda x: x.get("score", 0))
 # 履歴読み込み
 def load_results():
-    if not os.path.exists(RESULTS_FILE):
-        return []
+
+    conn = None
+    cur = None
 
     try:
-        with open(RESULTS_FILE, "r", encoding="utf-8") as f:
-            raw = f.read().strip()
 
-        if not raw:
-            return []
+        conn = psycopg2.connect(
+            DATABASE_URL
+        )
 
-        data = json.loads(raw)
+        cur = conn.cursor()
 
-        if not isinstance(data, list):
-            raise ValueError("results.json is not a list")
+        cur.execute(
+            """
+            SELECT payload
+            FROM results
+            ORDER BY saved_at DESC
+            """
+        )
 
-        return [
-            item for item in data
-            if isinstance(item, dict)
-        ]
+        rows = cur.fetchall()
+
+        results = []
+
+        for row in rows:
+
+            payload = row[0]
+
+            if isinstance(
+                payload,
+                dict
+            ):
+                results.append(
+                    payload
+                )
+
+            elif isinstance(
+                payload,
+                str
+            ):
+                try:
+
+                    results.append(
+                        json.loads(
+                            payload
+                        )
+                    )
+
+                except Exception:
+                    pass
+
+        print(
+            "[RESULTS LOADED FROM DB]",
+            len(results),
+            flush=True
+        )
+
+        return results
 
     except Exception as e:
-        print("[RESULTS LOAD ERROR]", e, flush=True)
-        raise
 
+        print(
+            "[RESULTS LOAD ERROR]",
+            e,
+            flush=True
+        )
+
+        return []
+
+    finally:
+
+        if cur:
+            cur.close()
+
+        if conn:
+            conn.close()
 # 履歴保存
 def save_results(data):
     if not isinstance(data, list):
