@@ -23,6 +23,7 @@ import urllib.parse
 import requests
 import re
 DATABASE_URL = os.getenv("DATABASE_URL")
+print("[APP START]", flush=True)
 # ===== DEV_MODE_START =====
 DEV_MODE = False  # ← 開発中はTrue / 公開時はFalseにするか削除
 # ===== DEV_MODE_END =====
