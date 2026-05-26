@@ -6930,30 +6930,20 @@ def history():
             history_data = []
 
         prepared = []
+
         for item in history_data:
             if not isinstance(item, dict):
                 continue
 
-            view_item = prepare_result_for_view(item)
-
-            if not isinstance(view_item, dict):
-                print(
-                    "[HISTORY SKIP INVALID VIEW ITEM]",
-                    item.get("id", ""),
-                    flush=True
-                )
-                continue
-
             prepared.append({
-                "id": view_item.get("id", ""),
-                "record_date": view_item.get("record_date", ""),
-                "analysis_date": view_item.get("analysis_date", ""),
-                "saved_at": view_item.get("saved_at", ""),
-                "skin_score": view_item.get("skin_score", 0),
-                "skin_summary": view_item.get("skin_summary", ""),
-                "scores": view_item.get("scores", {}),
+                "id": item.get("id", ""),
+                "record_date": item.get("record_date", ""),
+                "analysis_date": item.get("analysis_date", ""),
+                "saved_at": item.get("saved_at", ""),
+                "skin_score": item.get("skin_score", 0),
+                "skin_summary": item.get("skin_summary", ""),
+                "scores": item.get("scores", {}),
             })
-
 
         labels = []
         skin_scores = []
@@ -6975,7 +6965,6 @@ def history():
         traceback.print_exc()
         print("===============================")
 
-        # 履歴が壊れていても一覧ページ自体は出す
         return render_template(
             "history.html",
             history=[],
