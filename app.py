@@ -6977,9 +6977,19 @@ def result_detail(result_id):
     try:
         history_data = load_results()
 
+        if not isinstance(history_data, list):
+            history_data = []
+
         for item in history_data:
-            if str(item.get("id")) == str(result_id):
+            if not isinstance(item, dict):
+                continue
+
+            if str(item.get("id", "")) == str(result_id):
                 data = prepare_result_for_view(item)
+
+                if not isinstance(data, dict):
+                    data = item
+
                 data["is_premium"] = is_premium_user()
 
                 return render_template("result.html", data=data)
@@ -6987,7 +6997,10 @@ def result_detail(result_id):
         return "結果が見つかりません", 404
 
     except Exception as e:
+        print("===== HISTORY DETAIL ERROR =====", flush=True)
         print(e, flush=True)
+        traceback.print_exc()
+        print("================================", flush=True)
         return "エラーが発生しました", 500
 
 @app.route("/result/<result_id>")
