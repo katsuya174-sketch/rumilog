@@ -679,6 +679,23 @@ def save_rakuten_cache(cache):
 def make_rakuten_cache_key(product_name, brand=""):
     return f"{brand}::{product_name}".strip()
 
+def clean_rakuten_keyword(keyword):
+    if not isinstance(keyword, str):
+        return ""
+
+    keyword = keyword.strip()
+    keyword = keyword.replace("\n", " ")
+    keyword = keyword.replace("\r", " ")
+    keyword = re.sub(r"\s+", " ", keyword)
+
+    keyword = re.sub(r"[^\w\sぁ-んァ-ヶ一-龥ー・＋+]", " ", keyword)
+    keyword = re.sub(r"\s+", " ", keyword).strip()
+
+    if len(keyword) < 2:
+        return ""
+
+    return keyword[:120]
+
 def fetch_rakuten_item(product_name, category="", brand=""):
     if not product_name:
         print("[RAKUTEN API] product_name empty", flush=True)
@@ -703,6 +720,12 @@ def fetch_rakuten_item(product_name, category="", brand=""):
     keywords = build_rakuten_search_keywords(product_name, brand)
     MAX_RAKUTEN_KEYWORDS = 2
     for keyword in keywords[:MAX_RAKUTEN_KEYWORDS]:
+        keyword = clean_rakuten_keyword(keyword)
+
+        if not keyword:
+            print("[RAKUTEN SKIP INVALID KEYWORD]", product_name, flush=True)
+            continue
+
         try:
             print(f"[RAKUTEN TRY KEYWORD] {keyword}", flush=True)
 
