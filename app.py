@@ -4455,10 +4455,6 @@ def load_results():
 
     try:
 
-        conn = get_db_conn()(
-            DATABASE_URL
-        )
-
         cur = conn.cursor()
 
         cur.execute(
