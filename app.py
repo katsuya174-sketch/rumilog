@@ -2492,6 +2492,194 @@ def is_wrong_cleanser_candidate(product, step):
 
     return False
 
+def infer_active_profile(product):
+    if not isinstance(product, dict):
+        return {
+            "families": set(),
+            "strength": "low",
+            "irritation_risk": "low",
+            "pair_well_with": set(),
+            "avoid_with": set()
+        }
+
+    active_ingredients = product.get("active_ingredients") or []
+    support_ingredients = product.get("support_ingredients") or []
+    ingredient_focus = product.get("ingredient_focus") or []
+    main_functions = product.get("main_functions") or []
+    ingredient_strength = product.get("ingredient_strength") or {}
+
+    text_parts = []
+    text_parts.extend(active_ingredients)
+    text_parts.extend(support_ingredients)
+    text_parts.extend(ingredient_focus)
+    text_parts.extend(main_functions)
+
+    text = " ".join(str(x).lower() for x in text_parts)
+
+    families = set()
+    pair_well_with = set()
+    avoid_with = set()
+
+    strength = "low"
+    irritation_risk = "low"
+
+    if any(x in text for x in [
+        "retinol",
+        "retinal",
+        "retinoid",
+        "レチノール",
+        "レチナール",
+        "レチノイド"
+    ]):
+        families.add("retinoid")
+        pair_well_with.update([
+            "ceramide",
+            "panthenol",
+            "peptide",
+            "barrier"
+        ])
+        avoid_with.update([
+            "aha_bha",
+            "strong_vitamin_c"
+        ])
+
+        retinol_level = product.get("retinol_level", "")
+
+        if retinol_level in ["high", "strong"]:
+            strength = "high"
+            irritation_risk = "high"
+        else:
+            strength = "medium"
+            irritation_risk = "medium"
+
+    if any(x in text for x in [
+        "vitamin_c",
+        "ascorbic",
+        "アスコルビン酸",
+        "ビタミンc",
+        "ビタミンC"
+    ]):
+        families.add("vitamin_c")
+
+        vitamin_c_strength = ingredient_strength.get("vitamin_c", "")
+
+        if vitamin_c_strength in ["high", "strong"]:
+            families.add("strong_vitamin_c")
+            strength = "high"
+            irritation_risk = "medium"
+
+    if any(x in text for x in [
+        "aha",
+        "bha",
+        "pha",
+        "lha",
+        "glycolic_acid",
+        "lactic_acid",
+        "salicylic_acid",
+        "mandelic_acid",
+        "グリコール酸",
+        "乳酸",
+        "サリチル酸",
+        "マンデル酸",
+        "ピーリング"
+    ]):
+        families.add("aha_bha")
+        avoid_with.update([
+            "retinoid",
+            "strong_vitamin_c"
+        ])
+        strength = "medium"
+        irritation_risk = "medium"
+
+    if any(x in text for x in [
+        "ceramide",
+        "セラミド",
+        "barrier",
+        "バリア"
+    ]):
+        families.add("ceramide")
+        families.add("barrier")
+
+    if any(x in text for x in [
+        "panthenol",
+        "パンテノール",
+        "cica",
+        "ツボクサ",
+        "madecassoside",
+        "マデカッソシド"
+    ]):
+        families.add("panthenol")
+        families.add("barrier")
+
+    if any(x in text for x in [
+        "peptide",
+        "ペプチド"
+    ]):
+        families.add("peptide")
+
+    return {
+        "families": families,
+        "strength": strength,
+        "irritation_risk": irritation_risk,
+        "pair_well_with": pair_well_with,
+        "avoid_with": avoid_with
+    }
+
+def score_product_combination(
+    selected_products,
+    candidate
+):
+    score = 0
+
+    current = [
+        infer_active_profile(x)
+        for x in selected_products
+    ]
+
+    new = infer_active_profile(candidate)
+
+    families = set()
+
+    for p in current:
+        families.update(
+            p["families"]
+        )
+
+    overlap = (
+        families
+        &
+        new["families"]
+    )
+
+    synergy = (
+        families
+        &
+        new["pair_well_with"]
+    )
+
+    conflict = (
+        families
+        &
+        new["avoid_with"]
+    )
+
+    score += len(synergy) * 10
+    score -= len(conflict) * 18
+
+    total_strength = sum(
+        2 if p["strength"] == "high"
+        else 1
+        for p in current
+    )
+
+    if new["strength"] == "high":
+        total_strength += 2
+
+    if total_strength >= 4:
+        score -= 22
+
+    return score
+
 def score_product(product, step, user_data, budget_value):
     if is_wrong_cleanser_candidate(product,step):
         return -9999
@@ -2598,6 +2786,8 @@ def score_product(product, step, user_data, budget_value):
         score += 5
     elif "normal" in product_skin_types:
         score += 2
+
+    
 
     return score
 
@@ -2874,6 +3064,63 @@ def is_discontinued_or_suspicious_product(product):
 
     return False
 
+def score_routine_balance(step, product):
+    profile = infer_active_profile(product)
+
+    score = 0
+
+    families = profile["families"]
+
+    strength = profile["strength"]
+
+    purpose = normalize_text(
+        step.get("purpose", "")
+    )
+
+    if (
+        "ニキビ跡" in purpose
+        or "色素沈着" in purpose
+    ):
+
+        if (
+            "retinoid" in families
+            and strength != "high"
+        ):
+            score += 10
+
+        if (
+            "vitamin_c" in families
+        ):
+            score += 8
+
+    if (
+        "ハリ" in purpose
+        or "毛穴" in purpose
+    ):
+
+        if (
+            "retinoid" in families
+        ):
+            score += 12
+
+        if (
+            "peptide" in families
+        ):
+            score += 10
+
+    if (
+        "barrier" in families
+    ):
+        score += 5
+
+    if (
+        profile["irritation_risk"]
+        == "high"
+    ):
+        score -= 8
+
+    return score
+
 def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None):
     if exclude_names is None:
         exclude_names = set()
@@ -2897,7 +3144,18 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         improve_score = score_improvement(product, improvement_plan or {})
 
         base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
-        final_score = (base_score * base_weight) + (improve_score * improve_weight)
+        routine_score = score_routine_balance(
+            step,
+            product
+        )
+
+        final_score = (
+            base_score * base_weight
+        ) + (
+            improve_score * improve_weight
+        ) + (
+            routine_score
+        )
 
         product["_score"] = round(final_score, 1)
         product["_base_score"] = round(base_score, 1)
@@ -2959,7 +3217,18 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             improve_score = score_improvement(product, improvement_plan or {})
 
             base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
-            final_score = (base_score * base_weight) + (improve_score * improve_weight)
+            froutine_score = score_routine_balance(
+                step,
+                product
+            )
+
+            final_score = (
+                base_score * base_weight
+            ) + (
+                improve_score * improve_weight
+            ) + (
+                routine_score
+            )
 
             product["_score"] = round(final_score, 1)
             product["_base_score"] = round(base_score, 1)
@@ -2986,7 +3255,18 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         improve_score = score_improvement(virtual, improvement_plan or {})
 
         base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
-        final_score = (base_score * base_weight) + (improve_score * improve_weight)
+        routine_score = score_routine_balance(
+            step,
+            virtual
+        )
+
+        final_score = (
+            base_score * base_weight
+        ) + (
+            improve_score * improve_weight
+        ) + (
+            routine_score
+        )
 
         virtual["_score"] = round(final_score, 1)
         virtual["_base_score"] = round(base_score, 1)
@@ -3011,7 +3291,23 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     )
 
     top_candidates = sorted_candidates[:3]
-
+    print(
+        "[TOP CANDIDATES]",
+        step.get("category", ""),
+        step.get("purpose", ""),
+        [
+            {
+                "name": c.get("name", ""),
+                "score": c.get("_score", 0),
+                "base": c.get("_base_score", 0),
+                "improve": c.get("_improve_score", 0),
+                "routine": c.get("_routine_score", 0),
+                "source": c.get("_source", "")
+            }
+            for c in top_candidates
+        ],
+        flush=True
+    )
     best = dict(top_candidates[0])
 
     best["_top_candidates"] = [
