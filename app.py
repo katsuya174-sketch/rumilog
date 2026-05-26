@@ -4455,6 +4455,7 @@ def load_results():
 
     try:
 
+        conn = get_db_conn()
         cur = conn.cursor()
 
         cur.execute(
