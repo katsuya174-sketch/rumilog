@@ -1077,63 +1077,141 @@
     
     
         async function verifyProductCard(card) {
-            const product = card.dataset.product || "";
-            const category = card.dataset.category || "";
+
+            const product =
+                card.dataset.product || "";
+
+            const category =
+                card.dataset.category || "";
 
             if (!product) return;
 
-            const params = new URLSearchParams({
-                product: product,
-                category: category
-            });
+            try {
 
-            const res = await fetch("/api/verify-product?" + params.toString());
-            const data = await res.json();
+                const params =
+                    new URLSearchParams({
+                        product,
+                        category
+                    });
 
-            if (!data.ok) return;
+                const res =
+                    await fetch(
+                        "/api/verify-product?"
+                        + params.toString()
+                    );
 
-            const img = card.querySelector("img.product-img-new");
+                const data =
+                    await res.json();
 
-            if (img && data.image) {
-                img.src = data.image;
-                img.style.display = "block";
-                img.classList.remove("is-hidden");
+                if (!data.ok) return;
+
+                const img =
+                    card.querySelector(
+                        "img.product-img-new"
+                    );
+
+                const empty =
+                    card.querySelector(
+                        ".product-img-empty"
+                    );
+
+                if (
+                    img &&
+                    data.image
+                ) {
+
+                    img.src =
+                        data.image;
+
+                    img.style.display =
+                        "block";
+
+                    img.classList.remove(
+                        "is-hidden"
+                    );
+
+                    if (empty) {
+
+                        empty.style.display =
+                            "none";
+
+                        empty.classList.add(
+                            "is-hidden"
+                        );
+
+                    }
+
+                }
+
+                const priceEl =
+                    card.querySelector(
+                        ".product-price"
+                    );
+
+                if (
+                    priceEl &&
+                    data.price
+                ) {
+
+                    priceEl.textContent =
+                        "参考価格："
+                        + Number(
+                            data.price
+                        ).toLocaleString()
+                        + "円";
+
+                }
+
+                const rakutenButton =
+                    card.querySelector(
+                        "a[href*='source=rakuten']"
+                    );
+
+                if (
+                    rakutenButton &&
+                    data.rakuten_link
+                ) {
+
+                    rakutenButton.href =
+                        "/click?source=rakuten"
+                        + "&product="
+                        + encodeURIComponent(product)
+                        + "&category="
+                        + encodeURIComponent(category)
+                        + "&url="
+                        + encodeURIComponent(
+                            data.rakuten_link
+                        );
+
+                }
+
             }
 
-            const empty = card.querySelector(".product-img-empty");
+            catch (e) {
 
-            if (empty && data.image) {
-                empty.style.display = "none";
-                empty.classList.add("is-hidden");
+                console.log(
+                    "[VERIFY ERROR]",
+                    e
+                );
+
             }
 
-            const priceEl = card.querySelector(".product-price");
-
-            if (priceEl && data.price) {
-                priceEl.textContent =
-                    "参考価格："
-                    + Number(data.price).toLocaleString()
-                    + "円";
             }
 
-            const rakutenButton = card.querySelector("a[href*='source=rakuten']");
+            document.addEventListener(
+            "DOMContentLoaded",
+            function () {
 
-            if (rakutenButton && data.rakuten_link) {
-                rakutenButton.href =
-                    "/click?source=rakuten&product="
-                    + encodeURIComponent(product)
-                    + "&category="
-                    + encodeURIComponent(category)
-                    + "&url="
-                    + encodeURIComponent(data.rakuten_link);
+                document
+                    .querySelectorAll(
+                        "[data-product]"
+                    )
+                    .forEach(
+                        verifyProductCard
+                    );
+
             }
-        }
-
-        document.addEventListener("DOMContentLoaded", function () {
-          document.querySelectorAll("[data-product]").forEach(function (card) {
-              verifyProductCard(card);
-          });
-      });
+            );
     </script>
 </body>
 </html> 

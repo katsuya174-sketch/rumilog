@@ -22,17 +22,33 @@ import traceback
 import urllib.parse
 import requests
 import re
+import copy
+from psycopg2.pool import SimpleConnectionPool
 DATABASE_URL = os.getenv("DATABASE_URL")
+DB_POOL = SimpleConnectionPool(
+    minconn=1,
+    maxconn=5,
+    dsn=DATABASE_URL
+)
+
+
+def get_db_conn():
+    return DB_POOL.getconn()
+
+
+def put_db_conn(conn):
+    if conn:
+        DB_POOL.putconn(conn)
 print("[APP START]", flush=True)
 
 def init_results_table():
 
+    conn = None
+    cur = None
+
     try:
 
-        conn = psycopg2.connect(
-            DATABASE_URL
-        )
-
+        conn = get_db_conn()
         cur = conn.cursor()
 
         cur.execute(
@@ -51,10 +67,6 @@ def init_results_table():
 
         conn.commit()
 
-        cur.close()
-
-        conn.close()
-
         print(
             "[DB TABLE READY]",
             flush=True
@@ -62,12 +74,23 @@ def init_results_table():
 
     except Exception as e:
 
+        if conn:
+            conn.rollback()
+
         print(
             "[DB TABLE ERROR]",
             e,
             flush=True
         )
+
+    finally:
+
+        if cur:
+            cur.close()
+
+        put_db_conn(conn)
 init_results_table()
+VERIFY_PRODUCT_CACHE = {}
 # ===== DEV_MODE_START =====
 DEV_MODE = False  # ← 開発中はTrue / 公開時はFalseにするか削除
 # ===== DEV_MODE_END =====
@@ -678,8 +701,8 @@ def fetch_rakuten_item(product_name, category="", brand=""):
     }
 
     keywords = build_rakuten_search_keywords(product_name, brand)
-
-    for keyword in keywords:
+    MAX_RAKUTEN_KEYWORDS = 2
+    for keyword in keywords[:MAX_RAKUTEN_KEYWORDS]:
         try:
             print(f"[RAKUTEN TRY KEYWORD] {keyword}", flush=True)
 
@@ -702,7 +725,7 @@ def fetch_rakuten_item(product_name, category="", brand=""):
                 endpoint,
                 params=params,
                 headers=headers,
-                timeout=10
+                timeout=(2, 4)
             )
 
             print(f"[RAKUTEN API STATUS] {res.status_code}", flush=True)
@@ -719,17 +742,9 @@ def fetch_rakuten_item(product_name, category="", brand=""):
                 or []
             )
 
-            print(
-                "[RAKUTEN PAYLOAD KEYS]",
-                list(payload.keys()),
-                flush=True
-            )
+            # print("[RAKUTEN PAYLOAD KEYS]",list(payload.keys()),flush=True)
 
-            print(
-                "[RAKUTEN API ITEMS]",
-                len(items),
-                flush=True
-            )
+            # print("[RAKUTEN API ITEMS]",len(items),flush=True)
 
             if not items:
                 continue
@@ -807,12 +822,7 @@ def fetch_rakuten_item(product_name, category="", brand=""):
                 "image": image_url,
             }
 
-            print("[RAKUTEN API BEST ITEM]", {
-                "name": result["name"],
-                "price": result["price"],
-                "image": result["image"],
-                "rakuten_link_exists": result["rakuten_link"] != "#"
-            }, flush=True)
+            # print("[RAKUTEN API BEST ITEM]", {"name": result["name"],"price": result["price"],"image": result["image"],"rakuten_link_exists": result["rakuten_link"] != "#"}, flush=True)
 
             return result
 
@@ -4445,7 +4455,7 @@ def load_results():
 
     try:
 
-        conn = psycopg2.connect(
+        conn = get_db_conn()(
             DATABASE_URL
         )
 
@@ -4513,8 +4523,7 @@ def load_results():
         if cur:
             cur.close()
 
-        if conn:
-            conn.close()
+        put_db_conn(conn)
 # 履歴保存
 def save_results(data):
     if not isinstance(data, list):
@@ -4549,7 +4558,8 @@ def save_results(data):
                 (
                     record_id,
                     saved_at,
-                    json.dumps(item, ensure_ascii=False)
+                    json.dumps(lightweight_result_payload(item),
+                                ensure_ascii=False)
                 )
             )
 
@@ -5078,6 +5088,38 @@ def prepare_result_for_view(result):
     }
 
     result["skin_score"] = safe_int(result.get("skin_score", 0))
+
+
+def lightweight_result_payload(item):
+    """
+    DB保存前に、表示に不要な一時データだけ削る。
+    result.html / history_detail 表示に必要な情報は残す。
+    """
+    if not isinstance(item, dict):
+        return item
+
+    data = copy.deepcopy(item)
+
+    remove_keys = [
+        "raw_response",
+        "gemini_response",
+        "prompt",
+        "debug",
+        "debug_info",
+        "logs",
+        "product_log",
+        "market_candidates_raw",
+        "rakuten_raw",
+        "api_raw",
+        "trace",
+        "traceback",
+    ]
+
+    for key in remove_keys:
+        data.pop(key, None)
+
+    return data
+
 
     def prepare_step(step):
         if not isinstance(step, dict):
@@ -7070,6 +7112,17 @@ def api_verify_product():
             "error": "product is required"
         })
 
+    cache_key = (
+        product_name,
+        category,
+        brand
+    )
+
+    if cache_key in VERIFY_PRODUCT_CACHE:
+        return jsonify(
+            VERIFY_PRODUCT_CACHE[cache_key]
+        )
+
     item = fetch_rakuten_item(
         product_name=product_name,
         category=category,
@@ -7077,18 +7130,26 @@ def api_verify_product():
     )
 
     if not item:
-        return jsonify({
+        result = {
             "ok": False,
             "error": "not found"
-        })
+        }
 
-    return jsonify({
+        VERIFY_PRODUCT_CACHE[cache_key] = result
+
+        return jsonify(result)
+
+    result = {
         "ok": True,
         "name": item.get("name", ""),
         "price": item.get("price", 0),
         "image": item.get("image", ""),
         "rakuten_link": item.get("rakuten_link", "")
-    })
+    }
+
+    VERIFY_PRODUCT_CACHE[cache_key] = result
+
+    return jsonify(result)
 
 # ==========================================
 # Flaskサーバー起動
