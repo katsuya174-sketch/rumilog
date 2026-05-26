@@ -121,7 +121,7 @@ from constants import (
     AI_INGREDIENT_MAP,
     CONCERN_MAP
 )
-def call_gemini_with_retry(client, model, contents, config=None, max_retries=6):
+def call_gemini_with_retry(client, model, contents, config=None, max_retries=3):
     import time
     from google.genai import errors
 
