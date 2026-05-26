@@ -3141,6 +3141,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         product = dict(p)
 
         base_score = score_product(product, step, user_data, budget_value)
+        if base_score <= -9000:
+            continue
         improve_score = score_improvement(product, improvement_plan or {})
 
         base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
@@ -3214,6 +3216,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
                 product["brand"] = brand
 
             base_score = score_product(product, step, user_data, budget_value)
+            if base_score <= -9000:
+                continue
             improve_score = score_improvement(product, improvement_plan or {})
 
             base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
@@ -3252,6 +3256,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             continue
 
         base_score = score_product(virtual, step, user_data, budget_value)
+        if base_score <= -9000:
+            continue
         improve_score = score_improvement(virtual, improvement_plan or {})
 
         base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
