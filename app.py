@@ -6936,6 +6936,14 @@ def history():
 
             view_item = prepare_result_for_view(item)
 
+            if not isinstance(view_item, dict):
+                print(
+                    "[HISTORY SKIP INVALID VIEW ITEM]",
+                    item.get("id", ""),
+                    flush=True
+                )
+                continue
+
             prepared.append({
                 "id": view_item.get("id", ""),
                 "record_date": view_item.get("record_date", ""),
