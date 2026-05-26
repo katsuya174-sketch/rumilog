@@ -755,8 +755,47 @@ def fetch_rakuten_item(product_name, category="", brand=""):
 
             if res.status_code != 200:
                 print("[RAKUTEN API ERROR BODY]", res.text, flush=True)
-                continue
 
+                if (
+                    res.status_code == 400
+                    and "keyword is not valid" in res.text
+                    and " " in keyword
+                ):
+                    keyword_no_space = keyword.replace(" ", "")
+
+                    print(
+                        "[RAKUTEN RETRY NO SPACE KEYWORD]",
+                        keyword_no_space,
+                        flush=True
+                    )
+
+                    params["keyword"] = keyword_no_space
+
+                    retry_res = requests.get(
+                        endpoint,
+                        params=params,
+                        headers=headers,
+                        timeout=(2, 4)
+                    )
+
+                    print(
+                        "[RAKUTEN RETRY STATUS]",
+                        retry_res.status_code,
+                        flush=True
+                    )
+
+                    if retry_res.status_code != 200:
+                        print(
+                            "[RAKUTEN RETRY ERROR BODY]",
+                            retry_res.text,
+                            flush=True
+                        )
+                        continue
+
+                    res = retry_res
+
+                else:
+                    continue
             payload = res.json()
 
             items = (
