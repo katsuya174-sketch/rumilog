@@ -152,6 +152,7 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=3):
     raise last_error
 
 from datetime import datetime, date
+from zoneinfo import ZoneInfo
 from PIL import Image,ImageOps
 from flask import Flask, render_template, request,jsonify,redirect
 from google import genai
@@ -5593,7 +5594,12 @@ def append_result(raw_data, image_path=""):
     record = {
         **normalized,
         "id": record_id,
-        "saved_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "saved_at": (
+            datetime.now(
+                ZoneInfo("Asia/Tokyo")
+            )
+            .strftime("%Y-%m-%d %H:%M:%S")
+        ),
     }
 
     history.append(record)
