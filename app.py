@@ -4092,6 +4092,12 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             step["product_source"] = source or "db"
 
         step = apply_verified_rakuten_to_step(step, best)
+        if not step.get("recommend_reason"):
+            step["recommend_reason"] = (
+                best.get("reason")
+                or step.get("selection_reason")
+                or build_ai_reason(step, user_data)
+            )
         step = normalize_step_price_fields(step)
 
         print("[FINAL PRODUCT]", step.get("product"), flush=True)
