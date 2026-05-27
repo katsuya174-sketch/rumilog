@@ -3979,6 +3979,43 @@ def pick_best_db_fallback_product(step, products, user_data, budget_value, exclu
 
     return filtered[0]
 
+def clean_display_product_name(name):
+    if not isinstance(name, str):
+        return ""
+
+    text = name.strip()
+
+    bad_tokens = [
+        "brand",
+        "name",
+        "confidence",
+        "category",
+        "score",
+        "product"
+    ]
+
+    parts = text.split()
+    cleaned = []
+
+    skip_next = False
+
+    for part in parts:
+        lower = part.lower()
+
+        if skip_next:
+            skip_next = False
+            continue
+
+        if lower in bad_tokens:
+            skip_next = True
+            continue
+
+        if lower.isdigit():
+            continue
+
+        cleaned.append(part)
+
+    return " ".join(cleaned).strip()
 def assign_products_to_all_steps(data, products, user_data, budget_value):
     print("MARKET VERSION assign_products_to_all_steps", flush=True)
 
@@ -4004,6 +4041,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             step["estimated_price"] = price
 
         return step
+
 
     def assign_one_step(step, used_product_names, section_name):
         if not isinstance(step, dict):
@@ -4043,7 +4081,9 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             step["amazon_link"] = ""
             step["product_source"] = "none"
             step["recommend_reason"] = "現在確認できる商品候補が見つかりませんでした。"
-
+            step["product"] = clean_display_product_name(
+                step.get("product", "")
+            )
             return normalize_step_price_fields(step)
 
         product_name = best.get("name")
