@@ -3985,32 +3985,57 @@ def clean_display_product_name(name):
 
     text = name.strip()
 
-    bad_tokens = [
+    if not text:
+        return ""
+
+    text = text.replace("{", " ")
+    text = text.replace("}", " ")
+    text = text.replace('"', " ")
+    text = text.replace("'", " ")
+    text = text.replace(":", " ")
+    text = text.replace(",", " ")
+
+    parts = text.split()
+
+    if "name" in [p.lower() for p in parts]:
+        lowered = [p.lower() for p in parts]
+
+        start = lowered.index("name") + 1
+        end = len(parts)
+
+        for stop_word in [
+            "confidence",
+            "score",
+            "category",
+            "reason",
+            "source"
+        ]:
+            if stop_word in lowered[start:]:
+                end = min(
+                    end,
+                    lowered.index(stop_word)
+                )
+
+        text = " ".join(parts[start:end])
+
+    bad_words = [
         "brand",
         "name",
         "confidence",
         "category",
         "score",
-        "product"
+        "product",
+        "reason",
+        "source"
     ]
 
-    parts = text.split()
     cleaned = []
 
-    skip_next = False
-
-    for part in parts:
-        lower = part.lower()
-
-        if skip_next:
-            skip_next = False
+    for part in text.split():
+        if part.lower() in bad_words:
             continue
 
-        if lower in bad_tokens:
-            skip_next = True
-            continue
-
-        if lower.isdigit():
+        if part.isdigit():
             continue
 
         cleaned.append(part)
@@ -4086,6 +4111,10 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             )
             return normalize_step_price_fields(step)
 
+        best["name"] = clean_display_product_name(
+            best.get("name", "")
+        )
+
         product_name = best.get("name")
         if product_name:
             used_product_names.add(product_name)
@@ -4147,7 +4176,9 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
         print("[FINAL PRODUCT]", step.get("product"), flush=True)
         print("[FINAL IMAGE]", step.get("image"), flush=True)
-
+        step["product"] = clean_display_product_name(
+            step.get("product", "")
+        )
         return step
 
     for section in ["morning", "night"]:
