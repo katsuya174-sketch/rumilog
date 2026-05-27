@@ -891,9 +891,7 @@ def fetch_rakuten_item(product_name, category="", brand=""):
                 else:
                     continue
             payload = res.json()
-            if retry_res.status_code == 429:
-                print("[RAKUTEN RETRY RATE LIMIT SKIP]", keyword_no_space, flush=True)
-                return None
+            
             items = (
                 payload.get("items")
                 or payload.get("Items")
