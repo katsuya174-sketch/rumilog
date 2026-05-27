@@ -4092,7 +4092,12 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             step["product_source"] = source or "db"
 
         step = apply_verified_rakuten_to_step(step, best)
-        if not step.get("recommend_reason"):
+        invalid_reason = "現在確認できる商品候補が見つかりませんでした。"
+
+        if (
+            not step.get("recommend_reason")
+            or step.get("recommend_reason") == invalid_reason
+        ):
             step["recommend_reason"] = (
                 best.get("reason")
                 or step.get("selection_reason")
