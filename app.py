@@ -723,6 +723,44 @@ def save_rakuten_cache(cache):
 def make_rakuten_cache_key(product_name, brand=""):
     return f"{brand}::{product_name}".strip()
 
+def clean_ai_product_name(name):
+    if not isinstance(name, str):
+        return ""
+
+    text = name.strip()
+
+    remove_tokens = [
+        "name",
+        "brand",
+        "confidence",
+        "category",
+        "score",
+        "product",
+    ]
+
+    parts = text.split()
+    cleaned_parts = []
+
+    skip_next = False
+
+    for part in parts:
+        if skip_next:
+            skip_next = False
+            continue
+
+        lower = part.lower()
+
+        if lower in remove_tokens:
+            skip_next = True
+            continue
+
+        if lower.isdigit():
+            continue
+
+        cleaned_parts.append(part)
+
+    return " ".join(cleaned_parts).strip()
+
 def clean_rakuten_keyword(keyword):
     if not isinstance(keyword, str):
         return ""
@@ -744,7 +782,7 @@ def fetch_rakuten_item(product_name, category="", brand=""):
     if not product_name:
         print("[RAKUTEN API] product_name empty", flush=True)
         return None
-
+    product_name = clean_ai_product_name(product_name)
     if not RAKUTEN_APP_ID:
         print("[RAKUTEN API] RAKUTEN_APP_ID is empty", flush=True)
         return None
@@ -799,7 +837,9 @@ def fetch_rakuten_item(product_name, category="", brand=""):
 
             if res.status_code != 200:
                 print("[RAKUTEN API ERROR BODY]", res.text, flush=True)
-
+                if res.status_code == 429:
+                    print("[RAKUTEN RATE LIMIT SKIP]", keyword, flush=True)
+                    return None
                 if (
                     res.status_code == 400
                     and "keyword is not valid" in res.text
@@ -841,7 +881,9 @@ def fetch_rakuten_item(product_name, category="", brand=""):
                 else:
                     continue
             payload = res.json()
-
+            if retry_res.status_code == 429:
+                print("[RAKUTEN RETRY RATE LIMIT SKIP]", keyword_no_space, flush=True)
+                return None
             items = (
                 payload.get("items")
                 or payload.get("Items")
