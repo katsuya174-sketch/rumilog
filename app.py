@@ -4272,7 +4272,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
                 or step.get("selection_reason")
                 or build_ai_reason(step, user_data)
             )
-        step = apply_verified_rakuten_to_step(step, best)
+        
         step = finalize_step_display_fields(step, best, user_data)
         step = normalize_step_price_fields(step)
 
