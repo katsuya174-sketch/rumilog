@@ -3157,7 +3157,9 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
         candidate_name = candidate.get("name", "")
         brand = candidate.get("brand", "")
-
+        candidate_name = normalize_product_name(
+            str(candidate_name or "").strip()
+)
         # name自体がJSON文字列になっている場合の補正
         if isinstance(candidate_name, str):
             text = candidate_name.strip()
@@ -3311,6 +3313,17 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         }
         for c in top_candidates
     ]
+    best["base_score"] = best.get("_base_score", 0)
+    best["improve_score"] = best.get("_improve_score", 0)
+    best["routine_score"] = best.get("_routine_score", 0)
+    best["final_score"] = best.get("_score", 0)
+
+    best["score_detail"] = {
+        "base": best.get("_base_score", 0),
+        "improve": best.get("_improve_score", 0),
+        "routine": best.get("_routine_score", 0),
+        "final": best.get("_score", 0)
+    }
 
     log_candidate_battle(
         step,
