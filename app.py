@@ -5511,12 +5511,65 @@ def finalize_result_data(data, user_data):
 
     return data
 
+def calculate_skin_score(scores):
+
+    if not isinstance(scores, dict):
+        return 0
+
+    weights = {
+        "oil_balance": 1.0,
+        "redness": 1.1,
+        "pores": 1.0,
+        "hydration": 1.3,
+        "firmness": 1.1,
+        "acne": 1.4,
+        "dullness": 0.9,
+        "barrier": 1.3,
+        "texture": 1.0,
+        "tone_evenness": 0.9
+    }
+
+    total = 0
+    total_weight = 0
+
+    for key, weight in weights.items():
+
+        value = safe_int(
+            scores.get(
+                key,
+                0
+            )
+        )
+
+        value = max(
+            0,
+            min(
+                value,
+                100
+            )
+        )
+
+        total += value * weight
+        total_weight += weight
+
+    if total_weight == 0:
+        return 0
+
+    return round(
+        total / total_weight
+    )
+
 # Gemini結果を保存用フォーマットに変換
 def normalize_result(raw_data, image_path=""):
     return {
         "record_date": raw_data.get("record_date", datetime.today().strftime("%Y-%m-%d")),
         "analysis_date": raw_data.get("analysis_date", datetime.today().strftime("%Y-%m-%d")),
-        "skin_score": raw_data.get("skin_score", 0),
+        "skin_score": calculate_skin_score(
+            raw_data.get(
+                "scores",
+                {}
+            )
+        ),
         "scores": {
             "oil_balance": raw_data.get("scores", {}).get("oil_balance", 0),
             "redness": raw_data.get("scores", {}).get("redness", 0),
@@ -6743,7 +6796,7 @@ def detailed_analysis_with_gemini(client, user_data, result_data):
         model="gemini-2.5-flash",
         contents=prompt,
         config={
-            "temperature": 0.2
+            "temperature": 0
         }
     )
 
