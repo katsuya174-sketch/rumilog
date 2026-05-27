@@ -779,6 +779,7 @@ def clean_rakuten_keyword(keyword):
     return keyword[:120]
 
 def fetch_rakuten_item(product_name, category="", brand=""):
+    product_name = clean_display_product_name(product_name)
     if not product_name:
         print("[RAKUTEN API] product_name empty", flush=True)
         return None
@@ -3227,8 +3228,10 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         if not isinstance(candidate, dict):
             continue
 
-        candidate_name = candidate.get("name", "")
-        brand = candidate.get("brand", "")
+        fields = extract_ai_candidate_fields(candidate)
+
+        candidate_name = fields.get("name", "")
+        brand = fields.get("brand", "")
         candidate_name = normalize_product_name(
             str(candidate_name or "").strip()
 )
@@ -3727,6 +3730,45 @@ def merge_candidate_list(original, extra, max_items=20):
             break
 
     return merged
+
+def extract_ai_candidate_fields(candidate):
+    if isinstance(candidate, dict):
+        brand = str(candidate.get("brand", "") or "").strip()
+        name = str(candidate.get("name", "") or "").strip()
+        confidence = candidate.get("confidence", "")
+
+        if name:
+            return {
+                "brand": brand,
+                "name": clean_display_product_name(name),
+                "confidence": confidence
+            }
+
+    if isinstance(candidate, str):
+        text = candidate.strip()
+
+        try:
+            parsed = json.loads(text)
+
+            if isinstance(parsed, dict):
+                return extract_ai_candidate_fields(parsed)
+
+        except Exception:
+            pass
+
+        cleaned_name = clean_display_product_name(text)
+
+        return {
+            "brand": "",
+            "name": cleaned_name,
+            "confidence": ""
+        }
+
+    return {
+        "brand": "",
+        "name": "",
+        "confidence": ""
+    }
 
 def normalize_ai_candidates(step):
     raw_candidates = step.get("product_candidates", [])
