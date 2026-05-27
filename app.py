@@ -837,9 +837,11 @@ def fetch_rakuten_item(product_name, category="", brand=""):
 
             if res.status_code != 200:
                 print("[RAKUTEN API ERROR BODY]", res.text, flush=True)
+
                 if res.status_code == 429:
                     print("[RAKUTEN RATE LIMIT SKIP]", keyword, flush=True)
                     return None
+
                 if (
                     res.status_code == 400
                     and "keyword is not valid" in res.text
@@ -867,6 +869,14 @@ def fetch_rakuten_item(product_name, category="", brand=""):
                         retry_res.status_code,
                         flush=True
                     )
+
+                    if retry_res.status_code == 429:
+                        print(
+                            "[RAKUTEN RETRY RATE LIMIT SKIP]",
+                            keyword_no_space,
+                            flush=True
+                        )
+                        return None
 
                     if retry_res.status_code != 200:
                         print(
