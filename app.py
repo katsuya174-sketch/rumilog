@@ -593,7 +593,67 @@ def build_rakuten_search_keywords(product_name, brand=""):
     print("[RAKUTEN KEYWORDS]", keywords, flush=True)
 
     return list(dict.fromkeys([k for k in keywords if k]))[:7]
+OLD_PRODUCT_WORDS = [
+    "旧",
+    "旧品",
+    "旧商品",
+    "旧パッケージ",
+    "リニューアル前",
+    "廃盤",
+    "生産終了",
+    "在庫処分",
+    "訳あり",
+    "アウトレット",
+    "箱なし",
+    "外箱なし"
+]
 
+
+CURRENT_PRODUCT_WORDS = [
+    "新",
+    "新商品",
+    "リニューアル",
+    "現行",
+    "最新",
+    "正規品",
+    "公式",
+    "本体",
+    "医薬部外品"
+]
+
+
+def score_current_product_signal(item):
+    if not isinstance(item, dict):
+        return 0
+
+    name = str(item.get("itemName", ""))
+    shop = str(item.get("shopName", ""))
+
+    text = f"{name} {shop}"
+
+    score = 0
+
+    if any(word in text for word in OLD_PRODUCT_WORDS):
+        score -= 80
+
+    if any(word in text for word in CURRENT_PRODUCT_WORDS):
+        score += 20
+
+    if item.get("mediumImageUrls"):
+        score += 10
+
+    review_count = safe_int(item.get("reviewCount", 0))
+
+    if review_count >= 50:
+        score += 8
+
+    if review_count >= 200:
+        score += 12
+
+    if "公式" in shop:
+        score += 25
+
+    return score
 def score_rakuten_item(item, product_name, brand="", category=""):
     title = str(item.get("itemName", "") or "")
     title_norm = title.lower()
@@ -637,7 +697,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
 
     if item.get("affiliateUrl") or item.get("itemUrl"):
         score += 5
-
+    score += score_current_product_signal(item)
     return score
 
 RAKUTEN_CACHE_FILE = "rakuten_cache.json"
