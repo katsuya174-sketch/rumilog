@@ -4083,6 +4083,45 @@ def clean_display_product_name(name):
         cleaned.append(part)
 
     return " ".join(cleaned).strip()
+
+def finalize_step_display_fields(step, best, user_data):
+    if not isinstance(step, dict):
+        return step
+
+    if isinstance(best, dict):
+        step["product"] = clean_display_product_name(
+            step.get("product") or best.get("name", "")
+        )
+
+        step["base_score"] = best.get("_base_score", best.get("base_score", 0))
+        step["improve_score"] = best.get("_improve_score", best.get("improve_score", 0))
+        step["routine_score"] = best.get("_routine_score", best.get("routine_score", 0))
+        step["final_score"] = best.get("_score", best.get("final_score", 0))
+
+        step["score_detail"] = {
+            "base": step.get("base_score", 0),
+            "improve": step.get("improve_score", 0),
+            "routine": step.get("routine_score", 0),
+            "final": step.get("final_score", 0)
+        }
+
+        invalid_reason = "現在確認できる商品候補が見つかりませんでした。"
+
+        if (
+            not step.get("recommend_reason")
+            or step.get("recommend_reason") == invalid_reason
+        ):
+            step["recommend_reason"] = (
+                best.get("reason")
+                or step.get("selection_reason")
+                or build_ai_reason(step, user_data)
+            )
+
+    step["product"] = clean_display_product_name(
+        step.get("product", "")
+    )
+
+    return step
 def assign_products_to_all_steps(data, products, user_data, budget_value):
     print("MARKET VERSION assign_products_to_all_steps", flush=True)
 
@@ -4090,11 +4129,29 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
     improvement_plan = data.get("improvement_plan", {})
 
     def apply_verified_rakuten_to_step(step, best):
+        if not isinstance(step, dict):
+            return step
+
         if not isinstance(best, dict):
             return step
 
-        if best.get("name"):
-            step["product"] = best["name"]
+        verified_name = clean_display_product_name(
+            best.get("name", "")
+        )
+
+        verified_product = dict(best)
+        verified_product["name"] = verified_name
+
+        if is_discontinued_or_suspicious_product(verified_product):
+            print(
+                "[RAKUTEN VERIFIED SKIP STALE PRODUCT]",
+                verified_name,
+                flush=True
+            )
+            return step
+
+        if verified_name:
+            step["product"] = verified_name
 
         if best.get("image"):
             step["image"] = best["image"]
@@ -4202,7 +4259,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             apply_db_product_to_step(step, best, user_data)
             step["product_source"] = source or "db"
 
-        step = apply_verified_rakuten_to_step(step, best)
+        
         invalid_reason = "現在確認できる商品候補が見つかりませんでした。"
 
         if (
@@ -4214,10 +4271,14 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
                 or step.get("selection_reason")
                 or build_ai_reason(step, user_data)
             )
+        step = apply_verified_rakuten_to_step(step, best)
+        step = finalize_step_display_fields(step, best, user_data)
         step = normalize_step_price_fields(step)
 
         print("[FINAL PRODUCT]", step.get("product"), flush=True)
         print("[FINAL IMAGE]", step.get("image"), flush=True)
+        print("[FINAL REASON]", step.get("recommend_reason"), flush=True)
+        print("[FINAL SCORE DETAIL]", step.get("score_detail"), flush=True)
         step["product"] = clean_display_product_name(
             step.get("product", "")
         )
