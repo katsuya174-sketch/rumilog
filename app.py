@@ -25,70 +25,54 @@ import re
 import copy
 from psycopg2.pool import SimpleConnectionPool
 DATABASE_URL = os.getenv("DATABASE_URL")
-DB_POOL = SimpleConnectionPool(
-    minconn=1,
-    maxconn=5,
-    dsn=DATABASE_URL
-)
+#DB_POOL = SimpleConnectionPool(
+#   minconn=1,
+#    maxconn=5,
+#    dsn=DATABASE_URL
+#)
 
 
-def get_db_conn():
-    return DB_POOL.getconn()
+#def get_db_conn():
+#    return DB_POOL.getconn()
 
 
-def put_db_conn(conn):
-    if conn:
-        DB_POOL.putconn(conn)
+#def put_db_conn(conn):
+#    if conn:
+#        DB_POOL.putconn(conn)
 print("[APP START]", flush=True)
 
 def init_results_table():
-
     conn = None
     cur = None
 
     try:
-
-        conn = get_db_conn()
+        conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
 
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS results (
-
-                id TEXT PRIMARY KEY,
-
-                saved_at TIMESTAMP,
-
-                payload JSONB
-
-            );
-            """
-        )
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS results (
+            id TEXT PRIMARY KEY,
+            saved_at TIMESTAMP,
+            payload JSONB
+        );
+        """)
 
         conn.commit()
 
-        print(
-            "[DB TABLE READY]",
-            flush=True
-        )
+        print("[DB TABLE READY]", flush=True)
 
     except Exception as e:
-
         if conn:
             conn.rollback()
 
-        print(
-            "[DB TABLE ERROR]",
-            e,
-            flush=True
-        )
+        print("[DB TABLE ERROR]", e, flush=True)
 
     finally:
-
         if cur:
             cur.close()
 
-        put_db_conn(conn)
+        if conn:
+            conn.close()
 init_results_table()
 VERIFY_PRODUCT_CACHE = {}
 # ===== DEV_MODE_START =====
@@ -4813,78 +4797,49 @@ def pick_product(category, products):
     return max(candidates, key=lambda x: x.get("score", 0))
 # 履歴読み込み
 def load_results():
-
     conn = None
     cur = None
 
     try:
-
-        conn = get_db_conn()
+        conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
 
-        cur.execute(
-            """
-            SELECT payload
-            FROM results
-            ORDER BY saved_at DESC
-            """
-        )
+        cur.execute("""
+        SELECT payload
+        FROM results
+        ORDER BY saved_at DESC
+        """)
 
         rows = cur.fetchall()
 
         results = []
 
         for row in rows:
-
             payload = row[0]
 
-            if isinstance(
-                payload,
-                dict
-            ):
-                results.append(
-                    payload
-                )
+            if isinstance(payload, dict):
+                results.append(payload)
 
-            elif isinstance(
-                payload,
-                str
-            ):
+            elif isinstance(payload, str):
                 try:
-
-                    results.append(
-                        json.loads(
-                            payload
-                        )
-                    )
-
+                    results.append(json.loads(payload))
                 except Exception:
                     pass
 
-        print(
-            "[RESULTS LOADED FROM DB]",
-            len(results),
-            flush=True
-        )
+        print("[RESULTS LOADED FROM DB]", len(results), flush=True)
 
         return results
 
     except Exception as e:
-
-        print(
-            "[RESULTS LOAD ERROR]",
-            e,
-            flush=True
-        )
-
+        print("[RESULTS LOAD ERROR]", e, flush=True)
         return []
 
     finally:
-
         if cur:
             cur.close()
 
-        put_db_conn(conn)
+        if conn:
+            conn.close()
 # 履歴保存
 def save_results(data):
     if not isinstance(data, list):
