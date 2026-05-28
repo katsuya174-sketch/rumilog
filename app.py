@@ -2788,15 +2788,42 @@ def score_product(product, step, user_data, budget_value):
     # ===== ピーリング強制判定 =====
     if step.get("category") == "ピーリング":
         PEELING_INGREDIENTS = [
-            "aha", "bha", "pha", "lha",
-            "glycolic_acid", "lactic_acid",
-            "salicylic_acid", "mandelic_acid"
+            "aha",
+            "bha",
+            "pha",
+            "lha",
+            "glycolic_acid",
+            "lactic_acid",
+            "salicylic_acid",
+            "mandelic_acid"
         ]
 
-        product_actives = product.get("active_ingredients", [])
+        PEELING_NAME_KEYWORDS = [
+            "ピーリング",
+            "ピール",
+            "スキンピール",
+            "ゴマージュ",
+            "角質",
+            "角質ケア",
+            "スクラブ",
+            "アクアジェル"
+        ]
 
-        if not any(i in product_actives for i in PEELING_INGREDIENTS):
-            return -9999  # 強制除外
+        product_actives = product.get("active_ingredients", []) or []
+        product_name = str(product.get("name", "") or "")
+
+        has_peeling_ingredient = any(
+            i in product_actives
+            for i in PEELING_INGREDIENTS
+        )
+
+        has_peeling_name = any(
+            word in product_name
+            for word in PEELING_NAME_KEYWORDS
+        )
+
+        if not has_peeling_ingredient and not has_peeling_name:
+            return -9999 # 強制除外
 
     user_skin = normalize_text(user_data.get("skin_type", ""))
     if not user_skin:
@@ -3214,6 +3241,16 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         if base_score <= -9000:
             continue
         improve_score = score_improvement(product, improvement_plan or {})
+        print(
+            "[IMPROVE SCORE CHECK]",
+            step.get("category", ""),
+            step.get("ingredient_focus", ""),
+            product.get("name", ""),
+            improve_score,
+            improvement_plan,
+            flush=True
+        )
+
 
         base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
         routine_score = score_routine_balance(
@@ -3304,7 +3341,15 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             if base_score <= -9000:
                 continue
             improve_score = score_improvement(product, improvement_plan or {})
-
+            print(
+                "[IMPROVE SCORE CHECK]",
+                step.get("category", ""),
+                step.get("ingredient_focus", ""),
+                product.get("name", ""),
+                improve_score,
+                improvement_plan,
+                flush=True
+            )
             base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
             froutine_score = score_routine_balance(
                 step,
@@ -3344,7 +3389,15 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         if base_score <= -9000:
             continue
         improve_score = score_improvement(virtual, improvement_plan or {})
-
+        print(
+            "[IMPROVE SCORE CHECK]",
+            step.get("category", ""),
+            step.get("ingredient_focus", ""),
+            virtual.get("name", ""),
+            improve_score,
+            improvement_plan,
+            flush=True
+        )
         base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
         routine_score = score_routine_balance(
             step,
@@ -4133,9 +4186,15 @@ def finalize_step_display_fields(step, best, user_data):
         return step
 
     if isinstance(best, dict):
-        step["product"] = clean_display_product_name(
+        brand = str(best.get("brand", "") or "").strip()
+        name = clean_display_product_name(
             step.get("product") or best.get("name", "")
         )
+
+        if brand and name and not name.startswith(brand):
+            step["product"] = f"{brand} {name}"
+        else:
+            step["product"] = name
 
         step["base_score"] = best.get("_base_score", best.get("base_score", 0))
         step["improve_score"] = best.get("_improve_score", best.get("improve_score", 0))
@@ -4161,9 +4220,16 @@ def finalize_step_display_fields(step, best, user_data):
                 or build_ai_reason(step, user_data)
             )
 
-    step["product"] = clean_display_product_name(
-        step.get("product", "")
+    brand = str(best.get("brand", "") or "").strip()
+
+    name = clean_display_product_name(
+        step.get("product") or best.get("name", "")
     )
+
+    if brand and name and not name.startswith(brand):
+        step["product"] = f"{brand} {name}"
+    else:
+        step["product"] = name
 
     return step
 def assign_products_to_all_steps(data, products, user_data, budget_value):
