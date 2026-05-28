@@ -2888,16 +2888,10 @@ def score_product(product, step, user_data, budget_value):
 
 
 def score_improvement(product, improvement_plan):
-    """
-    改善プランとの一致スコア
-    使う項目:
-    - active_ingredients
-    - support_ingredients
-    - ingredient_strength
-    - main_functions
-    - ingredient_focus
-    """
     score = 0
+
+    if not isinstance(product, dict):
+        return 0
 
     if not improvement_plan:
         return 0
@@ -2914,21 +2908,25 @@ def score_improvement(product, improvement_plan):
     actions += immediate.get("actions", [])
     actions += short_term.get("actions", [])
 
-    product_actives = product.get("active_ingredients", [])
-    product_support = product.get("support_ingredients", [])
-    product_functions = product.get("main_functions", [])
-    product_focuses = product.get("ingredient_focus", [])
-    ingredient_strength_map = product.get("ingredient_strength", {})
+    product_actives = product.get("active_ingredients", []) or []
+    product_support = product.get("support_ingredients", []) or []
+    product_functions = product.get("main_functions", []) or []
+    product_focuses = product.get("ingredient_focus", []) or []
+    ingredient_strength_map = product.get("ingredient_strength", {}) or {}
+
+    product_name = normalize_text(product.get("name", ""))
+    product_category = normalize_text(product.get("category", ""))
 
     normalized = []
+
     for ing in key_ingredients:
         tag = normalize_ingredient_tag(ing)
+
         if tag:
             normalized.append(tag)
 
     normalized = list(dict.fromkeys(normalized))
 
-    # 成分一致
     for ing in normalized:
         if ing in product_actives:
             score += 22
@@ -2937,23 +2935,62 @@ def score_improvement(product, improvement_plan):
         elif ing in product_support:
             score += 8
 
-    # main_functions一致
+        ing_text = normalize_text(ing)
+
+        if ing_text and ing_text in product_name:
+            score += 10
+
     for f in product_functions:
         f_norm = normalize_text(f)
+
         for act in actions:
             act_norm = normalize_text(act)
+
             if f_norm and act_norm and (f_norm in act_norm or act_norm in f_norm):
                 score += 10
                 break
 
-    # ingredient_focus一致
     for focus in product_focuses:
         focus_norm = normalize_text(focus)
+
         for act in actions:
             act_norm = normalize_text(act)
+
             if focus_norm and act_norm and (focus_norm in act_norm or act_norm in focus_norm):
                 score += 8
                 break
+
+    action_text = normalize_text(" ".join(str(x) for x in actions))
+    ingredient_text = normalize_text(" ".join(str(x) for x in key_ingredients))
+    combined_goal_text = action_text + " " + ingredient_text
+
+    if "ニキビ" in combined_goal_text or "acne" in combined_goal_text:
+        if any(word in product_name for word in ["アゼライン", "cica", "シカ", "ドクダミ", "ティーツリー"]):
+            score += 10
+
+    if "色素沈着" in combined_goal_text or "くすみ" in combined_goal_text or "美白" in combined_goal_text:
+        if any(word in product_name for word in ["ビタミン", "メラノ", "トラネキサム", "ナイアシン", "美白"]):
+            score += 10
+
+    if "ハリ" in combined_goal_text or "毛穴" in combined_goal_text:
+        if any(word in product_name for word in ["レチノ", "ペプチド", "pdrn", "リンクル"]):
+            score += 10
+
+    if "バリア" in combined_goal_text or "乾燥" in combined_goal_text:
+        if any(word in product_name for word in ["セラミド", "キュレル", "ミノン", "ヒアルロン"]):
+            score += 10
+
+    if product_category in ["乳液", "クリーム"] and (
+        "バリア" in combined_goal_text or "乾燥" in combined_goal_text
+    ):
+        score += 6
+
+    if product_category in ["美容液"] and (
+        "ハリ" in combined_goal_text
+        or "毛穴" in combined_goal_text
+        or "色素沈着" in combined_goal_text
+    ):
+        score += 6
 
     return score
 
