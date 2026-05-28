@@ -7524,6 +7524,11 @@ def lab_test_function():
             # =========================
             # ⑦ 商品割当
             # =========================
+            print(
+                "[IMPROVEMENT PLAN BEFORE ASSIGN]",
+                data.get("improvement_plan", {}),
+                flush=True
+            )
             budget_value = parse_budget(user_data.get("budget", ""))
             debug_log("BUDGET VALUE", budget_value)
             data = assign_products_to_all_steps(data, products, user_data, budget_value)
