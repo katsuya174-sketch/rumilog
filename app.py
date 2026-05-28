@@ -7409,11 +7409,13 @@ def lab_test_function():
                         "message": message
                     }), 429
 
+                user_error = build_user_friendly_error_message(
+                    str(e)
+                )
+
                 return render_template(
-                    "lab.html",
-                    error_message=str(e),
-                    remaining_free_count=get_remaining_free_count(client_ip),
-                    DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT
+                    "error.html",
+                    error_message=user_error
                 )
 
             global_used = get_global_usage_count()
@@ -7432,7 +7434,7 @@ def lab_test_function():
                 error_text = str(e)
 
                 if "503" in error_text or "UNAVAILABLE" in error_text:
-                    message = "現在AI診断が混み合っています。少し時間をおいて再度お試しください。"
+                    message = "現在診断が混み合っています。少し時間をおいて再度お試しください。"
 
                 if is_ajax:
                     return jsonify({
@@ -7766,6 +7768,37 @@ def result_detail(result_id):
         traceback.print_exc()
         print("================================", flush=True)
         return "エラーが発生しました", 500
+
+def build_user_friendly_error_message(error_text=""):
+    text = str(error_text).lower()
+
+    if "429" in text:
+        return (
+            "現在アクセスが集中しているため、少し時間を空けてから再度お試しください。"
+        )
+
+    if "503" in text:
+        return (
+            "現在診断が混み合っています。"
+            "少し時間を空けてから再度お試しください。"
+        )
+
+    if "timeout" in text:
+        return (
+            "診断処理に時間がかかっています。"
+            "通信環境を確認して、再度お試しください。"
+        )
+
+    if "ssl" in text:
+        return (
+            "通信エラーが発生しました。"
+            "時間を空けて再度お試しください。"
+        )
+
+    return (
+        "診断中に一時的なエラーが発生しました。"
+        "少し時間を空けて再度お試しください。"
+    )
 
 @app.route("/result/<result_id>")
 def history_detail(result_id):
