@@ -4169,6 +4169,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
 
     def assign_one_step(step, used_product_names, section_name):
+        print("[ASSIGN ONE STEP ENTER]", section_name, step.get("category", ""), flush=True)
         if not isinstance(step, dict):
             return step
 
