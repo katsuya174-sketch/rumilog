@@ -1958,7 +1958,9 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     product_support = product.get("support_ingredients", [])
     product_skin_types = product.get("skin_types", [])
     sensitive_ok = product.get("sensitive_ok", "unknown")
-    retinol_level = int(product.get("retinol_level", 0) or 0)
+    retinol_level = safe_retinol_level(
+        product.get("retinol_level", 0)
+    )
     price_ref = safe_price(product.get("price_ref", 0))
     availability = product.get("availability_japan", [])
     product_functions = product.get("main_functions", [])
@@ -3069,7 +3071,9 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         "concerns": list(dict.fromkeys(concerns)),
         "skin_types": list(dict.fromkeys(skin_types)),
         "sensitive_ok": sensitive_ok,
-        "retinol_level": int(candidate.get("retinol_level", 0) or 0),
+        "retinol_level" : safe_retinol_level(
+            candidate.get("retinol_level", 0)
+        ),
         "price_ref": safe_price(candidate.get("price_ref", 0)),
         "main_functions": list(dict.fromkeys(main_functions)),
         "formulation": list(dict.fromkeys(formulation)),
