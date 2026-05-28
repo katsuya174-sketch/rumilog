@@ -4238,45 +4238,6 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
     ai_image_db = load_ai_product_images()
     improvement_plan = data.get("improvement_plan", {})
 
-    def apply_verified_rakuten_to_step(step, best):
-        if not isinstance(step, dict):
-            return step
-
-        if not isinstance(best, dict):
-            return step
-
-        verified_name = clean_display_product_name(
-            best.get("name", "")
-        )
-
-        verified_product = dict(best)
-        verified_product["name"] = verified_name
-
-        if is_discontinued_or_suspicious_product(verified_product):
-            print(
-                "[RAKUTEN VERIFIED SKIP STALE PRODUCT]",
-                verified_name,
-                flush=True
-            )
-            return step
-
-        if verified_name:
-            step["product"] = verified_name
-
-        if best.get("image"):
-            step["image"] = best["image"]
-
-        if best.get("rakuten_link"):
-            step["rakuten_link"] = best["rakuten_link"]
-
-        if best.get("price_ref"):
-            price = safe_price(best.get("price_ref", 0))
-            step["price"] = price
-            step["estimated_price"] = price
-
-        return step
-
-
     def assign_one_step(step, used_product_names, section_name):
       
         if not isinstance(step, dict):
