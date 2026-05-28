@@ -23,8 +23,10 @@ import urllib.parse
 import requests
 import re
 import copy
+import time
 from psycopg2.pool import SimpleConnectionPool
 DATABASE_URL = os.getenv("DATABASE_URL")
+RAKUTEN_COOLDOWN_UNTIL = 0
 #DB_POOL = SimpleConnectionPool(
 #   minconn=1,
 #    maxconn=5,
@@ -780,6 +782,11 @@ def clean_rakuten_keyword(keyword):
     return keyword[:120]
 
 def fetch_rakuten_item(product_name, category="", brand=""):
+    global RAKUTEN_COOLDOWN_UNTIL
+
+    if time.time() < RAKUTEN_COOLDOWN_UNTIL:
+        print("[RAKUTEN COOLDOWN ACTIVE]", flush=True)
+        return None
     product_name = clean_display_product_name(product_name)
     if not product_name:
         print("[RAKUTEN API] product_name empty", flush=True)
@@ -841,6 +848,7 @@ def fetch_rakuten_item(product_name, category="", brand=""):
                 print("[RAKUTEN API ERROR BODY]", res.text, flush=True)
 
                 if res.status_code == 429:
+                    RAKUTEN_COOLDOWN_UNTIL = time.time() + 60
                     print("[RAKUTEN RATE LIMIT SKIP]", keyword, flush=True)
                     return None
 
