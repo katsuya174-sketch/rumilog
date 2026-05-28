@@ -3279,11 +3279,12 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             continue
         improve_score = score_improvement(product, improvement_plan or {})
         print(
-            "[IMPROVE SCORE CHECK]",
+            "[IMPROVE DEBUG]",
             step.get("category", ""),
-            step.get("ingredient_focus", ""),
             product.get("name", ""),
+            "score=",
             improve_score,
+            "plan=",
             improvement_plan,
             flush=True
         )
@@ -3379,16 +3380,17 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
                 continue
             improve_score = score_improvement(product, improvement_plan or {})
             print(
-                "[IMPROVE SCORE CHECK]",
+                "[IMPROVE DEBUG]",
                 step.get("category", ""),
-                step.get("ingredient_focus", ""),
                 product.get("name", ""),
+                "score=",
                 improve_score,
+                "plan=",
                 improvement_plan,
                 flush=True
             )
             base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
-            froutine_score = score_routine_balance(
+            routine_score = score_routine_balance(
                 step,
                 product
             )
@@ -3427,11 +3429,12 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             continue
         improve_score = score_improvement(virtual, improvement_plan or {})
         print(
-            "[IMPROVE SCORE CHECK]",
+            "[IMPROVE DEBUG]",
             step.get("category", ""),
-            step.get("ingredient_focus", ""),
             virtual.get("name", ""),
+            "score=",
             improve_score,
+            "plan=",
             improvement_plan,
             flush=True
         )
