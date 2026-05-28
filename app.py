@@ -3782,6 +3782,23 @@ def extract_ai_candidate_fields(candidate):
         "confidence": ""
     }
 
+def safe_retinol_level(value):
+    if value is None:
+        return 0
+
+    if isinstance(value, int):
+        return value
+
+    text = str(value).strip().lower()
+
+    if text in ["", "none", "null", "unknown", "なし", "不明"]:
+        return 0
+
+    try:
+        return int(float(text))
+    except Exception:
+        return 0
+
 def normalize_ai_candidates(step):
     raw_candidates = step.get("product_candidates", [])
     normalized = []
@@ -3841,7 +3858,9 @@ def normalize_ai_candidates(step):
             "concerns": candidate.get("concerns", []) if isinstance(candidate.get("concerns", []), list) else purpose_to_concern_tags(step.get("purpose", "")),
             "skin_types": candidate.get("skin_types", []) if isinstance(candidate.get("skin_types", []), list) else [],
             "sensitive_ok": candidate.get("sensitive_ok", "unknown"),
-            "retinol_level": int(candidate.get("retinol_level", 0) or 0),
+            "retinol_level": safe_retinol_level(
+                candidate.get("retinol_level", 0)
+            ),
             "main_functions": candidate.get("main_functions", []) if isinstance(candidate.get("main_functions", []), list) else [],
             "formulation": candidate.get("formulation", []) if isinstance(candidate.get("formulation", []), list) else [],
             "technology": candidate.get("technology", []) if isinstance(candidate.get("technology", []), list) else [],
