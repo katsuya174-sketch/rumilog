@@ -3226,6 +3226,17 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
     # AI候補を全件候補化
     for candidate in candidates:
+        if isinstance(candidate, str):
+            try:
+                parsed_candidate = json.loads(candidate)
+
+                if isinstance(parsed_candidate, dict):
+                    candidate = parsed_candidate
+
+            except Exception as e:
+                print("[AI CANDIDATE STRING PARSE ERROR]", candidate, e, flush=True)
+                continue
+
         if not isinstance(candidate, dict):
             continue
 
@@ -4169,7 +4180,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
 
     def assign_one_step(step, used_product_names, section_name):
-        print("[ASSIGN ONE STEP ENTER]", section_name, step.get("category", ""), flush=True)
+      
         if not isinstance(step, dict):
             return step
 
