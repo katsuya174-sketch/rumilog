@@ -2887,26 +2887,33 @@ def score_product(product, step, user_data, budget_value):
     return score
 
 
-def score_improvement(product, improvement_plan):
+def score_improvement(product, improvement_plan=None, step=None):
     score = 0
 
     if not isinstance(product, dict):
         return 0
 
-    if not improvement_plan:
-        return 0
+    if improvement_plan is None:
+        improvement_plan = {}
 
     key_ingredients = []
     actions = []
 
-    immediate = improvement_plan.get("immediate", {})
-    short_term = improvement_plan.get("short_term", {})
+    immediate = improvement_plan.get("immediate", {}) if isinstance(improvement_plan, dict) else {}
+    short_term = improvement_plan.get("short_term", {}) if isinstance(improvement_plan, dict) else {}
 
-    key_ingredients += immediate.get("key_ingredients", [])
-    key_ingredients += short_term.get("key_ingredients", [])
+    key_ingredients += immediate.get("key_ingredients", []) or []
+    key_ingredients += short_term.get("key_ingredients", []) or []
 
-    actions += immediate.get("actions", [])
-    actions += short_term.get("actions", [])
+    actions += immediate.get("actions", []) or []
+    actions += short_term.get("actions", []) or []
+
+    if isinstance(step, dict):
+        if step.get("ingredient_focus"):
+            key_ingredients.append(step.get("ingredient_focus"))
+
+        if step.get("purpose"):
+            actions.append(step.get("purpose"))
 
     product_actives = product.get("active_ingredients", []) or []
     product_support = product.get("support_ingredients", []) or []
@@ -2920,10 +2927,15 @@ def score_improvement(product, improvement_plan):
     normalized = []
 
     for ing in key_ingredients:
-        tag = normalize_ingredient_tag(ing)
-
-        if tag:
-            normalized.append(tag)
+        if isinstance(ing, list):
+            for x in ing:
+                tag = normalize_ingredient_tag(x)
+                if tag:
+                    normalized.append(tag)
+        else:
+            tag = normalize_ingredient_tag(ing)
+            if tag:
+                normalized.append(tag)
 
     normalized = list(dict.fromkeys(normalized))
 
@@ -2940,55 +2952,48 @@ def score_improvement(product, improvement_plan):
         if ing_text and ing_text in product_name:
             score += 10
 
+    action_text = normalize_text(" ".join(str(x) for x in actions))
+    ingredient_text = normalize_text(" ".join(str(x) for x in key_ingredients))
+    goal_text = action_text + " " + ingredient_text
+
     for f in product_functions:
         f_norm = normalize_text(f)
 
-        for act in actions:
-            act_norm = normalize_text(act)
-
-            if f_norm and act_norm and (f_norm in act_norm or act_norm in f_norm):
-                score += 10
-                break
+        if f_norm and f_norm in goal_text:
+            score += 10
 
     for focus in product_focuses:
         focus_norm = normalize_text(focus)
 
-        for act in actions:
-            act_norm = normalize_text(act)
+        if focus_norm and focus_norm in goal_text:
+            score += 8
 
-            if focus_norm and act_norm and (focus_norm in act_norm or act_norm in focus_norm):
-                score += 8
-                break
-
-    action_text = normalize_text(" ".join(str(x) for x in actions))
-    ingredient_text = normalize_text(" ".join(str(x) for x in key_ingredients))
-    combined_goal_text = action_text + " " + ingredient_text
-
-    if "ニキビ" in combined_goal_text or "acne" in combined_goal_text:
-        if any(word in product_name for word in ["アゼライン", "cica", "シカ", "ドクダミ", "ティーツリー"]):
+    if "ニキビ" in goal_text or "acne" in goal_text:
+        if any(word in product_name for word in ["アゼライン", "シカ", "cica", "ドクダミ", "ティーツリー"]):
             score += 10
 
-    if "色素沈着" in combined_goal_text or "くすみ" in combined_goal_text or "美白" in combined_goal_text:
+    if "色素沈着" in goal_text or "くすみ" in goal_text or "美白" in goal_text:
         if any(word in product_name for word in ["ビタミン", "メラノ", "トラネキサム", "ナイアシン", "美白"]):
             score += 10
 
-    if "ハリ" in combined_goal_text or "毛穴" in combined_goal_text:
+    if "ハリ" in goal_text or "毛穴" in goal_text or "ターンオーバー" in goal_text:
         if any(word in product_name for word in ["レチノ", "ペプチド", "pdrn", "リンクル"]):
             score += 10
 
-    if "バリア" in combined_goal_text or "乾燥" in combined_goal_text:
-        if any(word in product_name for word in ["セラミド", "キュレル", "ミノン", "ヒアルロン"]):
+    if "バリア" in goal_text or "乾燥" in goal_text or "保湿" in goal_text:
+        if any(word in product_name for word in ["セラミド", "キュレル", "ミノン", "ヒアルロン", "保湿"]):
             score += 10
 
     if product_category in ["乳液", "クリーム"] and (
-        "バリア" in combined_goal_text or "乾燥" in combined_goal_text
+        "バリア" in goal_text or "乾燥" in goal_text or "保湿" in goal_text
     ):
         score += 6
 
-    if product_category in ["美容液"] and (
-        "ハリ" in combined_goal_text
-        or "毛穴" in combined_goal_text
-        or "色素沈着" in combined_goal_text
+    if product_category == "美容液" and (
+        "ハリ" in goal_text
+        or "毛穴" in goal_text
+        or "色素沈着" in goal_text
+        or "ニキビ" in goal_text
     ):
         score += 6
 
@@ -3277,7 +3282,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         base_score = score_product(product, step, user_data, budget_value)
         if base_score <= -9000:
             continue
-        improve_score = score_improvement(product, improvement_plan or {})
+        improve_score = score_improvement(product, improvement_plan or {},step)
         print(
             "[IMPROVE DEBUG]",
             step.get("category", ""),
@@ -3378,7 +3383,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             base_score = score_product(product, step, user_data, budget_value)
             if base_score <= -9000:
                 continue
-            improve_score = score_improvement(product, improvement_plan or {})
+            improve_score = score_improvement(product, improvement_plan or {},step)
             print(
                 "[IMPROVE DEBUG]",
                 step.get("category", ""),
@@ -3427,7 +3432,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         base_score = score_product(virtual, step, user_data, budget_value)
         if base_score <= -9000:
             continue
-        improve_score = score_improvement(virtual, improvement_plan or {})
+        improve_score = score_improvement(virtual, improvement_plan or {},step)
         print(
             "[IMPROVE DEBUG]",
             step.get("category", ""),
