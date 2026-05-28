@@ -3832,6 +3832,7 @@ def normalize_ai_candidates(step):
         item = {
             "brand": brand,
             "name": name,
+            "category": step.get("category", ""),
             "confidence": confidence,
             "price_ref": safe_price(candidate.get("price_ref", step.get("estimated_price", 0))),
             "active_ingredients": candidate.get("active_ingredients", []) if isinstance(candidate.get("active_ingredients", []), list) else [],
