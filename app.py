@@ -6636,48 +6636,17 @@ def pick_uploaded_file(request, normal_name, camera_name):
     return None
 
 def get_analysis_schema():
-    product_candidate_schema ={
+    product_candidate_schema = {
         "type": "object",
         "properties": {
             "brand": {"type": "string"},
             "name": {"type": "string"},
-            "confidence": {"type": "integer"},
-            "active_ingredients": {
-                "type": "array",
-                "items": {"type": "string"}
-            },
-            "support_ingredients": {
-                "type": "array",
-                "items": {"type": "string"}
-            },
-            "main_functions": {
-                "type": "array",
-                "items": {"type": "string"}
-            },
-            "ingredient_focus": {
-                "type": "array",
-                "items": {"type": "string"}
-            },
-            "skin_types": {
-                "type": "array",
-                "items": {"type": "string"}
-            },
-            "sensitive_ok": {"type": "string"},
-            "price_ref": {"type": "integer"},
-            "reason": {"type": "string"}
+            "confidence": {"type": "integer"}
         },
         "required": [
             "brand",
             "name",
-            "confidence",
-            "active_ingredients",
-            "support_ingredients",
-            "main_functions",
-            "ingredient_focus",
-            "skin_types",
-            "sensitive_ok",
-            "price_ref",
-            "reason"
+            "confidence"
         ]
     }
 
@@ -6692,12 +6661,9 @@ def get_analysis_schema():
             "priority": {"type": "integer"},
             "product_candidates": {
                 "type": "array",
-                "items": product_candidate_schema,
-                "maxItems": 5
+                "items": product_candidate_schema
             },
-            "selection_reason": {"type": "string"},
-            "estimated_price": {"type": "integer"},
-            "price_band": {"type": "string"}
+            "selection_reason": {"type": "string"}
         },
         "required": [
             "category",
@@ -6713,9 +6679,8 @@ def get_analysis_schema():
     return {
         "type": "object",
         "properties": {
-            "record_date": {"type": "string"},
-            "analysis_date": {"type": "string"},
             "skin_score": {"type": "integer"},
+            "skin_summary": {"type": "string"},
             "scores": {
                 "type": "object",
                 "properties": {
@@ -6744,43 +6709,6 @@ def get_analysis_schema():
                 ]
             },
             "skin_summary": {"type": "string"},
-            "observation": {
-                "type": "object",
-                "properties": {
-                    "summary": {"type": "string"},
-                    "visible_concerns": {
-                        "type": "array",
-                        "items": {"type": "string"}
-                    },
-                    "symmetry": {"type": "string"},
-                    "image_confidence": {"type": "integer"}
-                },
-                "required": [
-                    "summary",
-                    "visible_concerns",
-                    "symmetry",
-                    "image_confidence"
-                ]
-            },
-            "root_causes": {
-                "type": "array",
-                "maxItems": 3,
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "cause": {"type": "string"},
-                        "evidence": {"type": "string"},
-                        "priority": {"type": "integer"},
-                        "care_direction": {"type": "string"}
-                    },
-                    "required": [
-                        "cause",
-                        "evidence",
-                        "priority",
-                        "care_direction"
-                    ]
-                }
-            },
             "morning": {
                 "type": "object",
                 "properties": {
@@ -6809,6 +6737,25 @@ def get_analysis_schema():
                 "type": "array",
                 "items": {"type": "string"}
             },
+            "improvement_plan": {
+                "type": "object",
+                "properties": {
+                    "priority_concerns": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    },
+                    "key_ingredients": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    },
+                    "care_direction": {"type": "string"}
+                },
+                "required": [
+                    "priority_concerns",
+                    "key_ingredients",
+                    "care_direction"
+                ]
+            },
             "moisture_plan": {
                 "type": "object",
                 "properties": {
@@ -6825,114 +6772,18 @@ def get_analysis_schema():
                     "need_double_moisture",
                     "reason"
                 ]
-            },
-            "improvement_plan": {
-                "type": "object",
-                "properties": {
-                    "score_projection": {
-                        "type": "object",
-                        "properties": {
-                            "1week": {"type": "integer"},
-                            "1month": {"type": "integer"},
-                            "3month": {"type": "integer"}
-                        },
-                        "required": [
-                            "1week",
-                            "1month",
-                            "3month"
-                        ]
-                    },
-                    "improvement_steps": {
-                        "type": "array",
-                        "items": {"type": "string"}
-                    },
-                    "immediate": {
-                        "type": "object",
-                        "properties": {
-                            "goal": {"type": "string"},
-                            "actions": {
-                                "type": "array",
-                                "items": {"type": "string"}
-                            },
-                            "key_ingredients": {
-                                "type": "array",
-                                "items": {"type": "string"}
-                            },
-                            "note": {"type": "string"}
-                        },
-                        "required": [
-                            "goal",
-                            "actions",
-                            "key_ingredients",
-                            "note"
-                        ]
-                    },
-                    "short_term": {
-                        "type": "object",
-                        "properties": {
-                            "goal": {"type": "string"},
-                            "actions": {
-                                "type": "array",
-                                "items": {"type": "string"}
-                            },
-                            "key_ingredients": {
-                                "type": "array",
-                                "items": {"type": "string"}
-                            },
-                            "note": {"type": "string"}
-                        },
-                        "required": [
-                            "goal",
-                            "actions",
-                            "key_ingredients",
-                            "note"
-                        ]
-                    },
-                    "long_term": {
-                        "type": "object",
-                        "properties": {
-                            "goal": {"type": "string"},
-                            "actions": {
-                                "type": "array",
-                                "items": {"type": "string"}
-                            },
-                            "key_ingredients": {
-                                "type": "array",
-                                "items": {"type": "string"}
-                            },
-                            "note": {"type": "string"}
-                        },
-                        "required": [
-                            "goal",
-                            "actions",
-                            "key_ingredients",
-                            "note"
-                        ]
-                    }
-                },
-                "required": [
-                    "score_projection",
-                    "improvement_steps",
-                    "immediate",
-                    "short_term",
-                    "long_term"
-                ]
             }
         },
         "required": [
-            "record_date",
-            "analysis_date",
             "skin_score",
-            "scores",
             "skin_summary",
-            "observation",
-            "root_causes",
+            "scores",
             "morning",
             "night",
             "weekly_care",
             "warnings",
-            "moisture_plan",
-            "improvement_plan"
+            "improvement_plan",
+            "moisture_plan"
         ]
     }
 
