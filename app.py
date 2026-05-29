@@ -533,7 +533,11 @@ def clean_rakuten_keyword(text):
 
     # 余分な空白を整理
     text = " ".join(text.split())
+    keyword = keyword.replace("　", " ")
+    keyword = keyword.replace("ＵＶ", "UV")
+    keyword = keyword.replace("uv", "UV")
 
+    keyword = re.sub(r"\s+", " ", keyword).strip()
     # 長すぎると楽天APIで弾かれやすいので短くする
     return text[:80]
 
