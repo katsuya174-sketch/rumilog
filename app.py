@@ -7020,7 +7020,7 @@ product_candidates は「候補収集」だけを行う。
 
 形式:
 
-{
+{{
   "brand": "",
   "name": "",
   "confidence": 0,
@@ -7032,7 +7032,7 @@ product_candidates は「候補収集」だけを行う。
   "sensitive_ok": "unknown",
   "price_ref": 0,
   "reason": ""
-}
+}}
 
 brand:
 ブランド名のみ。
