@@ -2730,7 +2730,39 @@ def infer_active_profile(product):
             families.add("strong_vitamin_c")
             strength = "high"
             irritation_risk = "medium"
+    if any(x in text for x in [
+        "azelaic",
+        "azelaic_acid",
+        "アゼライン酸"
+    ]):
+        families.add("azelaic")
 
+        pair_well_with.update([
+            "vitamin_c",
+            "barrier",
+            "ceramide"
+        ])
+    if any(x in text for x in [
+        "niacinamide",
+        "ナイアシンアミド"
+    ]):
+        families.add("niacinamide")
+
+        pair_well_with.update([
+            "vitamin_c",
+            "retinoid",
+            "barrier"
+        ])
+        if any(x in text for x in [
+            "pdrn"
+        ]):
+            families.add("pdrn")
+
+            pair_well_with.update([
+                "retinoid",
+                "peptide",
+                "barrier"
+            ])
     if any(x in text for x in [
         "aha",
         "bha",
@@ -3134,7 +3166,27 @@ def infer_improvement_targets(improvement_plan):
     """
     targets = set()
 
-    raw_text = str(improvement_plan or "").lower()
+    texts = []
+
+    if isinstance(improvement_plan, dict):
+
+        for value in improvement_plan.values():
+
+            if isinstance(value, list):
+                texts.extend(
+                    str(v)
+                    for v in value
+                )
+
+            elif value:
+                texts.append(str(value))
+
+    else:
+        texts.append(
+            str(improvement_plan or "")
+        )
+
+    raw_text = " ".join(texts).lower()
 
     target_keywords = {
         "acne": [
@@ -3169,7 +3221,23 @@ def infer_improvement_targets(improvement_plan):
             "乾燥", "保湿", "水分", "つっぱり", "かさつき",
             "dryness", "moisture", "hydration"
         ],
-    }
+        "oil_control": [
+            "皮脂",
+            "テカリ",
+            "脂性",
+            "oily",
+            "sebum"
+        ],
+
+        "soothing": [
+            "鎮静",
+            "cica",
+            "ドクダミ",
+            "赤み",
+            "soothing",
+            "calming"
+        ]
+            }
 
     for target, keywords in target_keywords.items():
         if any(keyword in raw_text for keyword in keywords):
@@ -3178,6 +3246,18 @@ def infer_improvement_targets(improvement_plan):
     # ニキビ跡という表現だけの場合は赤・茶どちらも見る
     if "ニキビ跡" in raw_text or "acne scar" in raw_text or "acne marks" in raw_text:
         targets.add("acne_marks_red")
+        targets.add("pigmentation")
+
+    if (
+        "赤み" in raw_text
+        and "ニキビ跡" in raw_text
+    ):
+        targets.add("acne_marks_red")
+
+    if (
+        "色素沈着" in raw_text
+        and "ニキビ跡" in raw_text
+    ):
         targets.add("pigmentation")
 
     # 毛穴 + ハリ系はたるみ毛穴対策として扱う
@@ -3548,23 +3628,38 @@ def is_discontinued_or_suspicious_product(product):
 
     return False
 
-def score_routine_balance(step, product):
+def score_routine_balance(
+    step,
+    product,
+    routine_context=None
+):
     profile = infer_active_profile(product)
 
     score = 0
 
-    families = profile["families"]
+    families = set(
+        profile.get("families", [])
+    )
 
-    strength = profile["strength"]
+    strength = profile.get(
+        "strength",
+        "low"
+    )
 
     purpose = normalize_text(
         step.get("purpose", "")
     )
 
+    # =========
+    # 目的一致
+    # =========
+
     if (
         "ニキビ跡" in purpose
         or "色素沈着" in purpose
     ):
+        if "vitamin_c" in families:
+            score += 10
 
         if (
             "retinoid" in families
@@ -3572,40 +3667,134 @@ def score_routine_balance(step, product):
         ):
             score += 10
 
-        if (
-            "vitamin_c" in families
-        ):
+        if "azelaic" in families:
             score += 8
 
     if (
-        "ハリ" in purpose
-        or "毛穴" in purpose
+        "毛穴" in purpose
+        or "ハリ" in purpose
     ):
-
-        if (
-            "retinoid" in families
-        ):
+        if "retinoid" in families:
             score += 12
 
-        if (
-            "peptide" in families
-        ):
+        if "peptide" in families:
             score += 10
 
-    if (
-        "barrier" in families
-    ):
-        score += 5
+    if "barrier" in families:
+        score += 6
+
+    # =========
+    # 刺激補正
+    # =========
 
     if (
-        profile["irritation_risk"]
+        profile.get("irritation_risk")
         == "high"
     ):
         score -= 8
 
-    return score
+    # =========
+    # ルーティン評価
+    # =========
 
-def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None):
+    if routine_context:
+
+        existing_families = set(
+            routine_context.get(
+                "families",
+                []
+            )
+        )
+        profile_pair = profile.get(
+            "pair_well_with",
+            set()
+        )
+
+        profile_avoid = profile.get(
+            "avoid_with",
+            set()
+        )
+
+        for family in existing_families:
+
+            if family in profile_pair:
+                score += 12
+
+            if family in profile_avoid:
+                score -= 20
+        existing_strengths = (
+            routine_context.get(
+                "strengths",
+                []
+            )
+        )
+
+        # VC重複
+        if (
+            "vitamin_c" in families
+            and "vitamin_c" in existing_families
+        ):
+            score -= 6
+
+        # レチノイド重複
+        if (
+            "retinoid" in families
+            and "retinoid" in existing_families
+        ):
+            score -= 12
+
+        # ピーリング重複
+        if (
+            "acid" in families
+            and "acid" in existing_families
+        ):
+            score -= 10
+
+        # レチノイド + 酸
+        if (
+            "retinoid" in families
+            and "acid" in existing_families
+        ):
+            score -= 15
+
+        if (
+            "acid" in families
+            and "retinoid" in existing_families
+        ):
+            score -= 15
+
+        # VC + レチノイド
+        if (
+            "vitamin_c" in families
+            and "retinoid" in existing_families
+        ):
+            score += 6
+
+        if (
+            "retinoid" in families
+            and "vitamin_c" in existing_families
+        ):
+            score += 6
+
+        # バリア補完
+        if (
+            "barrier" in families
+            and (
+                "retinoid" in existing_families
+                or "acid" in existing_families
+            )
+        ):
+            score += 10
+
+        # 強刺激の重複
+        if (
+            strength == "high"
+            and "high" in existing_strengths
+        ):
+            score -= 12
+
+    return score
+def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None,routine_context=None):
     if exclude_names is None:
         exclude_names = set()
 
@@ -3627,6 +3816,11 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         base_score = score_product(product, step, user_data, budget_value)
         if base_score <= -9000:
             continue
+        print(
+            "[IMPROVEMENT TARGETS]",
+            infer_improvement_targets(improvement_plan),
+            flush=True
+        )
         improve_score = score_improvement(product, improvement_plan or {})
         improvement_reason = build_improvement_reason(product, improvement_plan or {})
         print(
@@ -3644,7 +3838,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
         routine_score = score_routine_balance(
             step,
-            product
+            product,
+            routine_context
         )
 
         final_score = (
@@ -3658,6 +3853,10 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         product["_score"] = round(final_score, 1)
         product["_base_score"] = round(base_score, 1)
         product["_improve_score"] = round(improve_score, 1)
+        product["_routine_score"] = round(
+            routine_score,
+            1
+        )
         product["_improvement_reason"] = build_improvement_reason(
             product,
             improvement_plan or {}
@@ -3748,7 +3947,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
             routine_score = score_routine_balance(
                 step,
-                product
+                product,
+                routine_context
             )
 
             final_score = (
@@ -3762,6 +3962,10 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             product["_score"] = round(final_score, 1)
             product["_base_score"] = round(base_score, 1)
             product["_improve_score"] = round(improve_score, 1)
+            product["_routine_score"] = round(
+                routine_score,
+                1
+            )
             product["_improvement_reason"] = build_improvement_reason(
                 product,
                 improvement_plan or {}
@@ -3802,7 +4006,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
         routine_score = score_routine_balance(
             step,
-            virtual
+            virtual,
+            routine_context
         )
 
         final_score = (
@@ -3816,6 +4021,10 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         virtual["_score"] = round(final_score, 1)
         virtual["_base_score"] = round(base_score, 1)
         virtual["_improve_score"] = round(improve_score, 1)
+        virtual["_routine_score"] = round(
+            routine_score,
+            1
+        )
         virtual["_improvement_reason"] = build_improvement_reason(
             virtual,
             improvement_plan or {}
@@ -4684,7 +4893,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
     ai_image_db = load_ai_product_images()
     improvement_plan = data.get("improvement_plan", {})
 
-    def assign_one_step(step, used_product_names, section_name):
+    def assign_one_step(step, used_product_names, section_name, routine_context):
       
         if not isinstance(step, dict):
             return step
@@ -4699,6 +4908,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             budget_value=budget_value,
             improvement_plan=improvement_plan,
             exclude_names=used_product_names,
+            routine_context=routine_context,
         )
 
         print("====== MARKET BATTLE ======", flush=True)
@@ -4735,7 +4945,19 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
         product_name = best.get("name")
         if product_name:
             used_product_names.add(product_name)
+        profile = infer_active_profile(best)
 
+        routine_context["families"].extend(
+            profile.get("families", [])
+        )
+
+        routine_context["strengths"].append(
+            profile.get("strength", "low")
+        )
+
+        routine_context["selected_products"].append(
+            product_name
+        )
         step["top_candidates"] = best.get("_top_candidates", [])
         source = best.get("_source", "")
 
@@ -4806,13 +5028,18 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
     for section in ["morning", "night"]:
         used_product_names = set()
+        routine_context = {
+            "families": [],
+            "strengths": [],
+            "selected_products": []
+        }
         steps = data.get(section, {}).get("steps", [])
 
         if not isinstance(steps, list):
             continue
 
         for idx, step in enumerate(steps):
-            steps[idx] = assign_one_step(step, used_product_names, section)
+            steps[idx] = assign_one_step(step, used_product_names, section,routine_context)
 
     used_weekly_names = set()
     weekly_steps = data.get("weekly_care", [])
