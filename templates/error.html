@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>るみろぐ | エラー</title>
+
+    <style>
+        body{
+            margin:0;
+            min-height:100vh;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            background:
+                radial-gradient(circle at top,#ffe9f3 0%,#fff 45%);
+            font-family:
+                "Hiragino Sans",
+                "Yu Gothic",
+                sans-serif;
+            overflow:hidden;
+        }
+
+        .bubble{
+            position:absolute;
+            border-radius:50%;
+            background:rgba(255,255,255,0.45);
+            animation:float 12s linear infinite;
+            backdrop-filter:blur(3px);
+        }
+
+        .bubble:nth-child(1){
+            width:120px;
+            height:120px;
+            left:10%;
+            top:80%;
+            animation-duration:14s;
+        }
+
+        .bubble:nth-child(2){
+            width:70px;
+            height:70px;
+            left:80%;
+            top:90%;
+            animation-duration:10s;
+        }
+
+        .bubble:nth-child(3){
+            width:90px;
+            height:90px;
+            left:65%;
+            top:75%;
+            animation-duration:16s;
+        }
+
+        @keyframes float{
+            0%{
+                transform:translateY(0);
+                opacity:0;
+            }
+
+            10%{
+                opacity:1;
+            }
+
+            100%{
+                transform:translateY(-120vh);
+                opacity:0;
+            }
+        }
+
+        .card{
+            position:relative;
+            z-index:2;
+            width:min(92%,420px);
+            background:white;
+            border-radius:28px;
+            padding:34px 26px;
+            box-shadow:0 10px 40px rgba(255,120,170,0.14);
+            text-align:center;
+        }
+
+        .icon{
+            font-size:54px;
+            margin-bottom:18px;
+        }
+
+        h1{
+            margin:0 0 14px;
+            font-size:24px;
+            color:#444;
+        }
+
+        .message{
+            font-size:15px;
+            line-height:1.9;
+            color:#666;
+            margin-bottom:28px;
+        }
+
+        .retry-btn{
+            display:inline-block;
+            background:linear-gradient(
+                135deg,
+                #ff8eb5,
+                #ffb6cf
+            );
+            color:white;
+            text-decoration:none;
+            padding:14px 28px;
+            border-radius:999px;
+            font-size:15px;
+            font-weight:700;
+            transition:0.25s;
+            box-shadow:0 6px 18px rgba(255,120,170,0.24);
+        }
+
+        .retry-btn:hover{
+            transform:translateY(-2px);
+            opacity:0.92;
+        }
+
+        .sub{
+            margin-top:18px;
+            font-size:12px;
+            color:#aaa;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="bubble"></div>
+    <div class="bubble"></div>
+    <div class="bubble"></div>
+
+    <div class="card">
+
+        <div class="icon">🫧</div>
+
+        <h1>診断を完了できませんでした</h1>
+
+        <div class="message">
+            {{ error_message }}
+        </div>
+
+        <a href="/lab" class="retry-btn">
+            もう一度診断する
+        </a>
+
+        <div class="sub">
+            時間を空けると改善する場合があります
+        </div>
+
+    </div>
+
+</body>
+</html>

@@ -679,7 +679,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
 
     if category and category in title:
         score += 8
-
+    
     ng_words = [
         "詰替",
         "詰め替え",
@@ -694,6 +694,27 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     for ng in ng_words:
         if ng in title:
             score -= 25
+    bundle_quantity = infer_bundle_quantity_from_title(title)
+
+    if bundle_quantity > 1:
+        score -= 20
+    single_words = [
+        "単品",
+        "1個",
+        "1本",
+        "通常品",
+    ]
+
+    if any(word in title for word in single_words):
+        score += 12
+
+    price = safe_price(item.get("itemPrice", 0))
+
+    if price >= 8000:
+        score -= 12
+
+    if price >= 12000:
+        score -= 20
 
     if item.get("mediumImageUrls"):
         score += 10
@@ -764,6 +785,95 @@ def clean_ai_product_name(name):
 
     return " ".join(cleaned_parts).strip()
 
+def infer_bundle_quantity_from_title(title):
+    """
+    商品名からセット数を推定する。
+    例：
+    メラノCC 8個セット → 8
+    8個 → 8
+    3本まとめ買い → 3
+    2個組 → 2
+    10枚入 → 10
+    """
+    if not title:
+        return 1
+
+    text = str(title)
+    text = text.replace("　", " ")
+
+    patterns = [
+        r"(\d+)\s*個\s*セット",
+        r"(\d+)\s*本\s*セット",
+        r"(\d+)\s*枚\s*セット",
+        r"(\d+)\s*袋\s*セット",
+        r"(\d+)\s*箱\s*セット",
+        r"(\d+)\s*個組",
+        r"(\d+)\s*本組",
+        r"(\d+)\s*枚組",
+        r"(\d+)\s*個入り",
+        r"(\d+)\s*本入り",
+        r"(\d+)\s*枚入り",
+        r"(\d+)\s*個入",
+        r"(\d+)\s*本入",
+        r"(\d+)\s*枚入",
+        r"(\d+)\s*個",
+        r"(\d+)\s*本",
+        r"(\d+)\s*枚",
+        r"(\d+)\s*袋",
+        r"(\d+)\s*箱",
+        r"(\d+)\s*セット",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+
+        qty = int(match.group(1))
+
+        # 1個は補正不要、25以上は容量や型番の誤検出が増えるので除外
+        if 2 <= qty <= 24:
+            return qty
+
+    return 1
+
+
+def normalize_rakuten_item_price(item):
+    if not isinstance(item, dict):
+        return item
+
+    title = (
+        item.get("itemName")
+        or item.get("name")
+        or item.get("productName")
+        or ""
+    )
+
+    raw_price = (
+        item.get("itemPrice")
+        or item.get("price_ref")
+        or item.get("price")
+        or item.get("estimated_price")
+        or 0
+    )
+
+    raw_price = safe_price(raw_price)
+    if raw_price <= 0:
+        return item
+
+    quantity = infer_bundle_quantity_from_title(title)
+
+    normalized_price = raw_price
+    if quantity > 1:
+        normalized_price = round(raw_price / quantity)
+
+    item["raw_price"] = raw_price
+    item["bundle_quantity"] = quantity
+    item["normalized_price"] = normalized_price
+    item["price_ref"] = normalized_price
+
+    return item
+
 def clean_rakuten_keyword(keyword):
     if not isinstance(keyword, str):
         return ""
@@ -826,7 +936,7 @@ def fetch_rakuten_item(product_name, category="", brand=""):
                 "applicationId": RAKUTEN_APP_ID,
                 "accessKey": RAKUTEN_ACCESS_KEY,
                 "keyword": keyword,
-                "hits": 5,
+                "hits": 10,
                 "format": "json",
                 "formatVersion": 2,
                 "imageFlag": 1,
@@ -938,10 +1048,12 @@ def fetch_rakuten_item(product_name, category="", brand=""):
                 str(image_url)
                 .replace("http://", "https://")
             )
-
+            best = normalize_rakuten_item_price(best)
             result = {
                 "name": best.get("itemName", ""),
-                "price": best.get("itemPrice", 0),
+                "price": best.get("normalized_price", 0),
+                "raw_price": best.get("raw_price", 0),
+                "bundle_quantity": best.get("bundle_quantity", 1),
                 "rakuten_link": (
                     best.get("affiliateUrl")
                     or best.get("itemUrl")
@@ -2887,121 +2999,344 @@ def score_product(product, step, user_data, budget_value):
     return score
 
 
-def score_improvement(product, improvement_plan=None, step=None):
-    score = 0
+def normalize_text_value(value):
+    if value is None:
+        return ""
+    return str(value).strip().lower()
 
+
+def as_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def collect_product_terms(product):
+    terms = set()
+
+    for key in [
+        "active_ingredients",
+        "support_ingredients",
+        "main_functions",
+        "ingredient_focus",
+        "formulation",
+        "technology",
+        "signature_ingredients",
+        "concerns",
+    ]:
+        for item in as_list(product.get(key)):
+            if item:
+                terms.add(normalize_text_value(item))
+
+    strength = product.get("ingredient_strength", {})
+    if isinstance(strength, dict):
+        for key, value in strength.items():
+            if value:
+                terms.add(normalize_text_value(key))
+                terms.add(normalize_text_value(value))
+
+    name = normalize_text_value(product.get("name", ""))
+    brand = normalize_text_value(product.get("brand", ""))
+
+    if name:
+        terms.add(name)
+    if brand:
+        terms.add(brand)
+
+    return terms
+
+
+IMPROVEMENT_KEYWORDS = {
+    "acne": {
+        "strong": [
+            "azelaic_acid", "アゼライン酸", "salicylic_acid", "サリチル酸",
+            "bha", "グリチルリチン酸", "tea_tree", "ティーツリー",
+        ],
+        "support": [
+            "niacinamide", "ナイアシンアミド", "cica", "シカ",
+            "centella", "ツボクサ", "panthenol", "パンテノール",
+            "low_irritation", "低刺激",
+        ],
+    },
+    "acne_marks_red": {
+        "strong": [
+            "cica", "シカ", "centella", "ツボクサ", "madecassoside",
+            "マデカッソシド", "azelaic_acid", "アゼライン酸",
+            "tranexamic_acid", "トラネキサム酸",
+        ],
+        "support": [
+            "panthenol", "パンテノール", "allantoin", "アラントイン",
+            "ceramide", "セラミド", "low_irritation", "低刺激",
+        ],
+    },
+    "pigmentation": {
+        "strong": [
+            "vitamin_c", "ビタミンc", "ascorbic", "アスコルビン酸",
+            "tranexamic_acid", "トラネキサム酸", "arbutin", "アルブチン",
+            "kojic_acid", "コウジ酸", "glutathione", "グルタチオン",
+            "niacinamide", "ナイアシンアミド",
+        ],
+        "support": [
+            "retinol", "レチノール", "retinal", "レチナール",
+            "peeling", "ピーリング", "turnover", "ターンオーバー",
+            "sunscreen", "日焼け止め", "uv", "spf", "pa",
+        ],
+    },
+    "pores": {
+        "strong": [
+            "retinol", "レチノール", "retinal", "レチナール",
+            "niacinamide", "ナイアシンアミド", "azelaic_acid", "アゼライン酸",
+            "salicylic_acid", "サリチル酸", "bha",
+        ],
+        "support": [
+            "peptide", "ペプチド", "vitamin_c", "ビタミンc",
+            "clay", "クレイ", "酵素", "enzyme",
+        ],
+    },
+    "firmness": {
+        "strong": [
+            "retinol", "レチノール", "retinal", "レチナール",
+            "peptide", "ペプチド", "pdrn", "nad",
+        ],
+        "support": [
+            "ceramide", "セラミド", "panthenol", "パンテノール",
+            "hyaluronic", "ヒアルロン酸", "collagen", "コラーゲン",
+        ],
+    },
+    "barrier": {
+        "strong": [
+            "ceramide", "セラミド", "panthenol", "パンテノール",
+            "cica", "シカ", "centella", "ツボクサ",
+        ],
+        "support": [
+            "hyaluronic", "ヒアルロン酸", "beta_glucan", "βグルカン",
+            "allantoin", "アラントイン", "squalane", "スクワラン",
+            "low_irritation", "低刺激",
+        ],
+    },
+    "dryness": {
+        "strong": [
+            "ceramide", "セラミド", "hyaluronic", "ヒアルロン酸",
+            "panthenol", "パンテノール", "squalane", "スクワラン",
+        ],
+        "support": [
+            "glycerin", "グリセリン", "amino_acid", "アミノ酸",
+            "beta_glucan", "βグルカン",
+        ],
+    },
+}
+
+
+CATEGORY_IMPROVEMENT_BONUS = {
+    "美容液": 18,
+    "セラム": 18,
+    "クリーム": 14,
+    "乳液": 12,
+    "化粧水": 10,
+    "パック": 12,
+    "洗顔": 7,
+    "洗顔料": 7,
+    "クレンジング": 5,
+    "ピーリング": 13,
+    "日焼け止め": 16,
+}
+
+
+def infer_improvement_targets(improvement_plan):
+    """
+    improvement_plan / step / Gemini出力の文章から、
+    改善ターゲットを広めに推定する。
+    """
+    targets = set()
+
+    raw_text = str(improvement_plan or "").lower()
+
+    target_keywords = {
+        "acne": [
+            "ニキビ", "吹き出物", "acne", "breakout", "blemish",
+            "肌荒れ", "炎症ニキビ"
+        ],
+        "acne_marks_red": [
+            "赤み", "赤ニキビ跡", "赤いニキビ跡", "炎症後紅斑",
+            "post acne redness", "redness", "pie"
+        ],
+        "pigmentation": [
+            "色素沈着", "茶ニキビ跡", "茶色いニキビ跡", "シミ",
+            "くすみ", "美白", "透明感", "brightening",
+            "pigmentation", "dark spot", "pih", "melasma"
+        ],
+        "pores": [
+            "毛穴", "開き毛穴", "詰まり毛穴", "黒ずみ",
+            "角栓", "皮脂", "テカリ", "pores", "sebum",
+            "blackhead", "clogged pore"
+        ],
+        "firmness": [
+            "ハリ", "たるみ", "弾力", "小じわ", "しわ",
+            "エイジング", "aging", "firmness", "elasticity",
+            "wrinkle", "fine line"
+        ],
+        "barrier": [
+            "バリア", "敏感", "ゆらぎ", "鎮静", "刺激",
+            "赤みが出やすい", "乾燥しやすい", "barrier",
+            "sensitive", "soothing", "calming"
+        ],
+        "dryness": [
+            "乾燥", "保湿", "水分", "つっぱり", "かさつき",
+            "dryness", "moisture", "hydration"
+        ],
+    }
+
+    for target, keywords in target_keywords.items():
+        if any(keyword in raw_text for keyword in keywords):
+            targets.add(target)
+
+    # ニキビ跡という表現だけの場合は赤・茶どちらも見る
+    if "ニキビ跡" in raw_text or "acne scar" in raw_text or "acne marks" in raw_text:
+        targets.add("acne_marks_red")
+        targets.add("pigmentation")
+
+    # 毛穴 + ハリ系はたるみ毛穴対策として扱う
+    if "たるみ毛穴" in raw_text:
+        targets.add("pores")
+        targets.add("firmness")
+
+    # 何も拾えない場合は、最低限バリア・乾燥を評価
+    if not targets:
+        targets.update(["barrier", "dryness"])
+
+    return targets
+
+
+def term_matches(terms, keywords):
+    for term in terms:
+        for keyword in keywords:
+            keyword = normalize_text_value(keyword)
+            if keyword and keyword in term:
+                return True
+    return False
+
+
+def score_improvement(product, improvement_plan=None):
+    """
+    改善寄与スコア。
+    美容液だけでなく、化粧水・乳液・クリーム・洗顔・クレンジング・日焼け止め・パック・ピーリングも評価する。
+    """
     if not isinstance(product, dict):
         return 0
 
-    if improvement_plan is None:
-        improvement_plan = {}
+    score = 0
+    terms = collect_product_terms(product)
+    targets = infer_improvement_targets(improvement_plan or {})
 
-    key_ingredients = []
-    actions = []
+    category = str(product.get("category", "")).strip()
+    name = str(product.get("name", "")).lower()
 
-    immediate = improvement_plan.get("immediate", {}) if isinstance(improvement_plan, dict) else {}
-    short_term = improvement_plan.get("short_term", {}) if isinstance(improvement_plan, dict) else {}
+    score += CATEGORY_IMPROVEMENT_BONUS.get(category, 0)
 
-    key_ingredients += immediate.get("key_ingredients", []) or []
-    key_ingredients += short_term.get("key_ingredients", []) or []
+    for target in targets:
+        rule = IMPROVEMENT_KEYWORDS.get(target, {})
 
-    actions += immediate.get("actions", []) or []
-    actions += short_term.get("actions", []) or []
+        if term_matches(terms, rule.get("strong", [])):
+            score += 28
 
-    if isinstance(step, dict):
-        if step.get("ingredient_focus"):
-            key_ingredients.append(step.get("ingredient_focus"))
+        if term_matches(terms, rule.get("support", [])):
+            score += 14
 
-        if step.get("purpose"):
-            actions.append(step.get("purpose"))
+    # 商品名からの補正
+    name_bonus_keywords = {
+        "メラノ": 18,
+        "melano": 18,
+        "ビタミンc": 18,
+        "vitamin c": 18,
+        "レチノール": 22,
+        "retinol": 22,
+        "レチナール": 24,
+        "retinal": 24,
+        "アゼライン": 22,
+        "azelaic": 22,
+        "シカ": 12,
+        "cica": 12,
+        "セラミド": 14,
+        "ceramide": 14,
+        "ピーリング": 18,
+        "peeling": 18,
+        "日焼け止め": 18,
+        "uv": 18,
+        "spf": 18,
+    }
 
-    product_actives = product.get("active_ingredients", []) or []
-    product_support = product.get("support_ingredients", []) or []
-    product_functions = product.get("main_functions", []) or []
-    product_focuses = product.get("ingredient_focus", []) or []
-    ingredient_strength_map = product.get("ingredient_strength", {}) or {}
+    for keyword, bonus in name_bonus_keywords.items():
+        if keyword in name:
+            score += bonus
 
-    product_name = normalize_text(product.get("name", ""))
-    product_category = normalize_text(product.get("category", ""))
+    # 日焼け止めは色素沈着・赤み予防として改善寄与を持たせる
+    uv_level = product.get("uv_level", {})
+    if category == "日焼け止め" or "sunscreen" in terms or "日焼け止め" in terms:
+        score += 16
+        if isinstance(uv_level, dict):
+            spf = uv_level.get("spf")
+            pa = str(uv_level.get("pa", ""))
+            if isinstance(spf, int) and spf >= 30:
+                score += 8
+            if "+++" in pa:
+                score += 8
 
-    normalized = []
+    # ピーリングはターンオーバー改善として評価
+    if category == "ピーリング" or "peeling" in terms or "ピーリング" in terms:
+        score += 15
 
-    for ing in key_ingredients:
-        if isinstance(ing, list):
-            for x in ing:
-                tag = normalize_ingredient_tag(x)
-                if tag:
-                    normalized.append(tag)
-        else:
-            tag = normalize_ingredient_tag(ing)
-            if tag:
-                normalized.append(tag)
+    # 低刺激・継続性
+    sensitive_ok = str(product.get("sensitive_ok", "")).lower()
+    if sensitive_ok == "yes":
+        score += 8
+    elif sensitive_ok == "no":
+        score -= 8
 
-    normalized = list(dict.fromkeys(normalized))
-
-    for ing in normalized:
-        if ing in product_actives:
-            score += 22
-            score += get_strength_score(ingredient_strength_map.get(ing))
-
-        elif ing in product_support:
-            score += 8
-
-        ing_text = normalize_text(ing)
-
-        if ing_text and ing_text in product_name:
-            score += 10
-
-    action_text = normalize_text(" ".join(str(x) for x in actions))
-    ingredient_text = normalize_text(" ".join(str(x) for x in key_ingredients))
-    goal_text = action_text + " " + ingredient_text
-
-    for f in product_functions:
-        f_norm = normalize_text(f)
-
-        if f_norm and f_norm in goal_text:
-            score += 10
-
-    for focus in product_focuses:
-        focus_norm = normalize_text(focus)
-
-        if focus_norm and focus_norm in goal_text:
-            score += 8
-
-    if "ニキビ" in goal_text or "acne" in goal_text:
-        if any(word in product_name for word in ["アゼライン", "シカ", "cica", "ドクダミ", "ティーツリー"]):
-            score += 10
-
-    if "色素沈着" in goal_text or "くすみ" in goal_text or "美白" in goal_text:
-        if any(word in product_name for word in ["ビタミン", "メラノ", "トラネキサム", "ナイアシン", "美白"]):
-            score += 10
-
-    if "ハリ" in goal_text or "毛穴" in goal_text or "ターンオーバー" in goal_text:
-        if any(word in product_name for word in ["レチノ", "ペプチド", "pdrn", "リンクル"]):
-            score += 10
-
-    if "バリア" in goal_text or "乾燥" in goal_text or "保湿" in goal_text:
-        if any(word in product_name for word in ["セラミド", "キュレル", "ミノン", "ヒアルロン", "保湿"]):
-            score += 10
-
-    if product_category in ["乳液", "クリーム"] and (
-        "バリア" in goal_text or "乾燥" in goal_text or "保湿" in goal_text
-    ):
-        score += 6
-
-    if product_category == "美容液" and (
-        "ハリ" in goal_text
-        or "毛穴" in goal_text
-        or "色素沈着" in goal_text
-        or "ニキビ" in goal_text
-    ):
-        score += 6
-
-    return score
+    # 上限を設定して暴走防止
+    return max(0, min(score, 100))
 
 # =========================================================
 # SCORE BLOCK END
 # =========================================================
+def build_improvement_reason(product, improvement_plan=None):
+    if not isinstance(product, dict):
+        return ""
+
+    terms = collect_product_terms(product)
+    targets = infer_improvement_targets(improvement_plan or {})
+    category = str(product.get("category", "")).strip()
+
+    reasons = []
+
+    for target in targets:
+        rule = IMPROVEMENT_KEYWORDS.get(target, {})
+
+        if term_matches(terms, rule.get("strong", [])):
+            reasons.append(f"{target}に合う主成分を含む")
+        elif term_matches(terms, rule.get("support", [])):
+            reasons.append(f"{target}を支える補助成分を含む")
+
+    if category == "日焼け止め":
+        reasons.append("紫外線対策で色素沈着や赤み悪化を防ぐ")
+
+    if category == "ピーリング":
+        reasons.append("ターンオーバーを整え、くすみや毛穴改善を支える")
+
+    if category in ["洗顔", "洗顔料", "クレンジング"]:
+        reasons.append("皮脂や汚れを整え、ニキビ・毛穴悪化を防ぐ")
+
+    if str(product.get("sensitive_ok", "")).lower() == "yes":
+        reasons.append("低刺激で継続しやすい")
+
+    unique = []
+    for reason in reasons:
+        if reason not in unique:
+            unique.append(reason)
+
+    return " / ".join(unique[:3])
+
 
 def db_has_matching_ingredient(products, ingredient_focus):
     ingredient_tag = normalize_ingredient_tag(ingredient_focus)
@@ -3066,7 +3401,21 @@ def build_virtual_product_from_ai_candidate(step, candidate):
     if isinstance(candidate, str):
         candidate = {
             "name": candidate,
-            "price_ref": safe_price(step.get("estimated_price", 0)),
+            "price_ref": safe_price(
+                candidate.get("normalized_price")
+                or candidate.get("price_ref")
+                or candidate.get("itemPrice")
+                or candidate.get("price")
+                or 0
+            ),
+            "raw_price": safe_price(
+                candidate.get("raw_price")
+                or candidate.get("itemPrice")
+                or candidate.get("price_ref")
+                or candidate.get("price")
+                or 0
+            ),
+            "bundle_quantity": int(candidate.get("bundle_quantity") or 1),
             "active_ingredients": [],
             "support_ingredients": [],
             "signature_ingredients": [],
@@ -3143,7 +3492,20 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         "retinol_level" : safe_retinol_level(
             candidate.get("retinol_level", 0)
         ),
-        "price_ref": safe_price(candidate.get("price_ref", 0)),
+        "price_ref": safe_price(
+            candidate.get("normalized_price")
+            or candidate.get("price_ref")
+            or candidate.get("itemPrice")
+            or candidate.get("estimated_price")
+            or 0
+        ),
+        "raw_price": safe_price(
+            candidate.get("raw_price")
+            or candidate.get("itemPrice")
+            or candidate.get("price_ref")
+            or 0
+        ),
+"bundle_quantity": int(candidate.get("bundle_quantity") or 1),
         "main_functions": list(dict.fromkeys(main_functions)),
         "formulation": list(dict.fromkeys(formulation)),
         "technology": list(dict.fromkeys(technology)),
@@ -3282,7 +3644,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         base_score = score_product(product, step, user_data, budget_value)
         if base_score <= -9000:
             continue
-        improve_score = score_improvement(product, improvement_plan or {},step)
+        improve_score = score_improvement(product, improvement_plan or {})
+        improvement_reason = build_improvement_reason(product, improvement_plan or {})
         print(
             "[IMPROVE DEBUG]",
             step.get("category", ""),
@@ -3312,6 +3675,10 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         product["_score"] = round(final_score, 1)
         product["_base_score"] = round(base_score, 1)
         product["_improve_score"] = round(improve_score, 1)
+        product["_improvement_reason"] = build_improvement_reason(
+            product,
+            improvement_plan or {}
+        )
         product["_source"] = "db"
 
         all_candidates.append(product)
@@ -3383,7 +3750,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             base_score = score_product(product, step, user_data, budget_value)
             if base_score <= -9000:
                 continue
-            improve_score = score_improvement(product, improvement_plan or {},step)
+            improve_score = score_improvement(product, improvement_plan or {})
+            improvement_reason = build_improvement_reason(product, improvement_plan or {})
             print(
                 "[IMPROVE DEBUG]",
                 step.get("category", ""),
@@ -3411,11 +3779,15 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             product["_score"] = round(final_score, 1)
             product["_base_score"] = round(base_score, 1)
             product["_improve_score"] = round(improve_score, 1)
+            product["_improvement_reason"] = build_improvement_reason(
+                product,
+                improvement_plan or {}
+            )
             product["_source"] = "ai+db"
 
             all_candidates.append(product)
             continue
-
+        candidate = normalize_rakuten_item_price(candidate)
         # DBにないAI候補は仮想商品として評価
         virtual = build_virtual_product_from_ai_candidate(step, candidate)
 
@@ -3432,7 +3804,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         base_score = score_product(virtual, step, user_data, budget_value)
         if base_score <= -9000:
             continue
-        improve_score = score_improvement(virtual, improvement_plan or {},step)
+        improve_score = score_improvement(virtual, improvement_plan or {})
+        improvement_reason = build_improvement_reason(virtual, improvement_plan or {})
         print(
             "[IMPROVE DEBUG]",
             step.get("category", ""),
@@ -3460,6 +3833,10 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         virtual["_score"] = round(final_score, 1)
         virtual["_base_score"] = round(base_score, 1)
         virtual["_improve_score"] = round(improve_score, 1)
+        virtual["_improvement_reason"] = build_improvement_reason(
+            virtual,
+            improvement_plan or {}
+        )
         virtual["_source"] = "ai_virtual"
 
         all_candidates.append(virtual)
@@ -3961,7 +4338,21 @@ def normalize_ai_candidates(step):
             "name": name,
             "category": step.get("category", ""),
             "confidence": confidence,
-            "price_ref": safe_price(candidate.get("price_ref", step.get("estimated_price", 0))),
+            "price_ref": safe_price(
+                candidate.get("normalized_price")
+                or candidate.get("price_ref")
+                or candidate.get("itemPrice")
+                or candidate.get("price")
+                or 0
+            ),
+            "raw_price": safe_price(
+                candidate.get("raw_price")
+                or candidate.get("itemPrice")
+                or candidate.get("price_ref")
+                or candidate.get("price")
+                or 0
+            ),
+            "bundle_quantity": int(candidate.get("bundle_quantity") or 1),
             "active_ingredients": candidate.get("active_ingredients", []) if isinstance(candidate.get("active_ingredients", []), list) else [],
             "support_ingredients": candidate.get("support_ingredients", []) if isinstance(candidate.get("support_ingredients", []), list) else [],
             "signature_ingredients": candidate.get("signature_ingredients", []) if isinstance(candidate.get("signature_ingredients", []), list) else [],
@@ -3985,7 +4376,14 @@ def normalize_ai_candidates(step):
 
         seen.add(norm_name)
         normalized.append(item)
-
+    for item in normalized:
+        print(
+            "[PRICE DEBUG]",
+            item.get("name"),
+            "price=",
+            item.get("price_ref"),
+            flush=True
+        )
     print("[AI NORMALIZED]", normalized, flush=True)
     
     return normalized
@@ -4230,51 +4628,71 @@ def finalize_step_display_fields(step, best, user_data):
     if not isinstance(step, dict):
         return step
 
-    if isinstance(best, dict):
-        brand = str(best.get("brand", "") or "").strip()
-        name = clean_display_product_name(
-            step.get("product") or best.get("name", "")
-        )
-
-        if brand and name and not name.startswith(brand):
-            step["product"] = f"{brand} {name}"
-        else:
-            step["product"] = name
-
-        step["base_score"] = best.get("_base_score", best.get("base_score", 0))
-        step["improve_score"] = best.get("_improve_score", best.get("improve_score", 0))
-        step["routine_score"] = best.get("_routine_score", best.get("routine_score", 0))
-        step["final_score"] = best.get("_score", best.get("final_score", 0))
-
-        step["score_detail"] = {
-            "base": step.get("base_score", 0),
-            "improve": step.get("improve_score", 0),
-            "routine": step.get("routine_score", 0),
-            "final": step.get("final_score", 0)
-        }
-
-        invalid_reason = "現在確認できる商品候補が見つかりませんでした。"
-
-        if (
-            not step.get("recommend_reason")
-            or step.get("recommend_reason") == invalid_reason
-        ):
-            step["recommend_reason"] = (
-                best.get("reason")
-                or step.get("selection_reason")
-                or build_ai_reason(step, user_data)
-            )
+    if not isinstance(best, dict):
+        return step
 
     brand = str(best.get("brand", "") or "").strip()
-
     name = clean_display_product_name(
-        step.get("product") or best.get("name", "")
+        best.get("name") or step.get("product") or ""
     )
 
     if brand and name and not name.startswith(brand):
         step["product"] = f"{brand} {name}"
     else:
         step["product"] = name
+
+    step["base_score"] = best.get("_base_score", best.get("base_score", 0))
+    step["improve_score"] = best.get("_improve_score", best.get("improve_score", 0))
+    step["routine_score"] = best.get("_routine_score", best.get("routine_score", 0))
+    step["final_score"] = best.get("_score", best.get("final_score", 0))
+
+    step["improvement_score"] = step["improve_score"]
+    step["improvement_reason"] = (
+        best.get("_improvement_reason")
+        or best.get("improvement_reason")
+        or best.get("reason")
+        or step.get("improvement_reason")
+        or ""
+    )
+
+    step["price_ref"] = safe_price(
+        best.get("price_ref")
+        or best.get("normalized_price")
+        or step.get("price_ref")
+        or 0
+    )
+
+    step["raw_price"] = safe_price(
+        best.get("raw_price")
+        or step.get("raw_price")
+        or 0
+    )
+
+    step["bundle_quantity"] = int(
+        best.get("bundle_quantity")
+        or step.get("bundle_quantity")
+        or 1
+    )
+
+    step["score_detail"] = {
+        "base": step.get("base_score", 0),
+        "improve": step.get("improve_score", 0),
+        "routine": step.get("routine_score", 0),
+        "final": step.get("final_score", 0),
+    }
+
+    invalid_reason = "現在確認できる商品候補が見つかりませんでした。"
+
+    if (
+        not step.get("recommend_reason")
+        or step.get("recommend_reason") == invalid_reason
+    ):
+        step["recommend_reason"] = (
+            best.get("reason")
+            or best.get("_improvement_reason")
+            or step.get("selection_reason")
+            or build_ai_reason(step, user_data)
+        )
 
     return step
 def assign_products_to_all_steps(data, products, user_data, budget_value):
@@ -4366,6 +4784,8 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
                 or step.get("selection_reason")
                 or build_ai_reason(step, user_data)
             )
+            step["improvement_score"] = best.get("_improve_score", 0)
+            step["improvement_reason"] = best.get("_improvement_reason", "")
             step["product_source"] = source or "ai"
 
             impact = calculate_step_impact(step, best)
