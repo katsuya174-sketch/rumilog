@@ -5049,7 +5049,8 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             weekly_steps[idx] = assign_one_step(
                 step,
                 used_weekly_names,
-                "weekly_care"
+                "weekly_care",
+                routine_context
             )
 
     return data
