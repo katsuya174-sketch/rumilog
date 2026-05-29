@@ -6636,7 +6636,7 @@ def pick_uploaded_file(request, normal_name, camera_name):
     return None
 
 def get_analysis_schema():
-    return{
+    product_candidate_schema ={
         "type": "object",
         "properties": {
             "brand": {"type": "string"},
@@ -7204,7 +7204,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
             response_mime_type="application/json",
             response_schema=schema
         ),
-        max_retries=6
+        max_retries=2
     )
 
     raw_text = response.text.strip()
