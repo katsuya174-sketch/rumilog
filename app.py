@@ -8361,7 +8361,10 @@ def api_verify_product():
     if not item:
         result = {
             "ok": False,
-            "error": "not found"
+            "error": "not found",
+            "price": 0,
+            "image": "",
+            "rakuten_link": ""
         }
 
         VERIFY_PRODUCT_CACHE[cache_key] = result

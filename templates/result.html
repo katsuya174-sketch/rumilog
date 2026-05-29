@@ -951,132 +951,6 @@
         });
 
         async function verifyProductCard(card) {
-            const product = card.dataset.product;
-            const category = card.dataset.category || "";
-
-            if (!product) return;
-
-            const params = new URLSearchParams({
-                product: product,
-                category: category
-            });
-
-            const res = await fetch("/api/verify-product?" + params.toString());
-            const data = await res.json();
-
-            if (!data.ok) return;
-
-            const img = card.querySelector("img.product-img-new");
-            const empty = card.querySelector(".product-img-empty");
-
-            if (img && data.image) {
-
-                img.src = data.image;
-
-                img.classList.remove(
-                    "is-hidden"
-                );
-
-                if (empty) {
-
-                    empty.classList.add(
-                        "is-hidden"
-                    );
-
-                }
-
-                }
-
-            const priceEl = card.querySelector(".product-price");
-            if (priceEl && data.price) {
-                priceEl.textContent = "参考価格：" + data.price.toLocaleString() + "円";
-            }
-
-            const rakutenLink = card.querySelector(".rakuten-link");
-            if (rakutenLink && data.rakuten_link) {
-                rakutenLink.href = data.rakuten_link;
-            }
-        
-          }
-        document.addEventListener("DOMContentLoaded", () => {
-            document
-                .querySelectorAll("[data-product]")
-            document.addEventListener("DOMContentLoaded", async () => {
-
-                const cards = document.querySelectorAll("[data-product]");
-
-                console.log(
-                    "[VERIFY CARDS]",
-                    cards.length
-                );
-
-                for (const card of cards) {
-
-                    const product =
-                        card.dataset.product;
-
-                    const category =
-                        card.dataset.category || "";
-
-                    if (!product) {
-                        continue;
-                    }
-
-                    try {
-
-                        const url =
-                            "/api/verify-product?"
-                            + new URLSearchParams({
-                                product,
-                                category
-                            });
-
-                        const res =
-                            await fetch(url);
-
-                        const data =
-                            await res.json();
-
-                        if (
-                            !data.ok
-                            || !data.image
-                        ) {
-                            continue;
-                        }
-
-                        const img =
-                            card.querySelector(
-                                ".product-img-new"
-                            );
-
-                        if (!img) {
-                            continue;
-                        }
-
-                        img.src =
-                            data.image;
-
-                        img.style.display =
-                            "block";
-
-                    }
-
-                    catch (e) {
-
-                        console.log(
-                            "[VERIFY ERROR]",
-                            e
-                        );
-
-                    }
-
-                }
-
-                });
-        });
-    
-    
-        async function verifyProductCard(card) {
 
             const product =
                 card.dataset.product || "";
@@ -1084,7 +958,9 @@
             const category =
                 card.dataset.category || "";
 
-            if (!product) return;
+            if (!product) {
+                return;
+            }
 
             try {
 
@@ -1103,7 +979,9 @@
                 const data =
                     await res.json();
 
-                if (!data.ok) return;
+                if (!data.ok) {
+                    return;
+                }
 
                 const img =
                     card.querySelector(
@@ -1150,7 +1028,7 @@
 
                 if (
                     priceEl &&
-                    data.price
+                    Number(data.price) > 0
                 ) {
 
                     priceEl.textContent =
@@ -1200,15 +1078,28 @@
 
             document.addEventListener(
             "DOMContentLoaded",
-            function () {
+            async function () {
 
-                document
-                    .querySelectorAll(
+                const cards =
+                    document.querySelectorAll(
                         "[data-product]"
-                    )
-                    .forEach(
-                        verifyProductCard
                     );
+
+                for (const card of cards) {
+
+                    await verifyProductCard(
+                        card
+                    );
+
+                    await new Promise(
+                        resolve =>
+                            setTimeout(
+                                resolve,
+                                700
+                            )
+                    );
+
+                }
 
             }
             );
