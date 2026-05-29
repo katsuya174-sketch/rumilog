@@ -6636,13 +6636,86 @@ def pick_uploaded_file(request, normal_name, camera_name):
     return None
 
 def get_analysis_schema():
+    return{
+        "type": "object",
+        "properties": {
+            "brand": {"type": "string"},
+            "name": {"type": "string"},
+            "confidence": {"type": "integer"},
+            "active_ingredients": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "support_ingredients": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "main_functions": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "ingredient_focus": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "skin_types": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "sensitive_ok": {"type": "string"},
+            "price_ref": {"type": "integer"},
+            "reason": {"type": "string"}
+        },
+        "required": [
+            "brand",
+            "name",
+            "confidence",
+            "active_ingredients",
+            "support_ingredients",
+            "main_functions",
+            "ingredient_focus",
+            "skin_types",
+            "sensitive_ok",
+            "price_ref",
+            "reason"
+        ]
+    }
+
+    step_schema = {
+        "type": "object",
+        "properties": {
+            "category": {"type": "string"},
+            "role": {"type": "string"},
+            "purpose": {"type": "string"},
+            "ingredient_focus": {"type": "string"},
+            "risk_note": {"type": "string"},
+            "priority": {"type": "integer"},
+            "product_candidates": {
+                "type": "array",
+                "items": product_candidate_schema,
+                "maxItems": 5
+            },
+            "selection_reason": {"type": "string"},
+            "estimated_price": {"type": "integer"},
+            "price_band": {"type": "string"}
+        },
+        "required": [
+            "category",
+            "role",
+            "purpose",
+            "ingredient_focus",
+            "risk_note",
+            "priority",
+            "product_candidates"
+        ]
+    }
+
     return {
         "type": "object",
         "properties": {
             "record_date": {"type": "string"},
             "analysis_date": {"type": "string"},
             "skin_score": {"type": "integer"},
-
             "scores": {
                 "type": "object",
                 "properties": {
@@ -6670,7 +6743,6 @@ def get_analysis_schema():
                     "tone_evenness"
                 ]
             },
-
             "skin_summary": {"type": "string"},
             "observation": {
                 "type": "object",
@@ -6690,8 +6762,6 @@ def get_analysis_schema():
                     "image_confidence"
                 ]
             },
-                    
-
             "root_causes": {
                 "type": "array",
                 "maxItems": 3,
@@ -6711,120 +6781,34 @@ def get_analysis_schema():
                     ]
                 }
             },
-
             "morning": {
                 "type": "object",
                 "properties": {
                     "steps": {
                         "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "category": {"type": "string"},
-                                "role": {"type": "string"},
-                                "purpose": {"type": "string"},
-                                "ingredient_focus": {"type": "string"},
-                                "risk_note": {"type": "string"},
-                                "priority": {"type": "integer"},
-                                "product_candidates": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "maxItems": 5
-                                },
-                                "selection_reason": {"type": "string"},
-                                "estimated_price": {"type": "integer"},
-                                "price_band": {"type": "string"}
-                            },
-                            "required": [
-                                "category",
-                                "role",
-                                "purpose",
-                                "ingredient_focus",
-                                "risk_note",
-                                "priority",
-                                "product_candidates"
-                            ]
-                        }
+                        "items": step_schema
                     }
                 },
                 "required": ["steps"]
             },
-
             "night": {
                 "type": "object",
                 "properties": {
                     "steps": {
                         "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "category": {"type": "string"},
-                                "role": {"type": "string"},
-                                "purpose": {"type": "string"},
-                                "ingredient_focus": {"type": "string"},
-                                "risk_note": {"type": "string"},
-                                "priority": {"type": "integer"},
-                                "product_candidates": {
-                                    "type": "array",
-                                    "items": {"type": "string"},
-                                    "maxItems": 5
-                                },
-                                "selection_reason": {"type": "string"},
-                                "estimated_price": {"type": "integer"},
-                                "price_band": {"type": "string"}
-                            },
-                            "required": [
-                                "category",
-                                "role",
-                                "purpose",
-                                "ingredient_focus",
-                                "risk_note",
-                                "priority",
-                                "product_candidates"
-                            ]
-                        }
+                        "items": step_schema
                     }
                 },
                 "required": ["steps"]
             },
-
             "weekly_care": {
                 "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "category": {"type": "string"},
-                        "ingredient_focus": {"type": "string"},
-                        "frequency": {"type": "string"},
-                        "role": {"type": "string"},
-                        "purpose": {"type": "string"},
-                        "priority": {"type": "integer"},
-                        "product_candidates": {
-                            "type": "array",
-                            "items": {"type": "string"},
-                            "maxItems": 5
-                        },
-                        "selection_reason": {"type": "string"},
-                        "estimated_price": {"type": "integer"},
-                        "price_band": {"type": "string"}
-                    },
-                    "required": [
-                        "category",
-                        "role",
-                        "ingredient_focus",
-                        "frequency",
-                        "purpose",
-                        "priority",
-                        "product_candidates"
-                    ]
-                }
+                "items": step_schema
             },
-
             "warnings": {
                 "type": "array",
                 "items": {"type": "string"}
             },
-
             "moisture_plan": {
                 "type": "object",
                 "properties": {
@@ -6842,7 +6826,6 @@ def get_analysis_schema():
                     "reason"
                 ]
             },
-
             "improvement_plan": {
                 "type": "object",
                 "properties": {
@@ -6853,7 +6836,11 @@ def get_analysis_schema():
                             "1month": {"type": "integer"},
                             "3month": {"type": "integer"}
                         },
-                        "required": ["1week", "1month", "3month"]
+                        "required": [
+                            "1week",
+                            "1month",
+                            "3month"
+                        ]
                     },
                     "improvement_steps": {
                         "type": "array",
@@ -6873,7 +6860,12 @@ def get_analysis_schema():
                             },
                             "note": {"type": "string"}
                         },
-                        "required": ["goal", "actions", "key_ingredients", "note"]
+                        "required": [
+                            "goal",
+                            "actions",
+                            "key_ingredients",
+                            "note"
+                        ]
                     },
                     "short_term": {
                         "type": "object",
@@ -6889,7 +6881,12 @@ def get_analysis_schema():
                             },
                             "note": {"type": "string"}
                         },
-                        "required": ["goal", "actions", "key_ingredients", "note"]
+                        "required": [
+                            "goal",
+                            "actions",
+                            "key_ingredients",
+                            "note"
+                        ]
                     },
                     "long_term": {
                         "type": "object",
@@ -6905,7 +6902,12 @@ def get_analysis_schema():
                             },
                             "note": {"type": "string"}
                         },
-                        "required": ["goal", "actions", "key_ingredients", "note"]
+                        "required": [
+                            "goal",
+                            "actions",
+                            "key_ingredients",
+                            "note"
+                        ]
                     }
                 },
                 "required": [
@@ -6999,248 +7001,127 @@ def build_analysis_prompt(user_data):
 中期: 1〜2ヶ月
 長期: 3ヶ月以上
 
-⑤商品候補
-product_candidates は候補収集のみ。
-最終決定しない。
-商品選定は後続処理で行う。
+【商品候補ルール】
 
-【observation 出力ルール】
-observation には画像から確認できる事実だけを入れること。
-推測や原因は observation に入れないこと。
+product_candidates は「候補収集」だけを行う。
+最終選定・順位付け・点数付けは行わない。
 
-front:
-正面画像から、赤み、毛穴、皮脂、乾燥、キメ、色ムラ、全体印象を記載する。
+同じ画像・同じユーザー情報では、できるだけ同じ候補を返すこと。
 
-left_cheek:
-左頬画像から、赤み、毛穴、ニキビ跡、色素沈着、キメを記載する。
+候補は人気順・売れ筋順ではなく、以下の固定優先順位で選ぶ。
 
-right_cheek:
-右頬画像から、赤み、毛穴、ニキビ跡、色素沈着、キメを記載する。
+1. 目的成分とカテゴリが一致する
+2. 日本で継続購入しやすい
+3. 正式名称に高い確信がある
+4. 刺激リスクが過剰ではない
+5. 予算帯から大きく外れない
 
-symmetry:
-左右差を簡潔に記載する。
+各 step の product_candidates は必ず object 配列にする。
 
-image_confidence:
-画像から判断できる信頼度を0〜100の整数で入れること。
+形式:
 
-【root_causes 出力ルール】
-root_causes には、観察結果とユーザー情報から推定される根本原因を入れること。
-最大3個まで出すこと。
+{
+  "brand": "",
+  "name": "",
+  "confidence": 0,
+  "active_ingredients": [],
+  "support_ingredients": [],
+  "main_functions": [],
+  "ingredient_focus": [],
+  "skin_types": [],
+  "sensitive_ok": "unknown",
+  "price_ref": 0,
+  "reason": ""
+}
 
-各項目:
-cause: 原因名
-evidence: そう判断した根拠
-priority: 改善優先度。1が最優先
-care_direction: ケア方針
+brand:
+ブランド名のみ。
 
+name:
+商品名のみ。
+ブランド名を含めない。
+
+confidence:
+0〜100。
+70未満は出力禁止。
+
+active_ingredients:
+主な有効・攻め成分。
 例:
-炎症後赤み
-色素沈着
-皮脂過多
-毛穴目立ち
-バリア低下
-乾燥
-刺激リスク
-紫外線影響
-
-【カテゴリ固定】
-category は必ず以下のみ。
-
-クレンジング
-洗顔
-化粧水
-美容液
-乳液
-クリーム
-日焼け止め
-パック
-ピーリング
-
-【role固定】
-main
-booster
-
-【ingredient_focus候補】
 ビタミンC
-ナイアシンアミド
 レチノール
 レチナール
 アゼライン酸
+ナイアシンアミド
 トラネキサム酸
-PDRN
-ペプチド
-セラミド
-ヒアルロン酸
-CICA
-ドクダミ
 AHA
 BHA
 PHA
+ペプチド
 
-【美容液ルール】
-・美容液最大2個
-・同目的重複禁止
-・ブースター別枠
-・role設定必須
+support_ingredients:
+補助・守り成分。
+例:
+セラミド
+パンテノール
+CICA
+ヒアルロン酸
+アラントイン
+ドクダミ
+グリチルリチン酸
 
-【安全ルール】
-・刺激考慮
-・レチノール経験考慮
-・過剰提案禁止
+main_functions:
+商品の主目的。
+例:
+美白
+毛穴ケア
+ニキビケア
+ハリ改善
+バリア改善
+保湿
+鎮静
+UV防御
+角質ケア
 
-【商品候補ルール】
+ingredient_focus:
+その商品を選ぶ理由になる成分軸。
+例:
+ビタミンC
+レチノール
+アゼライン酸
+セラミド
+CICA
 
-各ステップの product_candidates:
+skin_types:
+合いやすい肌質。
+dry
+oily
+mixed
+sensitive
 
-・具体的な実在商品名を3〜5個入れる
-・空配列は禁止
-・日本で入手しやすい商品を優先する
-・目的、成分、肌質、敏感度、予算に合う候補を優先する
-・同じブランドばかりに偏らせない
-・商品名はブランド名を含める
+sensitive_ok:
+yes / no / unknown のいずれか。
 
+price_ref:
+不明なら 0。
+推測価格を入れない。
+楽天・Amazonの価格推測は禁止。
 
-禁止:
-おすすめ美容液
-レチノール系候補
-カテゴリ名のみ
-架空の商品名
-selection_reason 必須。
-
-説明内容:
-1 なぜそのカテゴリか
-2 対応悩み
-3 成分軸
-4 朝夜役割
-5 注意点
-
-【予算ルール】
-
-美容液 40%
-化粧水 20%
-保湿 20%
-洗顔 10%
-日焼け止め 10%
-
-必要なら柔軟調整。
-
-【価格ルール】
-
-estimated_price 必須。
-
-price_band:
-〜1500円
-1501〜3000円
-3001〜5000円
-5001円以上
-
-【スコア】
-
-100点満点。
-
-評価:
-oil_balance
-redness
-pores
-hydration
-firmness
-acne
-dullness
-barrier
-texture
-tone_evenness
-
-改善予測を improvement_steps に出す。
-
-【保湿レイヤ】
-
-moisture_plan:
-moisture_level
-need_emulsion
-need_cream
-need_double_moisture
-reason
-
-【最重要】
-
-JSONのみ返す。
-説明禁止。
-Markdown禁止。
-前置き禁止。
-
-JSONキーは英語。
-値は日本語。
-
-商品名は実在商品。
-
-必ず日本語出力。
-
-【商品出力ルール（厳守）】
-
-目的:
-商品名の創作禁止。
-
-出力商品は、
-現在日本国内で販売中であり、
-正式名称に高い確信がある商品のみ。
-
-出力形式:
-
-{{
- "brand":"",
- "name":"",
- "confidence":0
-}}
-
-制約:
-
-brand:
-ブランド名のみ
-
-name:
-商品名のみ
-
-nameにブランド名を含めない
+reason:
+候補に入れた理由を短く書く。
 
 禁止:
-・商品名の創作
+・架空商品
 ・旧名称
-・リニューアル前名称
-・略称
-・シリーズ名のみ
-・存在確認できない商品
+・正式名称に自信がない商品
+・カテゴリ名だけ
+・「おすすめ美容液」のような抽象名
+・シリーズ名だけ
+・推測価格
+・ランキングや流行だけを理由にした候補
 
-confidence:
-0〜100
-
-confidence < 70 は出力禁止
-
-正式名称に自信がない場合:
-null
-
-良い例:
-
-{{
- "brand":"オバジ",
- "name":"C10セラム",
- "confidence":95
-}}
-
-悪い例:
-
-{{
- "brand":"ロート製薬",
- "name":"ロート製薬 オバジC10セラム",
- "confidence":80
-}}
-
-悪い例:
-
-{{
- "brand":"無印良品",
- "name":"エイジングケア薬用リンクルケア美容液",
- "confidence":65
-}}
+商品名に自信がない場合は候補から外す。
+空配列は禁止だが、無理に低 confidence 商品を入れない。
 """
 
 def extract_image_bytes_for_hash(image):
