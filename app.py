@@ -696,7 +696,20 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     return score
 
 RAKUTEN_CACHE_FILE = "rakuten_cache.json"
-
+OLD_PRODUCT_WORDS = [
+    "旧",
+    "旧品",
+    "旧商品",
+    "旧パッケージ",
+    "リニューアル前",
+    "廃盤",
+    "生産終了",
+    "在庫処分",
+    "訳あり",
+    "アウトレット",
+    "箱なし",
+    "外箱なし"
+]
 
 def load_rakuten_cache():
     try:
@@ -4765,7 +4778,7 @@ def clean_display_product_name(name):
     text = text.replace("{", " ")
     text = text.replace("}", " ")
     text = text.replace('"', " ")
-    text = text.replace("'", " ")
+    text = text.replace("’", "'")
     text = text.replace(":", " ")
     text = text.replace(",", " ")
 
