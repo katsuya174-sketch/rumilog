@@ -25,6 +25,9 @@ import re
 import copy
 import time
 from psycopg2.pool import SimpleConnectionPool
+import hashlib
+GEMINI_ANALYSIS_CACHE = {}
+ANALYSIS_CACHE_VERSION = "v1"
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 #DB_POOL = SimpleConnectionPool(
@@ -6302,34 +6305,42 @@ def lightweight_result_payload(item):
     return data
 
 
-    def prepare_step(step):
-        if not isinstance(step, dict):
-            return {}
+def prepare_step(step):
+    if not isinstance(step, dict):
+        return {}
 
-        step = dict(step)
+    step = dict(step)
 
-        step["product"] = str(step.get("product", "") or "")
-        step["category"] = str(step.get("category", "") or "")
-        step["purpose"] = str(step.get("purpose", "") or "")
-        step["recommend_reason"] = str(step.get("recommend_reason", "") or "")
-        step["display_role"] = step.get("display_role") or get_step_display_role(step)
+    step["product"] = str(step.get("product", "") or "")
+    step["category"] = str(step.get("category", "") or "")
+    step["purpose"] = str(step.get("purpose", "") or "")
+    step["recommend_reason"] = str(step.get("recommend_reason", "") or "")
+    step["display_role"] = step.get("display_role") or get_step_display_role(step)
 
-        image = str(step.get("image", "") or "")
+    image = str(step.get("image", "") or "")
 
-        # 古いローカルfallback画像は使わない
-        if "/static/images/products/" in image:
-            image = ""
+    if "/static/images/products/" in image:
+        image = ""
 
-        step["image"] = image
-        step["price"] = safe_price(step.get("price", 0))
-        step["estimated_price"] = safe_price(step.get("estimated_price", step["price"]))
-        step["rakuten_link"] = str(step.get("rakuten_link", "") or "")
-        step["amazon_link"] = str(step.get("amazon_link", "") or "")
-        step["product_source"] = str(step.get("product_source", "") or "")
-        step["top_candidates"] = safe_list(step.get("top_candidates"))
-        step["top_impacts"] = safe_list(step.get("top_impacts"))
+    step["image"] = image
+    step["price"] = safe_price(step.get("price", step.get("price_ref", 0)))
+    step["price_ref"] = safe_price(step.get("price_ref", step["price"]))
+    step["estimated_price"] = safe_price(step.get("estimated_price", 0))
 
-        return step
+    step["rakuten_link"] = str(step.get("rakuten_link", "") or "")
+    step["amazon_link"] = str(step.get("amazon_link", "") or "")
+    step["product_source"] = str(step.get("product_source", "") or "")
+    step["top_candidates"] = safe_list(step.get("top_candidates"))
+    step["top_impacts"] = safe_list(step.get("top_impacts"))
+
+    return step
+
+
+def prepare_result(result):
+    if not isinstance(result, dict):
+        return {}
+
+    result = dict(result)
 
     morning = safe_dict(result.get("morning"))
     night = safe_dict(result.get("night"))
@@ -7232,10 +7243,49 @@ null
 }}
 """
 
+def extract_image_bytes_for_hash(image):
+    if image is None:
+        return b""
 
+    if isinstance(image, bytes):
+        return image
+
+    if isinstance(image, bytearray):
+        return bytes(image)
+
+    inline_data = getattr(image, "inline_data", None)
+    if inline_data is not None:
+        data = getattr(inline_data, "data", None)
+        if data:
+            return data
+
+    data = getattr(image, "data", None)
+    if data:
+        return data
+
+    return str(image).encode("utf-8")
+
+
+def make_analysis_cache_key(user_data, front_img, left_img, right_img):
+    h = hashlib.sha256()
+
+    h.update(ANALYSIS_CACHE_VERSION.encode("utf-8"))
+
+    user_key = json.dumps(
+        user_data,
+        ensure_ascii=False,
+        sort_keys=True,
+        default=str
+    )
+
+    h.update(user_key.encode("utf-8"))
+    h.update(extract_image_bytes_for_hash(front_img))
+    h.update(extract_image_bytes_for_hash(left_img))
+    h.update(extract_image_bytes_for_hash(right_img))
+
+    return h.hexdigest()
 def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
 
-    # ===== DEV_MODE_START =====
     if DEV_MODE:
         print("DEV_MODE: analyze_skin_with_gemini ダミー返却")
         return {
@@ -7246,7 +7296,19 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
             "weekly_care": [{"category": "パック", "purpose": "集中ケア"}],
             "scores": {}
         }
-    # ===== DEV_MODE_END =====
+
+    cache_key = make_analysis_cache_key(
+        user_data,
+        front_img,
+        left_img,
+        right_img
+    )
+
+    if cache_key in GEMINI_ANALYSIS_CACHE:
+        print("[GEMINI ANALYSIS CACHE HIT]", cache_key, flush=True)
+        return copy.deepcopy(GEMINI_ANALYSIS_CACHE[cache_key])
+
+    print("[GEMINI ANALYSIS CACHE MISS]", cache_key, flush=True)
 
     schema = get_analysis_schema()
     prompt = build_analysis_prompt(user_data)
@@ -7254,10 +7316,10 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
     response = call_gemini_with_retry(
         client,
         "gemini-2.5-flash",
-        contents=[prompt, front_img,left_img,right_img],
+        contents=[prompt, front_img, left_img, right_img],
         config=types.GenerateContentConfig(
             temperature=0,
-            top_p=1,
+            top_p=0.1,
             response_mime_type="application/json",
             response_schema=schema
         ),
@@ -7265,6 +7327,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
     )
 
     raw_text = response.text.strip()
+
     print("=== Gemini raw response ===")
     print(raw_text)
 
@@ -7277,11 +7340,17 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
 
     start = raw_text.find("{")
     end = raw_text.rfind("}")
+
     if start != -1 and end != -1 and end > start:
         raw_text = raw_text[start:end + 1]
 
     try:
-        return json.loads(raw_text)
+        data = json.loads(raw_text)
+
+        GEMINI_ANALYSIS_CACHE[cache_key] = copy.deepcopy(data)
+
+        return data
+
     except json.JSONDecodeError as e:
         print("===== GEMINI JSON ERROR =====")
         print(e)
@@ -7290,7 +7359,6 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
         print("====================")
 
         raise ValueError("AIの診断結果JSONが壊れています。もう一度診断してください。")
-
 def detailed_analysis_with_gemini(client, user_data, result_data):
 
     prompt = f"""
@@ -7880,7 +7948,7 @@ def lab_test_function():
                 raise RuntimeError("analyze_skin_with_gemini の戻り値が dict ではありません")
 
             data = ensure_result_structure(data)
-
+            data["skin_score"] = calculate_skin_score(data.get("scores", {}))
             debug_log("AFTER ANALYZE", {
                 "skin_score": data.get("skin_score"),
                 "summary": data.get("skin_summary"),
