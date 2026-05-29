@@ -628,6 +628,20 @@ def score_current_product_signal(item):
         score += 25
 
     return score
+OLD_PRODUCT_WORDS = [
+    "旧",
+    "旧品",
+    "旧商品",
+    "旧パッケージ",
+    "リニューアル前",
+    "廃盤",
+    "生産終了",
+    "在庫処分",
+    "訳あり",
+    "アウトレット",
+    "箱なし",
+    "外箱なし"
+]
 def score_rakuten_item(item, product_name, brand="", category=""):
     title = str(item.get("itemName", "") or "")
     title_norm = title.lower()
@@ -696,20 +710,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     return score
 
 RAKUTEN_CACHE_FILE = "rakuten_cache.json"
-OLD_PRODUCT_WORDS = [
-    "旧",
-    "旧品",
-    "旧商品",
-    "旧パッケージ",
-    "リニューアル前",
-    "廃盤",
-    "生産終了",
-    "在庫処分",
-    "訳あり",
-    "アウトレット",
-    "箱なし",
-    "外箱なし"
-]
+
 
 def load_rakuten_cache():
     try:
@@ -866,7 +867,7 @@ def clean_rakuten_keyword(keyword):
     keyword = keyword.replace("\n", " ")
     keyword = keyword.replace("\r", " ")
     keyword = keyword.replace("　", " ")
-
+    keyword = keyword.replace("%", "")
     keyword = keyword.replace("’", "'")
     keyword = keyword.replace("％", "%")
     keyword = keyword.replace("ＵＶ", "UV")
