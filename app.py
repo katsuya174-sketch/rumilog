@@ -547,10 +547,13 @@ def build_rakuten_search_keywords(product_name, brand=""):
 
     keywords = []
 
-    if name:
-        keywords.append(name)
+    def add_keyword(value):
+        value = clean_rakuten_keyword(value)
+        if value and value not in keywords:
+            keywords.append(value)
 
-    # 記号をゆるめる
+    add_keyword(name)
+
     loose = (
         name
         .replace("・", " ")
@@ -562,75 +565,36 @@ def build_rakuten_search_keywords(product_name, brand=""):
     )
     loose = " ".join(loose.split())
 
-    if loose and loose not in keywords:
-        keywords.append(loose)
+    add_keyword(loose)
+
+    if brand and name and not name.lower().startswith(brand.lower()):
+        add_keyword(f"{brand} {name}")
 
     parts = loose.split()
 
-    # 先頭語を落とすパターン
-    # 例: ファンケル マイルドクレンジング オイル
-    # → マイルドクレンジング オイル
-    if len(parts) >= 2:
-        drop_first = " ".join(parts[1:])
-        if drop_first not in keywords:
-            keywords.append(drop_first)
+    # 英字ブランドは先頭語を落とさない
+    has_ascii = any(ch.isascii() and ch.isalpha() for ch in loose)
 
-    # 先頭2語を落とすパターン
-    # 例: 資生堂 エリクシール シュペリエル エンリッチド...
-    # → シュペリエル エンリッチド...
+    if not has_ascii:
+        if len(parts) >= 2:
+            add_keyword(" ".join(parts[1:]))
+
+        if len(parts) >= 3:
+            add_keyword(" ".join(parts[2:]))
+
+    # 主要語検索。ただし英字ブランドの商品では短くしすぎない
     if len(parts) >= 3:
-        drop_first_two = " ".join(parts[2:])
-        if drop_first_two not in keywords:
-            keywords.append(drop_first_two)
+        if has_ascii:
+            add_keyword(" ".join(parts[:4]))
+        else:
+            add_keyword(" ".join(parts[:3]))
 
-    # 最後に主要語だけ
-    if len(parts) >= 3:
-        key3 = " ".join(parts[:3])
-        if key3 not in keywords:
-            keywords.append(key3)
-
-    if len(parts) >= 2:
-        key2 = " ".join(parts[:2])
-        if key2 not in keywords:
-            keywords.append(key2)
-
-    # brandが別で渡ってきた場合だけ、brand + nameも試す
-    if brand and name and not name.startswith(brand):
-        brand_name = f"{brand} {name}"
-        if brand_name not in keywords:
-            keywords.append(brand_name)
+    if len(parts) >= 2 and not has_ascii:
+        add_keyword(" ".join(parts[:2]))
 
     print("[RAKUTEN KEYWORDS]", keywords, flush=True)
 
-    return list(dict.fromkeys([k for k in keywords if k]))[:7]
-OLD_PRODUCT_WORDS = [
-    "旧",
-    "旧品",
-    "旧商品",
-    "旧パッケージ",
-    "リニューアル前",
-    "廃盤",
-    "生産終了",
-    "在庫処分",
-    "訳あり",
-    "アウトレット",
-    "箱なし",
-    "外箱なし"
-]
-
-
-CURRENT_PRODUCT_WORDS = [
-    "新",
-    "新商品",
-    "リニューアル",
-    "現行",
-    "最新",
-    "正規品",
-    "公式",
-    "本体",
-    "医薬部外品"
-]
-
+    return keywords[:5]
 
 def score_current_product_signal(item):
     if not isinstance(item, dict):
@@ -888,16 +852,28 @@ def clean_rakuten_keyword(keyword):
     keyword = keyword.strip()
     keyword = keyword.replace("\n", " ")
     keyword = keyword.replace("\r", " ")
-    keyword = re.sub(r"\s+", " ", keyword)
+    keyword = keyword.replace("　", " ")
 
-    keyword = re.sub(r"[^\w\sぁ-んァ-ヶ一-龥ー・＋+]", " ", keyword)
+    keyword = keyword.replace("’", "'")
+    keyword = keyword.replace("％", "%")
+    keyword = keyword.replace("ＵＶ", "UV")
+    keyword = keyword.replace("ｕｖ", "UV")
+
+    keyword = re.sub(r"\s+", " ", keyword).strip()
+
+    # 楽天APIで壊れやすい記号だけ除去。英字・数字・%・' は残す。
+    keyword = re.sub(
+        r"[^A-Za-z0-9\sぁ-んァ-ヶ一-龥ー・＋+%'％]",
+        " ",
+        keyword
+    )
+
     keyword = re.sub(r"\s+", " ", keyword).strip()
 
     if len(keyword) < 2:
         return ""
 
     return keyword[:120]
-
 def fetch_rakuten_item(product_name, category="", brand=""):
     global RAKUTEN_COOLDOWN_UNTIL
 
