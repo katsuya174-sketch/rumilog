@@ -8411,6 +8411,12 @@ def lab_test_function():
 
 @app.route("/admin/product-ranking")
 def admin_product_ranking():
+    admin_key = request.args.get("key", "")
+
+    if admin_key != os.getenv("ADMIN_KEY", ""):
+        return jsonify({
+            "error": "unauthorized"
+        }), 403
     results = load_results()
     ranking = build_product_ranking(results, limit=30)
 
