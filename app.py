@@ -900,6 +900,8 @@ def clean_rakuten_keyword(keyword):
     keyword = keyword.replace("%", "")
     keyword = keyword.replace("’", "'")
     keyword = keyword.replace("'", "")
+    keyword = keyword.replace("＋", " ")
+    keyword = keyword.replace("+", " ")
     keyword = keyword.replace("％", "%")
     keyword = keyword.replace("ＵＶ", "UV")
     keyword = keyword.replace("ｕｖ", "UV")
@@ -4612,9 +4614,13 @@ def normalize_ai_candidates(step):
             "technology": candidate.get("technology", []) if isinstance(candidate.get("technology", []), list) else [],
             "texture": str(candidate.get("texture", "") or ""),
             "contraindications": candidate.get("contraindications", []) if isinstance(candidate.get("contraindications", []), list) else [],
-            "reason": str(candidate.get("reason", "") or step.get("selection_reason", "") or "")
+            "reason": str(candidate.get("reason", "") or step.get("selection_reason", "") or ""),
+            "release_status": str(
+                candidate.get("release_status", "unknown") or "unknown"
+            ).lower(),
         }
-
+        if item["release_status"] != "current":
+            continue
         norm_name = normalize_candidate_name_for_merge(item["name"])
         if not norm_name or norm_name in seen:
             continue
@@ -6902,12 +6908,14 @@ def get_analysis_schema():
         "properties": {
             "brand": {"type": "string"},
             "name": {"type": "string"},
-            "confidence": {"type": "integer"}
+            "confidence": {"type": "integer"},
+            "release_status": {"type": "string"},
         },
         "required": [
             "brand",
             "name",
-            "confidence"
+            "confidence",
+            "release_status",
         ]
     }
 
@@ -7119,7 +7127,15 @@ product_candidates は「候補収集」だけを行う。
 最終選定・順位付け・点数付けは行わない。
 
 同じ画像・同じユーザー情報では、できるだけ同じ候補を返すこと。
+現行販売中の商品名のみ出力すること。
 
+商品がリニューアルされている場合は、
+必ず最新の正式名称を使用すること。
+
+旧名称・旧処方名・旧パッケージ名・
+リニューアル前の商品名は禁止。
+
+現行品か確信できない場合は出力しないこと。
 候補は人気順・売れ筋順ではなく、以下の固定優先順位で選ぶ。
 
 1. 目的成分とカテゴリが一致する
@@ -7210,6 +7226,10 @@ dry
 oily
 mixed
 sensitive
+
+release_status:
+必ず current / old / unknown のいずれか。
+release_status が current 以外の商品は出力しないこと。
 
 sensitive_ok:
 yes / no / unknown のいずれか。
