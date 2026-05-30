@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ title }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <style>
+        body {
+            font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
+            margin: 0;
+            padding: 24px;
+            background:
+                radial-gradient(circle at 20% 10%, #fff4f8 0, transparent 28%),
+                radial-gradient(circle at 90% 20%, #eef9ff 0, transparent 26%),
+                linear-gradient(180deg, #fffafd 0%, #f8fbff 100%);
+            color: #3f3a3a;
+        }
+
+        .page {
+            max-width: 880px;
+            margin: 0 auto;
+        }
+
+        .header-card {
+            background: rgba(255, 255, 255, 0.86);
+            border: 1px solid #f4dce6;
+            border-radius: 24px;
+            padding: 22px 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 30px rgba(220, 130, 165, 0.12);
+        }
+
+        h1 {
+            font-size: 24px;
+            margin: 0 0 8px;
+            color: #7a2942;
+            letter-spacing: 0.02em;
+        }
+
+        .lead {
+            margin: 0;
+            color: #7a6b72;
+            font-size: 14px;
+            line-height: 1.8;
+        }
+
+        .ranking-card {
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid #f1e3ea;
+            border-radius: 22px;
+            padding: 16px 18px;
+            margin-bottom: 12px;
+            box-shadow: 0 8px 22px rgba(120, 90, 110, 0.08);
+        }
+
+        .rank-line {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .rank {
+            min-width: 42px;
+            height: 42px;
+            border-radius: 999px;
+            background: #ffe3ee;
+            color: #9b3156;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .product {
+            font-weight: bold;
+            font-size: 16px;
+            color: #40373b;
+        }
+
+        .meta {
+            margin-left: 52px;
+            margin-top: 4px;
+            font-size: 13px;
+            color: #776b70;
+        }
+
+        .count {
+            color: #b54f72;
+            font-weight: bold;
+        }
+
+        .empty {
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid #f1e3ea;
+            border-radius: 22px;
+            padding: 22px;
+            color: #777;
+            text-align: center;
+        }
+
+        .back-link {
+            display: inline-block;
+            margin-top: 20px;
+            color: #9b3156;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 14px;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page">
+        <div class="header-card">
+            <h1>📦 {{ title }}</h1>
+            <p class="lead">
+                過去の診断で提案された回数が多い商品です。
+            </p>
+        </div>
+
+        {% if ranking %}
+            {% for item in ranking %}
+                <div class="ranking-card">
+                    <div class="rank-line">
+                        <span class="rank">{{ loop.index }}位</span>
+                        <span class="product">{{ item.product }}</span>
+                    </div>
+                    <div class="meta">
+                        {{ item.category }} / <span class="count">{{ item.count }}回</span> 提案
+                    </div>
+                </div>
+            {% endfor %}
+        {% else %}
+            <div class="empty">
+                まだ表示できる商品がありません。
+            </div>
+        {% endif %}
+
+        <a class="back-link" href="/history">← 診断履歴に戻る</a>
+    </div>
+</body>
+</html>

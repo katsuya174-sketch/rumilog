@@ -8417,28 +8417,33 @@ def admin_product_ranking():
         return jsonify({
             "error": "unauthorized"
         }), 403
+
     results = load_results()
     ranking = build_product_ranking(results, limit=30)
 
-    return jsonify({
-        "ranking": ranking
-    })
+    return render_template(
+        "product_ranking.html",
+        title="全ユーザー 商品出力ランキング",
+        ranking=ranking
+    )
 
 
 @app.route("/my-product-ranking")
 def my_product_ranking():
     client_ip = get_client_ip()
     results = load_results()
+
     ranking = build_product_ranking(
         results,
         client_ip=client_ip,
         limit=20
     )
 
-    return jsonify({
-        "ranking": ranking
-    })
-
+    return render_template(
+        "product_ranking.html",
+        title="よく提案される商品",
+        ranking=ranking
+    )
 @app.route("/click")
 def product_click():
     source = request.args.get("source", "unknown")

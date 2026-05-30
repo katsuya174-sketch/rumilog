@@ -5,106 +5,194 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>診断履歴</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        body {
+            font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
+            margin: 0;
+            padding: 24px;
+            background:
+                radial-gradient(circle at 20% 10%, #fff4f8 0, transparent 28%),
+                radial-gradient(circle at 90% 20%, #eef9ff 0, transparent 26%),
+                linear-gradient(180deg, #fffafd 0%, #f8fbff 100%);
+            color: #3f3a3a;
+            line-height: 1.8;
+        }
+
+        .page {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            color: #7a2942;
+            margin-bottom: 18px;
+        }
+
+        .card {
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid #f1e3ea;
+            border-radius: 22px;
+            padding: 18px;
+            margin-bottom: 18px;
+            box-shadow: 0 8px 22px rgba(120, 90, 110, 0.08);
+        }
+
+        .ranking-card {
+            background: linear-gradient(135deg, #fff4f8, #f5fbff);
+            border: 1px solid #f1dce6;
+        }
+
+        .card-title {
+            font-weight: bold;
+            color: #7a2942;
+            margin-bottom: 6px;
+        }
+
+        .lead {
+            font-size: 13px;
+            color: #776b70;
+            margin-bottom: 12px;
+        }
+
+        .pill-link {
+            display: inline-block;
+            padding: 10px 16px;
+            border-radius: 999px;
+            background: #f8d7e3;
+            color: #7a2942;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 14px;
+        }
+
+        .detail-link {
+            display: inline-block;
+            padding: 8px 12px;
+            background: #7a2942;
+            color: #fff;
+            border-radius: 999px;
+            text-decoration: none;
+            font-size: 14px;
+            margin-top: 12px;
+        }
+
+        .score {
+            font-size: 22px;
+            font-weight: bold;
+            color: #b54f72;
+            margin: 8px 0;
+        }
+
+        .meta {
+            color: #555;
+            font-size: 14px;
+        }
+
+        .empty {
+            text-align: center;
+            color: #777;
+        }
+
+        .back-link {
+            color: #9b3156;
+            text-decoration: none;
+            font-weight: bold;
+        }
+    </style>
 </head>
-<body style="font-family:sans-serif; line-height:1.8; padding:24px; max-width:900px; margin:auto;">
-    <h1>診断履歴</h1>
 
-    <div style="
-        border:1px solid #ddd;
-        border-radius:16px;
-        padding:16px;
-        margin-bottom:24px;
-        box-shadow:0 4px 12px rgba(0,0,0,0.05);
-    ">
-        <h2>Skin Score 推移</h2>
-        <canvas id="scoreChart"></canvas>
-    </div>
+<body>
+    <div class="page">
+        <h1>診断履歴</h1>
 
-    {% if history %}
-        {% for item in history %}
-            <div style="
-                border:1px solid #ddd;
-                border-radius:16px;
-                padding:16px;
-                margin-bottom:16px;
-                box-shadow:0 4px 12px rgba(0,0,0,0.05);
-            ">
-                <div><strong>ID:</strong> {{ item.id }}</div>
-                <div><strong>記録日:</strong> {{ item.record_date }}</div>
-                <div><strong>保存日時:</strong> {{ item.saved_at }}</div>
+        <div class="card ranking-card">
+            <div class="card-title">📦 よく提案される商品</div>
+            <div class="lead">
+                過去の診断で提案された回数が多い商品を確認できます。
+            </div>
+            <a href="/my-product-ranking" class="pill-link">見てみる</a>
+        </div>
 
-                <div style="font-size:20px; font-weight:bold;">
-                    Skin Score: {{ item.skin_score }}
-                </div>
+        <div class="card">
+            <h2>Skin Score 推移</h2>
+            <canvas id="scoreChart"></canvas>
+        </div>
 
-                <div><strong>肌状態:</strong> {{ item.skin_summary }}</div>
+        {% if history %}
+            {% for item in history %}
+                <div class="card">
+                    <div class="meta"><strong>ID:</strong> {{ item.id }}</div>
+                    <div class="meta"><strong>記録日:</strong> {{ item.record_date }}</div>
+                    <div class="meta"><strong>保存日時:</strong> {{ item.saved_at }}</div>
 
-                <hr>
+                    <div class="score">
+                        Skin Score: {{ item.skin_score }}
+                    </div>
 
-                <div><strong>予算:</strong> ¥{{ item.input_budget }}</div>
-                <div><strong>合計:</strong> ¥{{ item.total_price }}</div>
-                <div><strong>判定:</strong> {{ item.budget_status }}</div>
-                <div style="margin-top:12px;">
-                    <a href="/history/{{ item.id }}" style="
-                        display:inline-block;
-                        padding:8px 12px;
-                        background:#333;
-                        color:#fff;
-                        border-radius:8px;
-                        text-decoration:none;
-                        font-size:14px;
-                    ">
+                    <div class="meta"><strong>肌状態:</strong> {{ item.skin_summary }}</div>
+
+                    <hr>
+
+                    <div class="meta"><strong>予算:</strong> ¥{{ item.input_budget }}</div>
+                    <div class="meta"><strong>合計:</strong> ¥{{ item.total_price }}</div>
+                    <div class="meta"><strong>判定:</strong> {{ item.budget_status }}</div>
+
+                    <a href="/history/{{ item.id }}" class="detail-link">
                         詳細を見る →
                     </a>
                 </div>
-
+            {% endfor %}
+        {% else %}
+            <div class="card empty">
+                まだ診断履歴はありません。
             </div>
-        {% endfor %}
-    {% else %}
-        <p>まだ診断履歴はありません。</p>
-    {% endif %}
+        {% endif %}
 
-    <p><a href="/lab">← 診断に戻る</a></p>
+        <p>
+            <a href="/lab" class="back-link">← 診断に戻る</a>
+        </p>
+    </div>
 
     <script id="chart-labels" type="application/json">{{ labels | tojson }}</script>
     <script id="chart-scores" type="application/json">{{ scores | tojson }}</script>
 
-<script>
-    const chartLabels = JSON.parse(document.getElementById("chart-labels").textContent);
-    const chartScores = JSON.parse(document.getElementById("chart-scores").textContent);
+    <script>
+        const chartLabels = JSON.parse(document.getElementById("chart-labels").textContent);
+        const chartScores = JSON.parse(document.getElementById("chart-scores").textContent);
 
-    const canvas = document.getElementById("scoreChart");
+        const canvas = document.getElementById("scoreChart");
 
-    if (canvas) {
-        const ctx = canvas.getContext("2d");
+        if (canvas) {
+            const ctx = canvas.getContext("2d");
 
-        new Chart(ctx, {
-            type: "line",
-            data: {
-                labels: chartLabels,
-                datasets: [{
-                    label: "Skin Score",
-                    data: chartScores,
-                    tension: 0.3,
-                    fill: false
-                }]
-            },
-            options: {
-                responsive: true,
-                plugins: {
-                    legend: {
-                        display: true
-                    }
+            new Chart(ctx, {
+                type: "line",
+                data: {
+                    labels: chartLabels,
+                    datasets: [{
+                        label: "Skin Score",
+                        data: chartScores,
+                        tension: 0.3,
+                        fill: false
+                    }]
                 },
-                scales: {
-                    y: {
-                        min: 0,
-                        max: 100
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            display: true
+                        }
+                    },
+                    scales: {
+                        y: {
+                            min: 0,
+                            max: 100
+                        }
                     }
                 }
-            }
-        });
-    }
-</script>
+            });
+        }
+    </script>
 </body>
 </html>
