@@ -521,27 +521,7 @@ def wait_for_rakuten_rate_limit():
 
     import re
 
-def clean_rakuten_keyword(text):
-    if not text:
-        return ""
 
-    text = str(text)
-
-    # 改行・タブ除去
-    text = text.replace("\n", " ").replace("\r", " ").replace("\t", " ")
-
-    # 記号を少し整理
-    text = re.sub(r"[【】\[\]（）()「」『』|｜/／]", " ", text)
-
-    # 余分な空白を整理
-    text = " ".join(text.split())
-    keyword = keyword.replace("　", " ")
-    keyword = keyword.replace("ＵＶ", "UV")
-    keyword = keyword.replace("uv", "UV")
-
-    keyword = re.sub(r"\s+", " ", keyword).strip()
-    # 長すぎると楽天APIで弾かれやすいので短くする
-    return text[:80]
 
 def build_rakuten_search_keywords(product_name, brand=""):
     name = clean_rakuten_keyword(product_name)
@@ -874,31 +854,32 @@ def clean_rakuten_keyword(keyword):
     keyword = keyword.replace("\r", " ")
     keyword = keyword.replace("　", " ")
 
-    keyword = keyword.replace("%", "")
+    keyword = re.sub(r"\buv\b", "UV", keyword, flags=re.IGNORECASE)
+
     keyword = keyword.replace("’", "'")
     keyword = keyword.replace("'", "")
+    keyword = keyword.replace("％", "")
+    keyword = keyword.replace("%", "")
     keyword = keyword.replace("＋", " ")
     keyword = keyword.replace("+", " ")
-    keyword = keyword.replace("％", "%")
-    keyword = keyword.replace("ＵＶ", "UV")
-    keyword = keyword.replace("ｕｖ", "UV")
-    keyword = keyword.replace("(", " ")
-    keyword = keyword.replace(")", " ")
-    keyword = keyword.replace("（", " ")
-    keyword = keyword.replace("）", " ")
     keyword = keyword.replace("/", " ")
+    keyword = keyword.replace("／", " ")
     keyword = keyword.replace("&", " ")
     keyword = keyword.replace("＆", " ")
-    
 
-    # 楽天APIで壊れやすい記号だけ除去。英字・数字・%・' は残す。
     keyword = re.sub(
-        r"[^A-Za-z0-9\sぁ-んァ-ヶ一-龥ー・＋+%'％]",
+        r"[^A-Za-z0-9\sぁ-んァ-ヶ一-龥ー・]",
         " ",
         keyword
     )
 
     keyword = re.sub(r"\s+", " ", keyword).strip()
+
+    parts = keyword.split()
+    if parts and len(parts[-1]) == 1 and parts[-1].isascii():
+        parts = parts[:-1]
+
+    keyword = " ".join(parts).strip()
 
     if len(keyword) < 2:
         return ""
@@ -6773,6 +6754,69 @@ def prepare_result(result):
     ]
 
     return result
+
+from collections import Counter
+
+
+def iter_selected_products_from_result(result):
+    if not isinstance(result, dict):
+        return
+
+    sections = [
+        ("morning", result.get("morning", {}).get("steps", [])),
+        ("night", result.get("night", {}).get("steps", [])),
+        ("weekly_care", result.get("weekly_care", [])),
+    ]
+
+    for section_name, steps in sections:
+        if not isinstance(steps, list):
+            continue
+
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+
+            product = str(step.get("product", "") or "").strip()
+            category = str(step.get("category", "") or "").strip()
+
+            if not product:
+                continue
+
+            yield {
+                "product": product,
+                "category": category,
+                "section": section_name
+            }
+
+
+def build_product_ranking(results, client_ip=None, limit=20):
+    counter = Counter()
+
+    for result in results:
+        if not isinstance(result, dict):
+            continue
+
+        if client_ip and result.get("client_ip") != client_ip:
+            continue
+
+        for item in iter_selected_products_from_result(result):
+            key = (
+                item["product"],
+                item["category"]
+            )
+            counter[key] += 1
+
+    ranking = []
+
+    for (product, category), count in counter.most_common(limit):
+        ranking.append({
+            "product": product,
+            "category": category,
+            "count": count
+        })
+
+    return ranking
+
 # トップページ
 @app.route("/", methods=["GET", "POST"])
 def home():
@@ -8291,7 +8335,7 @@ def lab_test_function():
                 print("===== USAGE SAVE ERROR =====")
                 print(e)
 
-            
+            data["client_ip"] = client_ip
             saved_record = None
             try:
                 saved_record = append_result(data)
@@ -8364,6 +8408,30 @@ def lab_test_function():
     client_ip = get_client_ip()
     remaining_free_count = get_remaining_free_count(client_ip)
     return render_template("lab.html", remaining_free_count=remaining_free_count, DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT)
+
+@app.route("/admin/product-ranking")
+def admin_product_ranking():
+    results = load_results()
+    ranking = build_product_ranking(results, limit=30)
+
+    return jsonify({
+        "ranking": ranking
+    })
+
+
+@app.route("/my-product-ranking")
+def my_product_ranking():
+    client_ip = get_client_ip()
+    results = load_results()
+    ranking = build_product_ranking(
+        results,
+        client_ip=client_ip,
+        limit=20
+    )
+
+    return jsonify({
+        "ranking": ranking
+    })
 
 @app.route("/click")
 def product_click():
