@@ -110,13 +110,12 @@ from constants import (
     AI_INGREDIENT_MAP,
     CONCERN_MAP
 )
-def call_gemini_with_retry(client, model, contents, config=None, max_retries=3):
+def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
     import time
     from google.genai import errors
 
     last_error = None
 
-    
     for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
@@ -124,21 +123,23 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=3):
                 contents=contents,
                 config=config
             )
-            
+
             return response
 
         except (errors.ServerError, errors.APIError) as e:
             last_error = e
             msg = str(e)
 
-            print(f"[Gemini retry] attempt={attempt+1}/{max_retries} error={msg}",flush=True)
+            print(
+                f"[Gemini retry] attempt={attempt + 1}/{max_retries} error={msg}",
+                flush=True
+            )
 
             retryable = (
-                "503" in msg or
-                "UNAVAILABLE" in msg or
-                "429" in msg or
-                "RESOURCE_EXHAUSTED" in msg or
-                "429" in msg
+                "503" in msg
+                or "UNAVAILABLE" in msg
+                or "429" in msg
+                or "RESOURCE_EXHAUSTED" in msg
             )
 
             if not retryable:
@@ -147,11 +148,12 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=3):
             if attempt == max_retries - 1:
                 raise
 
-            wait_seconds = min(45, (attempt + 1) ** 2)
+            wait_seconds = min(8, (attempt + 1) ** 2)
+
             time.sleep(wait_seconds)
 
         except Exception as e:
-            print(f"[Gemini fatal] {e}",flush=True)
+            print(f"[Gemini fatal] {e}", flush=True)
             raise
 
     raise last_error
@@ -547,65 +549,39 @@ def build_rakuten_search_keywords(product_name, brand=""):
 
     keywords = []
 
-    def add_keyword(value):
+    def add(value):
         value = clean_rakuten_keyword(value)
         if value and value not in keywords:
             keywords.append(value)
 
-    add_keyword(name)
-    parts = name.split()
-
-    if len(parts) >= 3:
-        keywords.append(
-            " ".join(parts[:3])
-        )
-
-    if len(parts) >= 2:
-        keywords.append(
-            " ".join(parts[:2])
-        )
-    loose = (
-        name
-        .replace("・", " ")
-        .replace("　", " ")
-        .replace("(", " ")
-        .replace(")", " ")
-        .replace("（", " ")
-        .replace("）", " ")
-    )
-    loose = " ".join(loose.split())
-
-    add_keyword(loose)
+    add(name)
 
     if brand and name and not name.lower().startswith(brand.lower()):
-        add_keyword(f"{brand} {name}")
+        add(f"{brand} {name}")
 
-    parts = loose.split()
+    parts = name.split()
 
-    # 英字ブランドは先頭語を落とさない
-    has_ascii = any(ch.isascii() and ch.isalpha() for ch in loose)
+    # 英字ブランド商品は先頭を落としすぎない
+    has_ascii = any(ch.isascii() and ch.isalpha() for ch in name)
+
+    if len(parts) >= 4:
+        add(" ".join(parts[:4]))
+
+    if len(parts) >= 3:
+        add(" ".join(parts[:3]))
+
+    if len(parts) >= 2:
+        add(" ".join(parts[:2]))
 
     if not has_ascii:
         if len(parts) >= 2:
-            add_keyword(" ".join(parts[1:]))
-
+            add(" ".join(parts[1:]))
         if len(parts) >= 3:
-            add_keyword(" ".join(parts[2:]))
-
-    # 主要語検索。ただし英字ブランドの商品では短くしすぎない
-    if len(parts) >= 3:
-        if has_ascii:
-            add_keyword(" ".join(parts[:4]))
-        else:
-            add_keyword(" ".join(parts[:3]))
-
-    if len(parts) >= 2 and not has_ascii:
-        add_keyword(" ".join(parts[:2]))
+            add(" ".join(parts[2:]))
 
     print("[RAKUTEN KEYWORDS]", keywords, flush=True)
 
-    return keywords[:5]
-
+    return keywords[:7]
 def score_current_product_signal(item):
     if not isinstance(item, dict):
         return 0
@@ -897,6 +873,7 @@ def clean_rakuten_keyword(keyword):
     keyword = keyword.replace("\n", " ")
     keyword = keyword.replace("\r", " ")
     keyword = keyword.replace("　", " ")
+
     keyword = keyword.replace("%", "")
     keyword = keyword.replace("’", "'")
     keyword = keyword.replace("'", "")
@@ -910,6 +887,8 @@ def clean_rakuten_keyword(keyword):
     keyword = keyword.replace("（", " ")
     keyword = keyword.replace("）", " ")
     keyword = keyword.replace("/", " ")
+    keyword = keyword.replace("&", " ")
+    keyword = keyword.replace("＆", " ")
     
 
     # 楽天APIで壊れやすい記号だけ除去。英字・数字・%・' は残す。
@@ -953,7 +932,7 @@ def fetch_rakuten_item(product_name, category="", brand=""):
     }
 
     keywords = build_rakuten_search_keywords(product_name, brand)
-    MAX_RAKUTEN_KEYWORDS = 2
+    MAX_RAKUTEN_KEYWORDS = 5
     for keyword in keywords[:MAX_RAKUTEN_KEYWORDS]:
         keyword = clean_rakuten_keyword(keyword)
 
@@ -1303,26 +1282,34 @@ def find_db_product_by_name(products, product_name, category=None):
     if not target:
         return None
 
+    def is_usable_db_product(p):
+        if not isinstance(p, dict):
+            return False
+
+        if category and p.get("category") != category:
+            return False
+
+        if is_discontinued_or_suspicious_product(p):
+            return False
+
+        return True
+
     # まず完全一致
     for p in products:
-        if not isinstance(p, dict):
+        if not is_usable_db_product(p):
             continue
 
         db_name = normalize_product_name(p.get("name", ""))
-        if category and p.get("category") != category:
-            continue
 
         if target == db_name:
             return p
 
     # 次に部分一致
     for p in products:
-        if not isinstance(p, dict):
+        if not is_usable_db_product(p):
             continue
 
         db_name = normalize_product_name(p.get("name", ""))
-        if category and p.get("category") != category:
-            continue
 
         if target in db_name or db_name in target:
             return p
@@ -3519,21 +3506,10 @@ def build_virtual_product_from_ai_candidate(step, candidate):
     if isinstance(candidate, str):
         candidate = {
             "name": candidate,
-            "price_ref": safe_price(
-                candidate.get("normalized_price")
-                or candidate.get("price_ref")
-                or candidate.get("itemPrice")
-                or candidate.get("price")
-                or 0
-            ),
-            "raw_price": safe_price(
-                candidate.get("raw_price")
-                or candidate.get("itemPrice")
-                or candidate.get("price_ref")
-                or candidate.get("price")
-                or 0
-            ),
-            "bundle_quantity": int(candidate.get("bundle_quantity") or 1),
+            "brand": "",
+            "price_ref": 0,
+            "raw_price": 0,
+            "bundle_quantity": 1,
             "active_ingredients": [],
             "support_ingredients": [],
             "signature_ingredients": [],
@@ -3548,6 +3524,9 @@ def build_virtual_product_from_ai_candidate(step, candidate):
             "contraindications": [],
             "reason": ""
         }
+
+    if not isinstance(candidate, dict):
+        candidate = {}
 
     active_ingredients = [
         normalize_ingredient_tag(x)
@@ -3565,7 +3544,10 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         normalize_ingredient_tag(x)
         for x in candidate.get("signature_ingredients", [])
     ]
-    signature_ingredients = [x for x in signature_ingredients if x in signature_ingredient_effects]
+    signature_ingredients = [
+        x for x in signature_ingredients
+        if x in signature_ingredient_effects
+    ]
 
     ingredient_tag = normalize_ingredient_tag(ingredient_focus)
     if ingredient_tag and ingredient_tag not in active_ingredients:
@@ -3574,8 +3556,19 @@ def build_virtual_product_from_ai_candidate(step, candidate):
     concerns = []
     for c in candidate.get("concerns", []):
         c = normalize_text(c)
-        if c in ["pores", "acne", "redness", "oil_control", "dryness", "barrier", "dullness", "whitening", "aging"]:
+        if c in [
+            "pores",
+            "acne",
+            "redness",
+            "oil_control",
+            "dryness",
+            "barrier",
+            "dullness",
+            "whitening",
+            "aging"
+        ]:
             concerns.append(c)
+
     if not concerns:
         concerns = purpose_to_concern_tags(purpose)
 
@@ -3585,21 +3578,51 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         if s in ["dry", "oily", "mixed", "sensitive"]:
             skin_types.append(s)
 
-    sensitive_ok = normalize_text(candidate.get("sensitive_ok", "unknown"))
+    sensitive_ok = normalize_text(
+        candidate.get("sensitive_ok", "unknown")
+    )
     if sensitive_ok not in ["yes", "no", "unknown"]:
         sensitive_ok = "unknown"
 
     texture = normalize_text(candidate.get("texture", ""))
-    if texture not in ["light", "watery", "gel", "medium", "essence", "cream", "rich", "oil", "balm", "foam", "powder"]:
+    if texture not in [
+        "light",
+        "watery",
+        "gel",
+        "medium",
+        "essence",
+        "cream",
+        "rich",
+        "oil",
+        "balm",
+        "foam",
+        "powder"
+    ]:
         texture = ""
 
-    main_functions = [str(x) for x in candidate.get("main_functions", []) if str(x).strip()]
-    formulation = [str(x) for x in candidate.get("formulation", []) if str(x).strip()]
-    technology = [str(x) for x in candidate.get("technology", []) if str(x).strip()]
-    contraindications = [str(x) for x in candidate.get("contraindications", []) if str(x).strip()]
+    main_functions = [
+        str(x) for x in candidate.get("main_functions", [])
+        if str(x).strip()
+    ]
+
+    formulation = [
+        str(x) for x in candidate.get("formulation", [])
+        if str(x).strip()
+    ]
+
+    technology = [
+        str(x) for x in candidate.get("technology", [])
+        if str(x).strip()
+    ]
+
+    contraindications = [
+        str(x) for x in candidate.get("contraindications", [])
+        if str(x).strip()
+    ]
 
     return {
         "name": candidate.get("name", ""),
+        "brand": candidate.get("brand", ""),
         "category": category,
         "active_ingredients": list(dict.fromkeys(active_ingredients)),
         "support_ingredients": list(dict.fromkeys(support_ingredients)),
@@ -3607,31 +3630,32 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         "concerns": list(dict.fromkeys(concerns)),
         "skin_types": list(dict.fromkeys(skin_types)),
         "sensitive_ok": sensitive_ok,
-        "retinol_level" : safe_retinol_level(
+        "retinol_level": safe_retinol_level(
             candidate.get("retinol_level", 0)
         ),
         "price_ref": safe_price(
             candidate.get("normalized_price")
             or candidate.get("price_ref")
             or candidate.get("itemPrice")
-            or candidate.get("estimated_price")
+            or candidate.get("price")
             or 0
         ),
         "raw_price": safe_price(
             candidate.get("raw_price")
             or candidate.get("itemPrice")
             or candidate.get("price_ref")
+            or candidate.get("price")
             or 0
         ),
-"bundle_quantity": int(candidate.get("bundle_quantity") or 1),
+        "bundle_quantity": int(candidate.get("bundle_quantity") or 1),
         "main_functions": list(dict.fromkeys(main_functions)),
         "formulation": list(dict.fromkeys(formulation)),
         "technology": list(dict.fromkeys(technology)),
         "texture": texture,
         "contraindications": list(dict.fromkeys(contraindications)),
-        "image": ""
+        "image": "",
+        "_is_virtual": True
     }
-
 def select_best_db_product(step, products, user_data, budget_value, used_brands=None):
 
     if used_brands is None:
@@ -3671,182 +3695,211 @@ DISCONTINUED_KEYWORDS = [
 ]
 
 def is_discontinued_or_suspicious_product(product):
-    name = str(product.get("name", "") or product.get("product", "")).lower()
+    if not isinstance(product, dict):
+        return True
+
+    name = str(
+        product.get("name", "")
+        or product.get("product", "")
+    ).lower()
+
+    release_status = str(
+        product.get("release_status", "")
+    ).lower()
+
+    if release_status in [
+        "old",
+        "discontinued",
+        "ended",
+        "unknown"
+    ]:
+        return True
 
     for kw in DISCONTINUED_KEYWORDS:
         if kw.lower() in name:
             return True
 
-    status = str(product.get("status", "")).lower()
-    if status in ["discontinued", "out_of_stock", "ended"]:
+    status = str(
+        product.get("status", "")
+    ).lower()
+
+    if status in [
+        "discontinued",
+        "out_of_stock",
+        "ended"
+    ]:
         return True
 
     return False
 
-def score_routine_balance(
-    step,
-    product,
-    routine_context=None
-):
+def ensure_required_routine_steps(data):
+    if not isinstance(data, dict):
+        return {}
+
+    for section in ["morning", "night"]:
+        if section not in data or not isinstance(data.get(section), dict):
+            data[section] = {"steps": []}
+
+        if not isinstance(data[section].get("steps"), list):
+            data[section]["steps"] = []
+
+    morning_steps = data["morning"]["steps"]
+    night_steps = data["night"]["steps"]
+
+    morning_categories = {
+        s.get("category")
+        for s in morning_steps
+        if isinstance(s, dict)
+    }
+
+    night_categories = {
+        s.get("category")
+        for s in night_steps
+        if isinstance(s, dict)
+    }
+
+    if "洗顔" not in morning_categories:
+        morning_steps.insert(0, {
+            "category": "洗顔",
+            "role": "main",
+            "purpose": "朝の皮脂・汗を落としてスキンケアのなじみを整える",
+            "ingredient_focus": "低刺激",
+            "risk_note": "",
+            "priority": 1,
+            "product_candidates": []
+        })
+
+    if "日焼け止め" not in morning_categories:
+        morning_steps.append({
+            "category": "日焼け止め",
+            "role": "main",
+            "purpose": "紫外線による赤み・色素沈着・毛穴悪化を防ぐ",
+            "ingredient_focus": "UV防御",
+            "risk_note": "",
+            "priority": 9,
+            "product_candidates": []
+        })
+
+    if "クレンジング" not in night_categories:
+        night_steps.insert(0, {
+            "category": "クレンジング",
+            "role": "main",
+            "purpose": "日焼け止め・皮脂・メイク汚れを落とす",
+            "ingredient_focus": "低刺激",
+            "risk_note": "",
+            "priority": 1,
+            "product_candidates": []
+        })
+
+    if "洗顔" not in night_categories:
+        night_steps.insert(1, {
+            "category": "洗顔",
+            "role": "main",
+            "purpose": "残った汚れを落として毛穴・ニキビ悪化を防ぐ",
+            "ingredient_focus": "低刺激",
+            "risk_note": "",
+            "priority": 2,
+            "product_candidates": []
+        })
+
+    if "クリーム" not in night_categories:
+        night_steps.append({
+            "category": "クリーム",
+            "role": "main",
+            "purpose": "夜のバリア保護",
+            "ingredient_focus": "セラミド",
+            "risk_note": "",
+            "priority": 9,
+            "product_candidates": []
+        })
+
+    return data
+
+def score_routine_balance(step, product, routine_context=None):
     profile = infer_active_profile(product)
 
     score = 0
 
-    families = set(
-        profile.get("families", [])
-    )
+    families = set(profile.get("families", []))
+    strength = profile.get("strength", "low")
+    irritation_risk = profile.get("irritation_risk", "low")
 
-    strength = profile.get(
-        "strength",
-        "low"
-    )
+    purpose = normalize_text(step.get("purpose", ""))
 
-    purpose = normalize_text(
-        step.get("purpose", "")
-    )
-
-    # =========
-    # 目的一致
-    # =========
-
-    if (
-        "ニキビ跡" in purpose
-        or "色素沈着" in purpose
-    ):
+    if "ニキビ跡" in purpose or "色素沈着" in purpose:
         if "vitamin_c" in families:
             score += 10
-
-        if (
-            "retinoid" in families
-            and strength != "high"
-        ):
+        if "retinoid" in families and strength != "high":
             score += 10
-
         if "azelaic" in families:
             score += 8
+        if "niacinamide" in families:
+            score += 6
 
-    if (
-        "毛穴" in purpose
-        or "ハリ" in purpose
-    ):
+    if "毛穴" in purpose or "ハリ" in purpose:
         if "retinoid" in families:
             score += 12
-
         if "peptide" in families:
             score += 10
+        if "niacinamide" in families:
+            score += 6
 
     if "barrier" in families:
         score += 6
 
-    # =========
-    # 刺激補正
-    # =========
-
-    if (
-        profile.get("irritation_risk")
-        == "high"
-    ):
-        score -= 8
-
-    # =========
-    # ルーティン評価
-    # =========
+    if irritation_risk == "high":
+        score -= 10
+    elif irritation_risk == "medium":
+        score -= 4
 
     if routine_context:
+        existing_families = set(routine_context.get("families", []))
+        existing_strengths = routine_context.get("strengths", [])
 
-        existing_families = set(
-            routine_context.get(
-                "families",
-                []
-            )
-        )
-        profile_pair = profile.get(
-            "pair_well_with",
-            set()
-        )
-
-        profile_avoid = profile.get(
-            "avoid_with",
-            set()
-        )
+        profile_pair = set(profile.get("pair_well_with", set()))
+        profile_avoid = set(profile.get("avoid_with", set()))
 
         for family in existing_families:
-
             if family in profile_pair:
-                score += 12
-
+                score += 10
             if family in profile_avoid:
-                score -= 20
-        existing_strengths = (
-            routine_context.get(
-                "strengths",
-                []
-            )
-        )
+                score -= 18
 
-        # VC重複
-        if (
-            "vitamin_c" in families
-            and "vitamin_c" in existing_families
-        ):
-            score -= 6
+        if "vitamin_c" in families and "vitamin_c" in existing_families:
+            score -= 8
 
-        # レチノイド重複
-        if (
-            "retinoid" in families
-            and "retinoid" in existing_families
-        ):
-            score -= 12
+        if "retinoid" in families and "retinoid" in existing_families:
+            score -= 16
 
-        # ピーリング重複
-        if (
-            "acid" in families
-            and "acid" in existing_families
-        ):
-            score -= 10
-
-        # レチノイド + 酸
-        if (
-            "retinoid" in families
-            and "acid" in existing_families
-        ):
-            score -= 15
+        if "aha_bha" in families and "aha_bha" in existing_families:
+            score -= 14
 
         if (
-            "acid" in families
-            and "retinoid" in existing_families
+            "retinoid" in families and "aha_bha" in existing_families
+        ) or (
+            "aha_bha" in families and "retinoid" in existing_families
         ):
-            score -= 15
-
-        # VC + レチノイド
-        if (
-            "vitamin_c" in families
-            and "retinoid" in existing_families
-        ):
-            score += 6
+            score -= 24
 
         if (
-            "retinoid" in families
-            and "vitamin_c" in existing_families
+            "vitamin_c" in families and "retinoid" in existing_families
+        ) or (
+            "retinoid" in families and "vitamin_c" in existing_families
         ):
-            score += 6
+            score += 8
 
-        # バリア補完
         if (
             "barrier" in families
             and (
                 "retinoid" in existing_families
-                or "acid" in existing_families
+                or "aha_bha" in existing_families
+                or "vitamin_c" in existing_families
             )
         ):
-            score += 10
+            score += 12
 
-        # 強刺激の重複
-        if (
-            strength == "high"
-            and "high" in existing_strengths
-        ):
-            score -= 12
+        if strength == "high" and "high" in existing_strengths:
+            score -= 16
 
     return score
 def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None,routine_context=None):
@@ -4159,17 +4212,24 @@ def apply_moisture_plan(data):
     import json
 
     if isinstance(data, str):
-        
         data = json.loads(data)
 
+    if not isinstance(data, dict):
+        return {}
 
     moisture_plan = data.get("moisture_plan", {})
-    need_emulsion = moisture_plan.get("need_emulsion", False)
-    need_cream = moisture_plan.get("need_cream", False)
-    need_double_moisture = moisture_plan.get("need_double_moisture", False)
+    need_emulsion = bool(moisture_plan.get("need_emulsion", False))
+    need_cream = bool(moisture_plan.get("need_cream", False))
+    need_double_moisture = bool(moisture_plan.get("need_double_moisture", False))
 
     for section in ["morning", "night"]:
+        if section not in data or not isinstance(data.get(section), dict):
+            data[section] = {"steps": []}
+
         steps = data.get(section, {}).get("steps", [])
+        if not isinstance(steps, list):
+            steps = []
+
         filtered_steps = []
 
         for step in steps:
@@ -4178,15 +4238,38 @@ def apply_moisture_plan(data):
 
             category = step.get("category", "")
 
-            if category == "乳液" and not need_emulsion:
-                continue
+            # 朝は重すぎる保湿を減らす
+            if section == "morning":
+                if category == "乳液" and not need_emulsion and not need_double_moisture:
+                    continue
 
-            if category == "クリーム" and not need_cream:
-                continue
+                if category == "クリーム" and not need_cream and not need_double_moisture:
+                    continue
+
+            # 夜はクリームを削除しない
+            if section == "night":
+                if category == "乳液" and not need_emulsion and not need_double_moisture:
+                    continue
 
             filtered_steps.append(step)
 
-        categories = [s.get("category") for s in filtered_steps if isinstance(s, dict)]
+        categories = [
+            s.get("category")
+            for s in filtered_steps
+            if isinstance(s, dict)
+        ]
+
+        if section == "night":
+            if "クリーム" not in categories:
+                filtered_steps.append({
+                    "category": "クリーム",
+                    "role": "main",
+                    "purpose": "夜のバリア保護",
+                    "ingredient_focus": "セラミド",
+                    "risk_note": "",
+                    "priority": 5,
+                    "product_candidates": []
+                })
 
         if need_double_moisture:
             if "乳液" not in categories:
@@ -4199,6 +4282,12 @@ def apply_moisture_plan(data):
                     "priority": 4,
                     "product_candidates": []
                 })
+
+            categories = [
+                s.get("category")
+                for s in filtered_steps
+                if isinstance(s, dict)
+            ]
 
             if "クリーム" not in categories:
                 filtered_steps.append({
@@ -4213,9 +4302,100 @@ def apply_moisture_plan(data):
 
         data[section]["steps"] = filtered_steps
 
+  
+
     return data
 
+def ensure_required_routine_steps(data):
+    if not isinstance(data, dict):
+        return {}
 
+    if "morning" not in data or not isinstance(data.get("morning"), dict):
+        data["morning"] = {"steps": []}
+
+    if "night" not in data or not isinstance(data.get("night"), dict):
+        data["night"] = {"steps": []}
+
+    morning_steps = data["morning"].get("steps", [])
+    night_steps = data["night"].get("steps", [])
+
+    if not isinstance(morning_steps, list):
+        morning_steps = []
+
+    if not isinstance(night_steps, list):
+        night_steps = []
+
+    morning_categories = {
+        s.get("category")
+        for s in morning_steps
+        if isinstance(s, dict)
+    }
+
+    night_categories = {
+        s.get("category")
+        for s in night_steps
+        if isinstance(s, dict)
+    }
+
+    if "洗顔" not in morning_categories:
+        morning_steps.insert(0, {
+            "category": "洗顔",
+            "role": "main",
+            "purpose": "朝の皮脂・汗を落としてスキンケアのなじみを整える",
+            "ingredient_focus": "低刺激",
+            "risk_note": "",
+            "priority": 1,
+            "product_candidates": []
+        })
+
+    if "日焼け止め" not in morning_categories:
+        morning_steps.append({
+            "category": "日焼け止め",
+            "role": "main",
+            "purpose": "紫外線による赤み・色素沈着・毛穴悪化を防ぐ",
+            "ingredient_focus": "UV防御",
+            "risk_note": "",
+            "priority": 9,
+            "product_candidates": []
+        })
+
+    if "クレンジング" not in night_categories:
+        night_steps.insert(0, {
+            "category": "クレンジング",
+            "role": "main",
+            "purpose": "日焼け止め・皮脂・メイク汚れを落とす",
+            "ingredient_focus": "低刺激",
+            "risk_note": "",
+            "priority": 1,
+            "product_candidates": []
+        })
+
+    if "洗顔" not in night_categories:
+        night_steps.insert(1, {
+            "category": "洗顔",
+            "role": "main",
+            "purpose": "残った汚れを落として毛穴・ニキビ悪化を防ぐ",
+            "ingredient_focus": "低刺激",
+            "risk_note": "",
+            "priority": 2,
+            "product_candidates": []
+        })
+
+    if "クリーム" not in night_categories:
+        night_steps.append({
+            "category": "クリーム",
+            "role": "main",
+            "purpose": "夜のバリア保護",
+            "ingredient_focus": "セラミド",
+            "risk_note": "",
+            "priority": 9,
+            "product_candidates": []
+        })
+
+    data["morning"]["steps"] = morning_steps
+    data["night"]["steps"] = night_steps
+
+    return data
 
 def get_dynamic_score_weights(step, user_data):
     section = step.get("_section", "")
@@ -4952,8 +5132,13 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
     ai_image_db = load_ai_product_images()
     improvement_plan = data.get("improvement_plan", {})
 
-    def assign_one_step(step, used_product_names, section_name, routine_context):
-      
+    routine_context = {
+        "families": [],
+        "strengths": [],
+        "selected_products": []
+    }
+
+    def assign_one_step(step, used_product_names, section_name):
         if not isinstance(step, dict):
             return step
 
@@ -4992,31 +5177,22 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             step["amazon_link"] = ""
             step["product_source"] = "none"
             step["recommend_reason"] = "現在確認できる商品候補が見つかりませんでした。"
-            step["product"] = clean_display_product_name(
-                step.get("product", "")
-            )
+            step["product"] = clean_display_product_name(step.get("product", ""))
+
             return normalize_step_price_fields(step)
 
-        best["name"] = clean_display_product_name(
-            best.get("name", "")
-        )
+        best["name"] = clean_display_product_name(best.get("name", ""))
 
-        product_name = best.get("name")
+        product_name = best.get("name", "")
         if product_name:
             used_product_names.add(product_name)
+
         profile = infer_active_profile(best)
 
-        routine_context["families"].extend(
-            profile.get("families", [])
-        )
+        routine_context["families"].extend(profile.get("families", []))
+        routine_context["strengths"].append(profile.get("strength", "low"))
+        routine_context["selected_products"].append(product_name)
 
-        routine_context["strengths"].append(
-            profile.get("strength", "low")
-        )
-
-        routine_context["selected_products"].append(
-            product_name
-        )
         step["top_candidates"] = best.get("_top_candidates", [])
         source = best.get("_source", "")
 
@@ -5035,6 +5211,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
                     best.get("name", ""),
                     ai_image_db
                 )
+
                 if found_price and step["price"] <= 0:
                     step["price"] = safe_price(found_price)
                     step["estimated_price"] = safe_price(found_price)
@@ -5043,6 +5220,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             step["match_score"] = best.get("_score", 0) or 0
             step["base_score"] = best.get("_base_score", 0) or 0
             step["improve_score"] = best.get("_improve_score", 0) or 0
+            step["routine_score"] = best.get("_routine_score", 0) or 0
             step["recommend_reason"] = (
                 best.get("reason")
                 or step.get("selection_reason")
@@ -5060,7 +5238,6 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             apply_db_product_to_step(step, best, user_data)
             step["product_source"] = source or "db"
 
-        
         invalid_reason = "現在確認できる商品候補が見つかりませんでした。"
 
         if (
@@ -5072,7 +5249,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
                 or step.get("selection_reason")
                 or build_ai_reason(step, user_data)
             )
-        
+
         step = finalize_step_display_fields(step, best, user_data)
         step = normalize_step_price_fields(step)
 
@@ -5080,36 +5257,34 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
         print("[FINAL IMAGE]", step.get("image"), flush=True)
         print("[FINAL REASON]", step.get("recommend_reason"), flush=True)
         print("[FINAL SCORE DETAIL]", step.get("score_detail"), flush=True)
-        step["product"] = clean_display_product_name(
-            step.get("product", "")
-        )
+
+        step["product"] = clean_display_product_name(step.get("product", ""))
+
         return step
 
+    used_product_names = set()
+
     for section in ["morning", "night"]:
-        used_product_names = set()
-        routine_context = {
-            "families": [],
-            "strengths": [],
-            "selected_products": []
-        }
         steps = data.get(section, {}).get("steps", [])
 
         if not isinstance(steps, list):
             continue
 
         for idx, step in enumerate(steps):
-            steps[idx] = assign_one_step(step, used_product_names, section,routine_context)
+            steps[idx] = assign_one_step(
+                step,
+                used_product_names,
+                section
+            )
 
-    used_weekly_names = set()
     weekly_steps = data.get("weekly_care", [])
 
     if isinstance(weekly_steps, list):
         for idx, step in enumerate(weekly_steps):
             weekly_steps[idx] = assign_one_step(
                 step,
-                used_weekly_names,
-                "weekly_care",
-                routine_context
+                used_product_names,
+                "weekly_care"
             )
 
     return data
@@ -5831,41 +6006,7 @@ def build_budget_fit_plan(data, budget_value):
     result["total_price"] = calculate_total_price(result)
     return result
 
-def build_virtual_product_from_ai_candidate(cand, step):
-    """
-    AI候補 → DB完全互換に変換（不足補完込み）
-    """
 
-    return {
-        "name": cand.get("name", ""),
-        "brand": cand.get("brand", "unknown"),
-        "category": step.get("category", ""),
-
-        "price_ref": cand.get("price", 2000),
-
-        "active_ingredients": cand.get("active_ingredients", []),
-        "support_ingredients": cand.get("support_ingredients", []),
-
-        "main_functions": cand.get("main_functions", []),
-        "concerns": cand.get("concerns", []),
-
-        "skin_types": cand.get("skin_types", ["normal"]),
-        "retinol_level": cand.get("retinol_level", "none"),
-
-        "sensitive_ok": cand.get("sensitive_ok", "yes"),
-        "availability_japan": cand.get("availability_japan", ["rakuten", "amazon"]),
-
-        "ingredient_strength": cand.get("ingredient_strength", "medium"),
-
-        "technology": cand.get("technology", []),
-        "texture": cand.get("texture", "light"),
-
-        "contraindications": cand.get("contraindications", []),
-
-        "signature_ingredients": cand.get("signature_ingredients", []),
-
-        "_is_virtual": True
-    }
 
 def pick_product(category, products):
     candidates = [p for p in products if p.get("category", "") == category]
@@ -6742,35 +6883,125 @@ def enforce_booster_night_only(data):
 
     return data
 
+from itertools import combinations
+
+
+def score_serum_pair_compatibility(a, b):
+    profile_a = infer_active_profile(a)
+    profile_b = infer_active_profile(b)
+
+    families_a = set(profile_a.get("families", []))
+    families_b = set(profile_b.get("families", []))
+
+    score = 0
+
+    # 改善軸が分散しているペアを評価
+    if families_a != families_b:
+        score += 12
+
+    # VC + レチノイドは朝夜で役割分担しやすい
+    if (
+        ("vitamin_c" in families_a and "retinoid" in families_b)
+        or ("retinoid" in families_a and "vitamin_c" in families_b)
+    ):
+        score += 15
+
+    # レチノイド + バリア補完
+    if (
+        ("retinoid" in families_a and "barrier" in families_b)
+        or ("barrier" in families_a and "retinoid" in families_b)
+    ):
+        score += 14
+
+    # 酸 + バリア補完
+    if (
+        ("aha_bha" in families_a and "barrier" in families_b)
+        or ("barrier" in families_a and "aha_bha" in families_b)
+    ):
+        score += 10
+
+    # 同系統重複は減点
+    overlap = families_a & families_b
+    score -= len(overlap) * 8
+
+    # レチノイド重複
+    if "retinoid" in overlap:
+        score -= 18
+
+    # VC重複
+    if "vitamin_c" in overlap:
+        score -= 10
+
+    # 酸重複
+    if "aha_bha" in overlap:
+        score -= 18
+
+    # レチノイド × 酸は刺激リスク
+    if (
+        ("retinoid" in families_a and "aha_bha" in families_b)
+        or ("aha_bha" in families_a and "retinoid" in families_b)
+    ):
+        score -= 25
+
+    # 強刺激同士
+    if (
+        profile_a.get("irritation_risk") == "high"
+        and profile_b.get("irritation_risk") == "high"
+    ):
+        score -= 25
+
+    return score
+
+
 def limit_serum_steps(data):
     for section in ["morning", "night"]:
         steps = data.get(section, {}).get("steps", [])
 
-        serum_steps = [s for s in steps if s.get("category") == "美容液"]
+        if not isinstance(steps, list):
+            continue
 
-        # 2個までに制限
-        if len(serum_steps) > 2:
-            # スコア順で上位2つ残す
-            serum_steps_sorted = sorted(
-                serum_steps,
-                key=lambda x: x.get("match_score", 0),
-                reverse=True
+        serum_steps = [
+            s for s in steps
+            if s.get("category") == "美容液"
+        ]
+
+        if len(serum_steps) <= 2:
+            continue
+
+        best_pair = None
+        best_pair_score = -999999
+
+        for a, b in combinations(serum_steps, 2):
+            pair_score = (
+                safe_float(a.get("final_score", 0))
+                + safe_float(b.get("final_score", 0))
+                + safe_float(a.get("improve_score", 0))
+                + safe_float(b.get("improve_score", 0))
+                + score_serum_pair_compatibility(a, b)
             )
 
-            keep = set(id(s) for s in serum_steps_sorted[:2])
+            if pair_score > best_pair_score:
+                best_pair_score = pair_score
+                best_pair = (a, b)
 
-            new_steps = []
-            for s in steps:
-                if s.get("category") != "美容液":
-                    new_steps.append(s)
-                else:
-                    if id(s) in keep:
-                        new_steps.append(s)
+        if not best_pair:
+            continue
 
-            data[section]["steps"] = new_steps
+        keep = set(id(s) for s in best_pair)
+
+        data[section]["steps"] = [
+            s for s in steps
+            if s.get("category") != "美容液"
+            or id(s) in keep
+        ]
 
     return data
 
+def safe_float(value):
+    try:
+        return float(value)
+    except Exception:
+        return 0.0
 def validate_products(products):
     errors = []
     valid_categories = {"クレンジング","洗顔", "化粧水", "美容液", "乳液", "クリーム", "日焼け止め", "パック", "ピーリング"}
@@ -7059,7 +7290,7 @@ def get_analysis_schema():
 def build_analysis_prompt(user_data):
     return f"""
 あなたは日本の市販スキンケアと肌分析に詳しい美容アドバイザーです。
-肌画像とユーザー情報から、客観的分析→原因推定→改善計画→商品候補作成を行ってください。
+肌画像とユーザー情報から、客観的分析、原因推定、改善計画、商品候補作成を行ってください。
 
 【ユーザー情報】
 記録日: {user_data['record_date']}
@@ -7075,91 +7306,73 @@ def build_analysis_prompt(user_data):
 3枚目: 右頬
 
 【診断方針】
-・正面は全体バランス確認
-・左右頬は毛穴、赤み、色ムラ、ニキビ跡確認
-・左右差を考慮する
-・画像から分からないことは断定しない
+・画像から確認できる事実を優先する。
+・画像から分からないことは断定しない。
+・同じ画像、同じユーザー情報では、できるだけ同じ評価と同じ候補を返す。
+・人気順、売れ筋順、流行順ではなく、悩みと成分適合を優先する。
 
-【深掘り診断手順】
+【評価項目】
+scores は0〜100の整数。
+以下を必ず出力する。
 
-①観察
-画像から確認できる事実のみ整理する。
+oil_balance
+redness
+pores
+hydration
+firmness
+acne
+dullness
+barrier
+texture
+tone_evenness
 
-対象:
-赤み
-毛穴
-皮脂
-乾燥
-色素沈着
-ニキビ
-ハリ
-キメ
-左右差
+【カテゴリ固定】
+category は必ず以下のみ。
 
-観察と推測を混同しない。
+クレンジング
+洗顔
+化粧水
+美容液
+乳液
+クリーム
+日焼け止め
+パック
+ピーリング
 
-②原因推定
-観察結果とユーザー情報から原因推定。
+【role固定】
+role は main または booster のみ。
 
-例:
-皮脂過多
-炎症後赤み
-色素沈着
-バリア低下
-乾燥
-刺激
-紫外線影響
-
-③優先順位
-改善効果
-刺激リスク
-見た目変化
-を考慮。
-
-④改善計画
-短期: 〜2週間
-中期: 1〜2ヶ月
-長期: 3ヶ月以上
+【ingredient_focus候補】
+ビタミンC
+ナイアシンアミド
+レチノール
+レチナール
+アゼライン酸
+トラネキサム酸
+PDRN
+ペプチド
+セラミド
+ヒアルロン酸
+CICA
+ドクダミ
+AHA
+BHA
+PHA
+UV防御
+低刺激
 
 【商品候補ルール】
+product_candidates は候補収集のみ。
+最終選定、順位付け、点数付けは行わない。
 
-product_candidates は「候補収集」だけを行う。
-最終選定・順位付け・点数付けは行わない。
-
-同じ画像・同じユーザー情報では、できるだけ同じ候補を返すこと。
-現行販売中の商品名のみ出力すること。
-
-商品がリニューアルされている場合は、
-必ず最新の正式名称を使用すること。
-
-旧名称・旧処方名・旧パッケージ名・
-リニューアル前の商品名は禁止。
-
-現行品か確信できない場合は出力しないこと。
-候補は人気順・売れ筋順ではなく、以下の固定優先順位で選ぶ。
-
-1. 目的成分とカテゴリが一致する
-2. 日本で継続購入しやすい
-3. 正式名称に高い確信がある
-4. 刺激リスクが過剰ではない
-5. 予算帯から大きく外れない
-
-各 step の product_candidates は必ず object 配列にする。
-
-形式:
+各 step の product_candidates は object 配列にする。
+schemaに存在する以下4項目のみ出力する。
 
 {{
   "brand": "",
   "name": "",
   "confidence": 0,
-  "active_ingredients": [],
-  "support_ingredients": [],
-  "main_functions": [],
-  "ingredient_focus": [],
-  "skin_types": [],
-  "sensitive_ok": "unknown",
-  "price_ref": 0,
-  "reason": ""
+  "release_status": "current"
 }}
 
 brand:
@@ -7170,81 +7383,34 @@ name:
 ブランド名を含めない。
 
 confidence:
-0〜100。
+0〜100の整数。
 70未満は出力禁止。
 
-active_ingredients:
-主な有効・攻め成分。
-例:
-ビタミンC
-レチノール
-レチナール
-アゼライン酸
-ナイアシンアミド
-トラネキサム酸
-AHA
-BHA
-PHA
-ペプチド
-
-support_ingredients:
-補助・守り成分。
-例:
-セラミド
-パンテノール
-CICA
-ヒアルロン酸
-アラントイン
-ドクダミ
-グリチルリチン酸
-
-main_functions:
-商品の主目的。
-例:
-美白
-毛穴ケア
-ニキビケア
-ハリ改善
-バリア改善
-保湿
-鎮静
-UV防御
-角質ケア
-
-ingredient_focus:
-その商品を選ぶ理由になる成分軸。
-例:
-ビタミンC
-レチノール
-アゼライン酸
-セラミド
-CICA
-
-skin_types:
-合いやすい肌質。
-dry
-oily
-mixed
-sensitive
-
 release_status:
-必ず current / old / unknown のいずれか。
-release_status が current 以外の商品は出力しないこと。
+current / old / unknown のいずれか。
+出力してよい商品は current のみ。
+old または unknown の商品は出力しない。
 
-sensitive_ok:
-yes / no / unknown のいずれか。
+【現行品ルール】
+現行販売中の商品名のみ出力する。
+リニューアル済み商品の場合は、必ず最新の正式名称を使う。
+旧名称、旧処方名、旧パッケージ名、リニューアル前の商品名は禁止。
+現行品か確信できない商品は出力しない。
 
-price_ref:
-不明なら 0。
-推測価格を入れない。
-楽天・Amazonの価格推測は禁止。
+【候補選定ルール】
+候補は以下の固定優先順位で選ぶ。
 
-reason:
-候補に入れた理由を短く書く。
+1. 目的成分とカテゴリが一致する
+2. 日本で継続購入しやすい
+3. 正式名称に高い確信がある
+4. 刺激リスクが過剰ではない
+5. 予算帯から大きく外れない
 
-禁止:
+【禁止】
 ・架空商品
 ・旧名称
+・リニューアル前商品
+・廃盤商品
 ・正式名称に自信がない商品
 ・カテゴリ名だけ
 ・「おすすめ美容液」のような抽象名
@@ -7252,8 +7418,34 @@ reason:
 ・推測価格
 ・ランキングや流行だけを理由にした候補
 
-商品名に自信がない場合は候補から外す。
-空配列は禁止だが、無理に低 confidence 商品を入れない。
+【改善計画】
+improvement_plan は以下だけを簡潔に出す。
+
+priority_concerns:
+改善優先度の高い悩みを配列で出す。
+
+key_ingredients:
+改善に重要な成分を配列で出す。
+
+care_direction:
+全体のケア方針を短く出す。
+
+【保湿計画】
+moisture_plan は必ず以下を出す。
+
+moisture_level
+need_emulsion
+need_cream
+need_double_moisture
+reason
+
+【最重要】
+JSONのみ返す。
+説明禁止。
+Markdown禁止。
+前置き禁止。
+JSONキーは英語。
+値は日本語。
 """
 
 def extract_image_bytes_for_hash(image):
@@ -8019,7 +8211,7 @@ def lab_test_function():
             data = normalize_serum_roles(data)
             data = enforce_booster_night_only(data)
             data = apply_moisture_plan(data)
-
+            data = ensure_required_routine_steps(data)
             # serum制限は product選定後のほうが安全
             # ここではまだやらない
 

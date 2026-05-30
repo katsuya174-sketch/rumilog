@@ -525,11 +525,15 @@
                         </div>
                     </div>
                     {% endif %}
-                    {% if step.get("price", 0) > 0 %}
-                    <div class="product-price">参考価格: ¥{{ step.get("price", 0) }}</div>
-                    {% elif step.get("price_band", "") %}
-                    <div class="product-price">{{ step.get("price_band", "") }}</div>
-                    {% endif %}
+                    <div class="product-price">
+                        {% if step.get("rakuten_link") and step.get("price", 0) > 0 %}
+                            参考価格: ¥{{ step.get("price", 0) }}
+                        {% elif step.get("price_band", "") %}
+                            {{ step.get("price_band", "") }}
+                        {% else %}
+                            価格確認中
+                        {% endif %}
+                    </div>
                     <div class="buy-lead">
                         {{ step.get("buy_lead", "") }}
                     </div>
@@ -651,11 +655,15 @@
                         </div>
                     </div>
                     {% endif %}
-                    {% if step.get("price", 0) > 0 %}
-                    <div class="product-price">参考価格: ¥{{ step.get("price", 0) }}</div>
-                    {% elif step.get("price_band", "") %}
-                    <div class="product-price">{{ step.get("price_band", "") }}</div>
-                    {% endif %}
+                    <div class="product-price">
+                        {% if step.get("rakuten_link") and step.get("price", 0) > 0 %}
+                            参考価格: ¥{{ step.get("price", 0) }}
+                        {% elif step.get("price_band", "") %}
+                            {{ step.get("price_band", "") }}
+                        {% else %}
+                            価格確認中
+                        {% endif %}
+                    </div>
                     <div class="buy-lead">
                         {{ step.get("buy_lead", "") }}
                     </div>
@@ -780,11 +788,15 @@
                     </div>
                     {% endif %}
 
-                    {% if step.get("price", 0) > 0 %}
-                    <div class="product-price">参考価格: ¥{{ step.get("price", 0) }}</div>
-                    {% elif step.get("price_band", "") %}
-                    <div class="product-price">{{ step.get("price_band", "") }}</div>
-                    {% endif %}
+                    <div class="product-price">
+                        {% if step.get("rakuten_link") and step.get("price", 0) > 0 %}
+                            参考価格: ¥{{ step.get("price", 0) }}
+                        {% elif step.get("price_band", "") %}
+                            {{ step.get("price_band", "") }}
+                        {% else %}
+                            価格確認中
+                        {% endif %}
+                    </div>
                     <div class="buy-lead">
                         {{ step.get("buy_lead", "") }}
                     </div>
