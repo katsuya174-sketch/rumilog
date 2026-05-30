@@ -553,7 +553,17 @@ def build_rakuten_search_keywords(product_name, brand=""):
             keywords.append(value)
 
     add_keyword(name)
+    parts = name.split()
 
+    if len(parts) >= 3:
+        keywords.append(
+            " ".join(parts[:3])
+        )
+
+    if len(parts) >= 2:
+        keywords.append(
+            " ".join(parts[:2])
+        )
     loose = (
         name
         .replace("・", " ")
@@ -642,6 +652,17 @@ OLD_PRODUCT_WORDS = [
     "箱なし",
     "外箱なし"
 ]
+CURRENT_PRODUCT_WORDS = [
+    "新",
+    "新商品",
+    "リニューアル",
+    "現行",
+    "最新",
+    "正規品",
+    "公式",
+    "本体",
+    "医薬部外品"
+]
 def score_rakuten_item(item, product_name, brand="", category=""):
     title = str(item.get("itemName", "") or "")
     title_norm = title.lower()
@@ -662,8 +683,17 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     if brand and brand in title_norm:
         score += 20
 
-    if category and category in title:
-        score += 8
+    if any(
+        word in title
+        for word in CURRENT_PRODUCT_WORDS
+    ):
+        score += 15
+
+    if any(
+        word in title
+        for word in OLD_PRODUCT_WORDS
+    ):
+        score -= 80
     
     ng_words = [
         "詰替",
@@ -869,11 +899,16 @@ def clean_rakuten_keyword(keyword):
     keyword = keyword.replace("　", " ")
     keyword = keyword.replace("%", "")
     keyword = keyword.replace("’", "'")
+    keyword = keyword.replace("'", "")
     keyword = keyword.replace("％", "%")
     keyword = keyword.replace("ＵＶ", "UV")
     keyword = keyword.replace("ｕｖ", "UV")
-
-    keyword = re.sub(r"\s+", " ", keyword).strip()
+    keyword = keyword.replace("(", " ")
+    keyword = keyword.replace(")", " ")
+    keyword = keyword.replace("（", " ")
+    keyword = keyword.replace("）", " ")
+    keyword = keyword.replace("/", " ")
+    
 
     # 楽天APIで壊れやすい記号だけ除去。英字・数字・%・' は残す。
     keyword = re.sub(
@@ -926,7 +961,11 @@ def fetch_rakuten_item(product_name, category="", brand=""):
 
         try:
             print(f"[RAKUTEN TRY KEYWORD] {keyword}", flush=True)
-
+            print(
+                "[RAKUTEN KEYWORD LEN]",
+                len(keyword),
+                flush=True
+            )
             wait_for_rakuten_rate_limit()
 
             params = {
