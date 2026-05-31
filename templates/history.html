@@ -117,6 +117,28 @@
             <h2>Skin Score 推移</h2>
             <canvas id="scoreChart"></canvas>
         </div>
+
+        <div class="card">
+            <h2>改善の変化</h2>
+        
+            {% if improvement_summary %}
+                {% for item in improvement_summary %}
+                    <div class="meta">
+                        {{ item.label }}：
+                        {% if item.diff > 0 %}
+                            +{{ item.diff }}
+                        {% else %}
+                            {{ item.diff }}
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div class="meta">
+                    まだ比較できる診断履歴がありません。
+                </div>
+            {% endif %}
+        </div>
+
         <div class="card">
             <h2>項目別スコア推移</h2>
             <canvas id="detailScoreChart"></canvas>

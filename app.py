@@ -3544,11 +3544,110 @@ def score_ai_candidate(step, products):
         score += 5
 
     return score
+def infer_virtual_product_fields(name, category="", ingredient_focus="", purpose=""):
+    text = " ".join([
+        str(name or ""),
+        str(category or ""),
+        str(ingredient_focus or ""),
+        str(purpose or "")
+    ]).lower()
 
+    active = []
+    support = []
+    functions = []
+
+    rules = [
+        {
+            "keywords": ["ビタミンc", "vitamin c", "メラノ", "vc"],
+            "active": ["vitamin_c"],
+            "functions": ["美白", "くすみケア"]
+        },
+        {
+            "keywords": ["レチノール", "retinol"],
+            "active": ["retinol"],
+            "functions": ["ハリ改善", "毛穴ケア"]
+        },
+        {
+            "keywords": ["レチナール", "retinal"],
+            "active": ["retinal"],
+            "functions": ["ハリ改善", "毛穴ケア"]
+        },
+        {
+            "keywords": ["アゼライン", "azelaic"],
+            "active": ["azelaic_acid"],
+            "functions": ["ニキビケア", "皮脂コントロール"]
+        },
+        {
+            "keywords": ["ナイアシンアミド", "niacinamide"],
+            "active": ["niacinamide"],
+            "functions": ["毛穴ケア", "バリア改善"]
+        },
+        {
+            "keywords": ["トラネキサム", "tranexamic"],
+            "active": ["tranexamic_acid"],
+            "functions": ["美白", "色素沈着ケア"]
+        },
+        {
+            "keywords": ["pdrn"],
+            "active": ["pdrn"],
+            "functions": ["ハリ改善", "肌修復サポート"]
+        },
+        {
+            "keywords": ["ペプチド", "peptide"],
+            "active": ["peptide"],
+            "functions": ["ハリ改善"]
+        },
+        {
+            "keywords": ["セラミド", "ceramide"],
+            "support": ["ceramide"],
+            "functions": ["バリア改善", "保湿"]
+        },
+        {
+            "keywords": ["シカ", "cica", "ツボクサ"],
+            "support": ["cica"],
+            "functions": ["鎮静", "バリア改善"]
+        },
+        {
+            "keywords": ["パンテノール", "panthenol"],
+            "support": ["panthenol"],
+            "functions": ["鎮静", "バリア改善"]
+        },
+        {
+            "keywords": ["aha", "bha", "pha", "ピーリング", "角質"],
+            "active": ["aha_bha"],
+            "functions": ["角質ケア", "毛穴ケア"]
+        },
+        {
+            "keywords": ["uv", "spf", "日焼け止め"],
+            "active": ["uv_filter"],
+            "functions": ["UV防御", "色素沈着予防"]
+        }
+    ]
+
+    for rule in rules:
+        if any(keyword in text for keyword in rule["keywords"]):
+            active.extend(rule.get("active", []))
+            support.extend(rule.get("support", []))
+            functions.extend(rule.get("functions", []))
+
+    return {
+        "active_ingredients": list(dict.fromkeys(active)),
+        "support_ingredients": list(dict.fromkeys(support)),
+        "main_functions": list(dict.fromkeys(functions))
+    }
+
+    
 def build_virtual_product_from_ai_candidate(step, candidate):
     category = step.get("category", "")
     ingredient_focus = step.get("ingredient_focus", "")
     purpose = step.get("purpose", "")
+
+    inferred_fields = infer_virtual_product_fields(
+        name=candidate.get("name", "") if isinstance(candidate, dict) else candidate,
+        category=category,
+        ingredient_focus=ingredient_focus,
+        purpose=purpose
+)
 
     if isinstance(candidate, str):
         candidate = {
@@ -3580,12 +3679,22 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         for x in candidate.get("active_ingredients", [])
     ]
     active_ingredients = [x for x in active_ingredients if x]
+    for x in inferred_fields.get("active_ingredients", []):
+        x = normalize_ingredient_tag(x)
+        if x and x not in active_ingredients:
+            active_ingredients.append(x)
+
 
     support_ingredients = [
         normalize_ingredient_tag(x)
         for x in candidate.get("support_ingredients", [])
     ]
     support_ingredients = [x for x in support_ingredients if x]
+    for x in inferred_fields.get("support_ingredients", []):
+        x = normalize_ingredient_tag(x)
+        if x and x not in support_ingredients:
+            support_ingredients.append(x)
+
 
     signature_ingredients = [
         normalize_ingredient_tag(x)
@@ -3651,6 +3760,9 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         str(x) for x in candidate.get("main_functions", [])
         if str(x).strip()
     ]
+    for x in inferred_fields.get("main_functions", []):
+        if x and x not in main_functions:
+            main_functions.append(x)
 
     formulation = [
         str(x) for x in candidate.get("formulation", [])
@@ -4170,14 +4282,17 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         )
 
         routine_weight = get_routine_score_weight(step)
-
+        # AI仮想商品は成分推定ベースのため、DB商品より少し控えめに評価する
+        virtual_penalty = 0.92
         final_score = (
-            base_score * base_weight
-        ) + (
-            improve_score * improve_weight
-        ) + (
-            routine_score * routine_weight
-        )
+            (
+                base_score * base_weight
+            ) + (
+                improve_score * improve_weight
+            ) + (
+                routine_score * routine_weight
+            )
+        ) * virtual_penalty
         virtual["_score"] = round(final_score, 1)
         virtual["_base_score"] = round(base_score, 1)
         virtual["_improve_score"] = round(improve_score, 1)
@@ -8695,7 +8810,35 @@ def history():
             key: []
             for key in score_keys
         }
+        improvement_summary = []
 
+        score_labels = {
+            "redness": "赤み",
+            "pores": "毛穴",
+            "hydration": "水分",
+            "firmness": "ハリ",
+            "acne": "ニキビ",
+            "dullness": "くすみ",
+            "barrier": "バリア",
+            "texture": "キメ",
+            "tone_evenness": "色ムラ"
+        }
+
+        for key, values in score_series.items():
+            if len(values) >= 2:
+                diff = values[-1] - values[0]
+
+                if diff != 0:
+                    improvement_summary.append({
+                        "label": score_labels.get(key, key),
+                        "diff": diff
+                    })
+
+        improvement_summary = sorted(
+            improvement_summary,
+            key=lambda x: x["diff"],
+            reverse=True
+        )[:5]
         for item in prepared:
             labels.append(
                 item.get("record_date")
@@ -8721,7 +8864,8 @@ def history():
             history=prepared,
             labels=labels,
             scores=skin_scores,
-            score_series=score_series
+            score_series=score_series,
+            improvement_summary=improvement_summary
         )
 
     except Exception as e:
