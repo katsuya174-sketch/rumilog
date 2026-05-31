@@ -3182,7 +3182,116 @@ CATEGORY_IMPROVEMENT_BONUS = {
     "日焼け止め": 16,
 }
 
+def build_score_based_improvement_plan(scores, existing_plan=None):
+    if not isinstance(scores, dict):
+        scores = {}
 
+    existing_plan = existing_plan if isinstance(existing_plan, dict) else {}
+
+    priority_concerns = []
+    key_ingredients = []
+
+    rules = [
+        {
+            "score_key": "oil_balance",
+            "label": "皮脂バランス",
+            "ingredients": ["アゼライン酸", "ナイアシンアミド", "BHA"]
+        },
+        {
+            "score_key": "pores",
+            "label": "毛穴",
+            "ingredients": ["レチノール", "ナイアシンアミド", "アゼライン酸"]
+        },
+        {
+            "score_key": "tone_evenness",
+            "label": "色ムラ",
+            "ingredients": ["ビタミンC", "トラネキサム酸", "ナイアシンアミド"]
+        },
+        {
+            "score_key": "dullness",
+            "label": "くすみ",
+            "ingredients": ["ビタミンC", "トラネキサム酸", "AHA"]
+        },
+        {
+            "score_key": "acne",
+            "label": "ニキビ",
+            "ingredients": ["アゼライン酸", "BHA", "CICA"]
+        },
+        {
+            "score_key": "texture",
+            "label": "キメ",
+            "ingredients": ["セラミド", "ナイアシンアミド", "PHA"]
+        },
+        {
+            "score_key": "hydration",
+            "label": "保湿",
+            "ingredients": ["ヒアルロン酸", "セラミド", "パンテノール"]
+        },
+        {
+            "score_key": "barrier",
+            "label": "バリア",
+            "ingredients": ["セラミド", "パンテノール", "CICA"]
+        },
+        {
+            "score_key": "redness",
+            "label": "赤み",
+            "ingredients": ["CICA", "アゼライン酸", "パンテノール"]
+        },
+        {
+            "score_key": "firmness",
+            "label": "ハリ",
+            "ingredients": ["レチノール", "レチナール", "ペプチド"]
+        }
+    ]
+
+    scored_rules = []
+
+    for rule in rules:
+        value = safe_int(scores.get(rule["score_key"], 0))
+
+        if value <= 39:
+            priority_level = 3
+        elif value <= 54:
+            priority_level = 2
+        elif value <= 69:
+            priority_level = 1
+        else:
+            priority_level = 0
+
+        if priority_level > 0:
+            scored_rules.append({
+                "label": rule["label"],
+                "score": value,
+                "priority_level": priority_level,
+                "ingredients": rule["ingredients"]
+            })
+
+    scored_rules = sorted(
+        scored_rules,
+        key=lambda x: (
+            -x["priority_level"],
+            x["score"]
+        )
+    )
+
+    for item in scored_rules[:5]:
+        priority_concerns.append(item["label"])
+
+        for ingredient in item["ingredients"]:
+            if ingredient not in key_ingredients:
+                key_ingredients.append(ingredient)
+
+    if not priority_concerns:
+        priority_concerns = existing_plan.get("priority_concerns", []) or ["バリア", "保湿"]
+
+    if not key_ingredients:
+        key_ingredients = existing_plan.get("key_ingredients", []) or ["セラミド", "パンテノール"]
+
+    return {
+        "priority_concerns": priority_concerns[:5],
+        "key_ingredients": key_ingredients[:8],
+        "care_direction": "項目別スコアが低い悩みを優先しつつ、刺激を抑えて継続しやすいケアを行う"
+    }
 def infer_improvement_targets(improvement_plan):
     """
     improvement_plan / step / Gemini出力の文章から、
@@ -4998,6 +5107,15 @@ def normalize_ai_candidates(step):
 
         seen.add(norm_name)
         normalized.append(item)
+    normalized = sorted(
+        normalized,
+        key=lambda x: (
+            -safe_float(x.get("confidence", 0)),
+            normalize_candidate_name_for_merge(x.get("name", "")),
+            str(x.get("brand", "")).lower()
+        )
+    )
+
     for item in normalized:
         print(
             "[PRICE DEBUG]",
@@ -5006,8 +5124,9 @@ def normalize_ai_candidates(step):
             item.get("price_ref"),
             flush=True
         )
+
     print("[AI NORMALIZED]", normalized, flush=True)
-    
+
     return normalized
 
 def enrich_steps_with_market_candidates(data, candidate_data):
@@ -8503,6 +8622,10 @@ def lab_test_function():
             data = normalize_ai_labels(data)
             data = normalize_serum_roles(data)
             data = enforce_booster_night_only(data)
+            data["improvement_plan"] = build_score_based_improvement_plan(
+                data.get("scores", {}),
+                data.get("improvement_plan", {})
+            )
             data = apply_moisture_plan(data)
             data = ensure_required_routine_steps(data)
             # serum制限は product選定後のほうが安全
