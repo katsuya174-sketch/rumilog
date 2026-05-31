@@ -432,23 +432,6 @@ AFFILIATE_LINKS_AI_FILE = "affiliate_links_ai.json"
 print("[RAKUTEN APP ID RAW]", repr(RAKUTEN_APP_ID))
 print("[RAKUTEN APP ID LENGTH]", len(RAKUTEN_APP_ID))
 
-def print_product_db_stats(products):
-    from collections import Counter
-
-    counter = Counter()
-
-    for p in products:
-        if not isinstance(p, dict):
-            continue
-
-        counter[p.get("category", "未分類")] += 1
-
-    print("===== PRODUCT DB STATS =====", flush=True)
-
-    for category, count in sorted(counter.items()):
-        print(f"{category}: {count}", flush=True)
-
-    print("============================", flush=True)
 
 def load_affiliate_links_ai():
     if not os.path.exists(AFFILIATE_LINKS_AI_FILE):
@@ -8414,7 +8397,7 @@ def lab_test_function():
             # ⑥ DB読み込み
             # =========================
             products = load_products()
-            print_product_db_stats(products)
+            
             validate_and_log_products(products)
 
             # =========================
@@ -8561,6 +8544,54 @@ def lab_test_function():
     client_ip = get_client_ip()
     remaining_free_count = get_remaining_free_count(client_ip)
     return render_template("lab.html", remaining_free_count=remaining_free_count, DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT)
+
+@app.route("/admin/db-stats")
+def db_stats():
+    admin_key = request.args.get("key", "")
+
+    if admin_key != os.getenv("ADMIN_KEY", ""):
+        return jsonify({
+            "error": "unauthorized"
+        }), 403
+
+    products = load_products()
+
+    from collections import Counter, defaultdict
+
+    category_counter = Counter()
+    focus_counter = defaultdict(Counter)
+
+    for p in products:
+        if not isinstance(p, dict):
+            continue
+
+        category = p.get("category", "未分類")
+        category_counter[category] += 1
+
+        focuses = p.get("ingredient_focus", [])
+
+        if isinstance(focuses, str):
+            focuses = [focuses]
+
+        if not isinstance(focuses, list):
+            focuses = []
+
+        if not focuses:
+            focus_counter[category]["未設定"] += 1
+            continue
+
+        for focus in focuses:
+            focus = str(focus).strip()
+            if focus:
+                focus_counter[category][focus] += 1
+
+    return jsonify({
+        "category_counts": dict(category_counter),
+        "ingredient_focus_counts": {
+            category: dict(counter)
+            for category, counter in focus_counter.items()
+        }
+    })
 
 @app.route("/admin/product-ranking")
 def admin_product_ranking():
