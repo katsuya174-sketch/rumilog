@@ -3318,7 +3318,18 @@ def score_improvement(product, improvement_plan=None):
 
     category = str(product.get("category", "")).strip()
     name = str(product.get("name", "")).lower()
+    ingredient_strength = product.get("ingredient_strength", {})
+    main_functions = product.get("main_functions", [])
+    ingredient_focus = product.get("ingredient_focus", [])
 
+    if not isinstance(ingredient_strength, dict):
+        ingredient_strength = {}
+
+    if not isinstance(main_functions, list):
+        main_functions = []
+
+    if not isinstance(ingredient_focus, list):
+        ingredient_focus = []
     score += CATEGORY_IMPROVEMENT_BONUS.get(category, 0)
 
     for target in targets:
@@ -3329,7 +3340,43 @@ def score_improvement(product, improvement_plan=None):
 
         if term_matches(terms, rule.get("support", [])):
             score += 14
+    for ingredient, strength in ingredient_strength.items():
+        ingredient = normalize_text(ingredient)
+        strength = normalize_text(strength)
 
+        if not ingredient:
+            continue
+
+        if ingredient in terms:
+            if strength in ["high", "strong"]:
+                score += 10
+            elif strength in ["medium", "middle"]:
+                score += 6
+            elif strength in ["low", "mild"]:
+                score += 3
+
+            function_text = " ".join(
+                str(x)
+                for x in main_functions + ingredient_focus
+            ).lower()
+
+            function_bonus_keywords = {
+                "美白": 8,
+                "毛穴": 8,
+                "ニキビ": 8,
+                "ハリ": 8,
+                "バリア": 7,
+                "保湿": 6,
+                "鎮静": 6,
+                "角質": 7,
+                "uv": 8,
+                "UV": 8,
+                "紫外線": 8,
+            }
+
+            for keyword, bonus in function_bonus_keywords.items():
+                if keyword.lower() in function_text:
+                    score += bonus  
     # 商品名からの補正
     name_bonus_keywords = {
         "メラノ": 18,
@@ -3393,27 +3440,47 @@ def build_improvement_reason(product, improvement_plan=None):
     terms = collect_product_terms(product)
     targets = infer_improvement_targets(improvement_plan or {})
     category = str(product.get("category", "")).strip()
+    sensitive_ok = str(product.get("sensitive_ok", "")).lower()
+
+    target_labels = {
+        "acne": "ニキビ予防",
+        "acne_marks_red": "赤み・赤ニキビ跡",
+        "pigmentation": "色素沈着・くすみ",
+        "pores": "毛穴",
+        "firmness": "ハリ",
+        "barrier": "バリア",
+        "dryness": "乾燥",
+        "oil_control": "皮脂",
+        "soothing": "鎮静"
+    }
 
     reasons = []
 
     for target in targets:
         rule = IMPROVEMENT_KEYWORDS.get(target, {})
+        label = target_labels.get(target, target)
 
         if term_matches(terms, rule.get("strong", [])):
-            reasons.append(f"{target}に合う主成分を含む")
+            reasons.append(f"{label}に合う主成分を含む")
         elif term_matches(terms, rule.get("support", [])):
-            reasons.append(f"{target}を支える補助成分を含む")
+            reasons.append(f"{label}を支える補助成分を含む")
 
     if category == "日焼け止め":
-        reasons.append("紫外線対策で色素沈着や赤み悪化を防ぐ")
+        reasons.append("紫外線対策で赤み・色素沈着の悪化を防ぐ")
 
-    if category == "ピーリング":
-        reasons.append("ターンオーバーを整え、くすみや毛穴改善を支える")
+    elif category == "ピーリング":
+        reasons.append("角質ケアでくすみ・毛穴目立ちを支える")
 
-    if category in ["洗顔", "洗顔料", "クレンジング"]:
-        reasons.append("皮脂や汚れを整え、ニキビ・毛穴悪化を防ぐ")
+    elif category in ["洗顔", "洗顔料", "クレンジング"]:
+        reasons.append("皮脂や汚れを落とし、ニキビ・毛穴悪化を防ぐ")
 
-    if str(product.get("sensitive_ok", "")).lower() == "yes":
+    elif category in ["乳液", "クリーム"]:
+        reasons.append("バリアを守り、攻め成分を続けやすくする")
+
+    elif category == "パック":
+        reasons.append("集中ケアとして保湿・鎮静を補いやすい")
+
+    if sensitive_ok == "yes":
         reasons.append("低刺激で継続しやすい")
 
     unique = []
@@ -3422,8 +3489,6 @@ def build_improvement_reason(product, improvement_plan=None):
             unique.append(reason)
 
     return " / ".join(unique[:3])
-
-
 def db_has_matching_ingredient(products, ingredient_focus):
     ingredient_tag = normalize_ingredient_tag(ingredient_focus)
 
@@ -3931,12 +3996,14 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             routine_context
         )
 
+        routine_weight = get_routine_score_weight(step)
+
         final_score = (
             base_score * base_weight
         ) + (
             improve_score * improve_weight
         ) + (
-            routine_score
+            routine_score * routine_weight
         )
 
         product["_score"] = round(final_score, 1)
@@ -4040,12 +4107,14 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
                 routine_context
             )
 
+            routine_weight = get_routine_score_weight(step)
+
             final_score = (
                 base_score * base_weight
             ) + (
                 improve_score * improve_weight
             ) + (
-                routine_score
+                routine_score * routine_weight
             )
 
             product["_score"] = round(final_score, 1)
@@ -4099,14 +4168,15 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             routine_context
         )
 
+        routine_weight = get_routine_score_weight(step)
+
         final_score = (
             base_score * base_weight
         ) + (
             improve_score * improve_weight
         ) + (
-            routine_score
+            routine_score * routine_weight
         )
-
         virtual["_score"] = round(final_score, 1)
         virtual["_base_score"] = round(base_score, 1)
         virtual["_improve_score"] = round(improve_score, 1)
@@ -4413,6 +4483,30 @@ def get_dynamic_score_weights(step, user_data):
 
     return round(base_weight, 2), round(improve_weight, 2)
 
+
+def get_routine_score_weight(step):
+    section = step.get("_section", "")
+    category = step.get("category", "")
+
+    if section == "weekly_care":
+        return 1.45
+
+    if section == "night":
+        if category in ["美容液", "ピーリング"]:
+            return 1.35
+
+        if category in ["乳液", "クリーム"]:
+            return 1.25
+
+        return 1.15
+
+    if section == "morning":
+        if category in ["美容液", "日焼け止め"]:
+            return 1.2
+
+        return 1.1
+
+    return 1.0
 def select_best_product(category, step, products, user_data, budget_value, improvement_plan=None, exclude_names=None):
 
     """
@@ -8486,20 +8580,58 @@ def history():
                 "skin_score": item.get("skin_score", 0),
                 "skin_summary": item.get("skin_summary", ""),
                 "scores": item.get("scores", {}),
+                "input_budget": item.get("input_budget", 0),
+                "total_price": item.get("total_price", 0),
+                "budget_status": item.get("budget_status", ""),
             })
 
         labels = []
         skin_scores = []
 
+        score_keys = [
+            "oil_balance",
+            "redness",
+            "pores",
+            "hydration",
+            "firmness",
+            "acne",
+            "dullness",
+            "barrier",
+            "texture",
+            "tone_evenness"
+        ]
+
+        score_series = {
+            key: []
+            for key in score_keys
+        }
+
         for item in prepared:
-            labels.append(item.get("record_date") or item.get("saved_at") or "")
-            skin_scores.append(safe_int(item.get("skin_score", 0)))
+            labels.append(
+                item.get("record_date")
+                or item.get("saved_at")
+                or ""
+            )
+
+            skin_scores.append(
+                safe_int(item.get("skin_score", 0))
+            )
+
+            scores_dict = item.get("scores", {})
+            if not isinstance(scores_dict, dict):
+                scores_dict = {}
+
+            for key in score_keys:
+                score_series[key].append(
+                    safe_int(scores_dict.get(key, 0))
+                )
 
         return render_template(
             "history.html",
             history=prepared,
             labels=labels,
-            scores=skin_scores
+            scores=skin_scores,
+            score_series=score_series
         )
 
     except Exception as e:
@@ -8512,7 +8644,8 @@ def history():
             "history.html",
             history=[],
             labels=[],
-            scores=[]
+            scores=[],
+            score_series={}
         )
 
 @app.route("/history/<result_id>")

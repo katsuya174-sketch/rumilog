@@ -25,7 +25,7 @@
         }
 
         h1 {
-            color: #7a2942;
+            color: #ff7aa8;
             margin-bottom: 18px;
         }
 
@@ -45,7 +45,7 @@
 
         .card-title {
             font-weight: bold;
-            color: #7a2942;
+            color: #ff7aa8;
             margin-bottom: 6px;
         }
 
@@ -57,19 +57,18 @@
 
         .pill-link {
             display: inline-block;
-            padding: 10px 16px;
+            padding: 10px 18px;
             border-radius: 999px;
-            background: #f8d7e3;
-            color: #7a2942;
+            background: #ff7aa8;
+            color: #fff;
             text-decoration: none;
             font-weight: bold;
             font-size: 14px;
         }
-
         .detail-link {
             display: inline-block;
-            padding: 8px 12px;
-            background: #7a2942;
+            padding: 8px 14px;
+            background: #ff7aa8;
             color: #fff;
             border-radius: 999px;
             text-decoration: none;
@@ -80,7 +79,7 @@
         .score {
             font-size: 22px;
             font-weight: bold;
-            color: #b54f72;
+            color: #ff7aa8;
             margin: 8px 0;
         }
 
@@ -95,7 +94,7 @@
         }
 
         .back-link {
-            color: #9b3156;
+            color: #ff7aa8;
             text-decoration: none;
             font-weight: bold;
         }
@@ -106,7 +105,7 @@
     <div class="page">
         <h1>診断履歴</h1>
 
-        <div class="card ranking-card">
+        <div class="card">
             <div class="card-title">📦 よく提案される商品</div>
             <div class="lead">
                 過去の診断で提案された回数が多い商品を確認できます。
@@ -118,7 +117,10 @@
             <h2>Skin Score 推移</h2>
             <canvas id="scoreChart"></canvas>
         </div>
-
+        <div class="card">
+            <h2>項目別スコア推移</h2>
+            <canvas id="detailScoreChart"></canvas>
+        </div>
         {% if history %}
             {% for item in history %}
                 <div class="card">
@@ -156,8 +158,58 @@
 
     <script id="chart-labels" type="application/json">{{ labels | tojson }}</script>
     <script id="chart-scores" type="application/json">{{ scores | tojson }}</script>
+    <script id="score-series" type="application/json">{{ score_series | tojson }}</script>
+
 
     <script>
+      
+        const scoreSeries = JSON.parse(document.getElementById("score-series").textContent);
+        const detailCanvas = document.getElementById("detailScoreChart");
+
+        const labelMap = {
+            oil_balance: "皮脂バランス",
+            redness: "赤み",
+            pores: "毛穴",
+            hydration: "水分",
+            firmness: "ハリ",
+            acne: "ニキビ",
+            dullness: "くすみ",
+            barrier: "バリア",
+            texture: "キメ",
+            tone_evenness: "色ムラ"
+        };
+
+        if (detailCanvas && scoreSeries) {
+            const detailCtx = detailCanvas.getContext("2d");
+
+            new Chart(detailCtx, {
+                type: "line",
+                data: {
+                    labels: chartLabels,
+                    datasets: Object.keys(scoreSeries).map((key) => ({
+                        label: labelMap[key] || key,
+                        data: scoreSeries[key],
+                        tension: 0.3,
+                        fill: false
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: {
+                            display: true
+                        }
+                    },
+                    scales: {
+                        y: {
+                            min: 0,
+                            max: 100
+                        }
+                    }
+                }
+            });
+        }
+
         const chartLabels = JSON.parse(document.getElementById("chart-labels").textContent);
         const chartScores = JSON.parse(document.getElementById("chart-scores").textContent);
 
