@@ -7,98 +7,113 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
-        body {
-            font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
-            margin: 0;
-            padding: 24px;
-            background:
-                radial-gradient(circle at 20% 10%, #fff4f8 0, transparent 28%),
-                radial-gradient(circle at 90% 20%, #eef9ff 0, transparent 26%),
-                linear-gradient(180deg, #fffafd 0%, #f8fbff 100%);
-            color: #3f3a3a;
-            line-height: 1.8;
-        }
-
-        .page {
-            max-width: 900px;
-            margin: 0 auto;
-        }
-
-        h1 {
-            color: #ff7aa8;
-            margin-bottom: 18px;
-        }
-
-        .card {
-            background: rgba(255, 255, 255, 0.92);
-            border: 1px solid #f1e3ea;
-            border-radius: 22px;
-            padding: 18px;
-            margin-bottom: 18px;
-            box-shadow: 0 8px 22px rgba(120, 90, 110, 0.08);
-        }
-
-        .ranking-card {
-            background: linear-gradient(135deg, #fff4f8, #f5fbff);
-            border: 1px solid #f1dce6;
-        }
-
-        .card-title {
-            font-weight: bold;
-            color: #ff7aa8;
-            margin-bottom: 6px;
-        }
-
-        .lead {
-            font-size: 13px;
-            color: #776b70;
-            margin-bottom: 12px;
-        }
-
-        .pill-link {
-            display: inline-block;
-            padding: 10px 18px;
-            border-radius: 999px;
-            background: #ff7aa8;
-            color: #fff;
-            text-decoration: none;
-            font-weight: bold;
-            font-size: 14px;
-        }
-        .detail-link {
-            display: inline-block;
-            padding: 8px 14px;
-            background: #ff7aa8;
-            color: #fff;
-            border-radius: 999px;
-            text-decoration: none;
-            font-size: 14px;
-            margin-top: 12px;
-        }
-
-        .score {
-            font-size: 22px;
-            font-weight: bold;
-            color: #ff7aa8;
-            margin: 8px 0;
-        }
-
-        .meta {
-            color: #555;
-            font-size: 14px;
-        }
-
-        .empty {
-            text-align: center;
-            color: #777;
-        }
-
-        .back-link {
-            color: #ff7aa8;
-            text-decoration: none;
-            font-weight: bold;
-        }
-    </style>
+      body {
+          font-family: "Hiragino Sans", "Yu Gothic", "Kosugi Maru", sans-serif;
+          margin: 0;
+          padding: 24px;
+          background: linear-gradient(180deg, #fffafd 0%, #fff6f8 100%);
+          color: #555;
+          line-height: 1.8;
+      }
+  
+      .page {
+          max-width: 900px;
+          margin: 0 auto;
+      }
+  
+      h1,
+      h2 {
+          color: #c75b7a;
+          font-family: "Kosugi Maru", sans-serif;
+      }
+  
+      h1 {
+          margin-bottom: 18px;
+      }
+  
+      h2 {
+          font-size: 18px;
+          margin: 0 0 14px;
+      }
+  
+      .card {
+          background: rgba(255, 248, 252, 0.95);
+          border: 1px solid #f1d5dd;
+          border-radius: 16px;
+          padding: 16px 14px;
+          margin-bottom: 18px;
+          box-shadow: 0 4px 12px rgba(199, 91, 122, 0.08);
+      }
+  
+      .card-title {
+          font-weight: bold;
+          color: #c75b7a;
+          margin-bottom: 6px;
+          font-family: "Kosugi Maru", sans-serif;
+      }
+  
+      .lead {
+          font-size: 13px;
+          color: #8a7a80;
+          margin-bottom: 12px;
+          line-height: 1.7;
+      }
+  
+      .pill-link,
+      .detail-link {
+          display: inline-block;
+          padding: 10px 18px;
+          border-radius: 999px;
+          background: linear-gradient(135deg, #ffe6ee, #ffd6e8);
+          color: #c75b7a;
+          font-size: 13px;
+          font-weight: bold;
+          text-decoration: none;
+          border: 1px solid #f3c9d2;
+          font-family: "Kosugi Maru", sans-serif;
+      }
+  
+      .detail-link {
+          margin-top: 12px;
+      }
+  
+      .score {
+          font-size: 22px;
+          font-weight: bold;
+          color: #d46a8c;
+          margin: 8px 0;
+          font-family: "Kosugi Maru", sans-serif;
+      }
+  
+      .meta {
+          color: #666;
+          font-size: 14px;
+      }
+  
+      .empty {
+          text-align: center;
+          color: #8a7a80;
+      }
+  
+      .back-link {
+          color: #c75b7a;
+          text-decoration: underline;
+          font-weight: bold;
+      }
+  
+      hr {
+          border: none;
+          border-top: 1px dashed #e7b8c5;
+          margin: 14px 0;
+      }
+  
+      canvas {
+          background: rgba(255, 250, 252, 0.75);
+          border: 1px solid #f1d5dd;
+          border-radius: 14px;
+          padding: 10px;
+      }
+  </style>
 </head>
 
 <body>
@@ -208,12 +223,32 @@
                 type: "line",
                 data: {
                     labels: chartLabels,
-                    datasets: Object.keys(scoreSeries).map((key) => ({
-                        label: labelMap[key] || key,
-                        data: scoreSeries[key],
-                        tension: 0.3,
-                        fill: false
-                    }))
+                    datasets: Object.keys(scoreSeries).map((key, index) => {
+                        const colors = [
+                            "#d46a8c",
+                            "#c75b7a",
+                            "#e7a5ba",
+                            "#f3c9d2",
+                            "#a63d5c",
+                            "#cc6f90",
+                            "#e7b8c5",
+                            "#b54f72",
+                            "#f1d5dd",
+                            "#8a7a80"
+                        ];
+
+                        return {
+                            label: labelMap[key] || key,
+                            data: scoreSeries[key],
+                            tension: 0.3,
+                            fill: false,
+                            borderColor: colors[index % colors.length],
+                            backgroundColor: colors[index % colors.length],
+                            pointBackgroundColor: colors[index % colors.length],
+                            pointBorderColor: "#fff",
+                            pointRadius: 3
+                        };
+                    })
                 },
                 options: {
                     responsive: true,
@@ -248,7 +283,12 @@
                         label: "Skin Score",
                         data: chartScores,
                         tension: 0.3,
-                        fill: false
+                        fill: false,
+                        borderColor: "#d46a8c",
+                        backgroundColor: "#ffd6e8",
+                        pointBackgroundColor: "#d46a8c",
+                        pointBorderColor: "#fff",
+                        pointRadius: 4
                     }]
                 },
                 options: {
