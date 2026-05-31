@@ -432,6 +432,24 @@ AFFILIATE_LINKS_AI_FILE = "affiliate_links_ai.json"
 print("[RAKUTEN APP ID RAW]", repr(RAKUTEN_APP_ID))
 print("[RAKUTEN APP ID LENGTH]", len(RAKUTEN_APP_ID))
 
+def print_product_db_stats(products):
+    from collections import Counter
+
+    counter = Counter()
+
+    for p in products:
+        if not isinstance(p, dict):
+            continue
+
+        counter[p.get("category", "未分類")] += 1
+
+    print("===== PRODUCT DB STATS =====", flush=True)
+
+    for category, count in sorted(counter.items()):
+        print(f"{category}: {count}", flush=True)
+
+    print("============================", flush=True)
+
 def load_affiliate_links_ai():
     if not os.path.exists(AFFILIATE_LINKS_AI_FILE):
         return []
@@ -6972,7 +6990,7 @@ def translate_value(text, mapping):
     return mapping.get(lowered, text)
 
 CATEGORY_ORDER = {
-    "クレンジング":1,
+    "クレンジング": 1,
     "洗顔": 2,
     "化粧水": 3,
     "美容液": 4,
@@ -6980,7 +6998,7 @@ CATEGORY_ORDER = {
     "クリーム": 6,
     "日焼け止め": 7,
     "パック": 8,
-    "ピーリング": 9
+    "ピーリング": 9,
 }
 def normalize_serum_roles(data):
     booster_keywords = [
@@ -7135,6 +7153,46 @@ def limit_serum_steps(data):
 
     return data
 
+def limit_booster_steps(data):
+    for section in ["morning", "night"]:
+        steps = data.get(section, {}).get("steps", [])
+
+        if not isinstance(steps, list):
+            continue
+
+        booster_steps = [
+            s for s in steps
+            if (
+                s.get("role") == "booster"
+                or s.get("category") in ["ブースター", "導入美容液"]
+            )
+        ]
+
+        if len(booster_steps) <= 1:
+            continue
+
+        booster_sorted = sorted(
+            booster_steps,
+            key=lambda x: (
+                safe_float(x.get("final_score", 0)),
+                safe_float(x.get("improve_score", 0)),
+                safe_float(x.get("base_score", 0))
+            ),
+            reverse=True
+        )
+
+        keep = id(booster_sorted[0])
+
+        data[section]["steps"] = [
+            s for s in steps
+            if (
+                s not in booster_steps
+                or id(s) == keep
+            )
+        ]
+
+    return data
+
 def safe_float(value):
     try:
         return float(value)
@@ -7197,9 +7255,8 @@ def step_sort_key(step):
     role = step.get("role")
     priority = step.get("priority", 999)
 
-    # 導入美容液は化粧水の前
-    if category == "美容液" and role == "booster":
-        return (1.5, priority)  # 洗顔(1)と化粧水(2)の間
+    if role == "booster":
+        return (2.5, priority)
 
     base_order = CATEGORY_ORDER.get(category, 99)
 
@@ -8357,6 +8414,7 @@ def lab_test_function():
             # ⑥ DB読み込み
             # =========================
             products = load_products()
+            print_product_db_stats(products)
             validate_and_log_products(products)
 
             # =========================
@@ -8382,6 +8440,7 @@ def lab_test_function():
             # ⑧ 選定後の調整
             # =========================
             data = limit_serum_steps(data)
+            data = limit_booster_steps(data)
             data = sort_steps(data)
 
             # =========================
