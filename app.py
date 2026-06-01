@@ -1104,11 +1104,7 @@ def fetch_rakuten_item(product_name, category="", brand=""):
             )
             best = normalize_rakuten_item_price(best)
 
-            print(
-                "[RAKUTEN LINK IN FETCH]",
-                best.get("affiliateUrl"),
-                flush=True
-            )
+            
             result = {
                 "name": best.get("itemName", ""),
                 "price": best.get("normalized_price", 0),
@@ -3845,7 +3841,26 @@ def infer_virtual_product_fields(name, category="", ingredient_focus="", purpose
         "support_ingredients": list(dict.fromkeys(support)),
         "main_functions": list(dict.fromkeys(functions))
     }
+def normalize_candidate_category(value, fallback=""):
+    value = str(value or "").strip()
 
+    allowed = [
+        "クレンジング",
+        "洗顔",
+        "化粧水",
+        "美容液",
+        "導入美容液",
+        "乳液",
+        "クリーム",
+        "日焼け止め",
+        "パック",
+        "ピーリング"
+    ]
+
+    if value in allowed:
+        return value
+
+    return fallback
     
 def build_virtual_product_from_ai_candidate(step, candidate):
     category = step.get("category", "")
@@ -3992,7 +4007,10 @@ def build_virtual_product_from_ai_candidate(step, candidate):
     return {
         "name": candidate.get("name", ""),
         "brand": candidate.get("brand", ""),
-        "category": category,
+        "category": normalize_candidate_category(
+            candidate.get("category", category),
+            fallback=category
+        ),
         "active_ingredients": list(dict.fromkeys(active_ingredients)),
         "support_ingredients": list(dict.fromkeys(support_ingredients)),
         "signature_ingredients": list(dict.fromkeys(signature_ingredients)),
