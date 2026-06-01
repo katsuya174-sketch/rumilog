@@ -634,9 +634,58 @@ CURRENT_PRODUCT_WORDS = [
     "本体",
     "医薬部外品"
 ]
+def extract_product_identity_tokens(text):
+    text = str(text or "").lower()
+
+    percents = set(
+        re.findall(r"\d+(?:\.\d+)?\s*%", text)
+    )
+
+    volumes = set(
+        re.findall(r"\d+(?:\.\d+)?\s*(?:ml|g|個|本|枚)", text)
+    )
+
+    normalized = clean_rakuten_keyword(text).lower()
+    words = set(normalized.split())
+
+    return {
+        "percents": percents,
+        "volumes": volumes,
+        "words": words
+    }
+
+
+def is_same_product_for_market(ai_name, rakuten_title):
+    ai = extract_product_identity_tokens(ai_name)
+    rk = extract_product_identity_tokens(rakuten_title)
+
+    # 濃度が両方にあるのに違う場合は別商品
+    if ai["percents"] and rk["percents"]:
+        if ai["percents"] != rk["percents"]:
+            return False
+
+    # 容量が両方にあるのに違う場合は別商品
+    if ai["volumes"] and rk["volumes"]:
+        if ai["volumes"] != rk["volumes"]:
+            return False
+
+    ai_words = ai["words"]
+    rk_words = rk["words"]
+
+    if not ai_words:
+        return False
+
+    matched = ai_words & rk_words
+    match_ratio = len(matched) / max(len(ai_words), 1)
+
+    return match_ratio >= 0.45
+
 def score_rakuten_item(item, product_name, brand="", category=""):
     title = str(item.get("itemName", "") or "")
     title_norm = title.lower()
+
+    if not is_same_product_for_market(product_name, title):
+        return -9999
 
     name = clean_rakuten_keyword(product_name).lower()
     brand = clean_rakuten_keyword(brand).lower()
@@ -4558,6 +4607,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         step.get("purpose", ""),
         [
             {
+                "brand": c.get("brand", ""),
                 "name": c.get("name", ""),
                 "score": c.get("_score", 0),
                 "base": c.get("_base_score", 0),
@@ -4573,6 +4623,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
     best["_top_candidates"] = [
         {
+            "brand": c.get("brand", ""),
             "name": c.get("name", ""),
             "score": c.get("_score", 0),
             "base_score": c.get("_base_score", 0),
