@@ -1103,6 +1103,12 @@ def fetch_rakuten_item(product_name, category="", brand=""):
                 .replace("http://", "https://")
             )
             best = normalize_rakuten_item_price(best)
+
+            print(
+                "[RAKUTEN LINK IN FETCH]",
+                best.get("affiliateUrl"),
+                flush=True
+            )
             result = {
                 "name": best.get("itemName", ""),
                 "price": best.get("normalized_price", 0),
@@ -9473,11 +9479,8 @@ def api_verify_product():
         VERIFY_PRODUCT_CACHE[cache_key] = result
 
         return jsonify(result)
-    print(
-        "[RAKUTEN LINK]",
-        best.get("affiliateUrl"),
-        flush=True
-    )
+    
+    
     result = {
         "ok": True,
         "name": item.get("name", ""),
