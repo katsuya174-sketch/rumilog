@@ -640,32 +640,29 @@ def score_rakuten_item(item, product_name, brand="", category=""):
 
     name = clean_rakuten_keyword(product_name).lower()
     brand = clean_rakuten_keyword(brand).lower()
-    category = str(category or "")
 
     score = 0
 
-    if name and name.lower() in title_norm:
-        score += 60
+    # 商品名一致
+    if name and name in title_norm:
+        score += 70
 
     for word in name.split():
         if word and word in title_norm:
-            score += 12
+            score += 10
 
+    # ブランド一致
     if brand and brand in title_norm:
-        score += 20
+        score += 25
 
-    if any(
-        word in title
-        for word in CURRENT_PRODUCT_WORDS
-    ):
+    # 現行品シグナル
+    if any(word in title for word in CURRENT_PRODUCT_WORDS):
         score += 15
 
-    if any(
-        word in title
-        for word in OLD_PRODUCT_WORDS
-    ):
-        score -= 80
-    
+    # 旧品・訳あり・廃盤系は強く落とす
+    if any(word in title for word in OLD_PRODUCT_WORDS):
+        score -= 90
+
     ng_words = [
         "詰替",
         "詰め替え",
@@ -674,21 +671,26 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         "サンプル",
         "ミニ",
         "トライアル",
-        "中古"
+        "中古",
+        "並行輸入",
+        "海外発送"
     ]
 
     for ng in ng_words:
         if ng in title:
             score -= 25
+
     bundle_quantity = infer_bundle_quantity_from_title(title)
 
     if bundle_quantity > 1:
-        score -= 20
+        score -= 25
+
     single_words = [
         "単品",
         "1個",
         "1本",
         "通常品",
+        "本体"
     ]
 
     if any(word in title for word in single_words):
@@ -702,15 +704,54 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     if price >= 12000:
         score -= 20
 
+    # 画像あり
     if item.get("mediumImageUrls"):
         score += 10
 
-    if item.get("affiliateUrl") or item.get("itemUrl"):
+    # アフィリエイトURLありを優先
+    if item.get("affiliateUrl"):
+        score += 18
+    elif item.get("itemUrl"):
         score += 5
-    score += score_current_product_signal(item)
-    return score
 
-RAKUTEN_CACHE_FILE = "rakuten_cache.json"
+    # レビュー評価
+    review_average = safe_float(item.get("reviewAverage", 0))
+    review_count = safe_int(item.get("reviewCount", 0))
+
+    if review_average >= 4.5:
+        score += 18
+    elif review_average >= 4.2:
+        score += 12
+    elif review_average >= 4.0:
+        score += 6
+    elif review_average > 0 and review_average < 3.5:
+        score -= 15
+
+    # レビュー数
+    if review_count >= 1000:
+        score += 20
+    elif review_count >= 300:
+        score += 14
+    elif review_count >= 100:
+        score += 8
+    elif review_count > 0:
+        score += 3
+
+    # 公式・正規品っぽいショップ/タイトルを少し優遇
+    trusted_words = [
+        "公式",
+        "正規品",
+        "正規販売店",
+        "認定ショップ",
+        "メーカー公式"
+    ]
+
+    if any(word in title for word in trusted_words):
+        score += 12
+
+    score += score_current_product_signal(item)
+
+    return score
 
 
 def load_rakuten_cache():
@@ -2709,6 +2750,9 @@ def infer_active_profile(product):
     main_functions = product.get("main_functions") or []
     ingredient_strength = product.get("ingredient_strength") or {}
 
+    if not isinstance(ingredient_strength, dict):
+        ingredient_strength = {}
+
     text_parts = []
     text_parts.extend(active_ingredients)
     text_parts.extend(support_ingredients)
@@ -2737,6 +2781,8 @@ def infer_active_profile(product):
             "ceramide",
             "panthenol",
             "peptide",
+            "pdrn",
+            "niacinamide",
             "barrier"
         ])
         avoid_with.update([
@@ -2761,6 +2807,13 @@ def infer_active_profile(product):
         "ビタミンC"
     ]):
         families.add("vitamin_c")
+        pair_well_with.update([
+            "niacinamide",
+            "tranexamic",
+            "glutathione",
+            "azelaic",
+            "barrier"
+        ])
 
         vitamin_c_strength = ingredient_strength.get("vitamin_c", "")
 
@@ -2768,39 +2821,62 @@ def infer_active_profile(product):
             families.add("strong_vitamin_c")
             strength = "high"
             irritation_risk = "medium"
+
     if any(x in text for x in [
         "azelaic",
         "azelaic_acid",
         "アゼライン酸"
     ]):
         families.add("azelaic")
-
         pair_well_with.update([
             "vitamin_c",
+            "niacinamide",
             "barrier",
             "ceramide"
         ])
+
     if any(x in text for x in [
         "niacinamide",
         "ナイアシンアミド"
     ]):
         families.add("niacinamide")
-
         pair_well_with.update([
             "vitamin_c",
             "retinoid",
+            "azelaic",
             "barrier"
         ])
-        if any(x in text for x in [
-            "pdrn"
-        ]):
-            families.add("pdrn")
 
-            pair_well_with.update([
-                "retinoid",
-                "peptide",
-                "barrier"
-            ])
+    if any(x in text for x in [
+        "pdrn"
+    ]):
+        families.add("pdrn")
+        pair_well_with.update([
+            "retinoid",
+            "peptide",
+            "barrier"
+        ])
+
+    if any(x in text for x in [
+        "tranexamic",
+        "tranexamic_acid",
+        "トラネキサム酸"
+    ]):
+        families.add("tranexamic")
+        pair_well_with.update([
+            "vitamin_c",
+            "niacinamide"
+        ])
+
+    if any(x in text for x in [
+        "glutathione",
+        "グルタチオン"
+    ]):
+        families.add("glutathione")
+        pair_well_with.update([
+            "vitamin_c"
+        ])
+
     if any(x in text for x in [
         "aha",
         "bha",
@@ -2849,6 +2925,11 @@ def infer_active_profile(product):
         "ペプチド"
     ]):
         families.add("peptide")
+        pair_well_with.update([
+            "retinoid",
+            "pdrn",
+            "barrier"
+        ])
 
     return {
         "families": families,
@@ -7402,7 +7483,10 @@ def limit_serum_steps(data):
 
         serum_steps = [
             s for s in steps
-            if s.get("category") == "美容液"
+            if (
+                s.get("category") == "美容液"
+                and s.get("role") != "booster"
+            )
         ]
 
         if len(serum_steps) <= 2:
@@ -7431,8 +7515,11 @@ def limit_serum_steps(data):
 
         data[section]["steps"] = [
             s for s in steps
-            if s.get("category") != "美容液"
-            or id(s) in keep
+            if (
+                s.get("category") != "美容液"
+                or s.get("role") == "booster"
+                or id(s) in keep
+            )
         ]
 
     return data
@@ -7673,10 +7760,6 @@ def get_analysis_schema():
                     "barrier": {"type": "integer"},
                     "texture": {"type": "integer"},
                     "tone_evenness": {"type": "integer"},
-                    "score": {"type": "integer"},
-                    "summary": {"type": "string"},
-                    "left_tendency": {"type": "string"},
-                    "right_tendency": {"type": "string"}
                 },
                 "required": [
                     "oil_balance",
@@ -7689,10 +7772,6 @@ def get_analysis_schema():
                     "barrier",
                     "texture",
                     "tone_evenness",
-                    "score",
-                    "summary",
-                    "left_tendency",
-                    "right_tendency"
                 ]
             },
             "skin_summary": {"type": "string"},
@@ -7759,7 +7838,23 @@ def get_analysis_schema():
                     "need_double_moisture",
                     "reason"
                 ]
-            }
+            },
+
+            "symmetry_analysis": {
+                "type": "object",
+                "properties": {
+                    "score": {"type": "integer"},
+                    "summary": {"type": "string"},
+                    "left_tendency": {"type": "string"},
+                    "right_tendency": {"type": "string"}
+                },
+                "required": [
+                    "score",
+                    "summary",
+                    "left_tendency",
+                    "right_tendency"
+                ]
+            },
         },
         "required": [
             "skin_score",
@@ -9002,8 +9097,17 @@ def product_click():
     if not url:
         return "リンクがありません", 400
 
-    return redirect(url)
+    allowed_domains = [
+        "rakuten.co.jp",
+        "hb.afl.rakuten.co.jp",
+        "amazon.co.jp",
+        "amzn.to"
+    ]
 
+    if not any(domain in url for domain in allowed_domains):
+        return "許可されていないリンクです", 400
+
+    return redirect(url)
 @app.route("/pricing")
 def pricing():
     source = request.args.get("source", "unknown")
@@ -9369,7 +9473,11 @@ def api_verify_product():
         VERIFY_PRODUCT_CACHE[cache_key] = result
 
         return jsonify(result)
-
+    print(
+        "[RAKUTEN LINK]",
+        best.get("affiliateUrl"),
+        flush=True
+    )
     result = {
         "ok": True,
         "name": item.get("name", ""),
