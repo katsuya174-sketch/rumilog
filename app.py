@@ -283,6 +283,20 @@ def get_client_ip():
         return forwarded.split(",")[0].strip()
     return request.remote_addr or "unknown"
 
+def is_premium_user():
+    """
+    有料会員判定をここに集約する。
+    将来、ログイン・決済・DB管理に移行しても、
+    各画面側のコードは変更しない。
+    """
+
+    premium_key = request.args.get("premium_key", "")
+    valid_key = os.getenv("PREMIUM_PREVIEW_KEY", "")
+
+    if valid_key and premium_key == valid_key:
+        return True
+
+    return False
 
 def load_free_usage():
     if not os.path.exists(FREE_LIMIT_FILE):
@@ -6815,7 +6829,60 @@ def calculate_skin_score(scores):
     return round(
         total / total_weight
     )
+def calculate_premium_scores(scores):
+    if not isinstance(scores, dict):
+        scores = {}
 
+    oil_balance = safe_int(scores.get("oil_balance", 0))
+    redness = safe_int(scores.get("redness", 0))
+    pores = safe_int(scores.get("pores", 0))
+    hydration = safe_int(scores.get("hydration", 0))
+    acne = safe_int(scores.get("acne", 0))
+    dullness = safe_int(scores.get("dullness", 0))
+    barrier = safe_int(scores.get("barrier", 0))
+    texture = safe_int(scores.get("texture", 0))
+    tone_evenness = safe_int(scores.get("tone_evenness", 0))
+
+    premium_scores = {
+        "acne_marks_red": round(
+            (redness * 0.65) +
+            (acne * 0.35)
+        ),
+        "pigmentation": round(
+            (tone_evenness * 0.55) +
+            (dullness * 0.45)
+        ),
+        "enlarged_pores": round(
+            (pores * 0.65) +
+            (oil_balance * 0.35)
+        ),
+        "blackhead_pores": round(
+            (pores * 0.45) +
+            (oil_balance * 0.35) +
+            (dullness * 0.20)
+        ),
+        "translucency": round(
+            (dullness * 0.45) +
+            (tone_evenness * 0.35) +
+            (hydration * 0.20)
+        ),
+        "tone_uniformity": round(
+            (tone_evenness * 0.55) +
+            (redness * 0.25) +
+            (dullness * 0.20)
+        ),
+        "skin_balance": round(
+            (hydration * 0.35) +
+            (barrier * 0.30) +
+            (texture * 0.20) +
+            (oil_balance * 0.15)
+        )
+    }
+
+    return {
+        key: max(0, min(value, 100))
+        for key, value in premium_scores.items()
+    }
 # Gemini結果を保存用フォーマットに変換
 def normalize_result(raw_data, image_path=""):
     return {
@@ -7605,7 +7672,11 @@ def get_analysis_schema():
                     "dullness": {"type": "integer"},
                     "barrier": {"type": "integer"},
                     "texture": {"type": "integer"},
-                    "tone_evenness": {"type": "integer"}
+                    "tone_evenness": {"type": "integer"},
+                    "score": {"type": "integer"},
+                    "summary": {"type": "string"},
+                    "left_tendency": {"type": "string"},
+                    "right_tendency": {"type": "string"}
                 },
                 "required": [
                     "oil_balance",
@@ -7617,7 +7688,11 @@ def get_analysis_schema():
                     "dullness",
                     "barrier",
                     "texture",
-                    "tone_evenness"
+                    "tone_evenness",
+                    "score",
+                    "summary",
+                    "left_tendency",
+                    "right_tendency"
                 ]
             },
             "skin_summary": {"type": "string"},
@@ -7695,7 +7770,8 @@ def get_analysis_schema():
             "weekly_care",
             "warnings",
             "improvement_plan",
-            "moisture_plan"
+            "moisture_plan",
+            "symmetry_analysis",
         ]
     }
 
@@ -7716,6 +7792,27 @@ def build_analysis_prompt(user_data):
 1枚目: 正面
 2枚目: 左頬
 3枚目: 右頬
+
+【左右差分析】
+正面、左頬、右頬の画像から左右差を評価する。
+
+symmetry_analysis:
+score:
+左右差が少ないほど高スコア。
+0〜100の整数。
+
+summary:
+左右差の全体要約。
+
+left_tendency:
+左頬に見られる傾向。
+例: 赤みがやや強い / 毛穴が目立つ / 色ムラが少ない
+
+right_tendency:
+右頬に見られる傾向。
+例: 毛穴がやや目立つ / 赤みが少ない / 色素沈着が目立つ
+
+画像から分からない場合は断定せず、控えめに記載する。
 
 【診断方針】
 ・画像から確認できる事実を優先する。
@@ -8566,6 +8663,24 @@ def lab_test_function():
 
             data = ensure_result_structure(data)
             data["skin_score"] = calculate_skin_score(data.get("scores", {}))
+            data["premium_scores"] = calculate_premium_scores(
+                data.get("scores", {})
+            )
+            symmetry_analysis = data.get("symmetry_analysis", {})
+
+            if not isinstance(symmetry_analysis, dict):
+                symmetry_analysis = {}
+
+            data["premium_scores"]["symmetry"] = safe_int(
+                symmetry_analysis.get("score", 0)
+            )
+
+            data["symmetry_analysis"] = {
+                "score": safe_int(symmetry_analysis.get("score", 0)),
+                "summary": str(symmetry_analysis.get("summary", "") or ""),
+                "left_tendency": str(symmetry_analysis.get("left_tendency", "") or ""),
+                "right_tendency": str(symmetry_analysis.get("right_tendency", "") or "")
+            }
             debug_log("AFTER ANALYZE", {
                 "skin_score": data.get("skin_score"),
                 "summary": data.get("skin_summary"),
@@ -8757,7 +8872,12 @@ def lab_test_function():
             # =========================
             # ⑫ 表示
             # =========================
-            html = render_template("result.html", data=data)
+            data["is_premium"] = is_premium_user()
+
+            html = render_template(
+                "result.html",
+                data=data
+            )
             if is_ajax:
                 return jsonify({
                     "success": True,
@@ -8830,6 +8950,10 @@ def db_stats():
             for category, counter in focus_counter.items()
         }
     })
+
+@app.route("/premium")
+def premium():
+    return render_template("premium.html")
 
 @app.route("/admin/product-ranking")
 def admin_product_ranking():
@@ -8911,6 +9035,7 @@ def history():
                 "input_budget": item.get("input_budget", 0),
                 "total_price": item.get("total_price", 0),
                 "budget_status": item.get("budget_status", ""),
+                "premium_scores": item.get("premium_scores", {}),
             })
 
         labels = []
@@ -8929,13 +9054,8 @@ def history():
             "tone_evenness"
         ]
 
-        score_series = {
-            key: []
-            for key in score_keys
-        }
-        improvement_summary = []
-
         score_labels = {
+            "oil_balance": "皮脂バランス",
             "redness": "赤み",
             "pores": "毛穴",
             "hydration": "水分",
@@ -8947,21 +9067,27 @@ def history():
             "tone_evenness": "色ムラ"
         }
 
-        for key, values in score_series.items():
-            if len(values) >= 2:
-                diff = values[-1] - values[0]
+        score_series = {
+            key: []
+            for key in score_keys
+        }
 
-                if diff != 0:
-                    improvement_summary.append({
-                        "label": score_labels.get(key, key),
-                        "diff": diff
-                    })
+        premium_score_keys = [
+            "acne_marks_red",
+            "pigmentation",
+            "enlarged_pores",
+            "blackhead_pores",
+            "translucency",
+            "tone_uniformity",
+            "skin_balance",
+            "symmetry"
+        ]
 
-        improvement_summary = sorted(
-            improvement_summary,
-            key=lambda x: x["diff"],
-            reverse=True
-        )[:5]
+        premium_score_series = {
+            key: []
+            for key in premium_score_keys
+        }
+
         for item in prepared:
             labels.append(
                 item.get("record_date")
@@ -8982,13 +9108,42 @@ def history():
                     safe_int(scores_dict.get(key, 0))
                 )
 
+            premium_scores_dict = item.get("premium_scores", {})
+            if not isinstance(premium_scores_dict, dict):
+                premium_scores_dict = {}
+
+            for key in premium_score_keys:
+                premium_score_series[key].append(
+                    safe_int(premium_scores_dict.get(key, 0))
+                )
+
+        improvement_summary = []
+
+        for key, values in score_series.items():
+            if len(values) >= 2:
+                diff = values[-1] - values[0]
+
+                if diff != 0:
+                    improvement_summary.append({
+                        "label": score_labels.get(key, key),
+                        "diff": diff
+                    })
+
+        improvement_summary = sorted(
+            improvement_summary,
+            key=lambda x: x["diff"],
+            reverse=True
+        )[:5]
+
         return render_template(
             "history.html",
             history=prepared,
             labels=labels,
             scores=skin_scores,
             score_series=score_series,
-            improvement_summary=improvement_summary
+            improvement_summary=improvement_summary,
+            premium_score_series=premium_score_series,
+            is_premium=False
         )
 
     except Exception as e:
@@ -9002,7 +9157,9 @@ def history():
             history=[],
             labels=[],
             scores=[],
-            score_series={}
+            score_series={},
+            improvement_summary=[],
+            premium_score_series={}
         )
 
 @app.route("/history/<result_id>")

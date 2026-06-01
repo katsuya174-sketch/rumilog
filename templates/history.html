@@ -158,6 +158,19 @@
             <h2>項目別スコア推移</h2>
             <canvas id="detailScoreChart"></canvas>
         </div>
+
+        <div class="card">
+            <h2>有料詳細スコア推移</h2>
+        
+            {% if is_premium %}
+                <canvas id="premiumScoreChart"></canvas>
+            {% else %}
+                <div class="premium-lock-box">
+                    詳細スコアの推移はプレミアム機能です。
+                </div>
+            {% endif %}
+        </div>
+
         {% if history %}
             {% for item in history %}
                 <div class="card">
@@ -196,117 +209,138 @@
     <script id="chart-labels" type="application/json">{{ labels | tojson }}</script>
     <script id="chart-scores" type="application/json">{{ scores | tojson }}</script>
     <script id="score-series" type="application/json">{{ score_series | tojson }}</script>
+  <script id="premium-score-series" type="application/json">{{ premium_score_series | tojson }}</script>
 
+  <script>
+      const chartLabels = JSON.parse(document.getElementById("chart-labels").textContent);
+      const chartScores = JSON.parse(document.getElementById("chart-scores").textContent);
+      const scoreSeries = JSON.parse(document.getElementById("score-series").textContent);
+      const premiumScoreSeries = JSON.parse(document.getElementById("premium-score-series").textContent);
 
-    <script>
-      
-        const scoreSeries = JSON.parse(document.getElementById("score-series").textContent);
-        const detailCanvas = document.getElementById("detailScoreChart");
+      const colors = [
+          "#d46a8c",
+          "#c75b7a",
+          "#e7a5ba",
+          "#f3c9d2",
+          "#a63d5c",
+          "#cc6f90",
+          "#e7b8c5",
+          "#b54f72",
+          "#f1d5dd",
+          "#8a7a80"
+      ];
 
-        const labelMap = {
-            oil_balance: "皮脂バランス",
-            redness: "赤み",
-            pores: "毛穴",
-            hydration: "水分",
-            firmness: "ハリ",
-            acne: "ニキビ",
-            dullness: "くすみ",
-            barrier: "バリア",
-            texture: "キメ",
-            tone_evenness: "色ムラ"
-        };
+      const labelMap = {
+          oil_balance: "皮脂バランス",
+          redness: "赤み",
+          pores: "毛穴",
+          hydration: "水分",
+          firmness: "ハリ",
+          acne: "ニキビ",
+          dullness: "くすみ",
+          barrier: "バリア",
+          texture: "キメ",
+          tone_evenness: "色ムラ"
+      };
 
-        if (detailCanvas && scoreSeries) {
-            const detailCtx = detailCanvas.getContext("2d");
+      const premiumLabelMap = {
+          acne_marks_red: "赤ニキビ跡",
+          pigmentation: "色素沈着",
+          enlarged_pores: "開き毛穴",
+          blackhead_pores: "黒ずみ毛穴",
+          translucency: "透明感",
+          tone_uniformity: "肌トーン均一性",
+          skin_balance: "肌バランス",
+          symmetry: "左右差"
+      };
 
-            new Chart(detailCtx, {
-                type: "line",
-                data: {
-                    labels: chartLabels,
-                    datasets: Object.keys(scoreSeries).map((key, index) => {
-                        const colors = [
-                            "#d46a8c",
-                            "#c75b7a",
-                            "#e7a5ba",
-                            "#f3c9d2",
-                            "#a63d5c",
-                            "#cc6f90",
-                            "#e7b8c5",
-                            "#b54f72",
-                            "#f1d5dd",
-                            "#8a7a80"
-                        ];
+      const baseChartOptions = {
+          responsive: true,
+          plugins: {
+              legend: {
+                  display: true
+              }
+          },
+          scales: {
+              y: {
+                  min: 0,
+                  max: 100
+              }
+          }
+      };
 
-                        return {
-                            label: labelMap[key] || key,
-                            data: scoreSeries[key],
-                            tension: 0.3,
-                            fill: false,
-                            borderColor: colors[index % colors.length],
-                            backgroundColor: colors[index % colors.length],
-                            pointBackgroundColor: colors[index % colors.length],
-                            pointBorderColor: "#fff",
-                            pointRadius: 3
-                        };
-                    })
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: {
-                            display: true
-                        }
-                    },
-                    scales: {
-                        y: {
-                            min: 0,
-                            max: 100
-                        }
-                    }
-                }
-            });
-        }
+      const canvas = document.getElementById("scoreChart");
 
-        const chartLabels = JSON.parse(document.getElementById("chart-labels").textContent);
-        const chartScores = JSON.parse(document.getElementById("chart-scores").textContent);
+      if (canvas) {
+          const ctx = canvas.getContext("2d");
 
-        const canvas = document.getElementById("scoreChart");
+          new Chart(ctx, {
+              type: "line",
+              data: {
+                  labels: chartLabels,
+                  datasets: [{
+                      label: "Skin Score",
+                      data: chartScores,
+                      tension: 0.3,
+                      fill: false,
+                      borderColor: "#d46a8c",
+                      backgroundColor: "#ffd6e8",
+                      pointBackgroundColor: "#d46a8c",
+                      pointBorderColor: "#fff",
+                      pointRadius: 4
+                  }]
+              },
+              options: baseChartOptions
+          });
+      }
 
-        if (canvas) {
-            const ctx = canvas.getContext("2d");
+      const detailCanvas = document.getElementById("detailScoreChart");
 
-            new Chart(ctx, {
-                type: "line",
-                data: {
-                    labels: chartLabels,
-                    datasets: [{
-                        label: "Skin Score",
-                        data: chartScores,
-                        tension: 0.3,
-                        fill: false,
-                        borderColor: "#d46a8c",
-                        backgroundColor: "#ffd6e8",
-                        pointBackgroundColor: "#d46a8c",
-                        pointBorderColor: "#fff",
-                        pointRadius: 4
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    plugins: {
-                        legend: {
-                            display: true
-                        }
-                    },
-                    scales: {
-                        y: {
-                            min: 0,
-                            max: 100
-                        }
-                    }
-                }
-            });
-        }
-    </script>
-</body>
-</html>
+      if (detailCanvas && scoreSeries) {
+          const detailCtx = detailCanvas.getContext("2d");
+
+          new Chart(detailCtx, {
+              type: "line",
+              data: {
+                  labels: chartLabels,
+                  datasets: Object.keys(scoreSeries).map((key, index) => ({
+                      label: labelMap[key] || key,
+                      data: scoreSeries[key],
+                      tension: 0.3,
+                      fill: false,
+                      borderColor: colors[index % colors.length],
+                      backgroundColor: colors[index % colors.length],
+                      pointBackgroundColor: colors[index % colors.length],
+                      pointBorderColor: "#fff",
+                      pointRadius: 3
+                  }))
+              },
+              options: baseChartOptions
+          });
+      }
+
+      const premiumCanvas = document.getElementById("premiumScoreChart");
+
+      if (premiumCanvas && premiumScoreSeries) {
+          const premiumCtx = premiumCanvas.getContext("2d");
+
+          new Chart(premiumCtx, {
+              type: "line",
+              data: {
+                  labels: chartLabels,
+                  datasets: Object.keys(premiumScoreSeries).map((key, index) => ({
+                      label: premiumLabelMap[key] || key,
+                      data: premiumScoreSeries[key],
+                      tension: 0.3,
+                      fill: false,
+                      borderColor: colors[index % colors.length],
+                      backgroundColor: colors[index % colors.length],
+                      pointBackgroundColor: colors[index % colors.length],
+                      pointBorderColor: "#fff",
+                      pointRadius: 3
+                  }))
+              },
+              options: baseChartOptions
+          });
+      }
+  </script>

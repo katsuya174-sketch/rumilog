@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>プレミアム機能</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <style>
+        body {
+            font-family: "Hiragino Sans", "Yu Gothic", "Kosugi Maru", sans-serif;
+            margin: 0;
+            padding: 24px;
+            background: linear-gradient(180deg, #fffafd 0%, #fff6f8 100%);
+            color: #555;
+            line-height: 1.8;
+        }
+
+        .page {
+            max-width: 760px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: rgba(255, 248, 252, 0.95);
+            border: 1px solid #f1d5dd;
+            border-radius: 16px;
+            padding: 18px 16px;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 12px rgba(199, 91, 122, 0.08);
+        }
+
+        h1, h2 {
+            color: #c75b7a;
+            font-family: "Kosugi Maru", sans-serif;
+        }
+
+        h1 {
+            margin-bottom: 14px;
+        }
+
+        h2 {
+            font-size: 18px;
+            margin-top: 0;
+        }
+
+        .lead {
+            color: #8a7a80;
+            font-size: 14px;
+        }
+
+        .feature {
+            padding: 8px 0;
+            border-bottom: 1px dashed #e7b8c5;
+        }
+
+        .feature:last-child {
+            border-bottom: none;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 10px 18px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #ffe6ee, #ffd6e8);
+            color: #c75b7a;
+            font-size: 13px;
+            font-weight: bold;
+            text-decoration: none;
+            border: 1px solid #f3c9d2;
+            font-family: "Kosugi Maru", sans-serif;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="page">
+        <div class="card">
+            <h1>プレミアム機能</h1>
+            <p class="lead">
+                通常の肌診断に加えて、より細かい肌状態の変化を確認できます。
+            </p>
+        </div>
+
+        <div class="card">
+            <h2>詳細スコア</h2>
+
+            <div class="feature">赤ニキビ跡</div>
+            <div class="feature">色素沈着</div>
+            <div class="feature">開き毛穴</div>
+            <div class="feature">黒ずみ毛穴</div>
+            <div class="feature">透明感</div>
+            <div class="feature">肌トーン均一性</div>
+            <div class="feature">左右差</div>
+        </div>
+
+        <div class="card">
+            <h2>履歴で変化を確認</h2>
+            <p class="lead">
+                詳細スコアの推移を見ながら、肌がどの方向に変化しているか確認できます。
+            </p>
+        </div>
+
+        <a href="/lab" class="btn">診断に戻る</a>
+    </div>
+</body>
+</html>
