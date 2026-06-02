@@ -1295,31 +1295,64 @@ def find_affiliate_links_for_ai_product(product_name, category, affiliate_ai_db)
     return None
 
 def attach_affiliate_links_to_step(step, affiliate_ai_db):
+    if not isinstance(step, dict):
+        return step
+
     product_name = step.get("product", "")
     category = step.get("category", "")
+    brand = step.get("brand", "")
+
+    if not product_name:
+        step["amazon_link"] = ""
+        step["rakuten_link"] = ""
+        return step
 
     # 1. step自体に直リンクがあるなら最優先
     if "affiliate_links" in step and isinstance(step["affiliate_links"], dict):
-        step["amazon_link"] = step["affiliate_links"].get("amazon", "#")
-        step["rakuten_link"] = step["affiliate_links"].get("rakuten", "#")
-        print("[BEFORE APPLY RAKUTEN]", step.get("product"), flush=True)
+        step["amazon_link"] = step["affiliate_links"].get("amazon", "")
+        step["rakuten_link"] = step["affiliate_links"].get("rakuten", "")
         return step
 
     # 2. AI候補専用DBで照合
-    matched_links = find_affiliate_links_for_ai_product(product_name, category, affiliate_ai_db)
+    matched_links = find_affiliate_links_for_ai_product(
+        product_name,
+        category,
+        affiliate_ai_db
+    )
+
     if matched_links:
-        step["amazon_link"] = matched_links.get("amazon", "#")
-        step["rakuten_link"] = matched_links.get("rakuten", "#")
+        step["amazon_link"] = matched_links.get("amazon", "")
+        step["rakuten_link"] = matched_links.get("rakuten", "")
         return step
 
-    # 3. 見つからなければ検索リンク
+    # 3. 楽天APIで商品直リンク・画像・価格を取得
+    rakuten_item = fetch_rakuten_item(
+        product_name=product_name,
+        category=category,
+        brand=brand
+    )
+
+    if rakuten_item:
+        step["rakuten_link"] = rakuten_item.get("rakuten_link", "")
+
+        if not step.get("image") and rakuten_item.get("image"):
+            step["image"] = rakuten_item.get("image", "")
+
+        if safe_price(step.get("price", 0)) <= 0:
+            step["price"] = safe_price(rakuten_item.get("price", 0))
+
+        if safe_price(step.get("estimated_price", 0)) <= 0:
+            step["estimated_price"] = safe_price(rakuten_item.get("price", 0))
+
+        step["raw_price"] = safe_price(rakuten_item.get("raw_price", 0))
+        step["bundle_quantity"] = int(rakuten_item.get("bundle_quantity", 1) or 1)
+    else:
+        step["rakuten_link"] = ""
+
+    # 4. Amazonは今は後回し。検索リンクだけ残す。
     step["amazon_link"] = build_amazon_link(product_name)
-    step["rakuten_link"] = build_rakuten_link(product_name)
 
-    
-
-    return step
-
+    return normalize_step_price_fields(step)
 def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
     for section in ["morning", "night"]:
         for step in data.get(section, {}).get("steps", []):
@@ -4134,68 +4167,61 @@ def is_discontinued_or_suspicious_product(product):
     if not isinstance(product, dict):
         return True
 
-    name = str(
-        product.get("name", "")
-        or product.get("product", "")
-    ).lower()
+    def norm(value):
+        return str(value or "").lower().replace("　", " ").strip()
 
-    release_status = str(
-        product.get("release_status", "")
-    ).lower()
+    name = norm(product.get("name") or product.get("product"))
+    brand = norm(product.get("brand"))
+    release_status = norm(product.get("release_status"))
+    status = norm(product.get("status"))
+    source = norm(product.get("_source"))
 
-    source = str(product.get("_source", "")).lower()
+    joined_text = " ".join([
+        brand,
+        name,
+        release_status,
+        status,
+        norm(product.get("description")),
+        norm(product.get("reason")),
+    ])
 
-    # AI仮想候補は current 明示がないものを通さない
-    if source in ["ai", "ai_virtual", "ai_rakuten_verified"]:
-        if release_status != "current":
-            return True
-
-    # DB商品は release_status 空欄を許容するが、明確な旧品指定は落とす
-    if release_status in [
-        "old",
-        "discontinued",
-        "ended",
-        "unknown"
-    ]:
+    if source in ["ai", "ai_virtual"]:
         return True
 
-    old_name_patterns = [
-        ["エンリッチド", "リンクルクリーム"],
+    if release_status in ["old", "discontinued", "ended", "unknown"]:
+        return True
+
+    if status in ["discontinued", "out_of_stock", "ended", "販売終了", "生産終了", "廃盤"]:
+        return True
+
+    hard_block_patterns = [
+        ["エリクシール", "エンリッチド", "リンクル"],
+        ["エリクシール", "ホワイト", "エンリッチド", "リンクル"],
+        ["エリクシールホワイト", "エンリッチド"],
+        ["資生堂", "エリクシールホワイト", "エンリッチド"],
         ["シュペリエル", "エンリッチド"],
+        ["リニューアル前"],
         ["旧", "パッケージ"],
         ["旧", "処方"],
-        ["リニューアル前"],
+        ["旧品"],
         ["廃盤"],
         ["生産終了"],
         ["販売終了"],
     ]
 
-    for pattern in old_name_patterns:
-        if all(word.lower() in name for word in pattern):
+    for pattern in hard_block_patterns:
+        if all(word.lower() in joined_text for word in pattern):
             return True
 
-    for kw in DISCONTINUED_KEYWORDS:
-        if kw.lower() in name:
+    for kw in globals().get("DISCONTINUED_KEYWORDS", []):
+        if norm(kw) and norm(kw) in joined_text:
             return True
 
-    if "OLD_PRODUCT_WORDS" in globals():
-        for kw in OLD_PRODUCT_WORDS:
-            if str(kw).lower() in name:
-                return True
-
-    status = str(
-        product.get("status", "")
-    ).lower()
-
-    if status in [
-        "discontinued",
-        "out_of_stock",
-        "ended"
-    ]:
-        return True
+    for kw in globals().get("OLD_PRODUCT_WORDS", []):
+        if norm(kw) and norm(kw) in joined_text:
+            return True
 
     return False
-
 def ensure_required_routine_steps(data):
     if not isinstance(data, dict):
         return {}
@@ -4553,12 +4579,35 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             continue
         candidate = normalize_rakuten_item_price(candidate)
         # DBにないAI候補は仮想商品として評価
-        virtual = build_virtual_product_from_ai_candidate(step, candidate)
-        if is_discontinued_or_suspicious_product(virtual):
-            continue
+        
         # brand/nameを明示的に保持
         virtual["brand"] = brand
         virtual["name"] = candidate_name
+
+        rakuten_verified = fetch_rakuten_item(
+            product_name=candidate_name,
+            category=category,
+            brand=brand
+        )
+
+        if not rakuten_verified:
+            continue
+
+        virtual["price_ref"] = safe_price(
+            rakuten_verified.get("price", virtual.get("price_ref", 0))
+        )
+
+        virtual["raw_price"] = safe_price(
+            rakuten_verified.get("raw_price", virtual.get("raw_price", 0))
+        )
+
+        virtual["bundle_quantity"] = int(
+            rakuten_verified.get("bundle_quantity", virtual.get("bundle_quantity", 1)) or 1
+        )
+
+        virtual["image"] = rakuten_verified.get("image", virtual.get("image", "")) or ""
+        virtual["rakuten_link"] = rakuten_verified.get("rakuten_link", "") or ""
+        virtual["_source"] = "ai_rakuten_verified"
 
         if is_discontinued_or_suspicious_product(virtual):
             continue
@@ -4614,7 +4663,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             virtual,
             improvement_plan or {}
         )
-        virtual["_source"] = "ai_virtual"
+        
 
         all_candidates.append(virtual)
 
@@ -4623,11 +4672,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
     all_candidates = [
         c for c in all_candidates
-        if (
-            isinstance(c, dict)
-            and not is_discontinued_or_suspicious_product(c)
-            and safe_float(c.get("_score", 0)) > 0
-        )
+        if isinstance(c, dict)
     ]
 
     if not all_candidates:
@@ -4673,6 +4718,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             "score": c.get("_score", 0),
             "base_score": c.get("_base_score", 0),
             "improve_score": c.get("_improve_score", 0),
+            "routine_score": c.get("_routine_score", 0),
             "source": c.get("_source", ""),
             "price_ref": c.get("price_ref", 0),
         }
@@ -5631,22 +5677,30 @@ def finalize_step_display_fields(step, best, user_data):
     if not isinstance(best, dict):
         return step
 
-    brand = str(best.get("brand", "") or "").strip()
+    brand = str(best.get("brand", "") or step.get("brand", "") or "").strip()
     name = clean_display_product_name(
         best.get("name") or step.get("product") or ""
     )
+
+    step["brand"] = brand
 
     if brand and name and not name.startswith(brand):
         step["product"] = f"{brand} {name}"
     else:
         step["product"] = name
 
-    step["base_score"] = best.get("_base_score", best.get("base_score", 0))
-    step["improve_score"] = best.get("_improve_score", best.get("improve_score", 0))
-    step["routine_score"] = best.get("_routine_score", best.get("routine_score", 0))
-    step["final_score"] = best.get("_score", best.get("final_score", 0))
+    base_score = best.get("_base_score", best.get("base_score", step.get("base_score", 0))) or 0
+    improve_score = best.get("_improve_score", best.get("improve_score", step.get("improve_score", 0))) or 0
+    routine_score = best.get("_routine_score", best.get("routine_score", step.get("routine_score", 0))) or 0
+    final_score = best.get("_score", best.get("final_score", best.get("match_score", step.get("match_score", 0)))) or 0
 
-    step["improvement_score"] = step["improve_score"]
+    step["base_score"] = base_score
+    step["improve_score"] = improve_score
+    step["routine_score"] = routine_score
+    step["final_score"] = final_score
+    step["match_score"] = final_score
+
+    step["improvement_score"] = improve_score
     step["improvement_reason"] = (
         best.get("_improvement_reason")
         or best.get("improvement_reason")
@@ -5655,16 +5709,28 @@ def finalize_step_display_fields(step, best, user_data):
         or ""
     )
 
+    step["score_detail"] = {
+        "base": base_score,
+        "improve": improve_score,
+        "routine": routine_score,
+        "final": final_score,
+    }
+
+    if not isinstance(step.get("top_candidates"), list):
+        step["top_candidates"] = best.get("_top_candidates", [])
+
     step["price_ref"] = safe_price(
         best.get("price_ref")
         or best.get("normalized_price")
         or step.get("price_ref")
+        or step.get("price")
         or 0
     )
 
     step["raw_price"] = safe_price(
         best.get("raw_price")
         or step.get("raw_price")
+        or step.get("price")
         or 0
     )
 
@@ -5673,13 +5739,6 @@ def finalize_step_display_fields(step, best, user_data):
         or step.get("bundle_quantity")
         or 1
     )
-
-    step["score_detail"] = {
-        "base": step.get("base_score", 0),
-        "improve": step.get("improve_score", 0),
-        "routine": step.get("routine_score", 0),
-        "final": step.get("final_score", 0),
-    }
 
     invalid_reason = "現在確認できる商品候補が見つかりませんでした。"
 
@@ -5695,6 +5754,8 @@ def finalize_step_display_fields(step, best, user_data):
         )
 
     return step
+
+
 def assign_products_to_all_steps(data, products, user_data, budget_value):
     print("MARKET VERSION assign_products_to_all_steps", flush=True)
 
@@ -6733,38 +6794,94 @@ def finalize_step_data(step, user_data):
     if not isinstance(step, dict):
         step = {}
 
-    category = str(step.get("category", "") or "美容液")
-    ingredient_focus = str(step.get("ingredient_focus", "") or "")
-    purpose = str(step.get("purpose", "") or "肌状態に合わせた基本ケア")
+    def to_number(value, default=0):
+        if isinstance(value, (int, float)):
+            return value
+        try:
+            return safe_price(value)
+        except Exception:
+            return default
 
-    # product
-    if not step.get("product"):
-        candidate_name = get_first_concrete_candidate(step)
+    def clean_text(value):
+        return "" if value is None else str(value).strip()
 
-        if candidate_name:
-            step["product"] = candidate_name
-            step["product_source"] = "ai_fallback"
-        else:
-            step["product"] = ""
-            step["product_source"] = "missing"
-        # image
-        if not step.get("image"):
-            step["image"] = ""
+    def normalize_candidate(c):
+        if not isinstance(c, dict):
+            return None
 
-    # recommend_reason
-    if not step.get("recommend_reason"):
-        step["recommend_reason"] = build_ai_reason(step, user_data)
+        name = clean_text(
+            c.get("name")
+            or c.get("product")
+            or c.get("product_name")
+        )
 
-    # product_source
-    if not step.get("product_source"):
-        step["product_source"] = "fallback"
+        if not name:
+            return None
 
+        base = to_number(
+            c.get("base_score", c.get("base", c.get("fit_score", 0)))
+        )
+        improve = to_number(
+            c.get("improve_score", c.get("improve", c.get("improvement_score", 0)))
+        )
+        routine = to_number(
+            c.get("routine_score", c.get("routine", 0))
+        )
+        final = to_number(
+            c.get("score", c.get("final_score", c.get("match_score", c.get("final", 0))))
+        )
+
+        if final <= 0:
+            final = base + improve + routine
+
+        return {
+            "brand": clean_text(c.get("brand")),
+            "name": name,
+            "score": final,
+            "base_score": base,
+            "improve_score": improve,
+            "routine_score": routine,
+            "source": clean_text(c.get("source", c.get("product_source", ""))),
+            "price_ref": to_number(c.get("price_ref", c.get("price", 0))),
+        }
+
+    category = clean_text(step.get("category")) or "美容液"
+    ingredient_focus = clean_text(step.get("ingredient_focus"))
+    purpose = clean_text(step.get("purpose")) or "肌状態に合わせた基本ケア"
+
+    step["category"] = category
+    step["ingredient_focus"] = ingredient_focus
+    step["purpose"] = purpose
 
     step = normalize_step_price_fields(step)
 
-    # price_band
+    current_product = clean_text(step.get("product"))
+    current_brand = clean_text(step.get("brand"))
+
+    if not current_product:
+        candidate_name = get_first_concrete_candidate(step)
+        if candidate_name:
+            step["product"] = clean_text(candidate_name)
+            step["product_source"] = step.get("product_source") or "ai_fallback"
+        else:
+            step["product"] = ""
+            step["product_source"] = "missing"
+    else:
+        step["product"] = current_product
+
+    if not step.get("product_source"):
+        step["product_source"] = "selected"
+
+    if not step.get("image"):
+        step["image"] = ""
+
+    if not step.get("recommend_reason"):
+        step["recommend_reason"] = build_ai_reason(step, user_data)
+
+    price = to_number(step.get("price", step.get("price_ref", 0)))
+    step["price"] = price
+
     if not step.get("price_band"):
-        price = step.get("price", 0)
         if price > 0:
             if price <= 1500:
                 step["price_band"] = "〜1500円"
@@ -6777,59 +6894,102 @@ def finalize_step_data(step, user_data):
         else:
             step["price_band"] = "価格不明"
 
-    # 数値系
-    for key in ["match_score", "base_score", "improve_score", "priority"]:
-        value = step.get(key, 0)
-        if isinstance(value, (int, float)):
-            step[key] = value
-        else:
-            step[key] = safe_price(value)
+    for key in ["match_score", "base_score", "improve_score", "routine_score", "priority"]:
+        step[key] = to_number(step.get(key, 0))
 
-    # score_detail
-    if not isinstance(step.get("score_detail"), dict):
-        step["score_detail"] = {
-            "base": step.get("base_score", 0),
-            "improve": step.get("improve_score", 0),
-            "final": step.get("match_score", 0)
-        }
+    candidates = []
+
+    for c in step.get("top_candidates", []):
+        normalized = normalize_candidate(c)
+        if normalized:
+            candidates.append(normalized)
+
+    for c in step.get("product_candidates", []):
+        normalized = normalize_candidate(c)
+        if normalized:
+            candidates.append(normalized)
+
+    selected_candidate = normalize_candidate({
+        "brand": step.get("brand", ""),
+        "name": step.get("product", ""),
+        "score": step.get("match_score", 0),
+        "base_score": step.get("base_score", 0),
+        "improve_score": step.get("improve_score", 0),
+        "routine_score": step.get("routine_score", 0),
+        "source": step.get("product_source", ""),
+        "price_ref": step.get("price", 0),
+    })
+
+    if selected_candidate:
+        candidates.insert(0, selected_candidate)
+
+    unique_candidates = []
+    seen_names = set()
+
+    for c in candidates:
+        key = c["name"].lower()
+        if key in seen_names:
+            continue
+        seen_names.add(key)
+        unique_candidates.append(c)
+
+    unique_candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    step["top_candidates"] = unique_candidates[:3]
+
+    if step["top_candidates"]:
+        best = step["top_candidates"][0]
+
+        if not step.get("product"):
+            step["product"] = best["name"]
+
+        if not step.get("brand") and best.get("brand"):
+            step["brand"] = best["brand"]
+
+        if step.get("match_score", 0) <= 0:
+            step["match_score"] = best.get("score", 0)
+
+        if step.get("base_score", 0) <= 0:
+            step["base_score"] = best.get("base_score", 0)
+
+        if step.get("improve_score", 0) <= 0:
+            step["improve_score"] = best.get("improve_score", 0)
+
+        if step.get("routine_score", 0) <= 0:
+            step["routine_score"] = best.get("routine_score", 0)
+
+    step["product_candidates"] = [
+        c for c in step.get("product_candidates", [])
+        if isinstance(c, dict)
+    ]
+
+    existing_score_detail = step.get("score_detail")
+    if isinstance(existing_score_detail, dict):
+        base = to_number(existing_score_detail.get("base", step.get("base_score", 0)))
+        improve = to_number(existing_score_detail.get("improve", step.get("improve_score", 0)))
+        routine = to_number(existing_score_detail.get("routine", step.get("routine_score", 0)))
+        final = to_number(existing_score_detail.get("final", step.get("match_score", 0)))
     else:
-        sd = step["score_detail"]
-        step["score_detail"] = {
-            "base": safe_price(sd.get("base", step.get("base_score", 0))),
-            "improve": safe_price(sd.get("improve", step.get("improve_score", 0))),
-            "final": safe_price(sd.get("final", step.get("match_score", 0))),
-        }
+        base = step.get("base_score", 0)
+        improve = step.get("improve_score", 0)
+        routine = step.get("routine_score", 0)
+        final = step.get("match_score", 0)
 
-    # product_candidates
-    if not isinstance(step.get("product_candidates"), list):
-        step["product_candidates"] = []
-    print(
-        "[AI FINAL CANDIDATES]",
-        step["product_candidates"],
-        flush=True
-    )
-    # top_candidates
-    if not isinstance(step.get("top_candidates"), list):
-        step["top_candidates"] = []
+    if final <= 0:
+        final = base + improve + routine
 
-    cleaned_top = []
-    for c in step.get("top_candidates", [])[:3]:
-        if not isinstance(c, dict):
-            continue
-        name = str(c.get("name", "")).strip()
-        if not name:
-            continue
-        cleaned_top.append({
-            "name": name,
-            "score": c.get("score", 0) if isinstance(c.get("score", 0), (int, float)) else safe_price(c.get("score", 0)),
-            "base_score": c.get("base_score", 0) if isinstance(c.get("base_score", 0), (int, float)) else safe_price(c.get("base_score", 0)),
-            "improve_score": c.get("improve_score", 0) if isinstance(c.get("improve_score", 0), (int, float)) else safe_price(c.get("improve_score", 0)),
-            "source": str(c.get("source", "") or ""),
-            "price_ref": safe_price(c.get("price_ref", 0)),
-        })
-    step["top_candidates"] = cleaned_top
+    step["score_detail"] = {
+        "base": base,
+        "improve": improve,
+        "routine": routine,
+        "final": final,
+    }
 
-    # impact_scores / top_impacts
+    step["base_score"] = base
+    step["improve_score"] = improve
+    step["routine_score"] = routine
+    step["match_score"] = final
+
     if not isinstance(step.get("impact_scores"), dict):
         impact = calculate_step_impact(step, None)
         step["impact_scores"] = impact
@@ -6838,16 +6998,25 @@ def finalize_step_data(step, user_data):
         if not isinstance(step.get("top_impacts"), list):
             step["top_impacts"] = format_top_impacts(step["impact_scores"])
 
-    # display_role
     step["display_role"] = get_step_display_role(step)
 
-    # 文字列系を最低限整える
-    for key in ["category", "role", "purpose", "ingredient_focus", "risk_note", "product", "recommend_reason", "product_source", "frequency", "display_role"]:
+    for key in [
+        "category",
+        "role",
+        "purpose",
+        "ingredient_focus",
+        "risk_note",
+        "product",
+        "brand",
+        "recommend_reason",
+        "product_source",
+        "frequency",
+        "display_role",
+    ]:
         if key in step:
-            step[key] = "" if step[key] is None else str(step[key])
+            step[key] = clean_text(step[key])
 
     return step
-
 def build_rule_based_warnings(data, user_data):
     warnings = []
     sens = normalize_text(user_data.get("sens", ""))

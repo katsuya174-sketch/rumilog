@@ -615,9 +615,11 @@
                         <a href="/click?source=amazon&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.amazon_link|urlencode }}" target="_blank" rel="noopener noreferrer">
                             <button type="button" class="amazon-btn">Amazonで見る</button>
                         </a>
+                        {% if step.get("rakuten_link") %}
                         <a href="/click?source=rakuten&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.rakuten_link|urlencode }}" target="_blank" rel="noopener noreferrer">
                             <button type="button" class="rakuten-btn">楽天で見る</button>
                         </a>
+                        {% endif %}
                     </div>
                     <div class="product-score">
                         適合: {{ step.get("base_score", 0) }} / 改善: {{ step.get("improve_score", 0) }}
@@ -745,9 +747,11 @@
                         <a href="/click?source=amazon&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.amazon_link|urlencode }}" target="_blank" rel="noopener noreferrer">
                             <button type="button" class="amazon-btn">Amazonで見る</button>
                         </a>
+                        {% if step.get("rakuten_link") %}
                         <a href="/click?source=rakuten&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.rakuten_link|urlencode }}" target="_blank" rel="noopener noreferrer">
                             <button type="button" class="rakuten-btn">楽天で見る</button>
                         </a>
+                        {% endif %}
                     </div>
                     <div class="product-score">
                         適合: {{ step.get("base_score", 0) }} / 改善: {{ step.get("improve_score", 0) }}
@@ -878,9 +882,11 @@
                             <a href="/click?source=amazon&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.amazon_link|urlencode }}" target="_blank" rel="noopener noreferrer">
                                 <button type="button" class="amazon-btn">Amazonで見る</button>
                             </a>
+                            {% if step.get("rakuten_link") %}
                             <a href="/click?source=rakuten&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.rakuten_link|urlencode }}" target="_blank" rel="noopener noreferrer">
                                 <button type="button" class="rakuten-btn">楽天で見る</button>
                             </a>
+                            {% endif %}
                         </div>
                     <div class="product-score">
                         適合: {{ step.get("base_score", 0) }} / 改善: {{ step.get("improve_score", 0) }}
