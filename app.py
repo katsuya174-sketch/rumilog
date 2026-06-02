@@ -4579,7 +4579,10 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             continue
         candidate = normalize_rakuten_item_price(candidate)
         # DBにないAI候補は仮想商品として評価
-        
+        virtual = build_virtual_product_from_ai_candidate(
+            step,
+            candidate
+        )
         # brand/nameを明示的に保持
         virtual["brand"] = brand
         virtual["name"] = candidate_name
