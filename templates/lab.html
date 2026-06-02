@@ -789,22 +789,69 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
       let currentStream = null;
       let currentFacingMode = "user";
   
-      function handleSubmit(event) {
+      async function handleSubmit(event) {
           event.preventDefault();
-  
+
           const form = document.getElementById("diagnosisForm");
+          const submitBtn = document.getElementById("submitBtn");
+
           if (!form.checkValidity()) {
               form.reportValidity();
               return false;
           }
-  
+
           showLoading();
-  
-          setTimeout(() => {
-              HTMLFormElement.prototype.submit.call(form);
-          }, 120);
-  
-          return false;
+
+          try {
+              const formData = new FormData(form);
+
+              const response = await fetch(form.action || window.location.href, {
+                  method: "POST",
+                  body: formData,
+                  headers: {
+                      "X-Requested-With": "XMLHttpRequest"
+                  }
+              });
+
+              let result = null;
+
+              try {
+                  result = await response.json();
+              } catch (jsonError) {
+                  result = null;
+              }
+
+              if (!response.ok || !result || result.success === false) {
+                  const message =
+                      (result && result.message)
+                      ? result.message
+                      : "診断中にエラーが発生しました。少し時間をおいて再度お試しください。";
+
+                  showLoadingError(message);
+                  return false;
+              }
+
+              if (result.html) {
+                  document.open();
+                  document.write(result.html);
+                  document.close();
+                  return false;
+              }
+
+              showLoadingError("診断結果の表示に失敗しました。もう一度お試しください。");
+              return false;
+
+          } catch (error) {
+              console.error("diagnosis ajax error:", error);
+              showLoadingError("通信エラーが発生しました。時間をおいて再度お試しください。");
+              return false;
+
+          } finally {
+              if (submitBtn) {
+                  submitBtn.disabled = false;
+                  submitBtn.innerText = "診断する";
+              }
+          }
       }
   
       function resetCaptureChips() {
@@ -1209,6 +1256,76 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           if (submitBtn) {
               submitBtn.disabled = true;
               submitBtn.innerText = "診断中…";
+          }
+      }
+      function showLoadingError(message) {
+          const overlay = document.getElementById("loadingOverlay");
+          const mainText = document.getElementById("loadingTextMain");
+          const animation = document.getElementById("loadingAnimation");
+          const submitBtn = document.getElementById("submitBtn");
+
+          if (overlay) {
+              overlay.style.display = "flex";
+          }
+
+          if (mainText) {
+              mainText.textContent = message || "診断中にエラーが発生しました。";
+          }
+
+          if (animation) {
+              animation.innerHTML = `
+                  <div style="
+                      margin-top: 18px;
+                      padding: 14px 16px;
+                      border-radius: 16px;
+                      background: rgba(255, 248, 252, 0.95);
+                      border: 1px solid #f1d5dd;
+                      color: #c75b7a;
+                      font-size: 14px;
+                      line-height: 1.7;
+                  ">
+                      画面を閉じずに、少し時間をおいてからもう一度お試しください。
+                      <br>
+                      <button type="button" onclick="hideLoadingError()" style="
+                          margin-top: 12px;
+                          padding: 9px 16px;
+                          border-radius: 999px;
+                          border: 1px solid #f3c9d2;
+                          background: linear-gradient(135deg, #ffe6ee, #ffd6e8);
+                          color: #c75b7a;
+                          font-weight: bold;
+                      ">
+                          入力画面に戻る
+                      </button>
+                  </div>
+              `;
+          }
+
+          if (submitBtn) {
+              submitBtn.disabled = false;
+              submitBtn.innerText = "診断する";
+          }
+      }
+
+      function hideLoadingError() {
+          const overlay = document.getElementById("loadingOverlay");
+          const animation = document.getElementById("loadingAnimation");
+
+          if (overlay) {
+              overlay.style.display = "none";
+          }
+
+          if (animation) {
+              animation.innerHTML = `
+                  <div class="loader loader-bubbles">
+                      <div class="loader-bubble-item bubble1"></div>
+                      <div class="loader-bubble-item bubble2"></div>
+                      <div class="loader-bubble-item bubble3"></div>
+                      <div class="loader-bubble-item bubble4"></div>
+                      <div class="loader-bubble-item bubble5"></div>
+                      <div class="loader-bubble-item bubble6"></div>
+                  </div>
+              `;
           }
       }
   </script>

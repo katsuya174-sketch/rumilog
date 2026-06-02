@@ -4143,6 +4143,14 @@ def is_discontinued_or_suspicious_product(product):
         product.get("release_status", "")
     ).lower()
 
+    source = str(product.get("_source", "")).lower()
+
+    # AI仮想候補は current 明示がないものを通さない
+    if source in ["ai", "ai_virtual", "ai_rakuten_verified"]:
+        if release_status != "current":
+            return True
+
+    # DB商品は release_status 空欄を許容するが、明確な旧品指定は落とす
     if release_status in [
         "old",
         "discontinued",
@@ -4151,9 +4159,29 @@ def is_discontinued_or_suspicious_product(product):
     ]:
         return True
 
+    old_name_patterns = [
+        ["エンリッチド", "リンクルクリーム"],
+        ["シュペリエル", "エンリッチド"],
+        ["旧", "パッケージ"],
+        ["旧", "処方"],
+        ["リニューアル前"],
+        ["廃盤"],
+        ["生産終了"],
+        ["販売終了"],
+    ]
+
+    for pattern in old_name_patterns:
+        if all(word.lower() in name for word in pattern):
+            return True
+
     for kw in DISCONTINUED_KEYWORDS:
         if kw.lower() in name:
             return True
+
+    if "OLD_PRODUCT_WORDS" in globals():
+        for kw in OLD_PRODUCT_WORDS:
+            if str(kw).lower() in name:
+                return True
 
     status = str(
         product.get("status", "")
@@ -4470,7 +4498,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         # AI候補名がDBにあるなら、DB詳細を使って昇格
         if db_match:
             product = dict(db_match)
-
+            if is_discontinued_or_suspicious_product(product):
+                continue
             # AI側brandを保持
             if brand and not product.get("brand"):
                 product["brand"] = brand
@@ -4525,7 +4554,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         candidate = normalize_rakuten_item_price(candidate)
         # DBにないAI候補は仮想商品として評価
         virtual = build_virtual_product_from_ai_candidate(step, candidate)
-
+        if is_discontinued_or_suspicious_product(virtual):
+            continue
         # brand/nameを明示的に保持
         virtual["brand"] = brand
         virtual["name"] = candidate_name
@@ -4664,6 +4694,9 @@ def apply_moisture_plan(data):
         return {}
 
     moisture_plan = data.get("moisture_plan", {})
+    if not isinstance(moisture_plan, dict):
+        moisture_plan = {}
+
     need_emulsion = bool(moisture_plan.get("need_emulsion", False))
     need_cream = bool(moisture_plan.get("need_cream", False))
     need_double_moisture = bool(moisture_plan.get("need_double_moisture", False))
@@ -4684,15 +4717,17 @@ def apply_moisture_plan(data):
 
             category = step.get("category", "")
 
-            # 朝は重すぎる保湿を減らす
             if section == "morning":
-                if category == "乳液" and not need_emulsion and not need_double_moisture:
+                if need_double_moisture:
+                    filtered_steps.append(step)
                     continue
 
-                if category == "クリーム" and not need_cream and not need_double_moisture:
+                if category == "乳液" and need_cream:
                     continue
 
-            # 夜はクリームを削除しない
+                if category == "クリーム" and need_emulsion:
+                    continue
+
             if section == "night":
                 if category == "乳液" and not need_emulsion and not need_double_moisture:
                     continue
@@ -4705,30 +4740,60 @@ def apply_moisture_plan(data):
             if isinstance(s, dict)
         ]
 
+        if section == "morning":
+            if need_double_moisture:
+                if "乳液" not in categories:
+                    filtered_steps.append({
+                        "category": "乳液",
+                        "role": "main",
+                        "purpose": "朝の保湿補助",
+                        "ingredient_focus": "セラミド",
+                        "risk_note": "",
+                        "priority": 5,
+                        "product_candidates": []
+                    })
+
+                categories = [
+                    s.get("category")
+                    for s in filtered_steps
+                    if isinstance(s, dict)
+                ]
+
+                if "クリーム" not in categories:
+                    filtered_steps.append({
+                        "category": "クリーム",
+                        "role": "main",
+                        "purpose": "朝のバリア保護",
+                        "ingredient_focus": "セラミド",
+                        "risk_note": "",
+                        "priority": 6,
+                        "product_candidates": []
+                    })
+
+            else:
+                if "乳液" not in categories and "クリーム" not in categories:
+                    if need_cream:
+                        filtered_steps.append({
+                            "category": "クリーム",
+                            "role": "main",
+                            "purpose": "朝のバリア保護",
+                            "ingredient_focus": "セラミド",
+                            "risk_note": "",
+                            "priority": 6,
+                            "product_candidates": []
+                        })
+                    else:
+                        filtered_steps.append({
+                            "category": "乳液",
+                            "role": "main",
+                            "purpose": "朝の保湿補助",
+                            "ingredient_focus": "セラミド",
+                            "risk_note": "",
+                            "priority": 5,
+                            "product_candidates": []
+                        })
+
         if section == "night":
-            if "クリーム" not in categories:
-                filtered_steps.append({
-                    "category": "クリーム",
-                    "role": "main",
-                    "purpose": "夜のバリア保護",
-                    "ingredient_focus": "セラミド",
-                    "risk_note": "",
-                    "priority": 5,
-                    "product_candidates": []
-                })
-
-        if need_double_moisture:
-            if "乳液" not in categories:
-                filtered_steps.append({
-                    "category": "乳液",
-                    "role": "main",
-                    "purpose": "保湿強化",
-                    "ingredient_focus": "セラミド",
-                    "risk_note": "",
-                    "priority": 4,
-                    "product_candidates": []
-                })
-
             categories = [
                 s.get("category")
                 for s in filtered_steps
@@ -4739,7 +4804,18 @@ def apply_moisture_plan(data):
                 filtered_steps.append({
                     "category": "クリーム",
                     "role": "main",
-                    "purpose": "バリア保護",
+                    "purpose": "夜のバリア保護",
+                    "ingredient_focus": "セラミド",
+                    "risk_note": "",
+                    "priority": 6,
+                    "product_candidates": []
+                })
+
+            if need_double_moisture and "乳液" not in categories:
+                filtered_steps.append({
+                    "category": "乳液",
+                    "role": "main",
+                    "purpose": "保湿強化",
                     "ingredient_focus": "セラミド",
                     "risk_note": "",
                     "priority": 5,
@@ -4747,8 +4823,6 @@ def apply_moisture_plan(data):
                 })
 
         data[section]["steps"] = filtered_steps
-
-  
 
     return data
 
@@ -8583,18 +8657,40 @@ def apply_db_product_to_step(step, product, user_data):
     step["affiliate_provider"] = product.get("affiliate_provider", "")
     step["affiliate_item_id"] = product.get("affiliate_item_id", "")
 
-    step["match_score"] = product.get("_score") or 0
-    step["base_score"] = product.get("_base_score") or 0
-    step["improve_score"] = product.get("_improve_score") or 0
-    step["recommend_reason"] = build_recommend_reason(product, step, user_data)
-    step["product_source"] = "db"
+    step["match_score"] = product.get("_score", product.get("final_score", 0)) or 0
+    step["base_score"] = product.get("_base_score", product.get("base_score", 0)) or 0
+    step["improve_score"] = product.get("_improve_score", product.get("improve_score", 0)) or 0
+    step["routine_score"] = product.get("_routine_score", product.get("routine_score", 0)) or 0
+    step["final_score"] = product.get("_score", product.get("final_score", 0)) or 0
+
+    step["improvement_score"] = step["improve_score"]
+    step["improvement_reason"] = (
+        product.get("_improvement_reason")
+        or product.get("improvement_reason")
+        or product.get("reason")
+        or ""
+    )
+
+    step["score_detail"] = {
+        "base": step["base_score"],
+        "improve": step["improve_score"],
+        "routine": step["routine_score"],
+        "final": step["final_score"],
+    }
+
+    step["recommend_reason"] = (
+        product.get("reason")
+        or product.get("_improvement_reason")
+        or build_recommend_reason(product, step, user_data)
+    )
+
+    step["product_source"] = product.get("_source", "db") or "db"
 
     impact = calculate_step_impact(step, product)
     step["impact_scores"] = impact
     step["top_impacts"] = format_top_impacts(impact)
 
     step["buy_lead"] = build_buy_lead(step)
-
 
 def apply_ai_candidate_to_step(step, user_data, ai_image_db=None):
     category = step.get("category", "")
