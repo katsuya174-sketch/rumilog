@@ -4560,6 +4560,9 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         virtual["brand"] = brand
         virtual["name"] = candidate_name
 
+        if is_discontinued_or_suspicious_product(virtual):
+            continue
+
         if is_wrong_cleanser_candidate(virtual, step):
             continue
 
@@ -4614,6 +4617,18 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         virtual["_source"] = "ai_virtual"
 
         all_candidates.append(virtual)
+
+    if not all_candidates:
+        return None
+
+    all_candidates = [
+        c for c in all_candidates
+        if (
+            isinstance(c, dict)
+            and not is_discontinued_or_suspicious_product(c)
+            and safe_float(c.get("_score", 0)) > 0
+        )
+    ]
 
     if not all_candidates:
         return None
@@ -5692,7 +5707,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
         "selected_products": []
     }
 
-    def assign_one_step(step, used_product_names, section_name):
+    def assign_one_step(step, used_product_names, section_name,routine_context):
         if not isinstance(step, dict):
             return step
 
@@ -5816,9 +5831,14 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
         return step
 
-    used_product_names = set()
-
     for section in ["morning", "night"]:
+        used_product_names = set()
+        routine_context = {
+            "families": [],
+            "strengths": [],
+            "selected_products": []
+        }
+
         steps = data.get(section, {}).get("steps", [])
 
         if not isinstance(steps, list):
@@ -5828,8 +5848,16 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             steps[idx] = assign_one_step(
                 step,
                 used_product_names,
-                section
+                section,
+                routine_context
             )
+
+    weekly_used_product_names = set()
+    weekly_routine_context = {
+        "families": [],
+        "strengths": [],
+        "selected_products": []
+    }
 
     weekly_steps = data.get("weekly_care", [])
 
@@ -5837,8 +5865,9 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
         for idx, step in enumerate(weekly_steps):
             weekly_steps[idx] = assign_one_step(
                 step,
-                used_product_names,
-                "weekly_care"
+                weekly_used_product_names,
+                "weekly_care",
+                weekly_routine_context
             )
 
     return data
