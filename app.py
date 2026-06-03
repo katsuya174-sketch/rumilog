@@ -719,9 +719,10 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     name = clean_rakuten_keyword(product_name).lower()
     brand = clean_rakuten_keyword(brand).lower()
 
-    score = 0
+    if not title:
+        return -9999
 
-    # 明確なNGだけ除外。商品名一致しないだけでは落とさない。
+    # 1個販売だけ採用する。セット・詰替・サンプルはリンクも価格も不適切なので除外。
     hard_reject_words = [
         "詰替",
         "詰め替え",
@@ -733,6 +734,18 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         "サンプル",
         "ミニサイズ",
         "トライアル",
+        "セット",
+        "まとめ買い",
+        "2個",
+        "3個",
+        "4個",
+        "5個",
+        "6個",
+        "2本",
+        "3本",
+        "4本",
+        "5本",
+        "6本",
         "中古",
         "廃盤",
         "廃番",
@@ -744,24 +757,37 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     if any(word in title for word in hard_reject_words):
         return -9999
 
-    # 明確なカテゴリ違いだけ除外
+    if infer_bundle_quantity_from_title(title) > 1:
+        return -9999
+
+    # 明確なカテゴリ違いだけ除外。UVクリーム・UVミルクは日焼け止めとして許可。
     if category == "美容液":
         if any(word in title for word in ["シートマスク", "フェイスマスク", "薬用マスク", "パック"]):
             return -9999
 
     elif category == "クリーム":
-        if any(word in title for word in ["化粧水", "ローション", "乳液", "ミルク", "シートマスク", "フェイスマスク"]):
+        if any(word in title for word in ["化粧水", "ローション", "乳液", "シートマスク", "フェイスマスク"]):
             return -9999
 
     elif category == "日焼け止め":
-        if any(word in title for word in ["シートマスク", "フェイスマスク", "パック"]):
+        if any(word in title for word in ["シートマスク", "フェイスマスク", "薬用マスク", "パック"]):
             return -9999
+        if not any(word in title for word in ["日焼け止め", "UV", "uv", "SPF", "spf", "PA", "pa", "サンスクリーン"]):
+            score_category = -20
+        else:
+            score_category = 20
 
     elif category == "化粧水":
-        if any(word in title for word in ["クリーム", "乳液", "ミルク", "シートマスク", "フェイスマスク", "パック"]):
+        if any(word in title for word in ["クリーム", "乳液", "ミルク", "美容液", "セラム", "シートマスク", "フェイスマスク", "パック"]):
             return -9999
+        score_category = 0
 
-    # 商品名一致は加点にする。足切りにはしない。
+    else:
+        score_category = 0
+
+    score = score_category if "score_category" in locals() else 0
+
+    # 商品名一致は加点。条件検索なので足切りにはしない。
     if name and name in title_norm:
         score += 70
     else:
@@ -802,7 +828,9 @@ def score_rakuten_item(item, product_name, brand="", category=""):
 
     price = safe_price(item.get("itemPrice", 0))
 
-    if price >= 12000:
+    if price <= 0:
+        score -= 30
+    elif price >= 12000:
         score -= 20
     elif price >= 8000:
         score -= 12
@@ -1009,11 +1037,14 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
     if time.time() < RAKUTEN_COOLDOWN_UNTIL:
         print("[RAKUTEN COOLDOWN ACTIVE]", flush=True)
         return None
+
     product_name = clean_display_product_name(product_name)
     if not product_name:
         print("[RAKUTEN API] product_name empty", flush=True)
         return None
+
     product_name = clean_ai_product_name(product_name)
+
     if not RAKUTEN_APP_ID:
         print("[RAKUTEN API] RAKUTEN_APP_ID is empty", flush=True)
         return None
@@ -1037,7 +1068,9 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
         ingredient_focus=ingredient_focus,
         purpose=purpose
     )
+
     MAX_RAKUTEN_KEYWORDS = 5
+
     for keyword in keywords[:MAX_RAKUTEN_KEYWORDS]:
         keyword = clean_rakuten_keyword(keyword)
 
@@ -1047,18 +1080,15 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
         try:
             print(f"[RAKUTEN TRY KEYWORD] {keyword}", flush=True)
-            print(
-                "[RAKUTEN KEYWORD LEN]",
-                len(keyword),
-                flush=True
-            )
+            print("[RAKUTEN KEYWORD LEN]", len(keyword), flush=True)
+
             wait_for_rakuten_rate_limit()
 
             params = {
                 "applicationId": RAKUTEN_APP_ID,
                 "accessKey": RAKUTEN_ACCESS_KEY,
                 "keyword": keyword,
-                "hits": 10,
+                "hits": 20,
                 "format": "json",
                 "formatVersion": 2,
                 "imageFlag": 1,
@@ -1084,53 +1114,52 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                     print("[RAKUTEN RATE LIMIT SKIP]", keyword, flush=True)
                     return None
 
-                if (
-                    res.status_code == 400
-                    and "keyword is not valid" in res.text
-                ):
+                if res.status_code == 400 and "keyword is not valid" in res.text:
                     print("[RAKUTEN INVALID KEYWORD SKIP]", keyword, flush=True)
                     continue
 
                 continue
 
             payload = res.json()
-            
-            
+
             items = (
                 payload.get("items")
                 or payload.get("Items")
                 or []
             )
 
-            # print("[RAKUTEN PAYLOAD KEYS]",list(payload.keys()),flush=True)
-
-            # print("[RAKUTEN API ITEMS]",len(items),flush=True)
-
             if not items:
                 continue
 
-            scored_items = sorted(
-                items,
-                key=lambda item: score_rakuten_item(
-                    item.get("Item", item) if isinstance(item, dict) else item,
+            scored_items = []
+
+            for raw_item in items:
+                item = raw_item.get("Item", raw_item) if isinstance(raw_item, dict) else raw_item
+
+                if not isinstance(item, dict):
+                    continue
+
+                score = score_rakuten_item(
+                    item,
                     product_name=product_name,
                     brand=brand,
                     category=category
-                ),
+                )
+
+                if score < 20:
+                    continue
+
+                scored_items.append((score, item))
+
+            if not scored_items:
+                continue
+
+            scored_items.sort(
+                key=lambda pair: pair[0],
                 reverse=True
             )
 
-            best = scored_items[0]
-
-            if isinstance(best, dict) and "Item" in best:
-                best = best["Item"]
-
-            best_score = score_rakuten_item(
-                best,
-                product_name=product_name,
-                brand=brand,
-                category=category
-            )
+            best_score, best = scored_items[0]
 
             print(
                 "[RAKUTEN BEST SCORE]",
@@ -1139,47 +1168,35 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 flush=True
             )
 
-            if best_score < 20:
-                print(
-                    "[RAKUTEN BEST REJECTED]",
-                    best_score,
-                    best.get("itemName", ""),
-                    flush=True
-                )
-                continue
-
             image_url = ""
 
-            medium_images = (
-                best.get("mediumImageUrls")
-                or []
-            )
+            medium_images = best.get("mediumImageUrls") or []
 
             if medium_images:
                 first = medium_images[0]
 
                 if isinstance(first, dict):
-                    image_url = (
-                        first.get("imageUrl", "")
-                    )
-
+                    image_url = first.get("imageUrl", "")
                 elif isinstance(first, str):
                     image_url = first
 
-            image_url = (
-                str(image_url)
-                .replace("http://", "https://")
-            )
+            image_url = str(image_url).replace("http://", "https://")
+
             best = normalize_rakuten_item_price(best)
 
-            
+            raw_price = safe_price(
+                best.get("raw_price")
+                or best.get("itemPrice")
+                or 0
+            )
+
             result = {
                 "name": clean_display_product_name(product_name),
                 "rakuten_title": best.get("itemName", ""),
-                "price": best.get("raw_price", 0),
-                "normalized_price": best.get("normalized_price", 0),
-                "raw_price": best.get("raw_price", 0),
-                "bundle_quantity": best.get("bundle_quantity", 1),
+                "price": raw_price,
+                "normalized_price": raw_price,
+                "raw_price": raw_price,
+                "bundle_quantity": 1,
                 "rakuten_link": (
                     best.get("affiliateUrl")
                     or best.get("itemUrl")
@@ -1187,8 +1204,6 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 ),
                 "image": image_url,
             }
-
-            # print("[RAKUTEN API BEST ITEM]", {"name": result["name"],"price": result["price"],"image": result["image"],"rakuten_link_exists": result["rakuten_link"] != "#"}, flush=True)
 
             return result
 
