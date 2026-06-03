@@ -712,145 +712,7 @@ def is_same_product_for_market(ai_name, rakuten_title):
 
     return match_ratio >= 0.45
 
-def score_rakuten_item(item, product_name, brand="", category=""):
-    title = str(item.get("itemName", "") or "")
-    title_norm = title.lower()
-
-    if not is_same_product_for_market(product_name, title):
-        return -9999
-
-    category_reject_words = {
-        "美容液": ["マスク", "シート", "パック"],
-        "乳液": ["化粧水", "ローション", "マスク", "パック"],
-        "クリーム": ["化粧水", "ローション", "マスク", "シート", "パック"],
-        "化粧水": ["クリーム", "乳液", "ミルク", "マスク", "パック"],
-    }
-
-    if category in category_reject_words:
-        if any(word in title for word in category_reject_words[category]):
-            return -9999
-
-    hard_reject_words = [
-        "詰替",
-        "詰め替え",
-        "つめかえ",
-        "レフィル",
-        "付け替え",
-        "つけかえ",
-        "お試し",
-        "サンプル",
-        "ミニサイズ",
-        "トライアル",
-        "セット",
-        "まとめ買い",
-        "2個",
-        "3個",
-        "4個",
-        "5個",
-        "6個",
-        "中古",
-        "廃盤",
-        "廃番",
-        "生産終了",
-        "販売終了",
-        "製造終了",
-    ]
-
-    if any(word in title for word in hard_reject_words):
-        return -9999
-
-    name = clean_rakuten_keyword(product_name).lower()
-    brand = clean_rakuten_keyword(brand).lower()
-
-    score = 0
-
-    soft_risk_words = [
-        "旧品",
-        "旧型",
-        "旧モデル",
-        "旧パッケージ",
-        "旧処方",
-        "リニューアル前",
-        "在庫限り",
-        "アウトレット",
-        "訳あり",
-        "箱なし",
-        "外箱なし",
-        "パッケージ不良",
-        "期限間近",
-        "使用期限間近",
-        "並行輸入",
-        "海外発送",
-    ]
-
-    for word in soft_risk_words:
-        if word in title:
-            score -= 45
-
-    if name and name in title_norm:
-        score += 70
-
-    for word in name.split():
-        if word and word in title_norm:
-            score += 10
-
-    if brand and brand in title_norm:
-        score += 25
-
-    if any(word in title for word in CURRENT_PRODUCT_WORDS):
-        score += 15
-
-    price = safe_price(item.get("itemPrice", 0))
-
-    if price >= 8000:
-        score -= 12
-
-    if price >= 12000:
-        score -= 20
-
-    if item.get("mediumImageUrls"):
-        score += 10
-
-    if item.get("affiliateUrl"):
-        score += 18
-    elif item.get("itemUrl"):
-        score += 5
-
-    review_average = safe_float(item.get("reviewAverage", 0))
-    review_count = safe_int(item.get("reviewCount", 0))
-
-    if review_average >= 4.5:
-        score += 18
-    elif review_average >= 4.2:
-        score += 12
-    elif review_average >= 4.0:
-        score += 6
-    elif review_average > 0 and review_average < 3.5:
-        score -= 15
-
-    if review_count >= 1000:
-        score += 20
-    elif review_count >= 300:
-        score += 14
-    elif review_count >= 100:
-        score += 8
-    elif review_count > 0:
-        score += 3
-
-    trusted_words = [
-        "公式",
-        "正規品",
-        "正規販売店",
-        "認定ショップ",
-        "メーカー公式",
-    ]
-
-    if any(word in title for word in trusted_words):
-        score += 12
-
-    score += score_current_product_signal(item)
-
-    return score
+score_rakuten_item
 
 def load_rakuten_cache():
     try:
@@ -4299,7 +4161,7 @@ def is_discontinued_or_suspicious_product(product):
             return True
 
     return False
-    
+
 def ensure_required_routine_steps(data):
     if not isinstance(data, dict):
         return {}
@@ -5840,11 +5702,7 @@ def finalize_step_display_fields(step, best, user_data):
     else:
         step["product"] = name
 
-    print(
-        "[DISPLAY PRODUCT]",
-        step["product"],
-        flush=True
-    )
+    
 
     base_score = best.get("_base_score", best.get("base_score", step.get("base_score", 0))) or 0
     improve_score = best.get("_improve_score", best.get("improve_score", step.get("improve_score", 0))) or 0
@@ -7197,6 +7055,7 @@ def finalize_step_data(step, user_data):
             step[key] = clean_text(step[key])
 
     return step
+
 def build_rule_based_warnings(data, user_data):
     warnings = []
     sens = normalize_text(user_data.get("sens", ""))
