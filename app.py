@@ -565,6 +565,17 @@ def build_rakuten_search_keywords(product_name, brand="", category="", ingredien
 
     if category and ingredient_focus:
         add(f"{category} {ingredient_focus}")
+    if category == "クリーム":
+        if brand and ingredient_focus:
+            add(f"{brand} フェイスクリーム {ingredient_focus}")
+
+        if ingredient_focus:
+            add(f"フェイスクリーム {ingredient_focus}")
+            add(f"保湿クリーム {ingredient_focus}")
+
+        add("フェイスクリーム 保湿")
+        add("保湿クリーム")
+
 
     if category and purpose:
         add(f"{category} {purpose}")
@@ -900,22 +911,13 @@ def clean_ai_product_name(name):
     return " ".join(cleaned_parts).strip()
 
 def infer_bundle_quantity_from_title(title):
-    """
-    商品名からセット数を推定する。
-    例：
-    メラノCC 8個セット → 8
-    8個 → 8
-    3本まとめ買い → 3
-    2個組 → 2
-    10枚入 → 10
-    """
     if not title:
         return 1
 
     text = str(title)
     text = text.replace("　", " ")
 
-    patterns = [
+    set_patterns = [
         r"(\d+)\s*個\s*セット",
         r"(\d+)\s*本\s*セット",
         r"(\d+)\s*枚\s*セット",
@@ -924,28 +926,18 @@ def infer_bundle_quantity_from_title(title):
         r"(\d+)\s*個組",
         r"(\d+)\s*本組",
         r"(\d+)\s*枚組",
-        r"(\d+)\s*個入り",
-        r"(\d+)\s*本入り",
-        r"(\d+)\s*枚入り",
-        r"(\d+)\s*個入",
-        r"(\d+)\s*本入",
-        r"(\d+)\s*枚入",
-        r"(\d+)\s*個",
-        r"(\d+)\s*本",
-        r"(\d+)\s*枚",
-        r"(\d+)\s*袋",
-        r"(\d+)\s*箱",
-        r"(\d+)\s*セット",
+        r"(\d+)\s*個\s*まとめ",
+        r"(\d+)\s*本\s*まとめ",
+        r"(\d+)\s*個\s*入り\s*セット",
+        r"(\d+)\s*本\s*入り\s*セット",
     ]
 
-    for pattern in patterns:
+    for pattern in set_patterns:
         match = re.search(pattern, text)
         if not match:
             continue
 
         qty = int(match.group(1))
-
-        # 1個は補正不要、25以上は容量や型番の誤検出が増えるので除外
         if 2 <= qty <= 24:
             return qty
 
@@ -1202,7 +1194,8 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
             result = {
                 "name": clean_display_product_name(product_name),
                 "rakuten_title": best.get("itemName", ""),
-                "price": best.get("normalized_price", 0),
+                "price": best.get("raw_price", 0),
+                "normalized_price": best.get("normalized_price", 0),
                 "raw_price": best.get("raw_price", 0),
                 "bundle_quantity": best.get("bundle_quantity", 1),
                 "rakuten_link": (
@@ -4018,6 +4011,23 @@ def normalize_candidate_category(value, fallback=""):
     if value in allowed:
         return value
 
+    text = normalize_text(value)
+
+    if any(w in text for w in ["導入", "ブースター", "先行", "セラムヴェール", "ブースト"]):
+        return "導入美容液"
+
+    if any(w in text for w in ["化粧水", "ローション", "トナー"]):
+        return "化粧水"
+
+    if any(w in text for w in ["乳液", "ミルク", "エマルジョン"]):
+        return "乳液"
+
+    if any(w in text for w in ["クリーム", "バーム"]):
+        return "クリーム"
+
+    if any(w in text for w in ["美容液", "セラム", "エッセンス", "アンプル"]):
+        return "美容液"
+
     return fallback
     
 def build_virtual_product_from_ai_candidate(step, candidate):
@@ -4274,6 +4284,7 @@ def is_discontinued_or_suspicious_product(product):
 
     hard_block_words = [
         "廃盤",
+        "廃番",
         "生産終了",
         "販売終了",
         "製造終了",
@@ -4288,7 +4299,7 @@ def is_discontinued_or_suspicious_product(product):
             return True
 
     return False
-
+    
 def ensure_required_routine_steps(data):
     if not isinstance(data, dict):
         return {}
@@ -4471,8 +4482,19 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     for p in db_products:
         if not isinstance(p, dict):
             continue
-        if p.get("category") != category:
+        product_category = normalize_candidate_category(
+            p.get("category", ""),
+            fallback=p.get("category", "")
+        )
+
+        step_category = normalize_candidate_category(
+            category,
+            fallback=category
+        )
+
+        if product_category != step_category:
             continue
+
         if p.get("name") in exclude_names:
             continue
 
@@ -4696,7 +4718,14 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         virtual["brand"] = brand
         virtual["name"] = rakuten_name
         virtual["rakuten_title"] = rakuten_name
-        virtual["category"] = category
+        virtual["category"] = normalize_candidate_category(
+            " ".join([
+                str(virtual.get("name", "")),
+                str(virtual.get("brand", "")),
+                str(candidate_for_check.get("category", "")),
+            ]),
+            fallback=category
+        )
 
         virtual["price_ref"] = safe_price(
             rakuten_verified.get("price", virtual.get("price_ref", 0))
@@ -4828,24 +4857,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
     sorted_candidates = deduped_candidates
     top_candidates = sorted_candidates[:3]
-    print(
-        "[TOP CANDIDATES]",
-        step.get("category", ""),
-        step.get("purpose", ""),
-        [
-            {
-                "brand": c.get("brand", ""),
-                "name": c.get("name", ""),
-                "score": c.get("_score", 0),
-                "base": c.get("_base_score", 0),
-                "improve": c.get("_improve_score", 0),
-                "routine": c.get("_routine_score", 0),
-                "source": c.get("_source", "")
-            }
-            for c in top_candidates
-        ],
-        flush=True
-    )
+    
     best = dict(top_candidates[0])
 
     best["_top_candidates"] = [
@@ -5521,7 +5533,10 @@ def normalize_ai_candidates(step):
         item = {
             "brand": brand,
             "name": name,
-            "category": step.get("category", ""),
+            "category": normalize_candidate_category(
+                " ".join([brand, name, str(candidate.get("category", ""))]),
+                fallback=step.get("category", "")
+            ),
             "confidence": confidence,
             "price_ref": safe_price(
                 candidate.get("normalized_price")
@@ -6080,6 +6095,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             )
 
     return data
+
 def build_recommend_reason(product, step, user_data):
     reasons = []
 
