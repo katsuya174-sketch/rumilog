@@ -1469,19 +1469,29 @@ def find_db_product_by_name(products, product_name, category=None):
     if not target:
         return None
 
+    normalized_target_category = normalize_candidate_category(
+        category,
+        fallback=category
+    ) if category else ""
+
     def is_usable_db_product(p):
         if not isinstance(p, dict):
             return False
 
-        if category and p.get("category") != category:
-            return False
+        if category:
+            product_category = normalize_candidate_category(
+                p.get("category", ""),
+                fallback=p.get("category", "")
+            )
+
+            if product_category != normalized_target_category:
+                return False
 
         if is_discontinued_or_suspicious_product(p):
             return False
 
         return True
 
-    # まず完全一致
     for p in products:
         if not is_usable_db_product(p):
             continue
@@ -1498,16 +1508,6 @@ def find_db_product_by_name(products, product_name, category=None):
             )
             return p
 
-    # 次に部分一致
-    for p in products:
-        if not is_usable_db_product(p):
-            continue
-
-        db_name = normalize_product_name(p.get("name", ""))
-
-        if target in db_name or db_name in target:
-            return p
-
     return None
 
 def find_ai_candidate_data(product_name, ai_image_db):
@@ -1516,27 +1516,17 @@ def find_ai_candidate_data(product_name, ai_image_db):
     if not target:
         return None, 0
 
-    # まず完全一致
     for item in ai_image_db:
         db_name = normalize_product_name(item.get("name", ""))
 
-        if target == db_name:
-            image_file = item.get("image", "")
-            price = item.get("price", 0)
+        if target != db_name:
+            continue
 
-            image_path = f"/static/images/products/{image_file}" if image_file else None
-            return image_path, price
+        image_file = item.get("image", "")
+        price = item.get("price", 0)
 
-    # 次に部分一致
-    for item in ai_image_db:
-        db_name = normalize_product_name(item.get("name", ""))
-
-        if target in db_name or db_name in target:
-            image_file = item.get("image", "")
-            price = item.get("price", 0)
-
-            image_path = f"/static/images/products/{image_file}" if image_file else None
-            return image_path, price
+        image_path = f"/static/images/products/{image_file}" if image_file else None
+        return image_path, price
 
     return None, 0
 
@@ -3183,20 +3173,9 @@ def score_product(product, step, user_data, budget_value):
     score = 0
 
     if is_non_cosmetic(product):
-        if step.get("_section") == "morning" and step.get("category") == "クリーム":
-          print("[CREAM DROP] non_cosmetic", product.get("name"), flush=True)
         return -9999
 
     if is_discontinued_or_suspicious_product(product):
-        if step.get("_section") == "morning" and step.get("category") == "クリーム":
-          print(
-              "[CREAM DROP] discontinued",
-              product.get("name"),
-              product.get("release_status"),
-              product.get("_source"),
-              flush=True
-          )
-
         return -9999
 
     # ===== ピーリング強制判定 =====
@@ -3246,21 +3225,19 @@ def score_product(product, step, user_data, budget_value):
     purpose = step.get("purpose", "")
     ingredient_focus = step.get("ingredient_focus", "")
     category = step.get("category", "")
-    product_category = product.get("category", "")
+    product_category = normalize_candidate_category(
+        product.get("category", ""),
+        fallback=product.get("category", "")
+    )
+
+    step_category = normalize_candidate_category(
+        category,
+        fallback=category
+    )
 
     # カテゴリ一致は最優先
-    if product_category != category:
-        if step.get("_section") == "morning" and step.get("category") == "クリーム":
-          print(
-              "[CREAM DROP] category",
-              product.get("name"),
-              "product_category=",
-              product_category,
-              "step_category=",
-              category,
-              flush=True
-          )
-          return -9999
+    if product_category != step_category:
+        return -9999
 
     score += 40
 
@@ -4018,9 +3995,13 @@ def infer_virtual_product_fields(name, category="", ingredient_focus="", purpose
         "main_functions": list(dict.fromkeys(functions))
     }
 def normalize_candidate_category(value, fallback=""):
-    value = str(value or "").strip()
+    raw_value = str(value or "").strip()
+    raw_fallback = str(fallback or "").strip()
 
-    allowed = [
+    if not raw_value:
+        return raw_fallback
+
+    allowed = {
         "クレンジング",
         "洗顔",
         "化粧水",
@@ -4031,29 +4012,52 @@ def normalize_candidate_category(value, fallback=""):
         "日焼け止め",
         "パック",
         "ピーリング"
-    ]
+    }
 
-    if value in allowed:
-        return value
+    if raw_value in allowed:
+        return raw_value
 
-    text = normalize_text(value)
+    mapped = AI_CATEGORY_MAP.get(raw_value.lower())
+    if mapped in allowed:
+        return mapped
+
+    text = normalize_text(raw_value)
+
+    if any(w in text for w in ["日焼け止め", "uv", "spf", "pa++++", "pa+++", "サンスクリーン", "サンケア", "suncream", "sun cream", "sunscreen"]):
+        return "日焼け止め"
+
+    if any(w in text for w in ["クレンジング", "メイク落とし", "cleansing", "makeup remover", "remover"]):
+        return "クレンジング"
+
+    if any(w in text for w in ["洗顔", "洗顔料", "洗顔フォーム", "フォーム", "フェイスウォッシュ", "cleanser", "face wash", "facewash"]):
+        return "洗顔"
 
     if any(w in text for w in ["導入", "ブースター", "先行", "セラムヴェール", "ブースト"]):
         return "導入美容液"
 
-    if any(w in text for w in ["化粧水", "ローション", "トナー"]):
+    if any(w in text for w in ["化粧水", "ローション", "トナー", "toner", "lotion"]):
         return "化粧水"
 
-    if any(w in text for w in ["乳液", "ミルク", "エマルジョン"]):
+    if any(w in text for w in ["乳液", "ミルク", "エマルジョン", "emulsion", "milk"]):
         return "乳液"
 
-    if any(w in text for w in ["クリーム", "バーム"]):
+    if any(w in text for w in ["クリーム", "バーム", "moisturizer", "moisturiser", "cream", "balm"]):
         return "クリーム"
 
-    if any(w in text for w in ["美容液", "セラム", "エッセンス", "アンプル"]):
+    if any(w in text for w in ["美容液", "セラム", "エッセンス", "アンプル", "serum", "essence", "ampoule"]):
         return "美容液"
 
-    return fallback
+    if any(w in text for w in ["パック", "マスク", "mask", "sheet mask"]):
+        return "パック"
+
+    if any(w in text for w in ["ピーリング", "角質", "exfoliator", "exfoliating", "peeling"]):
+        return "ピーリング"
+
+    fallback_mapped = AI_CATEGORY_MAP.get(raw_fallback.lower())
+    if fallback_mapped in allowed:
+        return fallback_mapped
+
+    return raw_fallback
     
 def build_virtual_product_from_ai_candidate(step, candidate):
     category = step.get("category", "")
@@ -4364,10 +4368,7 @@ def ensure_required_routine_steps(data):
             "ingredient_focus": "セラミド",
             "risk_note": "",
             "priority": 8,
-            "product_candidates": [
-                {"brand": "AESTURA", "name": "アトバリア 365 クリーム", "confidence": 90, "release_status": "current"},
-                {"brand": "キュレル", "name": "潤浸保湿 フェイスクリーム", "confidence": 85, "release_status": "current"}
-            ]
+            "product_candidates": []
         })
 
     if not has_category(morning_steps, "日焼け止め"):
@@ -4378,10 +4379,7 @@ def ensure_required_routine_steps(data):
             "ingredient_focus": "UV防御",
             "risk_note": "",
             "priority": 9,
-            "product_candidates": [
-                {"brand": "アネッサ", "name": "パーフェクトUV スキンケアミルク N", "confidence": 95, "release_status": "current"},
-                {"brand": "ビオレ", "name": "UV アクアリッチ ウォータリーエッセンス", "confidence": 85, "release_status": "current"}
-            ]
+            "product_candidates": []
         })
 
     if not has_category(night_steps, "クレンジング"):
@@ -4414,10 +4412,7 @@ def ensure_required_routine_steps(data):
             "ingredient_focus": "セラミド",
             "risk_note": "",
             "priority": 9,
-            "product_candidates": [
-                {"brand": "AESTURA", "name": "アトバリア 365 クリーム", "confidence": 85, "release_status": "current"},
-                {"brand": "LANEIGE", "name": "バウンシースリーピングマスク", "confidence": 80, "release_status": "current"}
-            ]
+            "product_candidates": []
         })
 
     return data
@@ -4517,12 +4512,23 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     candidates = normalize_ai_candidates(step)
     
 
-    all_candidates = []
-    
-    # DB商品を全件候補化
+       # DB商品を全件候補化
+    db_debug = {
+        "total": 0,
+        "non_dict": 0,
+        "category_mismatch": 0,
+        "excluded_name": 0,
+        "score_rejected": 0,
+        "accepted": 0,
+    }
+
     for p in db_products:
+        db_debug["total"] += 1
+
         if not isinstance(p, dict):
+            db_debug["non_dict"] += 1
             continue
+
         product_category = normalize_candidate_category(
             p.get("category", ""),
             fallback=p.get("category", "")
@@ -4532,25 +4538,31 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             category,
             fallback=category
         )
-        
+
         if product_category != step_category:
+            db_debug["category_mismatch"] += 1
             continue
 
         if p.get("name") in exclude_names:
+            db_debug["excluded_name"] += 1
             continue
 
         product = dict(p)
-        
+
         base_score = score_product(product, step, user_data, budget_value)
         if base_score <= -9000:
+            db_debug["score_rejected"] += 1
             continue
+
         print(
             "[IMPROVEMENT TARGETS]",
             infer_improvement_targets(improvement_plan),
             flush=True
         )
+
         improve_score = score_improvement(product, improvement_plan or {})
         improvement_reason = build_improvement_reason(product, improvement_plan or {})
+
         print(
             "[IMPROVE DEBUG]",
             step.get("category", ""),
@@ -4562,8 +4574,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             flush=True
         )
 
-
         base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
+
         routine_score = score_routine_balance(
             step,
             product,
@@ -4583,17 +4595,16 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         product["_score"] = round(final_score, 1)
         product["_base_score"] = round(base_score, 1)
         product["_improve_score"] = round(improve_score, 1)
-        product["_routine_score"] = round(
-            routine_score,
-            1
-        )
-        product["_improvement_reason"] = build_improvement_reason(
-            product,
-            improvement_plan or {}
-        )
+        product["_routine_score"] = round(routine_score, 1)
+        product["_improvement_reason"] = improvement_reason
         product["_source"] = "db"
 
         all_candidates.append(product)
+        db_debug["accepted"] += 1
+
+    # 確認用：夜クリーム候補なしの原因確認後に削除
+    if step.get("_section") == "night" and step.get("category") == "クリーム":
+        print("[DB CANDIDATE DEBUG]", db_debug, flush=True)
 
     # AI候補を全件候補化
     for candidate in candidates:
@@ -5106,53 +5117,27 @@ def ensure_required_routine_steps(data):
             "product_candidates": []
         })
 
-    if not has_category(morning_steps, "クリーム"):
-        morning_steps.append({
-            "category": "クリーム",
-            "role": "main",
-            "purpose": "朝の保湿とバリア保護。日中の乾燥や刺激から肌を守る",
-            "ingredient_focus": "セラミド",
-            "risk_note": "",
-            "priority": 8,
-            "product_candidates": [
-                {
-                    "brand": "AESTURA",
-                    "name": "アトバリア 365 クリーム",
-                    "confidence": 85,
-                    "release_status": "current"
-                },
-                {
-                    "brand": "LANEIGE",
-                    "name": "バウンシースリーピングマスク",
-                    "confidence": 75,
-                    "release_status": "current"
-                }
-            ]
-        })
+        if not has_category(night_steps, "クリーム"):
+            night_steps.append({
+                "category": "クリーム",
+                "role": "main",
+                "purpose": "夜のバリア保護",
+                "ingredient_focus": "セラミド",
+                "risk_note": "",
+                "priority": 9,
+                "product_candidates": []
+            })
 
-    if not has_category(morning_steps, "日焼け止め"):
-        morning_steps.append({
-            "category": "日焼け止め",
-            "role": "main",
-            "purpose": "紫外線による赤み・色素沈着・毛穴悪化を防ぐ",
-            "ingredient_focus": "UV防御",
-            "risk_note": "",
-            "priority": 9,
-            "product_candidates": [
-                {
-                    "brand": "アネッサ",
-                    "name": "パーフェクトUV スキンケアミルク N",
-                    "confidence": 95,
-                    "release_status": "current"
-                },
-                {
-                    "brand": "ビオレ",
-                    "name": "UV アクアリッチ ウォータリーエッセンス",
-                    "confidence": 85,
-                    "release_status": "current"
-                }
-            ]
-        })
+        if not has_category(morning_steps, "日焼け止め"):
+            morning_steps.append({
+                "category": "日焼け止め",
+                "role": "main",
+                "purpose": "紫外線による赤み・色素沈着・毛穴悪化を防ぐ",
+                "ingredient_focus": "UV防御",
+                "risk_note": "",
+                "priority": 9,
+                "product_candidates": []
+            })
 
     if not has_category(night_steps, "クレンジング"):
         night_steps.insert(0, {
@@ -6060,10 +6045,28 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
             image_path = None
             if ai_image_db:
-                image_path, found_price = find_ai_candidate_data(
-                    best.get("name", ""),
-                    ai_image_db
-                )
+                lookup_names = []
+
+                raw_name = clean_display_product_name(best.get("name", ""))
+                brand = str(best.get("brand", "") or "").strip()
+
+                if raw_name:
+                    lookup_names.append(raw_name)
+
+                if brand and raw_name and not raw_name.startswith(brand):
+                    lookup_names.append(f"{brand} {raw_name}")
+
+                image_path = None
+                found_price = 0
+
+                for lookup_name in lookup_names:
+                    image_path, found_price = find_ai_candidate_data(
+                        lookup_name,
+                        ai_image_db
+                    )
+
+                    if image_path:
+                        break
 
                 if found_price and step["price"] <= 0:
                     step["price"] = safe_price(found_price)
@@ -8195,6 +8198,28 @@ def validate_and_log_products(products):
         for err in validation_errors:
             print(err)
 
+    # 確認用：DBのカテゴリ件数を確認したら削除
+    from collections import Counter
+
+    category_counter = Counter()
+    normalized_category_counter = Counter()
+
+    for p in products:
+        if not isinstance(p, dict):
+            continue
+
+        raw_category = p.get("category", "")
+        normalized_category = normalize_candidate_category(
+            raw_category,
+            fallback=raw_category
+        )
+
+        category_counter[raw_category] += 1
+        normalized_category_counter[normalized_category] += 1
+
+    print("[PRODUCT DB COUNT]", len(products), flush=True)
+    print("[PRODUCT RAW CATEGORY COUNT]", dict(category_counter), flush=True)
+    print("[PRODUCT NORMALIZED CATEGORY COUNT]", dict(normalized_category_counter), flush=True)
 
 CATEGORY_ORDER = {
     "クレンジング": 1,
