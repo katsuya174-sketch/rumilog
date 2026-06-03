@@ -5531,9 +5531,16 @@ def normalize_ai_candidates(step):
     if not isinstance(raw_candidates, list):
         return []
 
-    for candidate in raw_candidates:
+    rejected_statuses = {
+        "old",
+        "discontinued",
+        "ended",
+        "販売終了",
+        "生産終了",
+        "廃盤",
+    }
 
-        # 文字列JSONならdictに変換
+    for candidate in raw_candidates:
         if isinstance(candidate, str):
             text = candidate.strip()
 
@@ -5549,7 +5556,9 @@ def normalize_ai_candidates(step):
             continue
 
         brand = str(candidate.get("brand", "") or "").strip()
-        name = str(candidate.get("name", "") or "").strip()
+        name = clean_display_product_name(
+            str(candidate.get("name", "") or "").strip()
+        )
 
         if brand and name.startswith(brand):
             name = name[len(brand):].strip()
@@ -5569,6 +5578,13 @@ def normalize_ai_candidates(step):
                 continue
         else:
             confidence = None
+
+        release_status = str(
+            candidate.get("release_status", "") or ""
+        ).lower().strip()
+
+        if release_status in rejected_statuses:
+            continue
 
         item = {
             "brand": brand,
@@ -5596,28 +5612,24 @@ def normalize_ai_candidates(step):
             "concerns": candidate.get("concerns", []) if isinstance(candidate.get("concerns", []), list) else purpose_to_concern_tags(step.get("purpose", "")),
             "skin_types": candidate.get("skin_types", []) if isinstance(candidate.get("skin_types", []), list) else [],
             "sensitive_ok": candidate.get("sensitive_ok", "unknown"),
-            "retinol_level": safe_retinol_level(
-                candidate.get("retinol_level", 0)
-            ),
+            "retinol_level": safe_retinol_level(candidate.get("retinol_level", 0)),
             "main_functions": candidate.get("main_functions", []) if isinstance(candidate.get("main_functions", []), list) else [],
             "formulation": candidate.get("formulation", []) if isinstance(candidate.get("formulation", []), list) else [],
             "technology": candidate.get("technology", []) if isinstance(candidate.get("technology", []), list) else [],
             "texture": str(candidate.get("texture", "") or ""),
             "contraindications": candidate.get("contraindications", []) if isinstance(candidate.get("contraindications", []), list) else [],
             "reason": str(candidate.get("reason", "") or step.get("selection_reason", "") or ""),
-            "release_status": str(
-                candidate.get("release_status", "unknown") or "unknown"
-            ).lower(),
+            "release_status": release_status or "unverified",
         }
-        if item["release_status"] != "current":
-            continue
+
         norm_name = normalize_candidate_name_for_merge(item["name"])
         if not norm_name or norm_name in seen:
             continue
 
         seen.add(norm_name)
         normalized.append(item)
-    normalized = sorted(
+
+    return sorted(
         normalized,
         key=lambda x: (
             -safe_float(x.get("confidence", 0)),
@@ -5625,19 +5637,6 @@ def normalize_ai_candidates(step):
             str(x.get("brand", "")).lower()
         )
     )
-
-    for item in normalized:
-        print(
-            "[PRICE DEBUG]",
-            item.get("name"),
-            "price=",
-            item.get("price_ref"),
-            flush=True
-        )
-
-    print("[AI NORMALIZED]", normalized, flush=True)
-
-    return normalized
 
 def enrich_steps_with_market_candidates(data, candidate_data):
     extra_steps = candidate_data.get("steps", [])
@@ -7076,13 +7075,18 @@ def finalize_step_data(step, user_data):
     current_brand = clean_text(step.get("brand"))
 
     if not current_product:
-        candidate_name = get_first_concrete_candidate(step)
-        if candidate_name:
-            step["product"] = clean_text(candidate_name)
-            step["product_source"] = step.get("product_source") or "ai_fallback"
-        else:
+        if step.get("product_source") in ["none", "missing"]:
             step["product"] = ""
-            step["product_source"] = "missing"
+            step["product_source"] = "none"
+        else:
+            candidate_name = get_first_concrete_candidate(step)
+
+            if candidate_name:
+                step["product"] = clean_text(candidate_name)
+                step["product_source"] = step.get("product_source") or "ai_fallback"
+            else:
+                step["product"] = ""
+                step["product_source"] = "missing"
     else:
         step["product"] = current_product
 
