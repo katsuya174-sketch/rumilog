@@ -3176,9 +3176,20 @@ def score_product(product, step, user_data, budget_value):
     score = 0
 
     if is_non_cosmetic(product):
+        if step.get("_section") == "morning" and step.get("category") == "クリーム":
+          print("[CREAM DROP] non_cosmetic", product.get("name"), flush=True)
         return -9999
 
     if is_discontinued_or_suspicious_product(product):
+        if step.get("_section") == "morning" and step.get("category") == "クリーム":
+          print(
+              "[CREAM DROP] discontinued",
+              product.get("name"),
+              product.get("release_status"),
+              product.get("_source"),
+              flush=True
+          )
+
         return -9999
 
     # ===== ピーリング強制判定 =====
@@ -3232,7 +3243,17 @@ def score_product(product, step, user_data, budget_value):
 
     # カテゴリ一致は最優先
     if product_category != category:
-        return -9999
+        if step.get("_section") == "morning" and step.get("category") == "クリーム":
+          print(
+              "[CREAM DROP] category",
+              product.get("name"),
+              "product_category=",
+              product_category,
+              "step_category=",
+              category,
+              flush=True
+          )
+          return -9999
 
     score += 40
 
@@ -4715,14 +4736,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         virtual["brand"] = brand
         virtual["name"] = rakuten_name
         virtual["rakuten_title"] = rakuten_name
-        virtual["category"] = normalize_candidate_category(
-            " ".join([
-                str(virtual.get("name", "")),
-                str(virtual.get("brand", "")),
-                str(candidate_for_check.get("category", "")),
-            ]),
-            fallback=category
-        )
+        virtual["category"] = category
 
         virtual["price_ref"] = safe_price(
             rakuten_verified.get("price", virtual.get("price_ref", 0))
