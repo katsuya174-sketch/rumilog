@@ -736,7 +736,20 @@ def score_rakuten_item(item, product_name, brand="", category=""):
                 for word in [w.lower() for w in rule["required"]]
             ):
                 return -9999
+    hard_reject_words = [
+        "詰替",
+        "詰め替え",
+        "つめかえ",
+        "レフィル",
+        "付け替え",
+        "つけかえ",
+        "お試し",
+        "サンプル",
+        "トライアル"
+    ]
 
+    if any(word in title for word in hard_reject_words):
+        return -9999
         if any(
             word.lower() in title_norm
             for word in [w.lower() for w in rule["reject"]]
@@ -807,14 +820,11 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         score += 15
 
     ng_words = [
-        "詰替",
-        "詰め替え",
-        "セット",
-        "まとめ買い",
-        "サンプル",
-        "ミニ",
-        "トライアル",
+        "限定",
+        "企画品",
+        "海外発送"
     ]
+    
 
     for ng in ng_words:
         if ng in title:
@@ -1247,7 +1257,8 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
             
             result = {
-                "name": best.get("itemName", ""),
+                "name": clean_display_product_name(product_name),
+                "rakuten_title": best.get("itemName", ""),
                 "price": best.get("normalized_price", 0),
                 "raw_price": best.get("raw_price", 0),
                 "bundle_quantity": best.get("bundle_quantity", 1),
