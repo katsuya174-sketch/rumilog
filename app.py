@@ -708,6 +708,41 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     if not is_same_product_for_market(product_name, title):
         return -9999
 
+    category_rules = {
+        "美容液": {
+            "required": ["セラム", "美容液", "アンプル", "エッセンス"],
+            "reject": ["マスク", "シート", "パック", "クリーム", "乳液"]
+        },
+        "乳液": {
+            "required": ["乳液", "ミルク", "エマルジョン"],
+            "reject": ["詰替", "詰め替え", "レフィル"]
+        },
+        "クリーム": {
+            "required": ["クリーム", "cream"],
+            "reject": ["マスク", "シート", "パック"]
+        },
+        "化粧水": {
+            "required": ["化粧水", "トナー", "ローション"],
+            "reject": ["クリーム", "乳液", "マスク"]
+        }
+    }
+
+    if category in category_rules:
+        rule = category_rules[category]
+
+        if rule["required"]:
+            if not any(
+                word.lower() in title_norm
+                for word in [w.lower() for w in rule["required"]]
+            ):
+                return -9999
+
+        if any(
+            word.lower() in title_norm
+            for word in [w.lower() for w in rule["reject"]]
+        ):
+            return -9999
+
     name = clean_rakuten_keyword(product_name).lower()
     brand = clean_rakuten_keyword(brand).lower()
 
@@ -1503,6 +1538,13 @@ def find_db_product_by_name(products, product_name, category=None):
         db_name = normalize_product_name(p.get("name", ""))
 
         if target == db_name:
+            print(
+                "[DB MATCH]",
+                product_name,
+                "=>",
+                p.get("name"),
+                flush=True
+            )
             return p
 
     # 次に部分一致
@@ -4710,6 +4752,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
         virtual["brand"] = brand
         virtual["name"] = rakuten_name
+        virtual["rakuten_title"] = rakuten_name
         virtual["category"] = category
 
         virtual["price_ref"] = safe_price(
@@ -5840,6 +5883,12 @@ def finalize_step_display_fields(step, best, user_data):
     else:
         step["product"] = name
 
+    print(
+        "[DISPLAY PRODUCT]",
+        step["product"],
+        flush=True
+    )
+
     base_score = best.get("_base_score", best.get("base_score", step.get("base_score", 0))) or 0
     improve_score = best.get("_improve_score", best.get("improve_score", step.get("improve_score", 0))) or 0
     routine_score = best.get("_routine_score", best.get("routine_score", step.get("routine_score", 0))) or 0
@@ -5947,7 +5996,13 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
         print("===========================", flush=True)
 
         if not best:
-            print("[NO PRODUCT SHOWN]", section_name, category, flush=True)
+            print(
+                "[BEST CHECK]",
+                section_name,
+                category,
+                best.get("name") if best else "NONE",
+                flush=True
+            )
 
             step["top_candidates"] = []
             step["product"] = ""
@@ -7026,8 +7081,19 @@ def finalize_step_data(step, user_data):
     if not step.get("image"):
         step["image"] = ""
 
-    if not step.get("recommend_reason"):
-        step["recommend_reason"] = build_ai_reason(step, user_data)
+    invalid_reasons = [
+        "現在確認できる商品候補が見つかりませんでした。",
+        "確認できる商品候補が見つかりませんでした。",
+    ]
+
+    if (
+        not step.get("recommend_reason")
+        or str(step.get("recommend_reason", "")).strip() in invalid_reasons
+    ):
+        if step.get("product"):
+            step["recommend_reason"] = build_ai_reason(step, user_data)
+        else:
+            step["recommend_reason"] = "現在確認できる商品候補が見つかりませんでした。"
 
     price = to_number(step.get("price", step.get("price_ref", 0)))
     step["price"] = price
@@ -8994,25 +9060,49 @@ def apply_db_product_to_step(step, product, user_data):
 
     category = step.get("category", "")
 
-    step["product"] = product.get("name", category)
+    invalid_reasons = {
+        "",
+        "現在確認できる商品候補が見つかりませんでした。",
+        "確認できる商品候補が見つかりませんでした。",
+    }
+
+    brand = str(product.get("brand", "") or "").strip()
+    name = clean_display_product_name(
+        str(product.get("name", category) or "").strip()
+    )
+
+    step["brand"] = brand
+    step["product"] = name
     step["price"] = safe_price(product.get("price_ref", 0))
+    step["estimated_price"] = step["price"]
 
     image_file = product.get("image", "")
     if image_file:
-        step["image"] = f"/static/images/products/{image_file}"
+        image_file = str(image_file)
+        if image_file.startswith("http://") or image_file.startswith("https://"):
+            step["image"] = image_file
+        elif image_file.startswith("/static/"):
+            step["image"] = image_file
+        else:
+            step["image"] = f"/static/images/products/{image_file}"
     else:
         step["image"] = ""
 
     step["affiliate_provider"] = product.get("affiliate_provider", "")
     step["affiliate_item_id"] = product.get("affiliate_item_id", "")
 
-    step["match_score"] = product.get("_score", product.get("final_score", 0)) or 0
-    step["base_score"] = product.get("_base_score", product.get("base_score", 0)) or 0
-    step["improve_score"] = product.get("_improve_score", product.get("improve_score", 0)) or 0
-    step["routine_score"] = product.get("_routine_score", product.get("routine_score", 0)) or 0
-    step["final_score"] = product.get("_score", product.get("final_score", 0)) or 0
+    base_score = product.get("_base_score", product.get("base_score", 0)) or 0
+    improve_score = product.get("_improve_score", product.get("improve_score", 0)) or 0
+    routine_score = product.get("_routine_score", product.get("routine_score", 0)) or 0
+    final_score = product.get("_score", product.get("final_score", product.get("match_score", 0))) or 0
 
-    step["improvement_score"] = step["improve_score"]
+    step["base_score"] = base_score
+    step["improve_score"] = improve_score
+    step["routine_score"] = routine_score
+    step["final_score"] = final_score
+    step["match_score"] = final_score
+
+    step["improvement_score"] = improve_score
     step["improvement_reason"] = (
         product.get("_improvement_reason")
         or product.get("improvement_reason")
@@ -9021,16 +9111,26 @@ def apply_db_product_to_step(step, product, user_data):
     )
 
     step["score_detail"] = {
-        "base": step["base_score"],
-        "improve": step["improve_score"],
-        "routine": step["routine_score"],
-        "final": step["final_score"],
+        "base": base_score,
+        "improve": improve_score,
+        "routine": routine_score,
+        "final": final_score,
     }
 
-    step["recommend_reason"] = (
+    reason = (
         product.get("reason")
         or product.get("_improvement_reason")
+        or product.get("improvement_reason")
+        or ""
+    )
+
+    if str(reason).strip() in invalid_reasons:
+        reason = ""
+
+    step["recommend_reason"] = (
+        reason
         or build_recommend_reason(product, step, user_data)
+        or build_ai_reason(step, user_data)
     )
 
     step["product_source"] = product.get("_source", "db") or "db"
