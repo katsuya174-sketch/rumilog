@@ -4339,19 +4339,13 @@ def ensure_required_routine_steps(data):
     morning_steps = data["morning"]["steps"]
     night_steps = data["night"]["steps"]
 
-    morning_categories = {
-        s.get("category")
-        for s in morning_steps
-        if isinstance(s, dict)
-    }
+    def has_category(steps, category):
+        return any(
+            isinstance(s, dict) and s.get("category") == category
+            for s in steps
+        )
 
-    night_categories = {
-        s.get("category")
-        for s in night_steps
-        if isinstance(s, dict)
-    }
-
-    if "洗顔" not in morning_categories:
+    if not has_category(morning_steps, "洗顔"):
         morning_steps.insert(0, {
             "category": "洗顔",
             "role": "main",
@@ -4362,7 +4356,21 @@ def ensure_required_routine_steps(data):
             "product_candidates": []
         })
 
-    if "日焼け止め" not in morning_categories:
+    if not has_category(morning_steps, "クリーム"):
+        morning_steps.append({
+            "category": "クリーム",
+            "role": "main",
+            "purpose": "朝の保湿とバリア保護。日中の乾燥や刺激から肌を守る",
+            "ingredient_focus": "セラミド",
+            "risk_note": "",
+            "priority": 8,
+            "product_candidates": [
+                {"brand": "AESTURA", "name": "アトバリア 365 クリーム", "confidence": 90, "release_status": "current"},
+                {"brand": "キュレル", "name": "潤浸保湿 フェイスクリーム", "confidence": 85, "release_status": "current"}
+            ]
+        })
+
+    if not has_category(morning_steps, "日焼け止め"):
         morning_steps.append({
             "category": "日焼け止め",
             "role": "main",
@@ -4370,10 +4378,13 @@ def ensure_required_routine_steps(data):
             "ingredient_focus": "UV防御",
             "risk_note": "",
             "priority": 9,
-            "product_candidates": []
+            "product_candidates": [
+                {"brand": "アネッサ", "name": "パーフェクトUV スキンケアミルク N", "confidence": 95, "release_status": "current"},
+                {"brand": "ビオレ", "name": "UV アクアリッチ ウォータリーエッセンス", "confidence": 85, "release_status": "current"}
+            ]
         })
 
-    if "クレンジング" not in night_categories:
+    if not has_category(night_steps, "クレンジング"):
         night_steps.insert(0, {
             "category": "クレンジング",
             "role": "main",
@@ -4384,7 +4395,7 @@ def ensure_required_routine_steps(data):
             "product_candidates": []
         })
 
-    if "洗顔" not in night_categories:
+    if not has_category(night_steps, "洗顔"):
         night_steps.insert(1, {
             "category": "洗顔",
             "role": "main",
@@ -4395,7 +4406,7 @@ def ensure_required_routine_steps(data):
             "product_candidates": []
         })
 
-    if "クリーム" not in night_categories:
+    if not has_category(night_steps, "クリーム"):
         night_steps.append({
             "category": "クリーム",
             "role": "main",
@@ -4403,7 +4414,10 @@ def ensure_required_routine_steps(data):
             "ingredient_focus": "セラミド",
             "risk_note": "",
             "priority": 9,
-            "product_candidates": []
+            "product_candidates": [
+                {"brand": "AESTURA", "name": "アトバリア 365 クリーム", "confidence": 85, "release_status": "current"},
+                {"brand": "LANEIGE", "name": "バウンシースリーピングマスク", "confidence": 80, "release_status": "current"}
+            ]
         })
 
     return data
