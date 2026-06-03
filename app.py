@@ -716,38 +716,12 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     title = str(item.get("itemName", "") or "")
     title_norm = title.lower()
 
-    if not is_same_product_for_market(product_name, title):
-        return -9999
+    name = clean_rakuten_keyword(product_name).lower()
+    brand = clean_rakuten_keyword(brand).lower()
 
-    def has_any(words):
-        return any(word in title for word in words)
+    score = 0
 
-    # 明確なカテゴリ違いだけ除外する
-    if category == "美容液":
-        if has_any(["シートマスク", "フェイスマスク", "薬用マスク", "マスク 12包", "マスク 24枚", "パック"]):
-            return -9999
-        if has_any(["乳液", "化粧水", "ローション"]):
-            return -9999
-
-    elif category == "乳液":
-        if has_any(["化粧水", "ローション", "シートマスク", "フェイスマスク", "薬用マスク", "パック"]):
-            return -9999
-
-    elif category == "クリーム":
-        if has_any(["化粧水", "ローション", "乳液", "ミルク", "シートマスク", "フェイスマスク"]):
-            return -9999
-        # スリーピングマスクはクリーム枠で許容する
-        # 美容液クリーム系もクリーム枠で許容する
-
-    elif category == "日焼け止め":
-        # UVクリーム、UV乳液、日焼け止めミルクは正規カテゴリなので除外しない
-        if has_any(["化粧水", "美容液", "セラム", "シートマスク", "フェイスマスク", "薬用マスク", "パック"]):
-            return -9999
-
-    elif category == "化粧水":
-        if has_any(["クリーム", "乳液", "ミルク", "美容液", "セラム", "シートマスク", "フェイスマスク", "薬用マスク", "パック"]):
-            return -9999
-
+    # 明確なNGだけ除外。商品名一致しないだけでは落とさない。
     hard_reject_words = [
         "詰替",
         "詰め替え",
@@ -759,13 +733,6 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         "サンプル",
         "ミニサイズ",
         "トライアル",
-        "セット",
-        "まとめ買い",
-        "2個",
-        "3個",
-        "4個",
-        "5個",
-        "6個",
         "中古",
         "廃盤",
         "廃番",
@@ -774,13 +741,41 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         "製造終了",
     ]
 
-    if has_any(hard_reject_words):
+    if any(word in title for word in hard_reject_words):
         return -9999
 
-    name = clean_rakuten_keyword(product_name).lower()
-    brand = clean_rakuten_keyword(brand).lower()
+    # 明確なカテゴリ違いだけ除外
+    if category == "美容液":
+        if any(word in title for word in ["シートマスク", "フェイスマスク", "薬用マスク", "パック"]):
+            return -9999
 
-    score = 0
+    elif category == "クリーム":
+        if any(word in title for word in ["化粧水", "ローション", "乳液", "ミルク", "シートマスク", "フェイスマスク"]):
+            return -9999
+
+    elif category == "日焼け止め":
+        if any(word in title for word in ["シートマスク", "フェイスマスク", "パック"]):
+            return -9999
+
+    elif category == "化粧水":
+        if any(word in title for word in ["クリーム", "乳液", "ミルク", "シートマスク", "フェイスマスク", "パック"]):
+            return -9999
+
+    # 商品名一致は加点にする。足切りにはしない。
+    if name and name in title_norm:
+        score += 70
+    else:
+        score -= 10
+
+    for word in name.split():
+        if word and word in title_norm:
+            score += 10
+
+    if brand and brand in title_norm:
+        score += 25
+
+    if any(word in title for word in CURRENT_PRODUCT_WORDS):
+        score += 15
 
     soft_risk_words = [
         "旧品",
@@ -805,25 +800,12 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         if word in title:
             score -= 45
 
-    if name and name in title_norm:
-        score += 70
-
-    for word in name.split():
-        if word and word in title_norm:
-            score += 10
-
-    if brand and brand in title_norm:
-        score += 25
-
-    if any(word in title for word in CURRENT_PRODUCT_WORDS):
-        score += 15
-
     price = safe_price(item.get("itemPrice", 0))
 
-    if price >= 8000:
-        score -= 12
     if price >= 12000:
         score -= 20
+    elif price >= 8000:
+        score -= 12
 
     if item.get("mediumImageUrls"):
         score += 10
@@ -854,15 +836,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     elif review_count > 0:
         score += 3
 
-    trusted_words = [
-        "公式",
-        "正規品",
-        "正規販売店",
-        "認定ショップ",
-        "メーカー公式",
-    ]
-
-    if any(word in title for word in trusted_words):
+    if any(word in title for word in ["公式", "正規品", "正規販売店", "認定ショップ", "メーカー公式"]):
         score += 12
 
     score += score_current_product_signal(item)
