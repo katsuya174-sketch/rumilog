@@ -1082,6 +1082,8 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
             print(f"[RAKUTEN TRY KEYWORD] {keyword}", flush=True)
             print("[RAKUTEN KEYWORD LEN]", len(keyword), flush=True)
 
+            class RakutenRateLimitError(Exception):
+                pass
             wait_for_rakuten_rate_limit()
 
             params = {
@@ -1110,9 +1112,11 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 print("[RAKUTEN API ERROR BODY]", res.text, flush=True)
 
                 if res.status_code == 429:
-                    RAKUTEN_COOLDOWN_UNTIL = time.time() + 60
-                    print("[RAKUTEN RATE LIMIT SKIP]", keyword, flush=True)
-                    return None
+                    RAKUTEN_COOLDOWN_UNTIL = time.time() + 10
+                    print("[RAKUTEN RATE LIMIT ERROR]", keyword, flush=True)
+                    raise RakutenRateLimitError(
+                        "楽天APIのアクセス制限に達しました。少し時間をおいてから再度お試しください。"
+                    )
 
                 if res.status_code == 400 and "keyword is not valid" in res.text:
                     print("[RAKUTEN INVALID KEYWORD SKIP]", keyword, flush=True)
@@ -1210,6 +1214,9 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
         except requests.exceptions.RequestException as e:
             print("[RAKUTEN API REQUEST ERROR]", e, flush=True)
             continue
+
+        except RakutenRateLimitError:
+            raise
 
         except Exception as e:
             print("[RAKUTEN API UNKNOWN ERROR]", repr(e), flush=True)
