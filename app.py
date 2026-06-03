@@ -4495,7 +4495,13 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     category = step.get("category", "")
     candidates = normalize_ai_candidates(step)
     all_candidates = []
-
+    if step.get("_section") == "morning" and category == "クリーム":
+        print(
+            "[CREAM DB LOOP START]",
+            "db_count=",
+            len(db_products) if isinstance(db_products, list) else "not_list",
+            flush=True
+        )
     # DB商品を全件候補化
     for p in db_products:
         if not isinstance(p, dict):
@@ -4509,7 +4515,21 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             category,
             fallback=category
         )
-
+        if step.get("_section") == "morning" and str(category).strip() == "クリーム":
+            print(
+                "[CREAM CATEGORY CHECK]",
+                "raw_step_category=",
+                repr(category),
+                "normalized_step_category=",
+                repr(step_category),
+                "db_sample_categories=",
+                [
+                    repr(p.get("category", ""))
+                    for p in db_products
+                    if isinstance(p, dict)
+                ][:20],
+                flush=True
+            )
         if product_category != step_category:
             continue
 
@@ -4517,7 +4537,13 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             continue
 
         product = dict(p)
-
+        if step.get("_section") == "morning" and category == "クリーム":
+            print(
+                "[CREAM SCORE TRY]",
+                product.get("name"),
+                product.get("category"),
+                flush=True
+            )
         base_score = score_product(product, step, user_data, budget_value)
         if base_score <= -9000:
             continue
