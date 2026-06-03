@@ -708,34 +708,17 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     if not is_same_product_for_market(product_name, title):
         return -9999
 
-    category_rules = {
-        "美容液": {
-            "required": ["セラム", "美容液", "アンプル", "エッセンス"],
-            "reject": ["マスク", "シート", "パック", "クリーム", "乳液"]
-        },
-        "乳液": {
-            "required": ["乳液", "ミルク", "エマルジョン"],
-            "reject": ["詰替", "詰め替え", "レフィル"]
-        },
-        "クリーム": {
-            "required": ["クリーム", "cream"],
-            "reject": ["マスク", "シート", "パック"]
-        },
-        "化粧水": {
-            "required": ["化粧水", "トナー", "ローション"],
-            "reject": ["クリーム", "乳液", "マスク"]
-        }
+    category_reject_words = {
+        "美容液": ["マスク", "シート", "パック"],
+        "乳液": ["化粧水", "ローション", "マスク", "パック"],
+        "クリーム": ["化粧水", "ローション", "マスク", "シート", "パック"],
+        "化粧水": ["クリーム", "乳液", "ミルク", "マスク", "パック"],
     }
 
-    if category in category_rules:
-        rule = category_rules[category]
+    if category in category_reject_words:
+        if any(word in title for word in category_reject_words[category]):
+            return -9999
 
-        if rule["required"]:
-            if not any(
-                word.lower() in title_norm
-                for word in [w.lower() for w in rule["required"]]
-            ):
-                return -9999
     hard_reject_words = [
         "詰替",
         "詰め替え",
@@ -745,30 +728,30 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         "つけかえ",
         "お試し",
         "サンプル",
-        "トライアル"
-    ]
-
-    if any(word in title for word in hard_reject_words):
-        return -9999
-        if any(
-            word.lower() in title_norm
-            for word in [w.lower() for w in rule["reject"]]
-        ):
-            return -9999
-
-    name = clean_rakuten_keyword(product_name).lower()
-    brand = clean_rakuten_keyword(brand).lower()
-
-    score = 0
-
-    hard_reject_words = [
+        "ミニサイズ",
+        "トライアル",
+        "セット",
+        "まとめ買い",
+        "2個",
+        "3個",
+        "4個",
+        "5個",
+        "6個",
+        "中古",
         "廃盤",
         "廃番",
         "生産終了",
         "販売終了",
         "製造終了",
-        "中古",
     ]
+
+    if any(word in title for word in hard_reject_words):
+        return -9999
+
+    name = clean_rakuten_keyword(product_name).lower()
+    brand = clean_rakuten_keyword(brand).lower()
+
+    score = 0
 
     soft_risk_words = [
         "旧品",
@@ -789,22 +772,9 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         "海外発送",
     ]
 
-    if any(word in title for word in hard_reject_words):
-        return -9999
-
-    risk_score = 0
-
-    if any(word in title for word in OLD_PRODUCT_WORDS):
-        risk_score += 70
-
     for word in soft_risk_words:
         if word in title:
-            risk_score += 35
-
-    if risk_score >= 70:
-        score -= 120
-    elif risk_score >= 35:
-        score -= 45
+            score -= 45
 
     if name and name in title_norm:
         score += 70
@@ -818,33 +788,6 @@ def score_rakuten_item(item, product_name, brand="", category=""):
 
     if any(word in title for word in CURRENT_PRODUCT_WORDS):
         score += 15
-
-    ng_words = [
-        "限定",
-        "企画品",
-        "海外発送"
-    ]
-    
-
-    for ng in ng_words:
-        if ng in title:
-            score -= 25
-
-    bundle_quantity = infer_bundle_quantity_from_title(title)
-
-    if bundle_quantity > 1:
-        score -= 25
-
-    single_words = [
-        "単品",
-        "1個",
-        "1本",
-        "通常品",
-        "本体"
-    ]
-
-    if any(word in title for word in single_words):
-        score += 12
 
     price = safe_price(item.get("itemPrice", 0))
 
@@ -888,7 +831,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         "正規品",
         "正規販売店",
         "認定ショップ",
-        "メーカー公式"
+        "メーカー公式",
     ]
 
     if any(word in title for word in trusted_words):
@@ -4323,40 +4266,29 @@ def is_discontinued_or_suspicious_product(product):
     if source in ["ai", "ai_virtual"]:
         return True
 
-    if release_status in ["old", "discontinued", "ended", "unknown"]:
+    if release_status in ["old", "discontinued", "ended"]:
         return True
 
     if status in ["discontinued", "out_of_stock", "ended", "販売終了", "生産終了", "廃盤"]:
         return True
 
-    hard_block_patterns = [
-        ["エリクシール", "エンリッチド", "リンクル"],
-        ["エリクシール", "ホワイト", "エンリッチド", "リンクル"],
-        ["エリクシールホワイト", "エンリッチド"],
-        ["資生堂", "エリクシールホワイト", "エンリッチド"],
-        ["シュペリエル", "エンリッチド"],
-        ["リニューアル前"],
-        ["旧", "パッケージ"],
-        ["旧", "処方"],
-        ["旧品"],
-        ["廃盤"],
-        ["生産終了"],
-        ["販売終了"],
+    hard_block_words = [
+        "廃盤",
+        "生産終了",
+        "販売終了",
+        "製造終了",
+        "リニューアル前",
+        "旧パッケージ",
+        "旧処方",
+        "旧品",
     ]
 
-    for pattern in hard_block_patterns:
-        if all(word.lower() in joined_text for word in pattern):
-            return True
-
-    for kw in globals().get("DISCONTINUED_KEYWORDS", []):
-        if norm(kw) and norm(kw) in joined_text:
-            return True
-
-    for kw in globals().get("OLD_PRODUCT_WORDS", []):
-        if norm(kw) and norm(kw) in joined_text:
+    for word in hard_block_words:
+        if word in joined_text:
             return True
 
     return False
+
 def ensure_required_routine_steps(data):
     if not isinstance(data, dict):
         return {}
