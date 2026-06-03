@@ -4494,30 +4494,10 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
     category = step.get("category", "")
     candidates = normalize_ai_candidates(step)
-    if step.get("_section") == "morning":
-        print(
-            "[MORNING STEP CHECK]",
-            "category=",
-            repr(category),
-            "db_count=",
-            len(db_products) if isinstance(db_products, list) else "not_list",
-            "ai_count=",
-            len(candidates) if isinstance(candidates, list) else "not_list",
-            flush=True
-        )
+    
 
     all_candidates = []
-    if step.get("_section") == "morning":
-        print(
-            "[MORNING STEP CHECK]",
-            "category=",
-            repr(category),
-            "db_count=",
-            len(db_products) if isinstance(db_products, list) else "not_list",
-            "ai_candidates_count=",
-            len(candidates) if isinstance(candidates, list) else "not_list",
-            flush=True
-        )
+    
     # DB商品を全件候補化
     for p in db_products:
         if not isinstance(p, dict):
@@ -5088,19 +5068,13 @@ def ensure_required_routine_steps(data):
     if not isinstance(night_steps, list):
         night_steps = []
 
-    morning_categories = {
-        s.get("category")
-        for s in morning_steps
-        if isinstance(s, dict)
-    }
+    def has_category(steps, category):
+        return any(
+            isinstance(s, dict) and s.get("category") == category
+            for s in steps
+        )
 
-    night_categories = {
-        s.get("category")
-        for s in night_steps
-        if isinstance(s, dict)
-    }
-
-    if "洗顔" not in morning_categories:
+    if not has_category(morning_steps, "洗顔"):
         morning_steps.insert(0, {
             "category": "洗顔",
             "role": "main",
@@ -5111,7 +5085,31 @@ def ensure_required_routine_steps(data):
             "product_candidates": []
         })
 
-    if "日焼け止め" not in morning_categories:
+    if not has_category(morning_steps, "クリーム"):
+        morning_steps.append({
+            "category": "クリーム",
+            "role": "main",
+            "purpose": "朝の保湿とバリア保護。日中の乾燥や刺激から肌を守る",
+            "ingredient_focus": "セラミド",
+            "risk_note": "",
+            "priority": 8,
+            "product_candidates": [
+                {
+                    "brand": "AESTURA",
+                    "name": "アトバリア 365 クリーム",
+                    "confidence": 85,
+                    "release_status": "current"
+                },
+                {
+                    "brand": "LANEIGE",
+                    "name": "バウンシースリーピングマスク",
+                    "confidence": 75,
+                    "release_status": "current"
+                }
+            ]
+        })
+
+    if not has_category(morning_steps, "日焼け止め"):
         morning_steps.append({
             "category": "日焼け止め",
             "role": "main",
@@ -5119,10 +5117,23 @@ def ensure_required_routine_steps(data):
             "ingredient_focus": "UV防御",
             "risk_note": "",
             "priority": 9,
-            "product_candidates": []
+            "product_candidates": [
+                {
+                    "brand": "アネッサ",
+                    "name": "パーフェクトUV スキンケアミルク N",
+                    "confidence": 95,
+                    "release_status": "current"
+                },
+                {
+                    "brand": "ビオレ",
+                    "name": "UV アクアリッチ ウォータリーエッセンス",
+                    "confidence": 85,
+                    "release_status": "current"
+                }
+            ]
         })
 
-    if "クレンジング" not in night_categories:
+    if not has_category(night_steps, "クレンジング"):
         night_steps.insert(0, {
             "category": "クレンジング",
             "role": "main",
@@ -5133,7 +5144,7 @@ def ensure_required_routine_steps(data):
             "product_candidates": []
         })
 
-    if "洗顔" not in night_categories:
+    if not has_category(night_steps, "洗顔"):
         night_steps.insert(1, {
             "category": "洗顔",
             "role": "main",
@@ -5144,7 +5155,7 @@ def ensure_required_routine_steps(data):
             "product_candidates": []
         })
 
-    if "クリーム" not in night_categories:
+    if not has_category(night_steps, "クリーム"):
         night_steps.append({
             "category": "クリーム",
             "role": "main",
@@ -5159,7 +5170,6 @@ def ensure_required_routine_steps(data):
     data["night"]["steps"] = night_steps
 
     return data
-
 def get_dynamic_score_weights(step, user_data):
     section = step.get("_section", "")
     purpose = normalize_text(step.get("purpose", ""))
