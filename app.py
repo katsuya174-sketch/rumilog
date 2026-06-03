@@ -712,16 +712,162 @@ def is_same_product_for_market(ai_name, rakuten_title):
 
     return match_ratio >= 0.45
 
-score_rakuten_item
+def score_rakuten_item(item, product_name, brand="", category=""):
+    title = str(item.get("itemName", "") or "")
+    title_norm = title.lower()
 
-def load_rakuten_cache():
-    try:
-        with open(RAKUTEN_CACHE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-            return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    if not is_same_product_for_market(product_name, title):
+        return -9999
 
+    def has_any(words):
+        return any(word in title for word in words)
+
+    # 明確なカテゴリ違いだけ除外する
+    if category == "美容液":
+        if has_any(["シートマスク", "フェイスマスク", "薬用マスク", "マスク 12包", "マスク 24枚", "パック"]):
+            return -9999
+        if has_any(["乳液", "化粧水", "ローション"]):
+            return -9999
+
+    elif category == "乳液":
+        if has_any(["化粧水", "ローション", "シートマスク", "フェイスマスク", "薬用マスク", "パック"]):
+            return -9999
+
+    elif category == "クリーム":
+        if has_any(["化粧水", "ローション", "乳液", "ミルク", "シートマスク", "フェイスマスク"]):
+            return -9999
+        # スリーピングマスクはクリーム枠で許容する
+        # 美容液クリーム系もクリーム枠で許容する
+
+    elif category == "日焼け止め":
+        # UVクリーム、UV乳液、日焼け止めミルクは正規カテゴリなので除外しない
+        if has_any(["化粧水", "美容液", "セラム", "シートマスク", "フェイスマスク", "薬用マスク", "パック"]):
+            return -9999
+
+    elif category == "化粧水":
+        if has_any(["クリーム", "乳液", "ミルク", "美容液", "セラム", "シートマスク", "フェイスマスク", "薬用マスク", "パック"]):
+            return -9999
+
+    hard_reject_words = [
+        "詰替",
+        "詰め替え",
+        "つめかえ",
+        "レフィル",
+        "付け替え",
+        "つけかえ",
+        "お試し",
+        "サンプル",
+        "ミニサイズ",
+        "トライアル",
+        "セット",
+        "まとめ買い",
+        "2個",
+        "3個",
+        "4個",
+        "5個",
+        "6個",
+        "中古",
+        "廃盤",
+        "廃番",
+        "生産終了",
+        "販売終了",
+        "製造終了",
+    ]
+
+    if has_any(hard_reject_words):
+        return -9999
+
+    name = clean_rakuten_keyword(product_name).lower()
+    brand = clean_rakuten_keyword(brand).lower()
+
+    score = 0
+
+    soft_risk_words = [
+        "旧品",
+        "旧型",
+        "旧モデル",
+        "旧パッケージ",
+        "旧処方",
+        "リニューアル前",
+        "在庫限り",
+        "アウトレット",
+        "訳あり",
+        "箱なし",
+        "外箱なし",
+        "パッケージ不良",
+        "期限間近",
+        "使用期限間近",
+        "並行輸入",
+        "海外発送",
+    ]
+
+    for word in soft_risk_words:
+        if word in title:
+            score -= 45
+
+    if name and name in title_norm:
+        score += 70
+
+    for word in name.split():
+        if word and word in title_norm:
+            score += 10
+
+    if brand and brand in title_norm:
+        score += 25
+
+    if any(word in title for word in CURRENT_PRODUCT_WORDS):
+        score += 15
+
+    price = safe_price(item.get("itemPrice", 0))
+
+    if price >= 8000:
+        score -= 12
+    if price >= 12000:
+        score -= 20
+
+    if item.get("mediumImageUrls"):
+        score += 10
+
+    if item.get("affiliateUrl"):
+        score += 18
+    elif item.get("itemUrl"):
+        score += 5
+
+    review_average = safe_float(item.get("reviewAverage", 0))
+    review_count = safe_int(item.get("reviewCount", 0))
+
+    if review_average >= 4.5:
+        score += 18
+    elif review_average >= 4.2:
+        score += 12
+    elif review_average >= 4.0:
+        score += 6
+    elif 0 < review_average < 3.5:
+        score -= 15
+
+    if review_count >= 1000:
+        score += 20
+    elif review_count >= 300:
+        score += 14
+    elif review_count >= 100:
+        score += 8
+    elif review_count > 0:
+        score += 3
+
+    trusted_words = [
+        "公式",
+        "正規品",
+        "正規販売店",
+        "認定ショップ",
+        "メーカー公式",
+    ]
+
+    if any(word in title for word in trusted_words):
+        score += 12
+
+    score += score_current_product_signal(item)
+
+    return score
 
 def save_rakuten_cache(cache):
     try:
