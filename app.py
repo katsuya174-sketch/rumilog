@@ -4512,7 +4512,9 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     candidates = normalize_ai_candidates(step)
     
 
-       # DB商品を全件候補化
+    all_candidates = []
+    
+    # DB商品を全件候補化
     db_debug = {
         "total": 0,
         "non_dict": 0,
