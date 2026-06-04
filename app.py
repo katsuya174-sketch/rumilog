@@ -525,7 +525,7 @@ def load_products():
 
     return products
 
-
+AFFILIATE_LINKS_AI_FILE = "affiliate_links_ai.json"
 def load_affiliate_links_ai():
     if not os.path.exists(AFFILIATE_LINKS_AI_FILE):
         return []
