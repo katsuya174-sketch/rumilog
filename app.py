@@ -404,21 +404,34 @@ def get_remaining_free_count(ip):
 
 def load_products():
     with open("products.json", "r", encoding="utf-8") as f:
-        products = json.load(f)
+        raw_data = json.load(f)
 
-    # Noneや壊れたデータを除去
+    if isinstance(raw_data, list):
+        products = raw_data
+    elif isinstance(raw_data, dict):
+        if isinstance(raw_data.get("products"), list):
+            products = raw_data["products"]
+        elif isinstance(raw_data.get("items"), list):
+            products = raw_data["items"]
+        else:
+            products = list(raw_data.values())
+    else:
+        products = []
+
     products = [p for p in products if isinstance(p, dict)]
 
-   
     for p in products:
-        # category正規化
         category = p.get("category", "")
-        p["category"] = AI_CATEGORY_MAP.get(category, category)
+        p["category"] = normalize_candidate_category(
+            AI_CATEGORY_MAP.get(str(category).lower(), category),
+            fallback=category
+        )
 
-        # concerns正規化
         concerns = p.get("concerns", [])
-        new_concerns = []
+        if not isinstance(concerns, list):
+            concerns = []
 
+        new_concerns = []
         for c in concerns:
             mapped = CONCERN_MAP.get(c, c)
             if mapped is None:
@@ -427,10 +440,11 @@ def load_products():
 
         p["concerns"] = list(dict.fromkeys(new_concerns))
 
-        # main_functions正規化
         main_functions = p.get("main_functions", [])
-        new_main_functions = []
+        if not isinstance(main_functions, list):
+            main_functions = []
 
+        new_main_functions = []
         for mf in main_functions:
             mapped = MAIN_FUNCTION_MAP.get(mf, mf)
             if mapped:
@@ -4515,20 +4529,10 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     all_candidates = []
     
     # DB商品を全件候補化
-    db_debug = {
-        "total": 0,
-        "non_dict": 0,
-        "category_mismatch": 0,
-        "excluded_name": 0,
-        "score_rejected": 0,
-        "accepted": 0,
-    }
 
     for p in db_products:
-        db_debug["total"] += 1
 
         if not isinstance(p, dict):
-            db_debug["non_dict"] += 1
             continue
 
         product_category = normalize_candidate_category(
@@ -4542,18 +4546,15 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         )
 
         if product_category != step_category:
-            db_debug["category_mismatch"] += 1
             continue
 
         if p.get("name") in exclude_names:
-            db_debug["excluded_name"] += 1
             continue
 
         product = dict(p)
 
         base_score = score_product(product, step, user_data, budget_value)
         if base_score <= -9000:
-            db_debug["score_rejected"] += 1
             continue
 
         print(
@@ -4602,11 +4603,6 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         product["_source"] = "db"
 
         all_candidates.append(product)
-        db_debug["accepted"] += 1
-
-    # 確認用：夜クリーム候補なしの原因確認後に削除
-    if step.get("_section") == "night" and step.get("category") == "クリーム":
-        print("[DB CANDIDATE DEBUG]", db_debug, flush=True)
 
     # AI候補を全件候補化
     for candidate in candidates:
@@ -9525,7 +9521,7 @@ def lab_test_function():
             # ⑥ DB読み込み
             # =========================
             products = load_products()
-            print("[PRODUCTS AFTER LOAD]", len(products), flush=True)
+            
 
             validate_and_log_products(products)
 
