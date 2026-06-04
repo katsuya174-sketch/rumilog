@@ -457,9 +457,6 @@ def load_products():
 
 AFFILIATE_LINKS_AI_FILE = "affiliate_links_ai.json"
 
-print("[RAKUTEN APP ID RAW]", repr(RAKUTEN_APP_ID))
-print("[RAKUTEN APP ID LENGTH]", len(RAKUTEN_APP_ID))
-
 
 def load_affiliate_links_ai():
     if not os.path.exists(AFFILIATE_LINKS_AI_FILE):
@@ -1364,13 +1361,19 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
         step["rakuten_link"] = ""
         return step
 
-    # 1. step自体に直リンクがあるなら最優先
+    existing_rakuten_link = str(step.get("rakuten_link", "") or "").strip()
+    existing_image = str(step.get("image", "") or "").strip()
+    product_source = str(step.get("product_source", "") or "").strip()
+
+    if product_source == "ai_rakuten_verified" and existing_rakuten_link:
+        step["amazon_link"] = build_amazon_link(product_name)
+        return normalize_step_price_fields(step)
+
     if "affiliate_links" in step and isinstance(step["affiliate_links"], dict):
         step["amazon_link"] = step["affiliate_links"].get("amazon", "")
         step["rakuten_link"] = step["affiliate_links"].get("rakuten", "")
-        return step
+        return normalize_step_price_fields(step)
 
-    # 2. AI候補専用DBで照合
     matched_links = find_affiliate_links_for_ai_product(
         product_name,
         category,
@@ -1380,19 +1383,18 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
     if matched_links:
         step["amazon_link"] = matched_links.get("amazon", "")
         step["rakuten_link"] = matched_links.get("rakuten", "")
-        return step
+        return normalize_step_price_fields(step)
 
-    # 3. 楽天APIで商品直リンク・画像・価格を取得
     rakuten_item = fetch_rakuten_item(
         product_name=product_name,
-        category=step.get("category", ""),
-        brand=step.get("brand", "")
+        category=category,
+        brand=brand
     )
 
     if rakuten_item:
         step["rakuten_link"] = rakuten_item.get("rakuten_link", "")
 
-        if not step.get("image") and rakuten_item.get("image"):
+        if not existing_image and rakuten_item.get("image"):
             step["image"] = rakuten_item.get("image", "")
 
         if safe_price(step.get("price", 0)) <= 0:
@@ -1404,12 +1406,13 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
         step["raw_price"] = safe_price(rakuten_item.get("raw_price", 0))
         step["bundle_quantity"] = int(rakuten_item.get("bundle_quantity", 1) or 1)
     else:
-        step["rakuten_link"] = ""
+        step["rakuten_link"] = existing_rakuten_link
 
-    # 4. Amazonは今は後回し。検索リンクだけ残す。
     step["amazon_link"] = build_amazon_link(product_name)
 
     return normalize_step_price_fields(step)
+
+
 def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
     for section in ["morning", "night"]:
         for step in data.get(section, {}).get("steps", []):
