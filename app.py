@@ -30,6 +30,7 @@ GEMINI_ANALYSIS_CACHE = {}
 ANALYSIS_CACHE_VERSION = "v1"
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
+_rakuten_item_cache = {}
 #DB_POOL = SimpleConnectionPool(
 #   minconn=1,
 #    maxconn=5,
@@ -613,7 +614,7 @@ def wait_for_rakuten_rate_limit():
 
     _last_rakuten_request_time = time.time()
 
-    import re
+    
 
 
 
@@ -1132,8 +1133,20 @@ def clean_rakuten_keyword(keyword):
 def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="", purpose=""):
     global RAKUTEN_COOLDOWN_UNTIL
 
+    cache_key = (
+        normalize_product_name(product_name),
+        normalize_candidate_category(category, fallback=category),
+        normalize_product_name(brand),
+        normalize_product_name(ingredient_focus),
+        normalize_product_name(purpose),
+    )
+
+    if cache_key in _rakuten_item_cache:
+        return _rakuten_item_cache[cache_key]
+
     if time.time() < RAKUTEN_COOLDOWN_UNTIL:
         print("[RAKUTEN COOLDOWN ACTIVE]", flush=True)
+        _rakuten_item_cache[cache_key] = None
         return None
 
     product_name = clean_display_product_name(product_name)
@@ -1307,6 +1320,7 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 "image": image_url,
             }
 
+            _rakuten_item_cache[cache_key] = result
             return result
 
         except requests.exceptions.RequestException as e:
@@ -1325,6 +1339,7 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
         flush=True
     )
 
+    _rakuten_item_cache[cache_key] = None
     return None
 
 def clean_product_title(text):
