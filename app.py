@@ -798,10 +798,43 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     name = clean_rakuten_keyword(product_name).lower()
     brand = clean_rakuten_keyword(brand).lower()
 
-    if not title:
+    if not title or not name:
         return -9999
 
-    # 1個販売だけ採用する。セット・詰替・サンプルはリンクも価格も不適切なので除外。
+    def compact_text(value):
+        return re.sub(r"[\s　・_\-ー/／\(\)（）\[\]【】+＋\.。,:：,]", "", str(value).lower())
+
+    title_compact = compact_text(title)
+    name_compact = compact_text(name)
+
+    name_tokens = [
+        compact_text(t)
+        for t in re.split(r"[\s　・_\-ー/／\(\)（）\[\]【】+＋\.。,:：,]", name)
+        if compact_text(t)
+    ]
+
+    important_tokens = [
+        t for t in name_tokens
+        if len(t) >= 2 and t not in {"the", "rx", "neo", "ex", "n"}
+    ]
+
+    exact_name_match = bool(name_compact and name_compact in title_compact)
+
+    matched_tokens = [
+        t for t in important_tokens
+        if t in title_compact
+    ]
+
+    if exact_name_match:
+        name_match_score = 90
+    else:
+        required_matches = 1 if len(important_tokens) <= 2 else 2
+
+        if len(matched_tokens) < required_matches:
+            return -9999
+
+        name_match_score = 35 + (len(matched_tokens) * 12)
+
     hard_reject_words = [
         "詰替",
         "詰め替え",
@@ -839,45 +872,31 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     if infer_bundle_quantity_from_title(title) > 1:
         return -9999
 
-    # 明確なカテゴリ違いだけ除外。UVクリーム・UVミルクは日焼け止めとして許可。
     if category == "美容液":
         if any(word in title for word in ["シートマスク", "フェイスマスク", "薬用マスク", "パック"]):
             return -9999
 
     elif category == "クリーム":
-        if any(word in title for word in ["化粧水", "ローション", "乳液", "シートマスク", "フェイスマスク"]):
+        if any(word in title for word in ["化粧水", "ローション", "乳液", "シートマスク", "フェイスマスク", "美容液", "セラム"]):
             return -9999
 
     elif category == "日焼け止め":
         if any(word in title for word in ["シートマスク", "フェイスマスク", "薬用マスク", "パック"]):
             return -9999
+
         if not any(word in title for word in ["日焼け止め", "UV", "uv", "SPF", "spf", "PA", "pa", "サンスクリーン"]):
-            score_category = -20
-        else:
-            score_category = 20
+            return -9999
 
     elif category == "化粧水":
         if any(word in title for word in ["クリーム", "乳液", "ミルク", "美容液", "セラム", "シートマスク", "フェイスマスク", "パック"]):
             return -9999
-        score_category = 0
 
-    else:
-        score_category = 0
+    score = name_match_score
 
-    score = score_category if "score_category" in locals() else 0
-
-    # 商品名一致は加点。条件検索なので足切りにはしない。
-    if name and name in title_norm:
-        score += 70
-    else:
-        score -= 10
-
-    for word in name.split():
-        if word and word in title_norm:
-            score += 10
-
-    if brand and brand in title_norm:
-        score += 25
+    if brand:
+        brand_compact = compact_text(brand)
+        if brand_compact and brand_compact in title_compact:
+            score += 25
 
     if any(word in title for word in CURRENT_PRODUCT_WORDS):
         score += 15
@@ -1433,29 +1452,26 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
     existing_image = str(step.get("image", "") or "").strip()
     product_source = str(step.get("product_source", "") or "").strip()
 
-    if product_source in ["db", "ai+db", "fallback_db"] and existing_rakuten_link:
-        step["amazon_link"] = build_amazon_link(product_name)
-        return normalize_step_price_fields(step)
-
     if product_source == "ai_rakuten_verified" and existing_rakuten_link:
         step["amazon_link"] = build_amazon_link(product_name)
         return normalize_step_price_fields(step)
 
-    if "affiliate_links" in step and isinstance(step["affiliate_links"], dict):
-        step["amazon_link"] = step["affiliate_links"].get("amazon", "")
-        step["rakuten_link"] = step["affiliate_links"].get("rakuten", "")
-        return normalize_step_price_fields(step)
+    if product_source not in ["db", "ai+db", "fallback_db"]:
+        if "affiliate_links" in step and isinstance(step["affiliate_links"], dict):
+            step["amazon_link"] = step["affiliate_links"].get("amazon", "")
+            step["rakuten_link"] = step["affiliate_links"].get("rakuten", "")
+            return normalize_step_price_fields(step)
 
-    matched_links = find_affiliate_links_for_ai_product(
-        product_name,
-        category,
-        affiliate_ai_db
-    )
+        matched_links = find_affiliate_links_for_ai_product(
+            product_name,
+            category,
+            affiliate_ai_db
+        )
 
-    if matched_links:
-        step["amazon_link"] = matched_links.get("amazon", "")
-        step["rakuten_link"] = matched_links.get("rakuten", "")
-        return normalize_step_price_fields(step)
+        if matched_links:
+            step["amazon_link"] = matched_links.get("amazon", "")
+            step["rakuten_link"] = matched_links.get("rakuten", "")
+            return normalize_step_price_fields(step)
 
     rakuten_item = fetch_rakuten_item(
         product_name=product_name,
@@ -1466,7 +1482,7 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
     if rakuten_item:
         step["rakuten_link"] = rakuten_item.get("rakuten_link", "")
 
-        if not existing_image and rakuten_item.get("image"):
+        if rakuten_item.get("image"):
             step["image"] = rakuten_item.get("image", "")
 
         if safe_price(step.get("price", 0)) <= 0:
@@ -1476,9 +1492,16 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
             step["estimated_price"] = safe_price(rakuten_item.get("price", 0))
 
         step["raw_price"] = safe_price(rakuten_item.get("raw_price", 0))
-        step["bundle_quantity"] = int(rakuten_item.get("bundle_quantity", 1) or 1)
+        step["bundle_quantity"] = safe_bundle_quantity(
+            rakuten_item.get("bundle_quantity", 1)
+        )
     else:
-        step["rakuten_link"] = existing_rakuten_link
+        if product_source in ["db", "ai+db", "fallback_db"]:
+            step["rakuten_link"] = ""
+        else:
+            step["rakuten_link"] = existing_rakuten_link
+
+        step["image"] = existing_image
 
     step["amazon_link"] = build_amazon_link(product_name)
 
@@ -4616,7 +4639,6 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     
 
     all_candidates = []
-    db_fallback_candidates = []
     # DB商品を全件候補化
 
     for p in db_products:
@@ -4691,7 +4713,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         product["_improvement_reason"] = improvement_reason
         product["_source"] = "db"
 
-        db_fallback_candidates.append(product)
+        all_candidates.append(product)
 
     # AI候補を全件候補化
     for candidate in candidates:
@@ -4949,9 +4971,6 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         )
 
         all_candidates.append(virtual)
-
-    if not all_candidates:
-        all_candidates = db_fallback_candidates
 
     if not all_candidates:
         return None
