@@ -2799,7 +2799,8 @@ def apply_sunscreen_score_rules(product, step, user_data, concern_tags):
 
     # 👇ここに追加
     uv_info = product.get("uv_level", {})
-    spf = int(uv_info.get("spf", 0) or 0)
+    spf_raw = str(uv_info.get("spf", 0) or "0").strip()
+    spf = int(re.sub(r"[^0-9]", "", spf_raw) or 0)
     pa = str(uv_info.get("pa", "") or "")
 
     if spf >= 50:
