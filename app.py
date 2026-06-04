@@ -4079,6 +4079,19 @@ def normalize_candidate_category(value, fallback=""):
 
     return raw_fallback
     
+def safe_bundle_quantity(value):
+    if isinstance(value, int) and value > 0:
+        return value
+
+    if isinstance(value, str):
+        value = value.strip()
+        if value.isdigit():
+            number = int(value)
+            if number > 0:
+                return number
+
+    return 1
+
 def build_virtual_product_from_ai_candidate(step, candidate):
     category = step.get("category", "")
     ingredient_focus = step.get("ingredient_focus", "")
@@ -4251,7 +4264,7 @@ def build_virtual_product_from_ai_candidate(step, candidate):
             or candidate.get("price")
             or 0
         ),
-        "bundle_quantity": int(candidate.get("bundle_quantity") or 1),
+        "bundle_quantity": safe_bundle_quantity(candidate.get("bundle_quantity")),
         "main_functions": list(dict.fromkeys(main_functions)),
         "formulation": list(dict.fromkeys(formulation)),
         "technology": list(dict.fromkeys(technology)),
@@ -5605,7 +5618,7 @@ def normalize_ai_candidates(step):
                 or candidate.get("price")
                 or 0
             ),
-            "bundle_quantity": int(candidate.get("bundle_quantity") or 1),
+            "bundle_quantity": safe_bundle_quantity(candidate.get("bundle_quantity")),
             "active_ingredients": candidate.get("active_ingredients", []) if isinstance(candidate.get("active_ingredients", []), list) else [],
             "support_ingredients": candidate.get("support_ingredients", []) if isinstance(candidate.get("support_ingredients", []), list) else [],
             "signature_ingredients": candidate.get("signature_ingredients", []) if isinstance(candidate.get("signature_ingredients", []), list) else [],
@@ -9377,6 +9390,12 @@ def lab_test_function():
             # ① 入力取得
             # =========================
             user_data = extract_user_data(request)
+            print("===== USER DATA DEBUG =====", flush=True)
+
+            for k, v in user_data.items():
+                print(k, "=", repr(v), flush=True)
+
+            print("===========================", flush=True)
             debug_log("START LAB")
             debug_log("USER DATA", user_data)
 
