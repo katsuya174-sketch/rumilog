@@ -406,6 +406,29 @@ def load_products():
     with open("products.json", "r", encoding="utf-8") as f:
         raw_data = json.load(f)
 
+    print("===== PRODUCTS JSON STRUCTURE =====", flush=True)
+
+    print(type(raw_data), flush=True)
+
+    if isinstance(raw_data, dict):
+        print(raw_data.keys(), flush=True)
+
+        for k, v in raw_data.items():
+            print(
+                k,
+                type(v),
+                len(v) if isinstance(v, list) else "",
+                flush=True
+            )
+
+    elif isinstance(raw_data, list):
+        print("LIST LENGTH:", len(raw_data), flush=True)
+
+        if raw_data:
+            print(raw_data[0], flush=True)
+
+    print("===== END PRODUCTS JSON STRUCTURE =====", flush=True)
+
     if isinstance(raw_data, list):
         products = raw_data
     elif isinstance(raw_data, dict):
