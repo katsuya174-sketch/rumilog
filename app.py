@@ -6042,39 +6042,48 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
         elif source in ["ai", "ai_virtual", "ai_rakuten_verified"]:
             step["product"] = best.get("name", category)
-            step["price"] = safe_price(best.get("price_ref", 0))
-            step["estimated_price"] = safe_price(best.get("price_ref", 0))
+            step["price"] = safe_price(
+                best.get("price_ref")
+                or best.get("normalized_price")
+                or best.get("raw_price")
+                or 0
+            )
+            step["estimated_price"] = step["price"]
 
-            image_path = None
-            if ai_image_db:
-                lookup_names = []
-
-                raw_name = clean_display_product_name(best.get("name", ""))
-                brand = str(best.get("brand", "") or "").strip()
-
-                if raw_name:
-                    lookup_names.append(raw_name)
-
-                if brand and raw_name and not raw_name.startswith(brand):
-                    lookup_names.append(f"{brand} {raw_name}")
-
+            if source == "ai_rakuten_verified":
+                step["image"] = best.get("image", "") or ""
+                step["rakuten_link"] = best.get("rakuten_link", "") or ""
+            else:
                 image_path = None
-                found_price = 0
+                if ai_image_db:
+                    lookup_names = []
 
-                for lookup_name in lookup_names:
-                    image_path, found_price = find_ai_candidate_data(
-                        lookup_name,
-                        ai_image_db
-                    )
+                    raw_name = clean_display_product_name(best.get("name", ""))
+                    brand = str(best.get("brand", "") or "").strip()
 
-                    if image_path:
-                        break
+                    if raw_name:
+                        lookup_names.append(raw_name)
 
-                if found_price and step["price"] <= 0:
-                    step["price"] = safe_price(found_price)
-                    step["estimated_price"] = safe_price(found_price)
+                    if brand and raw_name and not raw_name.startswith(brand):
+                        lookup_names.append(f"{brand} {raw_name}")
 
-            step["image"] = image_path or ""
+                    found_price = 0
+
+                    for lookup_name in lookup_names:
+                        image_path, found_price = find_ai_candidate_data(
+                            lookup_name,
+                            ai_image_db
+                        )
+
+                        if image_path:
+                            break
+
+                    if found_price and step["price"] <= 0:
+                        step["price"] = safe_price(found_price)
+                        step["estimated_price"] = safe_price(found_price)
+
+                step["image"] = image_path or ""
+
             step["match_score"] = best.get("_score", 0) or 0
             step["base_score"] = best.get("_base_score", 0) or 0
             step["improve_score"] = best.get("_improve_score", 0) or 0
@@ -9516,7 +9525,8 @@ def lab_test_function():
             # ⑥ DB読み込み
             # =========================
             products = load_products()
-            
+            print("[PRODUCTS AFTER LOAD]", len(products), flush=True)
+
             validate_and_log_products(products)
 
             # =========================
