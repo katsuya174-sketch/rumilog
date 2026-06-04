@@ -425,18 +425,54 @@ def load_products():
     products = [p for p in products if isinstance(p, dict)]
 
     for p in products:
+        # price_ref / raw_price 正規化
+        p["price_ref"] = safe_price(
+            p.get("price_ref")
+            or p.get("normalized_price")
+            or p.get("itemPrice")
+            or p.get("price")
+            or 0
+        )
+
+        p["raw_price"] = safe_price(
+            p.get("raw_price")
+            or p.get("itemPrice")
+            or p.get("price_ref")
+            or p.get("price")
+            or 0
+        )
+
+        # category 正規化
         category = p.get("category", "")
+        category_aliases = {
+            "導入美容液": "美容液",
+            "ブースター": "美容液",
+            "導入液": "美容液",
+            "シートマスク": "パック",
+            "フェイスマスク": "パック",
+            "UV": "日焼け止め",
+            "日焼け止めクリーム": "日焼け止め",
+        }
+
+        category = category_aliases.get(category, category)
+
         p["category"] = normalize_candidate_category(
             AI_CATEGORY_MAP.get(str(category).lower(), category),
             fallback=category
         )
 
+        # concerns 正規化
         concerns = p.get("concerns", [])
         if not isinstance(concerns, list):
             concerns = []
 
+        concern_aliases = {
+            "sensitive": "barrier",
+        }
+
         new_concerns = []
         for c in concerns:
+            c = concern_aliases.get(c, c)
             mapped = CONCERN_MAP.get(c, c)
             if mapped is None:
                 continue
@@ -444,14 +480,43 @@ def load_products():
 
         p["concerns"] = list(dict.fromkeys(new_concerns))
 
+        # main_functions 正規化
         main_functions = p.get("main_functions", [])
         if not isinstance(main_functions, list):
             main_functions = []
 
+        main_function_aliases = {
+            "メイク除去": "メイク落とし",
+            "うるおい保持洗浄": "うるおいを守って洗う",
+            "低刺激洗浄": "うるおいを守って洗う",
+            "皮脂汚れ除去": "皮脂汚れオフ",
+            "黒ずみ除去": "黒ずみ予防",
+            "角質ケア": "キメ改善",
+            "くすみ除去": "透明感向上",
+            "くすみ改善": "透明感向上",
+            "赤みケア": "鎮静ケア",
+            "ニキビケア": "ニキビ予防",
+            "皮脂バランス調整": "皮脂抑制",
+            "毛穴ケア": "毛穴改善",
+            "色素沈着ケア": "美白ケア",
+            "ニキビ跡ケア": "透明感向上",
+            "シワ改善": "エイジングケア",
+            "ツヤ改善": "透明感向上",
+            "ツヤ付与": "透明感向上",
+            "低刺激ケア": "鎮静ケア",
+            "浸透保湿": "保湿",
+            "保護": "バリア強化",
+            "毎日使いやすい": "うるおいを守って洗う",
+            "毛穴詰まり予防": "毛穴詰まり予防",
+            "洗いすぎ防止": "洗いすぎ防止",
+        }
+
         new_main_functions = []
         for mf in main_functions:
             mapped = MAIN_FUNCTION_MAP.get(mf, mf)
-            if mapped:
+            mapped = main_function_aliases.get(mapped, mapped)
+
+            if mapped in MAIN_FUNCTION_TAGS:
                 new_main_functions.append(mapped)
 
         p["main_functions"] = list(dict.fromkeys(new_main_functions))
