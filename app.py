@@ -9686,8 +9686,9 @@ def lab_test_function():
         except ValueError as e:
             print("\n===== LAB VALUE ERROR =====")
             print(str(e))
+            traceback.print_exc()
             print("===========================\n")
-            return f"<h1>{str(e)}</h1>"
+            return f"<pre>{traceback.format_exc()}</pre>"
 
         except Exception as e:
             print("\n===== LAB ERROR =====")
