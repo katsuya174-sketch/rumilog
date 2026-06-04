@@ -1433,6 +1433,10 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
     existing_image = str(step.get("image", "") or "").strip()
     product_source = str(step.get("product_source", "") or "").strip()
 
+    if product_source in ["db", "ai+db", "fallback_db"] and existing_rakuten_link:
+        step["amazon_link"] = build_amazon_link(product_name)
+        return normalize_step_price_fields(step)
+
     if product_source == "ai_rakuten_verified" and existing_rakuten_link:
         step["amazon_link"] = build_amazon_link(product_name)
         return normalize_step_price_fields(step)
@@ -4612,7 +4616,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     
 
     all_candidates = []
-    
+    db_fallback_candidates = []
     # DB商品を全件候補化
 
     for p in db_products:
@@ -4687,7 +4691,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         product["_improvement_reason"] = improvement_reason
         product["_source"] = "db"
 
-        all_candidates.append(product)
+        db_fallback_candidates.append(product)
 
     # AI候補を全件候補化
     for candidate in candidates:
@@ -4945,6 +4949,9 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         )
 
         all_candidates.append(virtual)
+
+    if not all_candidates:
+        all_candidates = db_fallback_candidates
 
     if not all_candidates:
         return None
@@ -9231,6 +9238,16 @@ def apply_db_product_to_step(step, product, user_data):
 
     step["affiliate_provider"] = product.get("affiliate_provider", "")
     step["affiliate_item_id"] = product.get("affiliate_item_id", "")
+
+    affiliate_item_id = str(product.get("affiliate_item_id", "") or "").strip()
+    rakuten_link = str(product.get("rakuten_link", "") or "").strip()
+
+    if rakuten_link:
+        step["rakuten_link"] = rakuten_link
+    elif affiliate_item_id.startswith("http://") or affiliate_item_id.startswith("https://"):
+        step["rakuten_link"] = affiliate_item_id
+    else:
+        step["rakuten_link"] = ""
 
     base_score = product.get("_base_score", product.get("base_score", 0)) or 0
     improve_score = product.get("_improve_score", product.get("improve_score", 0)) or 0
