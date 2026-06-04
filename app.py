@@ -406,38 +406,19 @@ def load_products():
     with open("products.json", "r", encoding="utf-8") as f:
         raw_data = json.load(f)
 
-    print("===== PRODUCTS JSON STRUCTURE =====", flush=True)
-
-    print(type(raw_data), flush=True)
-
-    if isinstance(raw_data, dict):
-        print(raw_data.keys(), flush=True)
-
-        for k, v in raw_data.items():
-            print(
-                k,
-                type(v),
-                len(v) if isinstance(v, list) else "",
-                flush=True
-            )
-
-    elif isinstance(raw_data, list):
-        print("LIST LENGTH:", len(raw_data), flush=True)
-
-        if raw_data:
-            print(raw_data[0], flush=True)
-
-    print("===== END PRODUCTS JSON STRUCTURE =====", flush=True)
-
     if isinstance(raw_data, list):
         products = raw_data
+
     elif isinstance(raw_data, dict):
-        if isinstance(raw_data.get("products"), list):
+        if isinstance(raw_data.get("skincare_database"), list):
+            products = raw_data["skincare_database"]
+        elif isinstance(raw_data.get("products"), list):
             products = raw_data["products"]
         elif isinstance(raw_data.get("items"), list):
             products = raw_data["items"]
         else:
-            products = list(raw_data.values())
+            products = []
+
     else:
         products = []
 
@@ -475,10 +456,9 @@ def load_products():
 
         p["main_functions"] = list(dict.fromkeys(new_main_functions))
 
+    print("[PRODUCTS AFTER LOAD]", len(products), flush=True)
+
     return products
-
-
-AFFILIATE_LINKS_AI_FILE = "affiliate_links_ai.json"
 
 
 def load_affiliate_links_ai():
