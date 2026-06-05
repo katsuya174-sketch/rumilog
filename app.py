@@ -9046,10 +9046,10 @@ product_candidates は候補収集のみ。
 最終選定、順位付け、点数付けは行わない。
 
 各 step の product_candidates は object 配列にする。
-各stepのproduct_candidatesは必ず8件以上、最大12件出す。
+各stepのproduct_candidatesは必ず6件以上、最大8件出す。
 1件だけ、2件だけ、3件だけは禁止。
 0件は禁止。
-候補が少ない場合でも、同じcategoryとingredient_focusに合う現行品を8件以上出す。
+候補が少ない場合でも、同じcategoryとingredient_focusに合う現行品を6件以上出す。
 ただし、数合わせのためにカテゴリ違い・目的違い・旧品・廃盤品・正式名称に自信がない商品を出すことは禁止。
 必ずその step の category と同じカテゴリの商品だけを出す。
 カテゴリ違いの商品は禁止。
