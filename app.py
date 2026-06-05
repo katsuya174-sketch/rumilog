@@ -8960,7 +8960,7 @@ ingredient_focus が「レチノール」のstepに、レチノール系では�
 
 各候補は以下を必ず出力する。
 
-{
+{{
   "brand": "",
   "name": "",
   "category": "",
@@ -8982,7 +8982,7 @@ ingredient_focus が「レチノール」のstepに、レチノール系では�
   "availability_japan": [],
   "uv_level": {{}},
   "reason": ""
-}
+}}
 
 category:
 必ずstepのcategoryと完全一致させる。
