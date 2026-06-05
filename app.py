@@ -5705,6 +5705,23 @@ def normalize_ai_candidates(step):
     if not isinstance(raw_candidates, list):
         return []
 
+    step_category = normalize_candidate_category(
+        step.get("category", ""),
+        fallback=step.get("category", "")
+    )
+
+    step_ingredient_focus = step.get("ingredient_focus", "")
+    if isinstance(step_ingredient_focus, list):
+        step_ingredient_focus_list = [
+            normalize_ingredient_tag(x)
+            for x in step_ingredient_focus
+            if normalize_ingredient_tag(x)
+        ]
+    else:
+        step_ingredient_focus_list = [
+            normalize_ingredient_tag(step_ingredient_focus)
+        ] if normalize_ingredient_tag(step_ingredient_focus) else []
+
     rejected_statuses = {
         "old",
         "discontinued",
@@ -5760,13 +5777,101 @@ def normalize_ai_candidates(step):
         if release_status in rejected_statuses:
             continue
 
+        candidate_category = normalize_candidate_category(
+            candidate.get("category", ""),
+            fallback=step_category
+        )
+
+        # AI候補は、stepカテゴリと一致するものだけ採用する。
+        # 商品名からカテゴリを推測してstepカテゴリを上書きしない。
+        if candidate_category != step_category:
+            continue
+
+        active_ingredients = candidate.get("active_ingredients", [])
+        if not isinstance(active_ingredients, list):
+            active_ingredients = []
+
+        active_ingredients = [
+            normalize_ingredient_tag(x)
+            for x in active_ingredients
+        ]
+        active_ingredients = [x for x in active_ingredients if x]
+
+        support_ingredients = candidate.get("support_ingredients", [])
+        if not isinstance(support_ingredients, list):
+            support_ingredients = []
+
+        support_ingredients = [
+            normalize_ingredient_tag(x)
+            for x in support_ingredients
+        ]
+        support_ingredients = [x for x in support_ingredients if x]
+
+        for focus in step_ingredient_focus_list:
+            if focus and focus not in active_ingredients:
+                active_ingredients.append(focus)
+
+        ingredient_focus = candidate.get("ingredient_focus", [])
+        if isinstance(ingredient_focus, str):
+            ingredient_focus = [ingredient_focus]
+        elif not isinstance(ingredient_focus, list):
+            ingredient_focus = []
+
+        ingredient_focus = [
+            normalize_text(x)
+            for x in ingredient_focus
+            if normalize_text(x)
+        ]
+
+        for focus in step_ingredient_focus_list:
+            if focus and focus not in ingredient_focus:
+                ingredient_focus.append(focus)
+
+        concerns = candidate.get("concerns", [])
+        if not isinstance(concerns, list):
+            concerns = purpose_to_concern_tags(step.get("purpose", ""))
+
+        normalized_concerns = []
+        for c in concerns:
+            c = normalize_text(c)
+            if c in [
+                "pores",
+                "acne",
+                "redness",
+                "oil_control",
+                "dryness",
+                "barrier",
+                "dullness",
+                "whitening",
+                "aging"
+            ]:
+                normalized_concerns.append(c)
+
+        if not normalized_concerns:
+            normalized_concerns = purpose_to_concern_tags(step.get("purpose", ""))
+
+        main_functions = candidate.get("main_functions", [])
+        if not isinstance(main_functions, list):
+            main_functions = []
+
+        normalized_main_functions = []
+        for mf in main_functions:
+            mapped = MAIN_FUNCTION_MAP.get(str(mf), str(mf))
+            if mapped in MAIN_FUNCTION_TAGS:
+                normalized_main_functions.append(mapped)
+
+        ingredient_strength = candidate.get("ingredient_strength", {})
+        if not isinstance(ingredient_strength, dict):
+            ingredient_strength = {}
+
+        for focus in step_ingredient_focus_list:
+            if focus and focus not in ingredient_strength:
+                ingredient_strength[focus] = "medium"
+
         item = {
             "brand": brand,
             "name": name,
-            "category": normalize_candidate_category(
-                " ".join([brand, name, str(candidate.get("category", ""))]),
-                fallback=step.get("category", "")
-            ),
+            "category": step_category,
             "confidence": confidence,
             "price_ref": safe_price(
                 candidate.get("normalized_price")
@@ -5783,20 +5888,24 @@ def normalize_ai_candidates(step):
                 or 0
             ),
             "bundle_quantity": safe_bundle_quantity(candidate.get("bundle_quantity")),
-            "active_ingredients": candidate.get("active_ingredients", []) if isinstance(candidate.get("active_ingredients", []), list) else [],
-            "support_ingredients": candidate.get("support_ingredients", []) if isinstance(candidate.get("support_ingredients", []), list) else [],
+            "active_ingredients": list(dict.fromkeys(active_ingredients)),
+            "support_ingredients": list(dict.fromkeys(support_ingredients)),
             "signature_ingredients": candidate.get("signature_ingredients", []) if isinstance(candidate.get("signature_ingredients", []), list) else [],
-            "concerns": candidate.get("concerns", []) if isinstance(candidate.get("concerns", []), list) else purpose_to_concern_tags(step.get("purpose", "")),
+            "concerns": list(dict.fromkeys(normalized_concerns)),
             "skin_types": candidate.get("skin_types", []) if isinstance(candidate.get("skin_types", []), list) else [],
             "sensitive_ok": candidate.get("sensitive_ok", "unknown"),
             "retinol_level": safe_retinol_level(candidate.get("retinol_level", 0)),
-            "main_functions": candidate.get("main_functions", []) if isinstance(candidate.get("main_functions", []), list) else [],
+            "main_functions": list(dict.fromkeys(normalized_main_functions)),
+            "ingredient_focus": list(dict.fromkeys(ingredient_focus)),
+            "ingredient_strength": ingredient_strength,
             "formulation": candidate.get("formulation", []) if isinstance(candidate.get("formulation", []), list) else [],
             "technology": candidate.get("technology", []) if isinstance(candidate.get("technology", []), list) else [],
             "texture": str(candidate.get("texture", "") or ""),
             "contraindications": candidate.get("contraindications", []) if isinstance(candidate.get("contraindications", []), list) else [],
+            "availability_japan": candidate.get("availability_japan", []) if isinstance(candidate.get("availability_japan", []), list) else [],
+            "uv_level": candidate.get("uv_level", {}) if isinstance(candidate.get("uv_level", {}), dict) else {},
             "reason": str(candidate.get("reason", "") or step.get("selection_reason", "") or ""),
-            "release_status": release_status or "unverified",
+            "release_status": release_status or "current",
         }
 
         norm_name = normalize_candidate_name_for_merge(item["name"])
@@ -8508,14 +8617,82 @@ def get_analysis_schema():
         "properties": {
             "brand": {"type": "string"},
             "name": {"type": "string"},
+            "category": {"type": "string"},
             "confidence": {"type": "integer"},
             "release_status": {"type": "string"},
+            "active_ingredients": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "support_ingredients": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "concerns": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "skin_types": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "sensitive_ok": {"type": "string"},
+            "retinol_level": {"type": "integer"},
+            "main_functions": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "ingredient_focus": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "ingredient_strength": {
+                "type": "object"
+            },
+            "formulation": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "technology": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "texture": {"type": "string"},
+            "contraindications": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "availability_japan": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
+            "uv_level": {
+                "type": "object"
+            },
+            "reason": {"type": "string"}
         },
         "required": [
             "brand",
             "name",
+            "category",
             "confidence",
             "release_status",
+            "active_ingredients",
+            "support_ingredients",
+            "concerns",
+            "skin_types",
+            "sensitive_ok",
+            "retinol_level",
+            "main_functions",
+            "ingredient_focus",
+            "ingredient_strength",
+            "formulation",
+            "technology",
+            "texture",
+            "contraindications",
+            "availability_japan",
+            "uv_level",
+            "reason"
         ]
     }
 
@@ -8773,14 +8950,106 @@ product_candidates は候補収集のみ。
 最終選定、順位付け、点数付けは行わない。
 
 各 step の product_candidates は object 配列にする。
-schemaに存在する以下4項目のみ出力する。
+必ずその step の category と同じカテゴリの商品だけを出す。
+カテゴリ違いの商品は禁止。
 
-{{
+例:
+category が「乳液」のstepに「クリーム」は出力禁止。
+category が「美容液」のstepに「クリーム」「化粧水」「パック」は出力禁止。
+ingredient_focus が「レチノール」のstepに、レチノール系ではない美白美容液だけを出すのは禁止。
+
+各候補は以下を必ず出力する。
+
+{
   "brand": "",
   "name": "",
+  "category": "",
   "confidence": 0,
-  "release_status": "current"
-}}
+  "release_status": "current",
+  "active_ingredients": [],
+  "support_ingredients": [],
+  "concerns": [],
+  "skin_types": [],
+  "sensitive_ok": "unknown",
+  "retinol_level": 0,
+  "main_functions": [],
+  "ingredient_focus": [],
+  "ingredient_strength": {{}},
+  "formulation": [],
+  "technology": [],
+  "texture": "",
+  "contraindications": [],
+  "availability_japan": [],
+  "uv_level": {{}},
+  "reason": ""
+}
+
+category:
+必ずstepのcategoryと完全一致させる。
+許可カテゴリ以外は禁止。
+
+active_ingredients:
+stepのingredient_focusに対応する主要成分を英語タグで出す。
+例:
+レチノール -> retinol
+レチナール -> retinal
+ビタミンC -> vitamin_c
+ナイアシンアミド -> niacinamide
+アゼライン酸 -> azelaic_acid
+セラミド -> ceramide
+
+concerns:
+以下から選ぶ。
+pores / acne / redness / oil_control / dryness / barrier / dullness / whitening / aging
+
+skin_types:
+以下から選ぶ。
+dry / oily / mixed / sensitive / normal
+
+sensitive_ok:
+yes / no / unknown
+
+retinol_level:
+レチノール・レチナール系でなければ0。
+低刺激なら1、標準なら2、高濃度・強めなら3。
+
+main_functions:
+以下の意味に合う日本語で出す。
+保湿 / バリア強化 / 鎮静ケア / 毛穴改善 / ニキビ予防 / 皮脂抑制 / 美白ケア / 透明感向上 / ハリ改善 / エイジングケア / 紫外線防御 / キメ改善
+
+ingredient_focus:
+stepのingredient_focusと一致する成分・目的を配列で出す。
+
+ingredient_strength:
+主要成分の強さを high / medium / low で出す。
+不明なら {{}}。
+
+formulation:
+低刺激、バリア処方、軽い使用感など、分かる範囲でタグを出す。
+不明なら []。
+
+technology:
+リポソーム、ナノカプセル、安定化ビタミンCなど、分かる範囲で出す。
+不明なら []。
+
+texture:
+light / watery / gel / medium / essence / cream / rich / oil / balm / foam / powder から選ぶ。
+不明なら ""。
+
+contraindications:
+敏感肌注意、朝使用注意、レチノール併用注意などがあれば出す。
+不明なら []。
+
+availability_japan:
+日本で買える販路を分かる範囲で出す。
+rakuten / amazon / qoo10 / official_jp / store
+
+uv_level:
+日焼け止めのみspfとpaを出す。
+それ以外は {{}}。
+
+reason:
+そのstepのcategory・ingredient_focus・purposeに合う理由を短く出す。
 
 brand:
 ブランド名のみ。
@@ -8794,9 +9063,8 @@ confidence:
 70未満は出力禁止。
 
 release_status:
-current / old / unknown のいずれか。
-出力してよい商品は current のみ。
-old または unknown の商品は出力しない。
+current のみ。
+old / unknown は出力禁止。
 
 【現行品ルール】
 現行販売中の商品名のみ出力する。
