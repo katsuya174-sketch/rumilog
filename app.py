@@ -79,7 +79,134 @@ def init_results_table():
 
         if conn:
             conn.close()
+
+GEMINI_DAILY_LIMIT = int(os.getenv("GEMINI_DAILY_LIMIT", "20"))
+GEMINI_RESET_HOUR_JST = 16
+
+
+def get_gemini_usage_key(now=None):
+    from datetime import datetime, timedelta, timezone
+
+    jst = timezone(timedelta(hours=9))
+    now = now or datetime.now(jst)
+
+    if now.hour < GEMINI_RESET_HOUR_JST:
+        usage_date = (now - timedelta(days=1)).date()
+    else:
+        usage_date = now.date()
+
+    return usage_date.isoformat()
+
+
+def init_gemini_usage_table():
+    conn = None
+    cur = None
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS gemini_usage (
+            usage_key TEXT PRIMARY KEY,
+            request_count INTEGER NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+
+        conn.commit()
+        print("[GEMINI USAGE TABLE READY]", flush=True)
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print("[GEMINI USAGE TABLE ERROR]", e, flush=True)
+
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+
+def increment_gemini_usage():
+    usage_key = get_gemini_usage_key()
+
+    conn = None
+    cur = None
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+
+        cur.execute("""
+        INSERT INTO gemini_usage (usage_key, request_count, updated_at)
+        VALUES (%s, 1, CURRENT_TIMESTAMP)
+        ON CONFLICT (usage_key)
+        DO UPDATE SET
+            request_count = gemini_usage.request_count + 1,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING request_count;
+        """, (usage_key,))
+
+        count = cur.fetchone()[0]
+        conn.commit()
+
+        return count
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print("[GEMINI USAGE COUNT ERROR]", e, flush=True)
+        return None
+
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+
+def get_gemini_usage_status():
+    usage_key = get_gemini_usage_key()
+
+    conn = None
+    cur = None
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+
+        cur.execute("""
+        SELECT request_count
+        FROM gemini_usage
+        WHERE usage_key = %s;
+        """, (usage_key,))
+
+        row = cur.fetchone()
+        used = int(row[0]) if row else 0
+
+    except Exception as e:
+        print("[GEMINI USAGE READ ERROR]", e, flush=True)
+        used = 0
+
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+    remaining = max(0, GEMINI_DAILY_LIMIT - used)
+
+    return {
+        "usage_key": usage_key,
+        "used": used,
+        "limit": GEMINI_DAILY_LIMIT,
+        "remaining": remaining,
+        "reset_hour_jst": GEMINI_RESET_HOUR_JST
+    }
 init_results_table()
+init_gemini_usage_table()
 VERIFY_PRODUCT_CACHE = {}
 # ===== DEV_MODE_START =====
 DEV_MODE = False  # ← 開発中はTrue / 公開時はFalseにするか削除
@@ -119,6 +246,16 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
 
     for attempt in range(max_retries):
         try:
+            current_count = increment_gemini_usage()
+            if current_count is not None:
+                print(
+                    "[GEMINI REQUEST COUNT]",
+                    current_count,
+                    "/",
+                    GEMINI_DAILY_LIMIT,
+                    flush=True
+                )
+
             response = client.models.generate_content(
                 model=model,
                 contents=contents,
@@ -4913,12 +5050,32 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         virtual["_source"] = "ai_virtual"
 
         if is_discontinued_or_suspicious_product(virtual):
+            print(
+                "[AI VIRTUAL REJECTED DISCONTINUED]",
+                step.get("_section", ""),
+                step.get("category", ""),
+                virtual.get("name", ""),
+                flush=True
+            )
             continue
 
         if is_wrong_cleanser_candidate(virtual, step):
+            print(
+                "[AI VIRTUAL REJECTED WRONG CLEANSER]",
+                step.get("_section", ""),
+                step.get("category", ""),
+                virtual.get("name", ""),
+                flush=True
+            )
             continue
 
         if is_non_cosmetic(virtual):
+            print(
+                "[AI VIRTUAL REJECTED NON COSMETIC]",
+                step.get("_section", ""),
+                step.get("category", ""),
+                virtual.get("name", ""),
+            )
             continue
 
         base_score = score_product(
@@ -9157,11 +9314,12 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
         left_img,
         right_img
     )
-    
+    cache_key = f"ai_candidate_schema_v3:{cache_key}"
+
     if cache_key in GEMINI_ANALYSIS_CACHE:
         print("[GEMINI ANALYSIS CACHE HIT]", cache_key, flush=True)
         return copy.deepcopy(GEMINI_ANALYSIS_CACHE[cache_key])
-    cache_key = f"ai_candidate_schema_v3:{cache_key}"
+    
     print("[GEMINI ANALYSIS CACHE MISS]", cache_key, flush=True)
 
     schema = get_analysis_schema()
@@ -10115,7 +10273,13 @@ def lab_test_function():
 
     client_ip = get_client_ip()
     remaining_free_count = get_remaining_free_count(client_ip)
-    return render_template("lab.html", remaining_free_count=remaining_free_count, DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT)
+    gemini_usage = get_gemini_usage_status()
+    return render_template(
+        "lab.html",
+        remaining_free_count=remaining_free_count,
+        gemini_usage=gemini_usage,
+        DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT
+    )
 
 @app.route("/admin/db-stats")
 def db_stats():
