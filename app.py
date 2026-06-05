@@ -1715,14 +1715,16 @@ def normalize_product_name(name):
         "]": "",
         "【": "",
         "】": "",
-        "　": "",
-        "ザ": "the",
+        "∞": "",
+        "％": "",
+        "%": "",
+        "ザ": "",
+        "the": "",
         "ｒ": "r",
         "Ｒ": "r",
         "ａ": "a",
         "Ａ": "a",
         "ipsa": "イプサ",
-        "the": "",
     }
 
     for before, after in replace_map.items():
@@ -1731,6 +1733,9 @@ def normalize_product_name(name):
     text = text.replace("セラム", "serum")
     text = text.replace("美容液", "serum")
     text = text.replace("アンプル", "ampoule")
+
+    # リニューアル表記や末尾の版表記を正規化
+    text = re.sub(r"(n|neo|ex)$", "", text)
 
     return text
 def find_db_product_by_name(products, product_name, category=None):
