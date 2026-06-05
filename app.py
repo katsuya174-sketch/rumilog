@@ -615,9 +615,6 @@ def wait_for_rakuten_rate_limit():
     _last_rakuten_request_time = time.time()
 
     
-
-
-
 def build_rakuten_search_keywords(product_name, brand="", category="", ingredient_focus="", purpose=""):
     name = clean_rakuten_keyword(product_name)
     brand = clean_rakuten_keyword(brand)
@@ -687,7 +684,7 @@ def build_rakuten_search_keywords(product_name, brand="", category="", ingredien
     print("[RAKUTEN KEYWORDS]", keywords, flush=True)
 
     return keywords[:7]
-    
+
 def score_current_product_signal(item):
     if not isinstance(item, dict):
         return 0
@@ -4988,6 +4985,37 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         deduped_candidates.append(c)
 
     sorted_candidates = deduped_candidates
+
+    print(
+        "[SOURCE COUNT]",
+        step.get("_section", ""),
+        step.get("category", ""),
+        {
+            "db": sum(1 for c in sorted_candidates if c.get("_source") == "db"),
+            "ai_db": sum(1 for c in sorted_candidates if c.get("_source") == "ai+db"),
+            "ai_virtual": sum(1 for c in sorted_candidates if c.get("_source") == "ai_virtual"),
+        },
+        flush=True
+    )
+
+    print(
+        "[TOP10 SOURCES]",
+        step.get("_section", ""),
+        step.get("category", ""),
+        [
+            {
+                "name": c.get("name", ""),
+                "source": c.get("_source", ""),
+                "score": c.get("_score", 0),
+                "base": c.get("_base_score", 0),
+                "improve": c.get("_improve_score", 0),
+                "routine": c.get("_routine_score", 0),
+            }
+            for c in sorted_candidates[:10]
+        ],
+        flush=True
+    )
+
     top_candidates = sorted_candidates[:3]
 
     if not top_candidates:
@@ -9093,11 +9121,11 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
         left_img,
         right_img
     )
-
+    
     if cache_key in GEMINI_ANALYSIS_CACHE:
         print("[GEMINI ANALYSIS CACHE HIT]", cache_key, flush=True)
         return copy.deepcopy(GEMINI_ANALYSIS_CACHE[cache_key])
-    cache_key = f"ai_candidate_schema_v2:{cache_key}"
+    cache_key = f"ai_candidate_schema_v3:{cache_key}"
     print("[GEMINI ANALYSIS CACHE MISS]", cache_key, flush=True)
 
     schema = get_analysis_schema()
