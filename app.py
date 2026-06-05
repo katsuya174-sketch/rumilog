@@ -637,14 +637,42 @@ def build_rakuten_search_keywords(product_name, brand="", category="", ingredien
         for word in OLD_PRODUCT_WORDS
     )
 
+    if not is_high_risk_ai_name:
+        if brand and name and not name.lower().startswith(brand.lower()):
+            add(f"{brand} {name}")
+
+        add(name)
+
+    parts = name.split()
+
+    # COSRX ザ ビタミンC23 セラム のように「ザ」が楽天APIで400になりやすいので、
+    # 意味の薄い語を落とした検索語を作る。
+    meaningful_parts = [
+        p for p in parts
+        if p not in {"ザ", "the", "THE"}
+    ]
+
+    if brand and meaningful_parts:
+        add(f"{brand} {' '.join(meaningful_parts)}")
+
+    if meaningful_parts:
+        add(" ".join(meaningful_parts))
+
+    if brand and len(meaningful_parts) >= 2:
+        add(f"{brand} {' '.join(meaningful_parts[-2:])}")
+
+    if len(meaningful_parts) >= 2:
+        add(" ".join(meaningful_parts[-2:]))
+
     if brand and category and ingredient_focus:
         add(f"{brand} {category} {ingredient_focus}")
 
-    if brand and category and purpose:
-        add(f"{brand} {category} {purpose}")
-
     if category and ingredient_focus:
         add(f"{category} {ingredient_focus}")
+
+    if category and purpose:
+        add(f"{category} {purpose}")
+
     if category == "クリーム":
         if brand and ingredient_focus:
             add(f"{brand} フェイスクリーム {ingredient_focus}")
@@ -656,39 +684,10 @@ def build_rakuten_search_keywords(product_name, brand="", category="", ingredien
         add("フェイスクリーム 保湿")
         add("保湿クリーム")
 
-
-    if category and purpose:
-        add(f"{category} {purpose}")
-
-    if not is_high_risk_ai_name:
-        if brand and name and not name.lower().startswith(brand.lower()):
-            add(f"{brand} {name}")
-
-        add(name)
-
-    parts = name.split()
-    has_ascii = any(ch.isascii() and ch.isalpha() for ch in name)
-
-    if not is_high_risk_ai_name:
-        if len(parts) >= 4:
-            add(" ".join(parts[:4]))
-
-        if len(parts) >= 3:
-            add(" ".join(parts[:3]))
-
-        if len(parts) >= 2:
-            add(" ".join(parts[:2]))
-
-        if not has_ascii:
-            if len(parts) >= 2:
-                add(" ".join(parts[1:]))
-            if len(parts) >= 3:
-                add(" ".join(parts[2:]))
-
     print("[RAKUTEN KEYWORDS]", keywords, flush=True)
 
     return keywords[:7]
-
+    
 def score_current_product_signal(item):
     if not isinstance(item, dict):
         return 0
@@ -1090,6 +1089,9 @@ def normalize_rakuten_item_price(item):
     return item
 
 def clean_rakuten_keyword(keyword):
+    if isinstance(keyword, list):
+        keyword = " ".join(str(x) for x in keyword if str(x).strip())
+
     if not isinstance(keyword, str):
         return ""
 
@@ -1100,26 +1102,34 @@ def clean_rakuten_keyword(keyword):
 
     keyword = re.sub(r"\buv\b", "UV", keyword, flags=re.IGNORECASE)
 
-    keyword = keyword.replace("’", "'")
-    keyword = keyword.replace("'", "")
-    keyword = keyword.replace("％", "")
-    keyword = keyword.replace("%", "")
-    keyword = keyword.replace("＋", " ")
-    keyword = keyword.replace("+", " ")
-    keyword = keyword.replace("/", " ")
-    keyword = keyword.replace("／", " ")
-    keyword = keyword.replace("&", " ")
-    keyword = keyword.replace("＆", " ")
+    replace_to_space = [
+        "＋", "+", "/", "／", "&", "＆", "・", "_", "-", "－",
+        "(", ")", "（", "）", "[", "]", "【", "】", "{", "}",
+        "'", "’", '"', "“", "”", "%", "％"
+    ]
+
+    for ch in replace_to_space:
+        keyword = keyword.replace(ch, " ")
 
     keyword = re.sub(
-        r"[^A-Za-z0-9\sぁ-んァ-ヶ一-龥ー・]",
+        r"[^A-Za-z0-9\sぁ-んァ-ヶ一-龥ー]",
         " ",
         keyword
     )
 
     keyword = re.sub(r"\s+", " ", keyword).strip()
 
-    parts = keyword.split()
+    remove_tokens = {
+        "ザ",
+        "the",
+        "THE",
+    }
+
+    parts = [
+        p for p in keyword.split()
+        if p and p not in remove_tokens
+    ]
+
     if parts and len(parts[-1]) == 1 and parts[-1].isascii():
         parts = parts[:-1]
 
@@ -4693,19 +4703,19 @@ def score_routine_balance(step, product, routine_context=None):
             score -= 16
 
     return score
-def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None,routine_context=None):
+def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None, routine_context=None):
     if exclude_names is None:
         exclude_names = set()
 
     category = step.get("category", "")
     candidates = normalize_ai_candidates(step)
-    
 
     all_candidates = []
-    # DB商品を全件候補化
 
+    # =========================
+    # DB候補を採点対象に入れる
+    # =========================
     for p in db_products:
-
         if not isinstance(p, dict):
             continue
 
@@ -4731,25 +4741,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         if base_score <= -9000:
             continue
 
-        print(
-            "[IMPROVEMENT TARGETS]",
-            infer_improvement_targets(improvement_plan),
-            flush=True
-        )
-
         improve_score = score_improvement(product, improvement_plan or {})
         improvement_reason = build_improvement_reason(product, improvement_plan or {})
-
-        print(
-            "[IMPROVE DEBUG]",
-            step.get("category", ""),
-            product.get("name", ""),
-            "score=",
-            improve_score,
-            "plan=",
-            improvement_plan,
-            flush=True
-        )
 
         base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
 
@@ -4778,7 +4771,10 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
         all_candidates.append(product)
 
-    # AI候補を全件候補化
+    # =========================
+    # AI候補を採点対象に入れる
+    # 楽天APIはここでは呼ばない
+    # =========================
     for candidate in candidates:
         if isinstance(candidate, str):
             try:
@@ -4798,28 +4794,6 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             str(fields.get("name", "") or "").strip()
         )
         brand = str(fields.get("brand", "") or "").strip()
-
-        if isinstance(candidate_name, str):
-            text = candidate_name.strip()
-
-            if text.startswith("{") and text.endswith("}"):
-                try:
-                    parsed = json.loads(text)
-                    if isinstance(parsed, dict):
-                        candidate["brand"] = parsed.get("brand", brand)
-                        candidate["name"] = parsed.get("name", "")
-                        candidate["confidence"] = parsed.get(
-                            "confidence",
-                            candidate.get("confidence")
-                        )
-
-                        candidate_name = clean_display_product_name(
-                            str(candidate.get("name", "") or "").strip()
-                        )
-                        brand = str(candidate.get("brand", "") or "").strip()
-
-                except Exception as e:
-                    print("[CANDIDATE JSON PARSE ERROR]", e, flush=True)
 
         if not candidate_name:
             continue
@@ -4871,17 +4845,6 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
                 improvement_plan or {}
             )
 
-            print(
-                "[IMPROVE DEBUG]",
-                step.get("category", ""),
-                product.get("name", ""),
-                "score=",
-                improve_score,
-                "plan=",
-                improvement_plan,
-                flush=True
-            )
-
             base_weight, improve_weight = get_dynamic_score_weights(
                 step,
                 user_data
@@ -4921,57 +4884,14 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             candidate_for_check
         )
 
-        rakuten_verified = fetch_rakuten_item(
-            product_name=candidate_name,
-            category=category,
-            brand=brand,
-            ingredient_focus=step.get("ingredient_focus", ""),
-            purpose=step.get("purpose", "")
-        )
-
-        if rakuten_verified:
-            rakuten_name = clean_display_product_name(
-                rakuten_verified.get("name", "")
-            )
-
-            if rakuten_name:
-                virtual["brand"] = brand
-                virtual["name"] = rakuten_name
-                virtual["rakuten_title"] = rakuten_name
-                virtual["category"] = category
-
-                virtual["price_ref"] = safe_price(
-                    rakuten_verified.get("price", virtual.get("price_ref", 0))
-                )
-                virtual["raw_price"] = safe_price(
-                    rakuten_verified.get("raw_price", virtual.get("raw_price", 0))
-                )
-                virtual["bundle_quantity"] = safe_bundle_quantity(
-                    rakuten_verified.get(
-                        "bundle_quantity",
-                        virtual.get("bundle_quantity", 1)
-                    )
-                )
-                virtual["image"] = rakuten_verified.get(
-                    "image",
-                    virtual.get("image", "")
-                ) or ""
-                virtual["rakuten_link"] = rakuten_verified.get("rakuten_link", "") or ""
-                virtual["_source"] = "ai_rakuten_verified"
-            else:
-                virtual["brand"] = brand
-                virtual["name"] = candidate_name
-                virtual["category"] = category
-                virtual["image"] = ""
-                virtual["rakuten_link"] = ""
-                virtual["_source"] = "ai_virtual"
-        else:
-            virtual["brand"] = brand
-            virtual["name"] = candidate_name
-            virtual["category"] = category
-            virtual["image"] = ""
-            virtual["rakuten_link"] = ""
-            virtual["_source"] = "ai_virtual"
+        # 商品選定中は楽天APIを呼ばない。
+        # 楽天リンク・画像取得は attach_affiliate_links_to_step 側で、選定後の商品だけに行う。
+        virtual["brand"] = brand
+        virtual["name"] = candidate_name
+        virtual["category"] = category
+        virtual["image"] = ""
+        virtual["rakuten_link"] = ""
+        virtual["_source"] = "ai_virtual"
 
         if is_discontinued_or_suspicious_product(virtual):
             continue
@@ -4997,17 +4917,6 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             improvement_plan or {}
         )
 
-        print(
-            "[IMPROVE DEBUG]",
-            step.get("category", ""),
-            virtual.get("name", ""),
-            "score=",
-            improve_score,
-            "plan=",
-            improvement_plan,
-            flush=True
-        )
-
         base_weight, improve_weight = get_dynamic_score_weights(
             step,
             user_data
@@ -5021,17 +4930,13 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
         routine_weight = get_routine_score_weight(step)
 
-        virtual_penalty = 0.92
-
         final_score = (
-            (
-                base_score * base_weight
-            ) + (
-                improve_score * improve_weight
-            ) + (
-                routine_score * routine_weight
-            )
-        ) * virtual_penalty
+            base_score * base_weight
+        ) + (
+            improve_score * improve_weight
+        ) + (
+            routine_score * routine_weight
+        )
 
         virtual["_score"] = round(final_score, 1)
         virtual["_base_score"] = round(base_score, 1)
@@ -5066,6 +4971,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         ),
         reverse=True
     )
+
     deduped_candidates = []
     seen_names = set()
 
@@ -5083,7 +4989,10 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
     sorted_candidates = deduped_candidates
     top_candidates = sorted_candidates[:3]
-    
+
+    if not top_candidates:
+        return None
+
     best = dict(top_candidates[0])
 
     best["_top_candidates"] = [
@@ -5099,6 +5008,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         }
         for c in top_candidates
     ]
+
     best["base_score"] = best.get("_base_score", 0)
     best["improve_score"] = best.get("_improve_score", 0)
     best["routine_score"] = best.get("_routine_score", 0)
@@ -9187,7 +9097,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
     if cache_key in GEMINI_ANALYSIS_CACHE:
         print("[GEMINI ANALYSIS CACHE HIT]", cache_key, flush=True)
         return copy.deepcopy(GEMINI_ANALYSIS_CACHE[cache_key])
-
+    cache_key = f"ai_candidate_schema_v2:{cache_key}"
     print("[GEMINI ANALYSIS CACHE MISS]", cache_key, flush=True)
 
     schema = get_analysis_schema()
