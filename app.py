@@ -4624,7 +4624,6 @@ def is_discontinued_or_suspicious_product(product):
     brand = norm(product.get("brand"))
     release_status = norm(product.get("release_status"))
     status = norm(product.get("status"))
-    source = norm(product.get("_source"))
 
     joined_text = " ".join([
         brand,
@@ -4634,9 +4633,6 @@ def is_discontinued_or_suspicious_product(product):
         norm(product.get("description")),
         norm(product.get("reason")),
     ])
-
-    if source in ["ai", "ai_virtual"]:
-        return True
 
     if release_status in ["old", "discontinued", "ended"]:
         return True
@@ -5050,32 +5046,12 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         virtual["_source"] = "ai_virtual"
 
         if is_discontinued_or_suspicious_product(virtual):
-            print(
-                "[AI VIRTUAL REJECTED DISCONTINUED]",
-                step.get("_section", ""),
-                step.get("category", ""),
-                virtual.get("name", ""),
-                flush=True
-            )
             continue
 
         if is_wrong_cleanser_candidate(virtual, step):
-            print(
-                "[AI VIRTUAL REJECTED WRONG CLEANSER]",
-                step.get("_section", ""),
-                step.get("category", ""),
-                virtual.get("name", ""),
-                flush=True
-            )
             continue
 
         if is_non_cosmetic(virtual):
-            print(
-                "[AI VIRTUAL REJECTED NON COSMETIC]",
-                step.get("_section", ""),
-                step.get("category", ""),
-                virtual.get("name", ""),
-            )
             continue
 
         base_score = score_product(
@@ -7026,25 +7002,13 @@ def is_rate_limited(ip, limit=3):
 import time
 
 def call_gemini_with_quota_guard(**kwargs):
-    max_retries = 3
-
-    for attempt in range(max_retries):
-        try:
-            return client.models.generate_content(**kwargs)
-
-        except Exception as e:
-            error_text = str(e)
-
-            if "503" in error_text or "UNAVAILABLE" in error_text:
-                print(f"[RETRY] Gemini 503 error, attempt {attempt+1}")
-
-                if attempt < max_retries - 1:
-                    time.sleep(2)  # 少し待って再試行
-                    continue
-
-            # それ以外 or リトライ失敗
-            raise e
-
+    return call_gemini_with_retry(
+        client=client,
+        model=kwargs.get("model"),
+        contents=kwargs.get("contents"),
+        config=kwargs.get("config"),
+        max_retries=3
+    )
     
 
 def debug_step_summary(section_name, steps):
