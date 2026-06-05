@@ -4707,6 +4707,28 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     category = step.get("category", "")
     candidates = normalize_ai_candidates(step)
 
+    print(
+        "[AI NORMALIZED CANDIDATES]",
+        step.get("_section", ""),
+        step.get("category", ""),
+        {
+            "raw_count": len(step.get("product_candidates", [])) if isinstance(step.get("product_candidates", []), list) else "not_list",
+            "normalized_count": len(candidates),
+            "items": [
+                {
+                    "brand": c.get("brand", ""),
+                    "name": c.get("name", ""),
+                    "category": c.get("category", ""),
+                    "confidence": c.get("confidence", ""),
+                    "release_status": c.get("release_status", ""),
+                }
+                for c in candidates
+                if isinstance(c, dict)
+            ]
+        },
+        flush=True
+    )
+
     all_candidates = []
 
     # =========================
@@ -4907,6 +4929,20 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         )
 
         if base_score <= -9000:
+            print(
+                "[AI VIRTUAL REJECTED BY SCORE_PRODUCT]",
+                step.get("_section", ""),
+                step.get("category", ""),
+                {
+                    "name": virtual.get("name", ""),
+                    "brand": virtual.get("brand", ""),
+                    "category": virtual.get("category", ""),
+                    "active_ingredients": virtual.get("active_ingredients", []),
+                    "concerns": virtual.get("concerns", []),
+                    "ingredient_focus": virtual.get("ingredient_focus", []),
+                },
+                flush=True
+            )
             continue
 
         improve_score = score_improvement(
