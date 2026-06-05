@@ -1762,20 +1762,35 @@ def find_db_product_by_name(products, product_name, category=None):
 
         return True
 
-    for p in products:
-        if not is_usable_db_product(p):
-            continue
+    usable_products = [
+        p for p in products
+        if is_usable_db_product(p)
+    ]
 
+    # 1. 完全一致
+    for p in usable_products:
         db_name = normalize_product_name(p.get("name", ""))
 
         if target == db_name:
-            print(
-                "[DB MATCH]",
-                product_name,
-                "=>",
-                p.get("name"),
-                flush=True
-            )
+            return p
+
+    # 2. ブランド抜き候補名とDB商品名の包含一致
+    for p in usable_products:
+        db_name = normalize_product_name(p.get("name", ""))
+        db_brand = normalize_product_name(p.get("brand", ""))
+
+        if not db_name:
+            continue
+
+        db_name_without_brand = db_name
+
+        if db_brand and db_name_without_brand.startswith(db_brand):
+            db_name_without_brand = db_name_without_brand[len(db_brand):].strip()
+
+        if target == db_name_without_brand:
+            return p
+
+        if target in db_name and len(target) >= 4:
             return p
 
     return None
@@ -5708,20 +5723,7 @@ def collect_market_candidates_with_gemini(user_data, analyzed_data):
         return {"steps": []}
 
 def normalize_candidate_name_for_merge(name):
-    if not name:
-        return ""
-    text = str(name).strip().lower()
-    text = text.replace("　", " ")
-    text = text.replace("・", "")
-    text = text.replace("-", "")
-    text = text.replace("（", "")
-    text = text.replace("）", "")
-    text = text.replace("(", "")
-    text = text.replace(")", "")
-    text = text.replace("  ", " ")
-    text = text.replace("the ", "")
-    return text
-
+    return normalize_product_name(name)
 
 def merge_candidate_list(original, extra, max_items=20):
     merged = []
