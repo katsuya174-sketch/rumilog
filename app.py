@@ -4210,7 +4210,7 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         category=category,
         ingredient_focus=ingredient_focus,
         purpose=purpose
-)
+    )
 
     if isinstance(candidate, str):
         candidate = {
@@ -4227,10 +4227,14 @@ def build_virtual_product_from_ai_candidate(step, candidate):
             "sensitive_ok": "unknown",
             "retinol_level": 0,
             "main_functions": [],
+            "ingredient_focus": [],
+            "ingredient_strength": {},
             "formulation": [],
             "technology": [],
             "texture": "",
             "contraindications": [],
+            "availability_japan": [],
+            "uv_level": {},
             "reason": ""
         }
 
@@ -4242,22 +4246,26 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         for x in candidate.get("active_ingredients", [])
     ]
     active_ingredients = [x for x in active_ingredients if x]
+
     for x in inferred_fields.get("active_ingredients", []):
         x = normalize_ingredient_tag(x)
         if x and x not in active_ingredients:
             active_ingredients.append(x)
 
+    ingredient_tag = normalize_ingredient_tag(ingredient_focus)
+    if ingredient_tag and ingredient_tag not in active_ingredients:
+        active_ingredients.append(ingredient_tag)
 
     support_ingredients = [
         normalize_ingredient_tag(x)
         for x in candidate.get("support_ingredients", [])
     ]
     support_ingredients = [x for x in support_ingredients if x]
+
     for x in inferred_fields.get("support_ingredients", []):
         x = normalize_ingredient_tag(x)
         if x and x not in support_ingredients:
             support_ingredients.append(x)
-
 
     signature_ingredients = [
         normalize_ingredient_tag(x)
@@ -4267,10 +4275,6 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         x for x in signature_ingredients
         if x in signature_ingredient_effects
     ]
-
-    ingredient_tag = normalize_ingredient_tag(ingredient_focus)
-    if ingredient_tag and ingredient_tag not in active_ingredients:
-        active_ingredients.append(ingredient_tag)
 
     concerns = []
     for c in candidate.get("concerns", []):
@@ -4294,12 +4298,10 @@ def build_virtual_product_from_ai_candidate(step, candidate):
     skin_types = []
     for s in candidate.get("skin_types", []):
         s = normalize_text(s)
-        if s in ["dry", "oily", "mixed", "sensitive"]:
+        if s in ["dry", "oily", "mixed", "sensitive", "normal"]:
             skin_types.append(s)
 
-    sensitive_ok = normalize_text(
-        candidate.get("sensitive_ok", "unknown")
-    )
+    sensitive_ok = normalize_text(candidate.get("sensitive_ok", "unknown"))
     if sensitive_ok not in ["yes", "no", "unknown"]:
         sensitive_ok = "unknown"
 
@@ -4320,12 +4322,40 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         texture = ""
 
     main_functions = [
-        str(x) for x in candidate.get("main_functions", [])
+        MAIN_FUNCTION_MAP.get(str(x), str(x))
+        for x in candidate.get("main_functions", [])
         if str(x).strip()
     ]
+
     for x in inferred_fields.get("main_functions", []):
-        if x and x not in main_functions:
-            main_functions.append(x)
+        mapped = MAIN_FUNCTION_MAP.get(str(x), str(x))
+        if mapped and mapped not in main_functions:
+            main_functions.append(mapped)
+
+    main_functions = [
+        x for x in main_functions
+        if x in MAIN_FUNCTION_TAGS
+    ]
+
+    ingredient_focus_list = []
+
+    raw_focuses = candidate.get("ingredient_focus", [])
+    if isinstance(raw_focuses, str):
+        raw_focuses = [raw_focuses]
+
+    if isinstance(raw_focuses, list):
+        for x in raw_focuses:
+            x = normalize_text(x)
+            if x:
+                ingredient_focus_list.append(x)
+
+    if ingredient_focus:
+        ingredient_focus_list.append(str(ingredient_focus))
+
+    for x in inferred_fields.get("ingredient_focus", []):
+        x = normalize_text(x)
+        if x:
+            ingredient_focus_list.append(x)
 
     formulation = [
         str(x) for x in candidate.get("formulation", [])
@@ -4342,6 +4372,21 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         if str(x).strip()
     ]
 
+    ingredient_strength = candidate.get("ingredient_strength", {})
+    if not isinstance(ingredient_strength, dict):
+        ingredient_strength = {}
+
+    if ingredient_tag and ingredient_tag not in ingredient_strength:
+        ingredient_strength[ingredient_tag] = "medium"
+
+    availability_japan = candidate.get("availability_japan", [])
+    if not isinstance(availability_japan, list):
+        availability_japan = []
+
+    uv_level = candidate.get("uv_level", {})
+    if not isinstance(uv_level, dict):
+        uv_level = {}
+
     return {
         "name": candidate.get("name", ""),
         "brand": candidate.get("brand", ""),
@@ -4355,9 +4400,7 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         "concerns": list(dict.fromkeys(concerns)),
         "skin_types": list(dict.fromkeys(skin_types)),
         "sensitive_ok": sensitive_ok,
-        "retinol_level": safe_retinol_level(
-            candidate.get("retinol_level", 0)
-        ),
+        "retinol_level": safe_retinol_level(candidate.get("retinol_level", 0)),
         "price_ref": safe_price(
             candidate.get("normalized_price")
             or candidate.get("price_ref")
@@ -4374,13 +4417,18 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         ),
         "bundle_quantity": safe_bundle_quantity(candidate.get("bundle_quantity")),
         "main_functions": list(dict.fromkeys(main_functions)),
+        "ingredient_focus": list(dict.fromkeys(ingredient_focus_list)),
+        "ingredient_strength": ingredient_strength,
         "formulation": list(dict.fromkeys(formulation)),
         "technology": list(dict.fromkeys(technology)),
         "texture": texture,
         "contraindications": list(dict.fromkeys(contraindications)),
+        "availability_japan": list(dict.fromkeys(availability_japan)),
+        "uv_level": uv_level,
         "image": "",
         "_is_virtual": True
     }
+
 def select_best_db_product(step, products, user_data, budget_value, used_brands=None):
 
     if used_brands is None:
@@ -4881,40 +4929,49 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             purpose=step.get("purpose", "")
         )
 
-        if not rakuten_verified:
-            continue
+        if rakuten_verified:
+            rakuten_name = clean_display_product_name(
+                rakuten_verified.get("name", "")
+            )
 
-        rakuten_name = clean_display_product_name(
-            rakuten_verified.get("name", "")
-        )
+            if rakuten_name:
+                virtual["brand"] = brand
+                virtual["name"] = rakuten_name
+                virtual["rakuten_title"] = rakuten_name
+                virtual["category"] = category
 
-        if not rakuten_name:
-            continue
-
-        virtual["brand"] = brand
-        virtual["name"] = rakuten_name
-        virtual["rakuten_title"] = rakuten_name
-        virtual["category"] = category
-
-        virtual["price_ref"] = safe_price(
-            rakuten_verified.get("price", virtual.get("price_ref", 0))
-        )
-        virtual["raw_price"] = safe_price(
-            rakuten_verified.get("raw_price", virtual.get("raw_price", 0))
-        )
-        virtual["bundle_quantity"] = int(
-            rakuten_verified.get(
-                "bundle_quantity",
-                virtual.get("bundle_quantity", 1)
-            ) or 1
-        )
-
-        virtual["image"] = rakuten_verified.get(
-            "image",
-            virtual.get("image", "")
-        ) or ""
-        virtual["rakuten_link"] = rakuten_verified.get("rakuten_link", "") or ""
-        virtual["_source"] = "ai_rakuten_verified"
+                virtual["price_ref"] = safe_price(
+                    rakuten_verified.get("price", virtual.get("price_ref", 0))
+                )
+                virtual["raw_price"] = safe_price(
+                    rakuten_verified.get("raw_price", virtual.get("raw_price", 0))
+                )
+                virtual["bundle_quantity"] = safe_bundle_quantity(
+                    rakuten_verified.get(
+                        "bundle_quantity",
+                        virtual.get("bundle_quantity", 1)
+                    )
+                )
+                virtual["image"] = rakuten_verified.get(
+                    "image",
+                    virtual.get("image", "")
+                ) or ""
+                virtual["rakuten_link"] = rakuten_verified.get("rakuten_link", "") or ""
+                virtual["_source"] = "ai_rakuten_verified"
+            else:
+                virtual["brand"] = brand
+                virtual["name"] = candidate_name
+                virtual["category"] = category
+                virtual["image"] = ""
+                virtual["rakuten_link"] = ""
+                virtual["_source"] = "ai_virtual"
+        else:
+            virtual["brand"] = brand
+            virtual["name"] = candidate_name
+            virtual["category"] = category
+            virtual["image"] = ""
+            virtual["rakuten_link"] = ""
+            virtual["_source"] = "ai_virtual"
 
         if is_discontinued_or_suspicious_product(virtual):
             continue
