@@ -246,6 +246,12 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
 
     for attempt in range(max_retries):
         try:
+            response = client.models.generate_content(
+                model=model,
+                contents=contents,
+                config=config
+            )
+
             current_count = increment_gemini_usage()
             if current_count is not None:
                 print(
@@ -255,12 +261,6 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
                     GEMINI_DAILY_LIMIT,
                     flush=True
                 )
-
-            response = client.models.generate_content(
-                model=model,
-                contents=contents,
-                config=config
-            )
 
             return response
 
@@ -287,7 +287,6 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
                 raise
 
             wait_seconds = min(8, (attempt + 1) ** 2)
-
             time.sleep(wait_seconds)
 
         except Exception as e:
