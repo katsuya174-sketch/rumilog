@@ -2837,7 +2837,8 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     product_texture = normalize_text(product.get("texture", ""))
     product_contra = product.get("contraindications", [])
     ingredient_strength_map = product.get("ingredient_strength", {})
-
+    if not isinstance(ingredient_strength_map, dict):
+        ingredient_strength_map = {}
     user_skin_types = normalize_skin_type(
         user_data.get("oil", ""),
         user_data.get("sens", "")
