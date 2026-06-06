@@ -1761,20 +1761,49 @@ def find_db_product_by_name(products, product_name, category=None):
         fallback=category
     ) if category else ""
 
+    category_aliases = {
+        "洗顔料": "洗顔",
+        "フェイスウォッシュ": "洗顔",
+        "クレンザー": "洗顔",
+        "保湿クリーム": "クリーム",
+        "フェイスクリーム": "クリーム",
+        "乳液・ミルク": "乳液",
+        "ミルク": "乳液",
+        "セラム": "美容液",
+        "エッセンス": "美容液",
+        "導入液": "導入美容液",
+        "ブースター": "導入美容液",
+    }
+
+    def canonical_category(value):
+        normalized = normalize_candidate_category(
+            value,
+            fallback=value
+        ) if value else ""
+
+        return category_aliases.get(normalized, normalized)
+
+    target_category = canonical_category(category)
+
+    def category_matches(product_category):
+        if not target_category:
+            return True
+
+        product_category = canonical_category(product_category)
+
+        if product_category == target_category:
+            return True
+
+        return False
+
     def is_usable_db_product(p):
         if not isinstance(p, dict):
             return False
 
-        if category:
-            product_category = normalize_candidate_category(
-                p.get("category", ""),
-                fallback=p.get("category", "")
-            )
-
-            if product_category != normalized_target_category:
-                return False
-
         if is_discontinued_or_suspicious_product(p):
+            return False
+
+        if not category_matches(p.get("category", "")):
             return False
 
         return True
@@ -1783,39 +1812,16 @@ def find_db_product_by_name(products, product_name, category=None):
         p for p in products
         if is_usable_db_product(p)
     ]
-    print(
-        "[DB NAME MATCH CHECK]",
-        {
-            "target_raw": product_name,
-            "target_norm": target,
-            "category": category,
-            "usable_count": len(usable_products),
-            "candidates": [
-                {
-                    "db_name": p.get("name", ""),
-                    "db_brand": p.get("brand", ""),
-                    "db_norm": normalize_product_name(p.get("name", "")),
-                    "db_brand_norm": normalize_product_name(p.get("brand", "")),
-                }
-                for p in usable_products[:20]
-            ]
-        },
-        flush=True
-    )
-    # 1. 完全一致
-    for p in usable_products:
-        db_name = normalize_product_name(p.get("name", ""))
 
-        if target == db_name:
-            return p
-
-    # 2. ブランド抜き候補名とDB商品名の包含一致
-    for p in usable_products:
+    def name_matches(p):
         db_name = normalize_product_name(p.get("name", ""))
         db_brand = normalize_product_name(p.get("brand", ""))
 
         if not db_name:
-            continue
+            return False
+
+        if target == db_name:
+            return True
 
         db_name_without_brand = db_name
 
@@ -1823,9 +1829,18 @@ def find_db_product_by_name(products, product_name, category=None):
             db_name_without_brand = db_name_without_brand[len(db_brand):].strip()
 
         if target == db_name_without_brand:
-            return p
+            return True
 
         if target in db_name and len(target) >= 4:
+            return True
+
+        if db_name in target and len(db_name) >= 4:
+            return True
+
+        return False
+
+    for p in usable_products:
+        if name_matches(p):
             return p
 
     return None
@@ -3555,7 +3570,28 @@ def score_product(product, step, user_data, budget_value):
         category,
         fallback=category
     )
+    # 朝のレチノール・レチナール系は、減点ではなく選定対象から除外する
+    if step.get("_section") == "morning":
+        product_actives_for_morning = product.get("active_ingredients", []) or []
+        product_focuses_for_morning = product.get("ingredient_focus", []) or []
+        product_contra_for_morning = product.get("contraindications", []) or []
+        product_name_for_morning = normalize_text(product.get("name", ""))
 
+        has_morning_retinoid = (
+            safe_retinol_level(product.get("retinol_level", 0)) > 0
+            or "retinol" in product_actives_for_morning
+            or "retinal" in product_actives_for_morning
+            or "retinoid" in product_actives_for_morning
+            or "retinol" in product_focuses_for_morning
+            or "retinal" in product_focuses_for_morning
+            or "retinoid" in product_focuses_for_morning
+            or "morning_use_caution" in product_contra_for_morning
+            or "レチノール" in product_name_for_morning
+            or "レチナール" in product_name_for_morning
+        )
+
+        if has_morning_retinoid:
+            return -9999
     # カテゴリ一致は最優先
     if product_category != step_category:
         return -9999
@@ -5202,7 +5238,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     seen_names = set()
 
     for c in sorted_candidates:
-        name_key = normalize_product_name(c.get("name", ""))
+        name_key = normalize_candidate_name_for_merge(c.get("name", ""))
 
         if not name_key:
             continue
