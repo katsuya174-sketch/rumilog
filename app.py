@@ -4271,85 +4271,130 @@ def infer_virtual_product_fields(name, category="", ingredient_focus="", purpose
     active = []
     support = []
     functions = []
+    focuses = []
+    contraindications = []
+    ingredient_strength = {}
+    retinol_level = 0
 
     rules = [
         {
-            "keywords": ["ビタミンc", "vitamin c", "メラノ", "vc"],
+            "keywords": ["ビタミンc", "vitamin c", "メラノ", "vc", "c25", "c23", "c10"],
             "active": ["vitamin_c"],
-            "functions": ["美白", "くすみケア"]
+            "functions": ["美白", "くすみケア"],
+            "focuses": ["vitamin_c"],
+            "strength": {"vitamin_c": "medium"}
         },
         {
             "keywords": ["レチノール", "retinol"],
             "active": ["retinol"],
-            "functions": ["ハリ改善", "毛穴ケア"]
+            "functions": ["ハリ改善", "毛穴ケア"],
+            "focuses": ["retinol"],
+            "strength": {"retinol": "medium"},
+            "retinol_level": 2,
+            "contraindications": ["morning_use_caution", "retinol_same_routine"]
         },
         {
-            "keywords": ["レチナール", "retinal"],
+            "keywords": ["レチナール", "retinal", "レチa", "レチA"],
             "active": ["retinal"],
-            "functions": ["ハリ改善", "毛穴ケア"]
+            "functions": ["ハリ改善", "毛穴ケア"],
+            "focuses": ["retinal"],
+            "strength": {"retinal": "medium"},
+            "retinol_level": 3,
+            "contraindications": ["morning_use_caution", "retinol_same_routine"]
         },
         {
             "keywords": ["アゼライン", "azelaic"],
             "active": ["azelaic_acid"],
-            "functions": ["ニキビケア", "皮脂コントロール"]
+            "functions": ["ニキビケア", "皮脂コントロール"],
+            "focuses": ["azelaic_acid"],
+            "strength": {"azelaic_acid": "medium"}
         },
         {
             "keywords": ["ナイアシンアミド", "niacinamide"],
             "active": ["niacinamide"],
-            "functions": ["毛穴ケア", "バリア改善"]
+            "functions": ["毛穴ケア", "バリア改善"],
+            "focuses": ["niacinamide"],
+            "strength": {"niacinamide": "medium"}
         },
         {
             "keywords": ["トラネキサム", "tranexamic"],
             "active": ["tranexamic_acid"],
-            "functions": ["美白", "色素沈着ケア"]
+            "functions": ["美白", "色素沈着ケア"],
+            "focuses": ["tranexamic_acid"],
+            "strength": {"tranexamic_acid": "medium"}
         },
         {
             "keywords": ["pdrn"],
             "active": ["pdrn"],
-            "functions": ["ハリ改善", "肌修復サポート"]
+            "functions": ["ハリ改善", "肌修復サポート"],
+            "focuses": ["pdrn"],
+            "strength": {"pdrn": "medium"}
         },
         {
             "keywords": ["ペプチド", "peptide"],
             "active": ["peptide"],
-            "functions": ["ハリ改善"]
+            "functions": ["ハリ改善"],
+            "focuses": ["peptide"],
+            "strength": {"peptide": "medium"}
         },
         {
             "keywords": ["セラミド", "ceramide"],
             "support": ["ceramide"],
-            "functions": ["バリア改善", "保湿"]
+            "functions": ["バリア改善", "保湿"],
+            "focuses": ["ceramide"]
         },
         {
             "keywords": ["シカ", "cica", "ツボクサ"],
             "support": ["cica"],
-            "functions": ["鎮静", "バリア改善"]
+            "functions": ["鎮静", "バリア改善"],
+            "focuses": ["cica"]
         },
         {
             "keywords": ["パンテノール", "panthenol"],
             "support": ["panthenol"],
-            "functions": ["鎮静", "バリア改善"]
+            "functions": ["鎮静", "バリア改善"],
+            "focuses": ["panthenol"]
         },
         {
             "keywords": ["aha", "bha", "pha", "ピーリング", "角質"],
             "active": ["aha_bha"],
-            "functions": ["角質ケア", "毛穴ケア"]
+            "functions": ["角質ケア", "毛穴ケア"],
+            "focuses": ["aha_bha"],
+            "strength": {"aha_bha": "medium"},
+            "contraindications": ["acid_same_routine"]
         },
         {
             "keywords": ["uv", "spf", "日焼け止め"],
             "active": ["uv_filter"],
-            "functions": ["UV防御", "色素沈着予防"]
+            "functions": ["UV防御", "色素沈着予防"],
+            "focuses": ["uv_filter"]
         }
     ]
 
     for rule in rules:
-        if any(keyword in text for keyword in rule["keywords"]):
+        if any(keyword.lower() in text for keyword in rule["keywords"]):
             active.extend(rule.get("active", []))
             support.extend(rule.get("support", []))
             functions.extend(rule.get("functions", []))
+            focuses.extend(rule.get("focuses", []))
+            contraindications.extend(rule.get("contraindications", []))
+
+            for key, value in rule.get("strength", {}).items():
+                ingredient_strength[key] = value
+
+            retinol_level = max(
+                retinol_level,
+                safe_retinol_level(rule.get("retinol_level", 0))
+            )
 
     return {
         "active_ingredients": list(dict.fromkeys(active)),
         "support_ingredients": list(dict.fromkeys(support)),
-        "main_functions": list(dict.fromkeys(functions))
+        "main_functions": list(dict.fromkeys(functions)),
+        "ingredient_focus": list(dict.fromkeys(focuses)),
+        "ingredient_strength": ingredient_strength,
+        "retinol_level": retinol_level,
+        "contraindications": list(dict.fromkeys(contraindications))
     }
 def normalize_candidate_category(value, fallback=""):
     raw_value = str(value or "").strip()
@@ -4600,6 +4645,10 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         str(x) for x in candidate.get("contraindications", [])
         if str(x).strip()
     ]
+    for x in inferred_fields.get("contraindications", []):
+        x = str(x).strip()
+        if x and x not in contraindications:
+            contraindications.append(x)
 
     ingredient_strength = candidate.get("ingredient_strength", {})
     if not isinstance(ingredient_strength, dict):
@@ -4607,6 +4656,11 @@ def build_virtual_product_from_ai_candidate(step, candidate):
 
     if ingredient_tag and ingredient_tag not in ingredient_strength:
         ingredient_strength[ingredient_tag] = "medium"
+
+    for key, value in inferred_fields.get("ingredient_strength", {}).items():
+        key = normalize_ingredient_tag(key)
+        if key and key not in ingredient_strength:
+            ingredient_strength[key] = value
 
     availability_japan = candidate.get("availability_japan", [])
     if not isinstance(availability_japan, list):
@@ -4629,7 +4683,10 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         "concerns": list(dict.fromkeys(concerns)),
         "skin_types": list(dict.fromkeys(skin_types)),
         "sensitive_ok": sensitive_ok,
-        "retinol_level": safe_retinol_level(candidate.get("retinol_level", 0)),
+        "retinol_level": max(
+            safe_retinol_level(candidate.get("retinol_level", 0)),
+            safe_retinol_level(inferred_fields.get("retinol_level", 0))
+        ),
         "price_ref": safe_price(
             candidate.get("normalized_price")
             or candidate.get("price_ref")
@@ -4918,6 +4975,7 @@ def score_routine_balance(step, product, routine_context=None):
             score -= 16
 
     return score
+
 def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None, routine_context=None):
     if exclude_names is None:
         exclude_names = set()
@@ -5238,7 +5296,11 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     seen_names = set()
 
     for c in sorted_candidates:
+        brand_key = normalize_candidate_name_for_merge(c.get("brand", ""))
         name_key = normalize_candidate_name_for_merge(c.get("name", ""))
+
+        if brand_key:
+            name_key = f"{brand_key} {name_key}".strip()
 
         if not name_key:
             continue
