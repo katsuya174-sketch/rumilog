@@ -1132,27 +1132,31 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     review_average = safe_float(item.get("reviewAverage", 0))
     review_count = safe_int(item.get("reviewCount", 0))
 
-    if review_average >= 4.5:
-        score += 18
-    elif review_average >= 4.2:
+    if review_average >= 4.6:
         score += 12
+    elif review_average >= 4.3:
+        score += 8
     elif review_average >= 4.0:
-        score += 6
-    elif 0 < review_average < 3.5:
-        score -= 15
+        score += 4
+    elif 0 < review_average < 3.7:
+        score -= 18
 
-    if review_count >= 3000:
-        score += 34
+    if review_count >= 5000:
+        score += 60
+    elif review_count >= 3000:
+        score += 50
     elif review_count >= 1000:
-        score += 28
+        score += 40
     elif review_count >= 500:
-        score += 22
+        score += 30
     elif review_count >= 300:
-        score += 16
+        score += 22
     elif review_count >= 100:
-        score += 10
+        score += 14
+    elif review_count >= 30:
+        score += 6
     elif review_count > 0:
-        score += 3
+        score += 1
         
     if any(word in title for word in ["公式", "正規品", "正規販売店", "認定ショップ", "メーカー公式"]):
         score += 12
@@ -6240,6 +6244,21 @@ def collect_market_candidates_with_gemini(user_data, analyzed_data):
 def normalize_candidate_name_for_merge(name):
     return normalize_product_name(name)
 
+def remove_repeated_brand_from_name(brand, name):
+    brand_key = normalize_candidate_name_for_merge(brand)
+    name_key = normalize_candidate_name_for_merge(name)
+
+    if not brand_key or not name_key:
+        return name_key
+
+    while name_key.startswith(f"{brand_key} {brand_key}"):
+        name_key = name_key[len(brand_key):].strip()
+
+    if name_key.startswith(brand_key):
+        name_key = name_key[len(brand_key):].strip()
+
+    return name_key
+
 def merge_candidate_list(original, extra, max_items=20):
     merged = []
     seen = set()
@@ -8074,10 +8093,10 @@ def finalize_step_data(step, user_data):
         if not name_key:
             return set()
 
-        name_without_brand_key = name_key
-
-        if brand_key and name_without_brand_key.startswith(brand_key):
-            name_without_brand_key = name_without_brand_key[len(brand_key):].strip()
+        name_without_brand_key = remove_repeated_brand_from_name(
+            candidate.get("brand", ""),
+            candidate.get("name", "")
+        )
 
         keys = {
             name_key,
