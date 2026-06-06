@@ -272,7 +272,19 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
                 f"[Gemini retry] attempt={attempt + 1}/{max_retries} error={msg}",
                 flush=True
             )
+            retry_match = re.search(
+                r"retry in ([0-9\.]+)s",
+                msg,
+                re.IGNORECASE
+            )
 
+            if retry_match:
+                print(
+                    "[GEMINI RETRY AFTER]",
+                    retry_match.group(1),
+                    "seconds",
+                    flush=True
+                )
             retryable = (
                 "503" in msg
                 or "UNAVAILABLE" in msg
@@ -1771,7 +1783,25 @@ def find_db_product_by_name(products, product_name, category=None):
         p for p in products
         if is_usable_db_product(p)
     ]
-
+    print(
+        "[DB NAME MATCH CHECK]",
+        {
+            "target_raw": product_name,
+            "target_norm": target,
+            "category": category,
+            "usable_count": len(usable_products),
+            "candidates": [
+                {
+                    "db_name": p.get("name", ""),
+                    "db_brand": p.get("brand", ""),
+                    "db_norm": normalize_product_name(p.get("name", "")),
+                    "db_brand_norm": normalize_product_name(p.get("brand", "")),
+                }
+                for p in usable_products[:20]
+            ]
+        },
+        flush=True
+    )
     # 1. 完全一致
     for p in usable_products:
         db_name = normalize_product_name(p.get("name", ""))
@@ -4986,11 +5016,22 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         if is_discontinued_or_suspicious_product(candidate_for_check):
             continue
 
-        db_match = find_db_product_by_name(
-            db_products,
-            candidate_name,
-            category
-        )
+        lookup_names = [candidate_name]
+
+        if brand and candidate_name and not candidate_name.startswith(brand):
+            lookup_names.append(f"{brand} {candidate_name}")
+
+        db_match = None
+
+        for lookup_name in lookup_names:
+            db_match = find_db_product_by_name(
+                db_products,
+                lookup_name,
+                category
+            )
+
+            if db_match:
+                break
 
         if db_match:
             product = dict(db_match)
