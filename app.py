@@ -1049,6 +1049,32 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         if not any(word in title for word in ["日焼け止め", "UV", "uv", "SPF", "spf", "PA", "pa", "サンスクリーン"]):
             return -9999
 
+    elif category == "パック":
+        if not any(word in title for word in [
+            "パック",
+            "マスク",
+            "シートマスク",
+            "フェイスマスク",
+            "sheet mask",
+            "face mask",
+            "mask"
+        ]):
+            return -9999
+
+        if any(word in title for word in [
+            "化粧水",
+            "ローション",
+            "トナー",
+            "美容液",
+            "セラム",
+            "クリーム",
+            "乳液",
+            "ミルク",
+            "洗顔",
+            "クレンジング"
+        ]):
+            return -9999
+
     elif category == "化粧水":
         if any(word in title for word in ["クリーム", "乳液", "ミルク", "美容液", "セラム", "シートマスク", "フェイスマスク", "パック"]):
             return -9999
@@ -1115,15 +1141,19 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     elif 0 < review_average < 3.5:
         score -= 15
 
-    if review_count >= 1000:
-        score += 20
+    if review_count >= 3000:
+        score += 34
+    elif review_count >= 1000:
+        score += 28
+    elif review_count >= 500:
+        score += 22
     elif review_count >= 300:
-        score += 14
+        score += 16
     elif review_count >= 100:
-        score += 8
+        score += 10
     elif review_count > 0:
         score += 3
-
+        
     if any(word in title for word in ["公式", "正規品", "正規販売店", "認定ショップ", "メーカー公式"]):
         score += 12
 
@@ -3807,6 +3837,18 @@ def score_product(product, step, user_data, budget_value):
     # カテゴリ一致は最優先
     if product_category != step_category:
         return -9999
+
+    product_name_for_category = normalize_text(product.get("name", ""))
+
+    if step_category == "美容液":
+        if any(w in product_name_for_category for w in [
+            "ローション",
+            "トナー",
+            "化粧水",
+            "lotion",
+            "toner"
+        ]):
+            return -9999
     # 化粧水枠にオールインワンジェル・ゲルは入れない
     if step_category == "化粧水":
         product_name_for_category = normalize_text(product.get("name", ""))
