@@ -31,6 +31,8 @@ ANALYSIS_CACHE_VERSION = "v1"
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
+VERIFIED_PRODUCTS_CACHE_FILE = "verified_products_cache.json"
+VERIFIED_PRODUCTS_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
 #DB_POOL = SimpleConnectionPool(
 #   minconn=1,
 #    maxconn=5,
@@ -1018,7 +1020,22 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         return -9999
 
     if category == "美容液":
-        if any(word in title for word in ["シートマスク", "フェイスマスク", "薬用マスク", "パック"]):
+        if any(word in title for word in [
+            "化粧水",
+            "ローション",
+            "トナー",
+            "toner",
+            "lotion",
+            "乳液",
+            "ミルク",
+            "クリーム",
+            "ジェルクリーム",
+            "オールインワン",
+            "シートマスク",
+            "フェイスマスク",
+            "薬用マスク",
+            "パック"
+        ]):
             return -9999
 
     elif category == "クリーム":
@@ -1284,6 +1301,158 @@ def clean_rakuten_keyword(keyword):
         return ""
 
     return keyword[:120]
+
+def load_verified_products_cache():
+    try:
+        with open(VERIFIED_PRODUCTS_CACHE_FILE, "r", encoding="utf-8") as f:
+            items = json.load(f)
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        print("[VERIFIED CACHE LOAD ERROR]", e, flush=True)
+        return []
+
+    if not isinstance(items, list):
+        return []
+
+    now = time.time()
+    valid_items = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        verified_at = safe_price(item.get("verified_at", 0))
+
+        if verified_at <= 0:
+            continue
+
+        if now - verified_at > VERIFIED_PRODUCTS_CACHE_TTL_SECONDS:
+            continue
+
+        name = str(item.get("name", "") or "").strip()
+        category = str(item.get("category", "") or "").strip()
+
+        if not name or not category:
+            continue
+
+        valid_items.append(item)
+
+    return valid_items
+
+
+def save_verified_products_cache(items):
+    if not isinstance(items, list):
+        return
+
+    cleaned = [
+        item for item in items
+        if isinstance(item, dict)
+        and str(item.get("name", "") or "").strip()
+        and str(item.get("category", "") or "").strip()
+    ]
+
+    try:
+        with open(VERIFIED_PRODUCTS_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cleaned, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("[VERIFIED CACHE SAVE ERROR]", e, flush=True)
+
+
+def make_verified_product_key(product):
+    if not isinstance(product, dict):
+        return ""
+
+    brand = normalize_candidate_name_for_merge(product.get("brand", ""))
+    name = normalize_candidate_name_for_merge(product.get("name", ""))
+    category = normalize_candidate_category(
+        product.get("category", ""),
+        fallback=product.get("category", "")
+    )
+
+    return "|".join([brand, name, category]).strip("|")
+
+
+def upsert_verified_product_cache(product):
+    if not isinstance(product, dict):
+        return
+
+    key = make_verified_product_key(product)
+
+    if not key:
+        return
+
+    items = load_verified_products_cache()
+
+    updated = []
+    replaced = False
+
+    for item in items:
+        if make_verified_product_key(item) == key:
+            updated.append(product)
+            replaced = True
+        else:
+            updated.append(item)
+
+    if not replaced:
+        updated.append(product)
+
+    save_verified_products_cache(updated)
+
+
+def build_verified_product_from_step(step, rakuten_item):
+    if not isinstance(step, dict) or not isinstance(rakuten_item, dict):
+        return None
+
+    candidate = {
+        "brand": step.get("brand", ""),
+        "name": step.get("product", ""),
+        "category": step.get("category", ""),
+        "price_ref": safe_price(rakuten_item.get("price", 0)),
+        "raw_price": safe_price(rakuten_item.get("raw_price", 0)),
+        "bundle_quantity": safe_bundle_quantity(rakuten_item.get("bundle_quantity", 1)),
+        "active_ingredients": step.get("active_ingredients", []),
+        "support_ingredients": step.get("support_ingredients", []),
+        "signature_ingredients": step.get("signature_ingredients", []),
+        "concerns": purpose_to_concern_tags(step.get("purpose", "")),
+        "skin_types": step.get("skin_types", []),
+        "sensitive_ok": step.get("sensitive_ok", "unknown"),
+        "retinol_level": safe_retinol_level(step.get("retinol_level", 0)),
+        "main_functions": step.get("main_functions", []),
+        "ingredient_focus": step.get("ingredient_focus", []),
+        "ingredient_strength": step.get("ingredient_strength", {}),
+        "formulation": step.get("formulation", []),
+        "technology": step.get("technology", []),
+        "texture": step.get("texture", ""),
+        "contraindications": step.get("contraindications", []),
+        "availability_japan": ["rakuten"],
+        "uv_level": step.get("uv_level", {}),
+    }
+
+    product = build_virtual_product_from_ai_candidate(
+        step,
+        candidate
+    )
+
+    product["brand"] = str(step.get("brand", "") or "").strip()
+    product["name"] = clean_display_product_name(step.get("product", ""))
+    product["category"] = normalize_candidate_category(
+        step.get("category", ""),
+        fallback=step.get("category", "")
+    )
+    product["price_ref"] = safe_price(rakuten_item.get("price", 0))
+    product["price"] = safe_price(rakuten_item.get("price", 0))
+    product["raw_price"] = safe_price(rakuten_item.get("raw_price", 0))
+    product["bundle_quantity"] = safe_bundle_quantity(
+        rakuten_item.get("bundle_quantity", 1)
+    )
+    product["image"] = rakuten_item.get("image", "")
+    product["rakuten_link"] = rakuten_item.get("rakuten_link", "")
+    product["rakuten_title"] = rakuten_item.get("rakuten_title", "")
+    product["verified_at"] = time.time()
+    product["_source_hint"] = "verified_cache"
+
+    return product
 
 def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="", purpose=""):
     global RAKUTEN_COOLDOWN_UNTIL
@@ -1665,6 +1834,13 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
         step["bundle_quantity"] = safe_bundle_quantity(
             rakuten_item.get("bundle_quantity", 1)
         )
+        verified_product = build_verified_product_from_step(
+            step,
+            rakuten_item
+        )
+
+        if verified_product:
+            upsert_verified_product_cache(verified_product)        
     else:
         if product_source in ["db", "ai+db", "fallback_db"]:
             step["rakuten_link"] = ""
@@ -5023,10 +5199,30 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
     all_candidates = []
 
+    verified_products = load_verified_products_cache()
+
+    combined_products = []
+    seen_product_keys = set()
+
+    for source_product in list(db_products or []) + verified_products:
+        if not isinstance(source_product, dict):
+            continue
+
+        product_key = make_verified_product_key(source_product)
+
+        if not product_key:
+            continue
+
+        if product_key in seen_product_keys:
+            continue
+
+        seen_product_keys.add(product_key)
+        combined_products.append(source_product)
+
     # =========================
-    # DB候補を採点対象に入れる
+    # DB候補 + 楽天確認済み候補を採点対象に入れる
     # =========================
-    for p in db_products:
+    for p in combined_products:
         if not isinstance(p, dict):
             continue
 
@@ -5078,7 +5274,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         product["_improve_score"] = round(improve_score, 1)
         product["_routine_score"] = round(routine_score, 1)
         product["_improvement_reason"] = improvement_reason
-        product["_source"] = "db"
+        product["_source"] = product.get("_source_hint", "db")
 
         all_candidates.append(product)
 
@@ -5335,6 +5531,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             "db": sum(1 for c in sorted_candidates if c.get("_source") == "db"),
             "ai_db": sum(1 for c in sorted_candidates if c.get("_source") == "ai+db"),
             "ai_virtual": sum(1 for c in sorted_candidates if c.get("_source") == "ai_virtual"),
+            "verified_cache": sum(1 for c in sorted_candidates if c.get("_source") == "verified_cache"),
         },
         flush=True
     )
@@ -5631,6 +5828,66 @@ def ensure_required_routine_steps(data):
             "priority": 9,
             "product_candidates": []
         })
+
+    if "weekly_care" not in data or not isinstance(data.get("weekly_care"), list):
+        data["weekly_care"] = []
+
+    weekly_care = data.get("weekly_care", [])
+
+    def weekly_has_category(category):
+        return any(
+            isinstance(s, dict) and s.get("category") == category
+            for s in weekly_care
+        )
+
+    scores = data.get("scores", {})
+    if not isinstance(scores, dict):
+        scores = {}
+
+    hydration_score = safe_price(scores.get("hydration", 0))
+    barrier_score = safe_price(scores.get("barrier", 0))
+    redness_score = safe_price(scores.get("redness", 0))
+    texture_score = safe_price(scores.get("texture", 0))
+    pores_score = safe_price(scores.get("pores", 0))
+    dullness_score = safe_price(scores.get("dullness", 0))
+
+    needs_recovery_pack = (
+        hydration_score <= 65
+        or barrier_score <= 65
+        or redness_score <= 65
+    )
+
+    needs_peeling = (
+        texture_score <= 65
+        or pores_score <= 65
+        or dullness_score <= 65
+    )
+
+    if needs_peeling and not weekly_has_category("ピーリング"):
+        weekly_care.append({
+            "category": "ピーリング",
+            "role": "main",
+            "purpose": "毛穴詰まり・ざらつき・くすみを週1回の角質ケアで整える",
+            "ingredient_focus": "PHA",
+            "risk_note": "レチノールや高濃度ビタミンCと同じ夜は避ける",
+            "priority": 7,
+            "frequency": "週1回・夜",
+            "product_candidates": []
+        })
+
+    if needs_recovery_pack and not weekly_has_category("パック"):
+        weekly_care.append({
+            "category": "パック",
+            "role": "main",
+            "purpose": "乾燥・赤み・バリア低下を週1回の集中保湿で整える",
+            "ingredient_focus": "CICA",
+            "risk_note": "刺激を感じる日はピーリングより保湿パックを優先する",
+            "priority": 8,
+            "frequency": "週1回・夜",
+            "product_candidates": []
+        })
+
+    data["weekly_care"] = weekly_care
 
     data["morning"]["steps"] = morning_steps
     data["night"]["steps"] = night_steps
@@ -7690,11 +7947,6 @@ def finalize_step_data(step, user_data):
         if normalized:
             candidates.append(normalized)
 
-    for c in step.get("product_candidates", []):
-        normalized = normalize_candidate(c)
-        if normalized:
-            candidates.append(normalized)
-
     selected_candidate = normalize_candidate({
         "brand": step.get("brand", ""),
         "name": step.get("product", ""),
@@ -7710,13 +7962,40 @@ def finalize_step_data(step, user_data):
         candidates.insert(0, selected_candidate)
 
     unique_candidates = []
-    seen_names = set()
+    seen_keys = set()
+
+    def build_candidate_identity_keys(candidate):
+        brand_key = normalize_candidate_name_for_merge(candidate.get("brand", ""))
+        name_key = normalize_candidate_name_for_merge(candidate.get("name", ""))
+
+        if not name_key:
+            return set()
+
+        name_without_brand_key = name_key
+
+        if brand_key and name_without_brand_key.startswith(brand_key):
+            name_without_brand_key = name_without_brand_key[len(brand_key):].strip()
+
+        keys = {
+            name_key,
+            name_without_brand_key,
+        }
+
+        if brand_key:
+            keys.add(f"{brand_key} {name_without_brand_key}".strip())
+
+        return {k for k in keys if k}
 
     for c in candidates:
-        key = normalize_product_name(c["name"])
-        if key in seen_names:
+        identity_keys = build_candidate_identity_keys(c)
+
+        if not identity_keys:
             continue
-        seen_names.add(key)
+
+        if seen_keys.intersection(identity_keys):
+            continue
+
+        seen_keys.update(identity_keys)
         unique_candidates.append(c)
 
     unique_candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
@@ -9188,6 +9467,20 @@ BHA
 PHA
 UV防御
 低刺激
+
+【週ケアルール】
+weekly_care は空配列にしない。
+肌状態に応じて、ピーリングまたはパックを1〜2件出す。
+
+ピーリングを出す条件:
+毛穴詰まり、ざらつき、くすみ、キメ乱れが目立つ場合。
+
+パックを出す条件:
+乾燥、赤み、バリア低下、刺激リスク、レチノール使用中の回復ケアが必要な場合。
+
+ただし、肌状態から週ケアが不要と判断できる場合のみ、weekly_care は最小限にする。
+カテゴリは必ず「ピーリング」または「パック」。
+通常の美容液・化粧水・クリームを weekly_care に入れることは禁止。
 
 【商品候補ルール】
 product_candidates は候補収集のみ。
