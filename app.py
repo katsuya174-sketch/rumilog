@@ -3595,7 +3595,27 @@ def score_product(product, step, user_data, budget_value):
     # カテゴリ一致は最優先
     if product_category != step_category:
         return -9999
+    # 化粧水枠にオールインワンジェル・ゲルは入れない
+    if step_category == "化粧水":
+        product_name_for_category = normalize_text(product.get("name", ""))
+        product_formulation_for_category = " ".join([
+            normalize_text(x)
+            for x in product.get("formulation", [])
+        ])
 
+        all_in_one_text = " ".join([
+            product_name_for_category,
+            product_formulation_for_category
+        ])
+
+        if any(w in all_in_one_text for w in [
+            "オールインワン",
+            "allinone",
+            "all-in-one",
+            "オールインワンジェル",
+            "オールインワンゲル"
+        ]):
+            return -9999
     score += 40
 
     concern_tags = purpose_to_concern_tags(purpose)
@@ -4261,12 +4281,8 @@ def score_ai_candidate(step, products):
 
     return score
 def infer_virtual_product_fields(name, category="", ingredient_focus="", purpose=""):
-    text = " ".join([
-        str(name or ""),
-        str(category or ""),
-        str(ingredient_focus or ""),
-        str(purpose or "")
-    ]).lower()
+    # 商品に含まれる成分の推定は、stepの目的や希望成分ではなく商品名だけから行う
+    text = str(name or "").lower()
 
     active = []
     support = []
@@ -5185,55 +5201,58 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             all_candidates.append(product)
             continue
 
-        virtual = build_virtual_product_from_ai_candidate(
+        rakuten_item = fetch_rakuten_item(
+            product_name=candidate_name,
+            category=category,
+            brand=brand,
+            ingredient_focus=step.get("ingredient_focus", ""),
+            purpose=step.get("purpose", "")
+        )
+
+        if not rakuten_item:
+            continue
+
+        verified = build_virtual_product_from_ai_candidate(
             step,
             candidate_for_check
         )
 
-        # 商品選定中は楽天APIを呼ばない。
-        # 楽天リンク・画像取得は attach_affiliate_links_to_step 側で、選定後の商品だけに行う。
-        virtual["brand"] = brand
-        virtual["name"] = candidate_name
-        virtual["category"] = category
-        virtual["image"] = ""
-        virtual["rakuten_link"] = ""
-        virtual["_source"] = "ai_virtual"
+        verified["brand"] = brand
+        verified["name"] = candidate_name
+        verified["category"] = category
+        verified["image"] = rakuten_item.get("image", "")
+        verified["rakuten_link"] = rakuten_item.get("rakuten_link", "")
+        verified["price_ref"] = safe_price(rakuten_item.get("price", 0))
+        verified["price"] = safe_price(rakuten_item.get("price", 0))
+        verified["estimated_price"] = safe_price(rakuten_item.get("price", 0))
+        verified["raw_price"] = safe_price(rakuten_item.get("raw_price", 0))
+        verified["bundle_quantity"] = safe_bundle_quantity(
+            rakuten_item.get("bundle_quantity", 1)
+        )
+        verified["product_source"] = "ai_rakuten_verified"
+        verified["_source"] = "ai_rakuten_verified"
 
-        if is_discontinued_or_suspicious_product(virtual):
+        if is_discontinued_or_suspicious_product(verified):
             continue
 
-        if is_wrong_cleanser_candidate(virtual, step):
+        if is_wrong_cleanser_candidate(verified, step):
             continue
 
-        if is_non_cosmetic(virtual):
+        if is_non_cosmetic(verified):
             continue
 
         base_score = score_product(
-            virtual,
+            verified,
             step,
             user_data,
             budget_value
         )
 
         if base_score <= -9000:
-            print(
-                "[AI VIRTUAL REJECTED BY SCORE_PRODUCT]",
-                step.get("_section", ""),
-                step.get("category", ""),
-                {
-                    "name": virtual.get("name", ""),
-                    "brand": virtual.get("brand", ""),
-                    "category": virtual.get("category", ""),
-                    "active_ingredients": virtual.get("active_ingredients", []),
-                    "concerns": virtual.get("concerns", []),
-                    "ingredient_focus": virtual.get("ingredient_focus", []),
-                },
-                flush=True
-            )
             continue
 
         improve_score = score_improvement(
-            virtual,
+            verified,
             improvement_plan or {}
         )
 
@@ -5244,7 +5263,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
         routine_score = score_routine_balance(
             step,
-            virtual,
+            verified,
             routine_context
         )
 
@@ -5258,16 +5277,16 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             routine_score * routine_weight
         )
 
-        virtual["_score"] = round(final_score, 1)
-        virtual["_base_score"] = round(base_score, 1)
-        virtual["_improve_score"] = round(improve_score, 1)
-        virtual["_routine_score"] = round(routine_score, 1)
-        virtual["_improvement_reason"] = build_improvement_reason(
-            virtual,
+        verified["_score"] = round(final_score, 1)
+        verified["_base_score"] = round(base_score, 1)
+        verified["_improve_score"] = round(improve_score, 1)
+        verified["_routine_score"] = round(routine_score, 1)
+        verified["_improvement_reason"] = build_improvement_reason(
+            verified,
             improvement_plan or {}
         )
 
-        all_candidates.append(virtual)
+        all_candidates.append(verified)
 
     if not all_candidates:
         return None
@@ -5299,16 +5318,28 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         brand_key = normalize_candidate_name_for_merge(c.get("brand", ""))
         name_key = normalize_candidate_name_for_merge(c.get("name", ""))
 
-        if brand_key:
-            name_key = f"{brand_key} {name_key}".strip()
-
         if not name_key:
             continue
 
-        if name_key in seen_names:
+        name_without_brand_key = name_key
+
+        if brand_key and name_without_brand_key.startswith(brand_key):
+            name_without_brand_key = name_without_brand_key[len(brand_key):].strip()
+
+        identity_keys = {
+            name_key,
+            name_without_brand_key
+        }
+
+        if brand_key:
+            identity_keys.add(f"{brand_key} {name_without_brand_key}".strip())
+
+        identity_keys = {k for k in identity_keys if k}
+
+        if seen_names.intersection(identity_keys):
             continue
 
-        seen_names.add(name_key)
+        seen_names.update(identity_keys)
         deduped_candidates.append(c)
 
     sorted_candidates = deduped_candidates
@@ -5321,6 +5352,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             "db": sum(1 for c in sorted_candidates if c.get("_source") == "db"),
             "ai_db": sum(1 for c in sorted_candidates if c.get("_source") == "ai+db"),
             "ai_virtual": sum(1 for c in sorted_candidates if c.get("_source") == "ai_virtual"),
+            "ai_rakuten_verified": sum(1 for c in sorted_candidates if c.get("_source") == "ai_rakuten_verified"),
         },
         flush=True
     )
@@ -6059,10 +6091,6 @@ def normalize_ai_candidates(step):
         ]
         support_ingredients = [x for x in support_ingredients if x]
 
-        for focus in step_ingredient_focus_list:
-            if focus and focus not in active_ingredients:
-                active_ingredients.append(focus)
-
         ingredient_focus = candidate.get("ingredient_focus", [])
         if isinstance(ingredient_focus, str):
             ingredient_focus = [ingredient_focus]
@@ -6075,9 +6103,6 @@ def normalize_ai_candidates(step):
             if normalize_text(x)
         ]
 
-        for focus in step_ingredient_focus_list:
-            if focus and focus not in ingredient_focus:
-                ingredient_focus.append(focus)
 
         concerns = candidate.get("concerns", [])
         if not isinstance(concerns, list):
@@ -6116,9 +6141,6 @@ def normalize_ai_candidates(step):
         if not isinstance(ingredient_strength, dict):
             ingredient_strength = {}
 
-        for focus in step_ingredient_focus_list:
-            if focus and focus not in ingredient_strength:
-                ingredient_strength[focus] = "medium"
 
         item = {
             "brand": brand,
