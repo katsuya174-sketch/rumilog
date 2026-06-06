@@ -1404,29 +1404,48 @@ def build_verified_product_from_step(step, rakuten_item):
     if not isinstance(step, dict) or not isinstance(rakuten_item, dict):
         return None
 
+    def as_list(value):
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str) and value.strip():
+            return [value.strip()]
+        return []
+
+    def as_dict(value):
+        return value if isinstance(value, dict) else {}
+
+    product_name = clean_display_product_name(step.get("product", ""))
+    category = normalize_candidate_category(
+        step.get("category", ""),
+        fallback=step.get("category", "")
+    )
+
+    if not product_name or not category:
+        return None
+
     candidate = {
-        "brand": step.get("brand", ""),
-        "name": step.get("product", ""),
-        "category": step.get("category", ""),
+        "brand": str(step.get("brand", "") or "").strip(),
+        "name": product_name,
+        "category": category,
         "price_ref": safe_price(rakuten_item.get("price", 0)),
         "raw_price": safe_price(rakuten_item.get("raw_price", 0)),
         "bundle_quantity": safe_bundle_quantity(rakuten_item.get("bundle_quantity", 1)),
-        "active_ingredients": step.get("active_ingredients", []),
-        "support_ingredients": step.get("support_ingredients", []),
-        "signature_ingredients": step.get("signature_ingredients", []),
+        "active_ingredients": as_list(step.get("active_ingredients", [])),
+        "support_ingredients": as_list(step.get("support_ingredients", [])),
+        "signature_ingredients": as_list(step.get("signature_ingredients", [])),
         "concerns": purpose_to_concern_tags(step.get("purpose", "")),
-        "skin_types": step.get("skin_types", []),
-        "sensitive_ok": step.get("sensitive_ok", "unknown"),
+        "skin_types": as_list(step.get("skin_types", [])),
+        "sensitive_ok": str(step.get("sensitive_ok", "unknown") or "unknown"),
         "retinol_level": safe_retinol_level(step.get("retinol_level", 0)),
-        "main_functions": step.get("main_functions", []),
-        "ingredient_focus": step.get("ingredient_focus", []),
-        "ingredient_strength": step.get("ingredient_strength", {}),
-        "formulation": step.get("formulation", []),
-        "technology": step.get("technology", []),
-        "texture": step.get("texture", ""),
-        "contraindications": step.get("contraindications", []),
+        "main_functions": as_list(step.get("main_functions", [])),
+        "ingredient_focus": as_list(step.get("ingredient_focus", [])),
+        "ingredient_strength": as_dict(step.get("ingredient_strength", {})),
+        "formulation": as_list(step.get("formulation", [])),
+        "technology": as_list(step.get("technology", [])),
+        "texture": str(step.get("texture", "") or ""),
+        "contraindications": as_list(step.get("contraindications", [])),
         "availability_japan": ["rakuten"],
-        "uv_level": step.get("uv_level", {}),
+        "uv_level": as_dict(step.get("uv_level", {})),
     }
 
     product = build_virtual_product_from_ai_candidate(
@@ -1434,12 +1453,9 @@ def build_verified_product_from_step(step, rakuten_item):
         candidate
     )
 
-    product["brand"] = str(step.get("brand", "") or "").strip()
-    product["name"] = clean_display_product_name(step.get("product", ""))
-    product["category"] = normalize_candidate_category(
-        step.get("category", ""),
-        fallback=step.get("category", "")
-    )
+    product["brand"] = candidate["brand"]
+    product["name"] = product_name
+    product["category"] = category
     product["price_ref"] = safe_price(rakuten_item.get("price", 0))
     product["price"] = safe_price(rakuten_item.get("price", 0))
     product["raw_price"] = safe_price(rakuten_item.get("raw_price", 0))
@@ -1834,13 +1850,17 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
         step["bundle_quantity"] = safe_bundle_quantity(
             rakuten_item.get("bundle_quantity", 1)
         )
-        verified_product = build_verified_product_from_step(
-            step,
-            rakuten_item
-        )
+        try:
+            verified_product = build_verified_product_from_step(
+                step,
+                rakuten_item
+            )
 
-        if verified_product:
-            upsert_verified_product_cache(verified_product)        
+            if verified_product:
+                upsert_verified_product_cache(verified_product)
+
+        except Exception as e:
+            print("[VERIFIED CACHE UPSERT ERROR]", e, flush=True)        
     else:
         if product_source in ["db", "ai+db", "fallback_db"]:
             step["rakuten_link"] = ""
@@ -5201,7 +5221,29 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
     verified_products = load_verified_products_cache()
 
+    if not isinstance(db_products, list):
+        db_products = []
+
+    if not isinstance(verified_products, list):
+        verified_products = []
+
     combined_products = []
+    seen_product_keys = set()
+
+    for source_product in db_products + verified_products:
+        if not isinstance(source_product, dict):
+            continue
+
+        product_key = make_verified_product_key(source_product)
+
+        if not product_key:
+            continue
+
+        if product_key in seen_product_keys:
+            continue
+
+        seen_product_keys.add(product_key)
+        combined_products.append(source_product)
     seen_product_keys = set()
 
     for source_product in list(db_products or []) + verified_products:
