@@ -2066,26 +2066,41 @@ def normalize_text(value):
         return ""
     return str(value).strip().lower()
 
-def ensure_result_structure(data):
+def safe_step_list(value):
+    if isinstance(value, list):
+        return [
+            item for item in value
+            if isinstance(item, dict)
+        ]
+
+    return []
+
+
+def safe_section_steps(section):
+    if not isinstance(section, dict):
+        return []
+
+    return safe_step_list(section.get("steps", []))
+
+
+def normalize_result_sections(data):
     if not isinstance(data, dict):
         data = {}
 
-    if "morning" not in data or not isinstance(data.get("morning"), dict):
+    if not isinstance(data.get("morning"), dict):
         data["morning"] = {"steps": []}
 
-    if "night" not in data or not isinstance(data.get("night"), dict):
+    if not isinstance(data.get("night"), dict):
         data["night"] = {"steps": []}
 
-    if "weekly_care" not in data or not isinstance(data.get("weekly_care"), list):
-        data["weekly_care"] = []
-
-    if "steps" not in data["morning"] or not isinstance(data["morning"].get("steps"), list):
-        data["morning"]["steps"] = []
-
-    if "steps" not in data["night"] or not isinstance(data["night"].get("steps"), list):
-        data["night"]["steps"] = []
+    data["morning"]["steps"] = safe_section_steps(data.get("morning"))
+    data["night"]["steps"] = safe_section_steps(data.get("night"))
+    data["weekly_care"] = safe_step_list(data.get("weekly_care", []))
 
     return data
+
+def ensure_result_structure(data):
+    return normalize_result_sections(data)
 
 def normalize_skin_type(oil, sens):
     result = []
@@ -6263,6 +6278,9 @@ def safe_retinol_level(value):
         return 0
 
 def normalize_ai_candidates(step):
+    if not isinstance(step, dict):
+        return []
+
     raw_candidates = step.get("product_candidates", [])
     normalized = []
     seen = set()
@@ -7597,8 +7615,6 @@ def calculate_final_score(product, step, user_data, budget_value):
 def calculate_total_price(data):
     total = 0
 
-    
-
     for step in data.get("morning", {}).get("steps", []):
         step["_section"] = "morning"
         price = step.get("price", 0)
@@ -7620,6 +7636,8 @@ def calculate_total_price(data):
     return total
 
 def build_budget_fit_plan(data, budget_value):
+    data = normalize_result_sections(data)
+
     all_steps = []
 
     # 朝
@@ -8185,6 +8203,7 @@ def finalize_result_data(data, user_data):
     if not isinstance(data, dict):
         data = {}
 
+    data = normalize_result_sections(data)
     if "morning" not in data or not isinstance(data.get("morning"), dict):
         data["morning"] = {"steps": []}
     if "night" not in data or not isinstance(data.get("night"), dict):
@@ -8303,11 +8322,31 @@ def finalize_result_data(data, user_data):
     data["budget_fit_total"] = safe_price(data.get("budget_fit_total", 0))
 
     if not isinstance(data.get("budget_fit_plan"), dict):
-        data["budget_fit_plan"] = {"morning": [], "night": [], "weekly_care": []}
+        data["budget_fit_plan"] = {
+            "morning": {"steps": []},
+            "night": {"steps": []},
+            "weekly_care": []
+        }
     else:
-        for key in ["morning", "night", "weekly_care"]:
-            if not isinstance(data["budget_fit_plan"].get(key), list):
-                data["budget_fit_plan"][key] = []
+        budget_plan = data["budget_fit_plan"]
+
+        if not isinstance(budget_plan.get("morning"), dict):
+            budget_plan["morning"] = {"steps": []}
+
+        if not isinstance(budget_plan.get("night"), dict):
+            budget_plan["night"] = {"steps": []}
+
+        budget_plan["morning"]["steps"] = safe_section_steps(
+            budget_plan.get("morning")
+        )
+        budget_plan["night"]["steps"] = safe_section_steps(
+            budget_plan.get("night")
+        )
+        budget_plan["weekly_care"] = safe_step_list(
+            budget_plan.get("weekly_care", [])
+        )
+
+        data["budget_fit_plan"] = budget_plan
 
     # 文字列系
     for key in ["record_date", "analysis_date", "skin_summary", "budget_status"]:
