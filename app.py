@@ -5201,48 +5201,31 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             all_candidates.append(product)
             continue
 
-        rakuten_item = fetch_rakuten_item(
-            product_name=candidate_name,
-            category=category,
-            brand=brand,
-            ingredient_focus=step.get("ingredient_focus", ""),
-            purpose=step.get("purpose", "")
-        )
-
-        if not rakuten_item:
-            continue
-
-        verified = build_virtual_product_from_ai_candidate(
+        virtual = build_virtual_product_from_ai_candidate(
             step,
             candidate_for_check
         )
 
-        verified["brand"] = brand
-        verified["name"] = candidate_name
-        verified["category"] = category
-        verified["image"] = rakuten_item.get("image", "")
-        verified["rakuten_link"] = rakuten_item.get("rakuten_link", "")
-        verified["price_ref"] = safe_price(rakuten_item.get("price", 0))
-        verified["price"] = safe_price(rakuten_item.get("price", 0))
-        verified["estimated_price"] = safe_price(rakuten_item.get("price", 0))
-        verified["raw_price"] = safe_price(rakuten_item.get("raw_price", 0))
-        verified["bundle_quantity"] = safe_bundle_quantity(
-            rakuten_item.get("bundle_quantity", 1)
-        )
-        verified["product_source"] = "ai_rakuten_verified"
-        verified["_source"] = "ai_rakuten_verified"
+        # 商品選定中は楽天APIを呼ばない。
+        # 楽天リンク・画像取得は attach_affiliate_links_to_step 側で、選定後の商品だけに行う。
+        virtual["brand"] = brand
+        virtual["name"] = candidate_name
+        virtual["category"] = category
+        virtual["image"] = ""
+        virtual["rakuten_link"] = ""
+        virtual["_source"] = "ai_virtual"
 
-        if is_discontinued_or_suspicious_product(verified):
+        if is_discontinued_or_suspicious_product(virtual):
             continue
 
-        if is_wrong_cleanser_candidate(verified, step):
+        if is_wrong_cleanser_candidate(virtual, step):
             continue
 
-        if is_non_cosmetic(verified):
+        if is_non_cosmetic(virtual):
             continue
 
         base_score = score_product(
-            verified,
+            virtual,
             step,
             user_data,
             budget_value
@@ -5252,7 +5235,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             continue
 
         improve_score = score_improvement(
-            verified,
+            virtual,
             improvement_plan or {}
         )
 
@@ -5263,7 +5246,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
         routine_score = score_routine_balance(
             step,
-            verified,
+            virtual,
             routine_context
         )
 
@@ -5277,16 +5260,16 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             routine_score * routine_weight
         )
 
-        verified["_score"] = round(final_score, 1)
-        verified["_base_score"] = round(base_score, 1)
-        verified["_improve_score"] = round(improve_score, 1)
-        verified["_routine_score"] = round(routine_score, 1)
-        verified["_improvement_reason"] = build_improvement_reason(
-            verified,
+        virtual["_score"] = round(final_score, 1)
+        virtual["_base_score"] = round(base_score, 1)
+        virtual["_improve_score"] = round(improve_score, 1)
+        virtual["_routine_score"] = round(routine_score, 1)
+        virtual["_improvement_reason"] = build_improvement_reason(
+            virtual,
             improvement_plan or {}
         )
 
-        all_candidates.append(verified)
+        all_candidates.append(virtual)
 
     if not all_candidates:
         return None
@@ -5352,7 +5335,6 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             "db": sum(1 for c in sorted_candidates if c.get("_source") == "db"),
             "ai_db": sum(1 for c in sorted_candidates if c.get("_source") == "ai+db"),
             "ai_virtual": sum(1 for c in sorted_candidates if c.get("_source") == "ai_virtual"),
-            "ai_rakuten_verified": sum(1 for c in sorted_candidates if c.get("_source") == "ai_rakuten_verified"),
         },
         flush=True
     )
