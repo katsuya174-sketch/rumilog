@@ -1371,7 +1371,7 @@ def load_verified_products_cache():
             continue
 
         valid_items.append(item)
-        
+
     print(
         "[VERIFIED CACHE LOADED]",
         len(valid_items),
@@ -1403,16 +1403,21 @@ def make_verified_product_key(product):
     if not isinstance(product, dict):
         return ""
 
-    brand = normalize_candidate_name_for_merge(product.get("brand", ""))
-    name = normalize_candidate_name_for_merge(product.get("name", ""))
     category = normalize_candidate_category(
         product.get("category", ""),
         fallback=product.get("category", "")
     )
 
-    return "|".join([brand, name, category]).strip("|")
+    identity = normalize_product_identity(
+        product.get("brand", ""),
+        product.get("name", "")
+    )
 
+    if not identity or not category:
+        return ""
 
+    return f"{identity}|{category}"
+    
 def upsert_verified_product_cache(product):
     if not isinstance(product, dict):
         return
@@ -5336,6 +5341,27 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         seen_product_keys.add(product_key)
         combined_products.append(source_product)
 
+    print(
+        "[COMBINED PRODUCTS COUNT]",
+        step.get("_section", ""),
+        step.get("category", ""),
+        {
+            "db_products": len(db_products),
+            "verified_products": len(verified_products),
+            "combined_products": len(combined_products),
+            "verified_names": [
+                {
+                    "brand": p.get("brand", ""),
+                    "name": p.get("name", ""),
+                    "category": p.get("category", ""),
+                    "source_hint": p.get("_source_hint", "")
+                }
+                for p in verified_products
+                if isinstance(p, dict)
+            ]
+        },
+        flush=True
+    )
     # =========================
     # DB候補 + 楽天確認済み候補を採点対象に入れる
     # =========================
@@ -5362,7 +5388,21 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         product = dict(p)
 
         base_score = score_product(product, step, user_data, budget_value)
+
         if base_score <= -9000:
+            if product.get("_source_hint") == "verified_cache":
+                print(
+                    "[VERIFIED CACHE REJECTED BY SCORE_PRODUCT]",
+                    step.get("_section", ""),
+                    step.get("category", ""),
+                    {
+                        "brand": product.get("brand", ""),
+                        "name": product.get("name", ""),
+                        "category": product.get("category", ""),
+                        "base_score": base_score,
+                    },
+                    flush=True
+                )
             continue
 
         improve_score = score_improvement(product, improvement_plan or {})
@@ -5996,9 +6036,7 @@ def ensure_required_routine_steps(data):
         weekly_care.append({
             "category": "パック",
             "role": "main",
-            "purpose": "乾燥・赤み・バリア低下を週1回の集中保湿で整える",
             "ingredient_focus": "CICA",
-            "risk_note": "刺激を感じる日はピーリングより保湿パックを優先する",
             "priority": 8,
             "frequency": "週1回・夜",
             "product_candidates": []
@@ -6256,6 +6294,24 @@ def collect_market_candidates_with_gemini(user_data, analyzed_data):
 
 def normalize_candidate_name_for_merge(name):
     return normalize_product_name(name)
+
+def normalize_product_identity(brand="", name=""):
+    brand_key = normalize_candidate_name_for_merge(brand)
+    name_key = normalize_candidate_name_for_merge(name)
+
+    if not name_key:
+        return ""
+
+    if brand_key:
+        while name_key.startswith(f"{brand_key} {brand_key}"):
+            name_key = name_key[len(brand_key):].strip()
+
+        if name_key.startswith(brand_key):
+            name_key = name_key[len(brand_key):].strip()
+
+        return f"{brand_key} {name_key}".strip()
+
+    return name_key
 
 def remove_repeated_brand_from_name(brand, name):
     brand_key = normalize_candidate_name_for_merge(brand)
@@ -8100,26 +8156,15 @@ def finalize_step_data(step, user_data):
     seen_keys = set()
 
     def build_candidate_identity_keys(candidate):
-        brand_key = normalize_candidate_name_for_merge(candidate.get("brand", ""))
-        name_key = normalize_candidate_name_for_merge(candidate.get("name", ""))
-
-        if not name_key:
-            return set()
-
-        name_without_brand_key = remove_repeated_brand_from_name(
+        identity = normalize_product_identity(
             candidate.get("brand", ""),
             candidate.get("name", "")
         )
 
-        keys = {
-            name_key,
-            name_without_brand_key,
-        }
+        if not identity:
+            return set()
 
-        if brand_key:
-            keys.add(f"{brand_key} {name_without_brand_key}".strip())
-
-        return {k for k in keys if k}
+        return {identity}
 
     for c in candidates:
         identity_keys = build_candidate_identity_keys(c)
@@ -9881,7 +9926,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
         left_img,
         right_img
     )
-    cache_key = f"ai_candidate_schema_v3:{cache_key}"
+    cache_key = f"ai_candidate_schema_v4:{cache_key}"
 
     if cache_key in GEMINI_ANALYSIS_CACHE:
         print("[GEMINI ANALYSIS CACHE HIT]", cache_key, flush=True)
