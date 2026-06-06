@@ -1157,7 +1157,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         score += 6
     elif review_count > 0:
         score += 1
-        
+
     if any(word in title for word in ["公式", "正規品", "正規販売店", "認定ショップ", "メーカー公式"]):
         score += 12
 
@@ -1371,6 +1371,12 @@ def load_verified_products_cache():
             continue
 
         valid_items.append(item)
+        
+    print(
+        "[VERIFIED CACHE LOADED]",
+        len(valid_items),
+        flush=True
+    )
 
     return valid_items
 
@@ -1433,6 +1439,13 @@ def upsert_verified_product_cache(product):
 
     save_verified_products_cache(updated)
 
+    print(
+        "[VERIFIED CACHE SAVED]",
+        product.get("category", ""),
+        product.get("brand", ""),
+        product.get("name", ""),
+        flush=True
+    )
 
 def build_verified_product_from_step(step, rakuten_item):
     if not isinstance(step, dict) or not isinstance(rakuten_item, dict):
