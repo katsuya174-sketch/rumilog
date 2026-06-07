@@ -300,9 +300,33 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
             if attempt == max_retries - 1:
                 raise
 
-            wait_seconds = min(8, (attempt + 1) ** 2)
-            time.sleep(wait_seconds)
+            retry_after_seconds = None
 
+            retry_match = re.search(
+                r"retry in ([0-9\.]+)s",
+                msg,
+                re.IGNORECASE
+            )
+
+            if retry_match:
+                try:
+                    retry_after_seconds = float(retry_match.group(1))
+                except Exception:
+                    retry_after_seconds = None
+
+            if retry_after_seconds is not None:
+                wait_seconds = min(12, max(2, retry_after_seconds))
+            else:
+                wait_seconds = min(12, 2 ** attempt)
+
+            print(
+                "[GEMINI RETRY WAIT]",
+                wait_seconds,
+                "seconds",
+                flush=True
+            )
+
+            time.sleep(wait_seconds)
         except Exception as e:
             print(f"[Gemini fatal] {e}", flush=True)
             raise
