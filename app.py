@@ -99,7 +99,6 @@ def get_gemini_usage_key(now=None):
 
     return usage_date.isoformat()
 
-
 def init_gemini_usage_table():
     conn = None
     cur = None
@@ -129,7 +128,6 @@ def init_gemini_usage_table():
             cur.close()
         if conn:
             conn.close()
-
 
 def increment_gemini_usage():
     usage_key = get_gemini_usage_key()
@@ -8447,7 +8445,7 @@ def finalize_step_data(step, user_data):
         }
 
         return {k for k in keys if k}
-        
+
     for c in candidates:
         identity_keys = build_candidate_identity_keys(c)
 
