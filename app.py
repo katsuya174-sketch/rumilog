@@ -1560,6 +1560,12 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
     if cache_key in _rakuten_item_cache:
         return _rakuten_item_cache[cache_key]
 
+    print(
+        "[RAKUTEN CACHE HIT]",
+        product_name,
+        flush=True
+    )
+
     if time.time() < RAKUTEN_COOLDOWN_UNTIL:
         print("[RAKUTEN COOLDOWN ACTIVE]", flush=True)
         _rakuten_item_cache[cache_key] = None
@@ -7328,7 +7334,7 @@ def build_recommend_reason(product, step, user_data):
     ]
 
     return "".join([s for s in sentences if s])
-    
+
 def build_ai_reason(step, user_data):
     parts = []
 
