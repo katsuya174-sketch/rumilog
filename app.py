@@ -9950,32 +9950,65 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
         left_img,
         right_img
     )
-    cache_key = f"ai_candidate_schema_v4:{cache_key}"
+    base_cache_key = make_analysis_cache_key(
+        user_data,
+        front_img,
+        left_img,
+        right_img
+    )
+
+    cache_key = f"ai_candidate_schema_v4:{base_cache_key}"
+
+    fallback_cache_keys = [
+        cache_key,
+        f"ai_candidate_schema_v3:{base_cache_key}",
+        f"ai_candidate_schema_v2:{base_cache_key}",
+    ]
 
     if cache_key in GEMINI_ANALYSIS_CACHE:
         print("[GEMINI ANALYSIS CACHE HIT]", cache_key, flush=True)
         return copy.deepcopy(GEMINI_ANALYSIS_CACHE[cache_key])
-    
+
     print("[GEMINI ANALYSIS CACHE MISS]", cache_key, flush=True)
 
     schema = get_analysis_schema()
     prompt = build_analysis_prompt(user_data)
 
-    response = call_gemini_with_retry(
-        client,
-        "gemini-2.5-flash",
-        contents=[prompt, front_img, left_img, right_img],
-        config=types.GenerateContentConfig(
-            temperature=0,
-            top_p=0.1,
-            response_mime_type="application/json",
-            response_schema=schema
-        ),
-        max_retries=2
-    )
+    try:
+        response = call_gemini_with_retry(
+            client,
+            "gemini-2.5-flash",
+            contents=[prompt, front_img, left_img, right_img],
+            config=types.GenerateContentConfig(
+                temperature=0,
+                top_p=0.1,
+                response_mime_type="application/json",
+                response_schema=schema
+            ),
+            max_retries=2
+        )
 
-    raw_text = response.text.strip()
+        raw_text = response.text.strip()
 
+    except Exception as e:
+        error_text = str(e)
+
+        if "503" in error_text or "UNAVAILABLE" in error_text:
+            for fallback_key in fallback_cache_keys:
+                if fallback_key in GEMINI_ANALYSIS_CACHE:
+                    print(
+                        "[GEMINI FALLBACK CACHE HIT]",
+                        fallback_key,
+                        flush=True
+                    )
+                    cached = copy.deepcopy(GEMINI_ANALYSIS_CACHE[fallback_key])
+                    cached.setdefault("warnings", [])
+                    cached["warnings"].append(
+                        "現在AI診断が混み合っているため、同じ入力の前回診断結果をもとに表示しています。"
+                    )
+                    return cached
+
+        raise
     print("=== Gemini raw response ===")
     print(raw_text)
 
@@ -10007,6 +10040,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
         print("====================")
 
         raise ValueError("AIの診断結果JSONが壊れています。もう一度診断してください。")
+        
 def detailed_analysis_with_gemini(client, user_data, result_data):
 
     prompt = f"""
