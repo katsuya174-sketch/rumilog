@@ -1567,7 +1567,12 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
     )
 
     if time.time() < RAKUTEN_COOLDOWN_UNTIL:
-        print("[RAKUTEN COOLDOWN ACTIVE]", flush=True)
+        print(
+            "[RAKUTEN COOLDOWN ACTIVE]",
+            round(RAKUTEN_COOLDOWN_UNTIL - time.time(), 1),
+            "seconds left",
+            flush=True
+        )
         _rakuten_item_cache[cache_key] = None
         return None
 
@@ -1594,7 +1599,7 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
         "User-Agent": "Mozilla/5.0",
     }
 
-    keywords = build_rakuten_search_keywords(
+    raw_keywords = build_rakuten_search_keywords(
         product_name=product_name,
         brand=brand,
         category=category,
@@ -1602,7 +1607,26 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
         purpose=purpose
     )
 
-    MAX_RAKUTEN_KEYWORDS = 5
+    keywords = []
+    seen_keywords = set()
+
+    for keyword in raw_keywords:
+        cleaned_keyword = clean_rakuten_keyword(keyword)
+
+        if not cleaned_keyword:
+            continue
+
+        keyword_key = normalize_product_name(cleaned_keyword)
+
+        if keyword_key in seen_keywords:
+            continue
+
+        seen_keywords.add(keyword_key)
+        keywords.append(cleaned_keyword)
+
+    print("[RAKUTEN KEYWORDS]", keywords, flush=True)
+
+    MAX_RAKUTEN_KEYWORDS = 3
 
     for keyword in keywords[:MAX_RAKUTEN_KEYWORDS]:
         keyword = clean_rakuten_keyword(keyword)
@@ -1645,11 +1669,32 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 print("[RAKUTEN API ERROR BODY]", res.text, flush=True)
 
                 if res.status_code == 429:
-                    RAKUTEN_COOLDOWN_UNTIL = time.time() + 10
-                    print("[RAKUTEN RATE LIMIT ERROR]", keyword, flush=True)
-                    raise RakutenRateLimitError(
-                        "楽天APIのアクセス制限に達しました。少し時間をおいてから再度お試しください。"
+                    retry_seconds = 10
+
+                    retry_match = re.search(
+                        r"Try again in ([0-9\.]+) seconds?",
+                        res.text,
+                        re.IGNORECASE
                     )
+
+                    if retry_match:
+                        try:
+                            retry_seconds = max(3, float(retry_match.group(1)) + 2)
+                        except Exception:
+                            retry_seconds = 10
+
+                    RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
+
+                    print(
+                        "[RAKUTEN RATE LIMIT COOLDOWN]",
+                        keyword,
+                        retry_seconds,
+                        "seconds",
+                        flush=True
+                    )
+
+                    _rakuten_item_cache[cache_key] = None
+                    return None
 
                 if res.status_code == 400 and "keyword is not valid" in res.text:
                     print("[RAKUTEN INVALID KEYWORD SKIP]", keyword, flush=True)
@@ -1749,8 +1794,10 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
             print("[RAKUTEN API REQUEST ERROR]", e, flush=True)
             continue
 
-        except RakutenRateLimitError:
-            raise
+        except RakutenRateLimitError as e:
+            print("[RAKUTEN RATE LIMIT SKIP]", e, flush=True)
+            _rakuten_item_cache[cache_key] = None
+            return None
 
         except Exception as e:
             print("[RAKUTEN API UNKNOWN ERROR]", repr(e), flush=True)
@@ -7204,6 +7251,90 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
     return data
 
+def build_selection_reason_from_scores(product, step, user_data):
+    if not isinstance(product, dict):
+        product = {}
+
+    if not isinstance(step, dict):
+        step = {}
+
+    def clean(value):
+        return str(value or "").strip()
+
+    category = clean(step.get("category"))
+    purpose = clean(step.get("purpose"))
+    ingredient_focus = clean(step.get("ingredient_focus"))
+    section = clean(step.get("_section"))
+
+    base_score = safe_price(product.get("_base_score", step.get("base_score", 0)))
+    improve_score = safe_price(product.get("_improve_score", step.get("improve_score", 0)))
+    routine_score = safe_price(product.get("_routine_score", step.get("routine_score", 0)))
+
+    oil = clean(user_data.get("oil"))
+    sens = clean(user_data.get("sens"))
+
+    active_ingredients = product.get("active_ingredients", [])
+    if not isinstance(active_ingredients, list):
+        active_ingredients = []
+
+    support_ingredients = product.get("support_ingredients", [])
+    if not isinstance(support_ingredients, list):
+        support_ingredients = []
+
+    normalized_focus = normalize_ingredient_tag(ingredient_focus)
+    focus_label = ingredient_map.get(normalized_focus, ingredient_focus)
+
+    concern_text = purpose or f"{category}として必要な役割"
+
+    first = (
+        f"今回は、{concern_text}へのつながりを重視して選んでいます。"
+    )
+
+    score_points = []
+
+    if improve_score >= base_score and improve_score >= routine_score:
+        score_points.append("改善への寄与が候補内で強く出た点")
+    elif base_score >= improve_score and base_score >= routine_score:
+        score_points.append("肌状態との基本的な相性が高かった点")
+    elif routine_score >= base_score and routine_score >= improve_score:
+        score_points.append("朝夜や週ケア全体の流れに組み込みやすい点")
+
+    if normalized_focus and normalized_focus in active_ingredients:
+        score_points.append(f"{focus_label}を主軸に目的へ直接アプローチしやすい点")
+    elif normalized_focus and normalized_focus in support_ingredients:
+        score_points.append(f"{focus_label}が補助的に入り、ケア全体を支えやすい点")
+
+    if oil == "oily":
+        score_points.append("皮脂が出やすい肌でも重くなりすぎにくい点")
+    elif oil == "dry":
+        score_points.append("乾燥しやすい肌を支えやすい点")
+    elif oil == "mixed":
+        score_points.append("部分的な乾燥と皮脂の差を崩しにくい点")
+
+    if sens in ["high", "middle"]:
+        score_points.append("刺激リスクと改善効果のバランスを取りやすい点")
+
+    score_points = list(dict.fromkeys([p for p in score_points if p]))
+
+    if score_points:
+        if len(score_points) == 1:
+            second = f"他候補と比べて、{score_points[0]}を評価しました。"
+        else:
+            second = f"他候補と比べて、{score_points[0]}と{score_points[1]}を評価しました。"
+    else:
+        second = "他候補と比べて、今回の肌状態とカテゴリ目的の一致度が高い点を評価しました。"
+
+    if section == "morning":
+        third = "朝に使う前提でも取り入れやすく、日中の肌負担を増やしにくい選定です。"
+    elif section == "night":
+        third = "夜のケアで使うことで、日中に受けた乾燥や皮脂・毛穴悩みへのケアにつなげやすい選定です。"
+    elif section == "weekly_care":
+        third = "毎日のケアだけでは補いにくい部分を、週単位で底上げする目的で選んでいます。"
+    else:
+        third = "今のルーティン全体に組み込みやすい点も含めて選んでいます。"
+
+    return first + second + third
+
 def build_recommend_reason(product, step, user_data):
     if not isinstance(product, dict):
         product = {}
@@ -7336,50 +7467,66 @@ def build_recommend_reason(product, step, user_data):
     return "".join([s for s in sentences if s])
 
 def build_ai_reason(step, user_data):
-    parts = []
+    if not isinstance(step, dict):
+        step = {}
 
-    category = step.get("category", "")
-    purpose = step.get("purpose", "")
-    ingredient_focus = step.get("ingredient_focus", "")
-    risk_note = step.get("risk_note", "")
-    section = step.get("_section", "")
+    def clean(value):
+        return str(value or "").strip()
 
-    oil = user_data.get("oil", "")
-    sens = user_data.get("sens", "")
-    exp = user_data.get("exp", "")
+    category = clean(step.get("category"))
+    purpose = clean(step.get("purpose"))
+    ingredient_focus = clean(step.get("ingredient_focus"))
+    section = clean(step.get("_section"))
+
+    oil = clean(user_data.get("oil"))
+    sens = clean(user_data.get("sens"))
+    exp = clean(user_data.get("exp"))
 
     if purpose:
-        parts.append(f"{purpose}を優先した提案")
+        first = f"今回の{category}では、{purpose}を優先して組み立てています。"
+    else:
+        first = f"今回の{category}では、今の肌状態に合う役割を優先して選んでいます。"
 
+    focus_sentence = ""
     if ingredient_focus:
-        parts.append(f"{ingredient_focus}を軸にした設計")
+        focus_sentence = f"成分面では{ingredient_focus}を軸に、肌悩みへのつながりを見ています。"
 
+    section_sentence = ""
     if section == "morning":
-        parts.append("朝は刺激を上げすぎず、扱いやすさと継続性を重視")
+        section_sentence = "朝に使う前提なので、日中の使いやすさや重さも含めて判断しています。"
     elif section == "night":
-        parts.append("夜は補修や集中的なケアを意識した設計")
+        section_sentence = "夜のケアでは、日中に受けた刺激や乾燥を整えながら、改善成分を活かしやすい流れを重視しています。"
     elif section == "weekly_care":
-        parts.append("毎日ではなく週単位で補助的に取り入れる想定")
+        section_sentence = "週ケアとして、毎日のケアだけでは補いにくい部分を集中的に整える目的で入れています。"
+
+    skin_sentence_parts = []
 
     if oil == "oily":
-        parts.append("脂性肌を踏まえて重すぎない方向で調整")
+        skin_sentence_parts.append("皮脂が出やすい肌なので、重さが出すぎないこと")
     elif oil == "dry":
-        parts.append("乾燥しやすさを踏まえて保湿も意識")
+        skin_sentence_parts.append("乾燥しやすい肌なので、保湿の支えになること")
     elif oil == "mixed":
-        parts.append("混合肌を踏まえてバランス重視で調整")
+        skin_sentence_parts.append("乾燥と皮脂の差が出やすい肌なので、バランスを崩しにくいこと")
 
     if sens == "high":
-        parts.append("敏感傾向を考慮して刺激面にも注意")
+        skin_sentence_parts.append("刺激感が出にくいこと")
+    elif sens == "middle":
+        skin_sentence_parts.append("攻めと守りのバランスを取りやすいこと")
+
     if exp == "beginner" and ("レチノール" in ingredient_focus or "レチナール" in ingredient_focus):
-        parts.append("レチノール初心者のため使い方は慎重にする前提")
+        skin_sentence_parts.append("レチノール経験に合わせて慎重に始めやすいこと")
 
-    if risk_note:
-        parts.append(f"注意点: {risk_note}")
+    skin_sentence = ""
+    if skin_sentence_parts:
+        skin_sentence = "また、" + "、".join(skin_sentence_parts[:2]) + "も今回の選定で見ています。"
 
-    if not parts:
-        parts.append(f"{category}カテゴリの中で肌状態に合わせやすい候補として提案")
+    return "".join([
+        first,
+        focus_sentence,
+        section_sentence,
+        skin_sentence
+    ])
 
-    return "。".join(parts[:5]) + "。"
 def calculate_step_impact(step, product):
     impact = {
         "oil_balance": 0,
@@ -10546,14 +10693,15 @@ def apply_db_product_to_step(step, product, user_data):
         "final": final_score,
     }
 
-    generated_reason = build_recommend_reason(
+    generated_reason = build_selection_reason_from_scores(
         product,
         step,
         user_data
     )
 
     fallback_reason = (
-        product.get("_improvement_reason")
+        build_recommend_reason(product, step, user_data)
+        or product.get("_improvement_reason")
         or product.get("improvement_reason")
         or product.get("reason")
         or ""
@@ -10566,7 +10714,7 @@ def apply_db_product_to_step(step, product, user_data):
         generated_reason
         or fallback_reason
         or build_ai_reason(step, user_data)
-    )
+    )    
     
     step["product_source"] = product.get("_source", "db") or "db"
 
