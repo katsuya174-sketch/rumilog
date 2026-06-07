@@ -6316,8 +6316,24 @@ def normalize_candidate_name_for_merge(name):
     return normalize_product_name(name)
 
 def normalize_product_identity(brand="", name=""):
-    brand_key = normalize_candidate_name_for_merge(brand)
-    name_key = normalize_candidate_name_for_merge(name)
+    def to_text(value):
+        if isinstance(value, list):
+            value = " ".join([
+                str(v) for v in value
+                if v is not None
+            ])
+        elif isinstance(value, dict):
+            value = " ".join([
+                str(v) for v in value.values()
+                if v is not None
+            ])
+        else:
+            value = str(value or "")
+
+        return value.strip()
+
+    brand_key = normalize_candidate_name_for_merge(to_text(brand))
+    name_key = normalize_candidate_name_for_merge(to_text(name))
 
     if not name_key:
         return ""
@@ -6332,7 +6348,7 @@ def normalize_product_identity(brand="", name=""):
         return f"{brand_key} {name_key}".strip()
 
     return name_key
-
+    
 def remove_repeated_brand_from_name(brand, name):
     brand_key = normalize_candidate_name_for_merge(brand)
     name_key = normalize_candidate_name_for_merge(name)
