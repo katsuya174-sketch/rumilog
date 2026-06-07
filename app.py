@@ -9931,6 +9931,69 @@ def make_analysis_cache_key(user_data, front_img, left_img, right_img):
     h.update(extract_image_bytes_for_hash(right_img))
 
     return h.hexdigest()
+
+GEMINI_ANALYSIS_CACHE_FILE = "gemini_analysis_cache.json"
+
+
+def load_gemini_analysis_file_cache():
+    try:
+        with open(GEMINI_ANALYSIS_CACHE_FILE, "r", encoding="utf-8") as f:
+            cache = json.load(f)
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print("[GEMINI FILE CACHE LOAD ERROR]", e, flush=True)
+        return {}
+
+    if not isinstance(cache, dict):
+        return {}
+
+    return cache
+
+
+def save_gemini_analysis_file_cache(cache):
+    if not isinstance(cache, dict):
+        return
+
+    try:
+        with open(GEMINI_ANALYSIS_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False)
+    except Exception as e:
+        print("[GEMINI FILE CACHE SAVE ERROR]", e, flush=True)
+
+
+def get_gemini_cached_analysis(cache_keys):
+    if not isinstance(cache_keys, list):
+        return None
+
+    for key in cache_keys:
+        if key in GEMINI_ANALYSIS_CACHE:
+            print("[GEMINI MEMORY CACHE HIT]", key, flush=True)
+            return copy.deepcopy(GEMINI_ANALYSIS_CACHE[key])
+
+    file_cache = load_gemini_analysis_file_cache()
+
+    for key in cache_keys:
+        item = file_cache.get(key)
+
+        if isinstance(item, dict):
+            print("[GEMINI FILE CACHE HIT]", key, flush=True)
+            GEMINI_ANALYSIS_CACHE[key] = copy.deepcopy(item)
+            return copy.deepcopy(item)
+
+    return None
+
+
+def set_gemini_cached_analysis(cache_key, data):
+    if not cache_key or not isinstance(data, dict):
+        return
+
+    GEMINI_ANALYSIS_CACHE[cache_key] = copy.deepcopy(data)
+
+    file_cache = load_gemini_analysis_file_cache()
+    file_cache[cache_key] = copy.deepcopy(data)
+    save_gemini_analysis_file_cache(file_cache)
+
 def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
 
     if DEV_MODE:
@@ -9944,12 +10007,6 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
             "scores": {}
         }
 
-    cache_key = make_analysis_cache_key(
-        user_data,
-        front_img,
-        left_img,
-        right_img
-    )
     base_cache_key = make_analysis_cache_key(
         user_data,
         front_img,
@@ -9965,12 +10022,13 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
         f"ai_candidate_schema_v2:{base_cache_key}",
     ]
 
-    if cache_key in GEMINI_ANALYSIS_CACHE:
-        print("[GEMINI ANALYSIS CACHE HIT]", cache_key, flush=True)
-        return copy.deepcopy(GEMINI_ANALYSIS_CACHE[cache_key])
+    cached_analysis = get_gemini_cached_analysis(fallback_cache_keys)
+
+    if cached_analysis:
+        cached_analysis.setdefault("warnings", [])
+        return cached_analysis
 
     print("[GEMINI ANALYSIS CACHE MISS]", cache_key, flush=True)
-
     schema = get_analysis_schema()
     prompt = build_analysis_prompt(user_data)
 
@@ -10028,7 +10086,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
     try:
         data = json.loads(raw_text)
 
-        GEMINI_ANALYSIS_CACHE[cache_key] = copy.deepcopy(data)
+        set_gemini_cached_analysis(cache_key, data)
 
         return data
 
@@ -10040,7 +10098,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
         print("====================")
 
         raise ValueError("AIの診断結果JSONが壊れています。もう一度診断してください。")
-        
+
 def detailed_analysis_with_gemini(client, user_data, result_data):
 
     prompt = f"""
