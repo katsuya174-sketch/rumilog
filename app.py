@@ -10576,7 +10576,6 @@ def debug_candidate_counts(data):
     print("============================")
 # # AI肌診断ページ
 @app.route("/lab", methods=["GET", "POST"])
-
 def lab_test_function():
     
     if request.method == "POST":
@@ -10646,15 +10645,20 @@ def lab_test_function():
 
                 error_text = str(e)
 
+                message = "診断中にエラーが発生しました。時間をおいて再度お試しください。"
+
                 if "503" in error_text or "UNAVAILABLE" in error_text:
                     message = "現在診断が混み合っています。少し時間をおいて再度お試しください。"
+
+                elif "429" in error_text:
+                    message = "現在診断利用が集中しています。しばらくしてから再度お試しください。"
 
                 if is_ajax:
                     return jsonify({
                         "success": False,
                         "message": message
                     }), 503
-
+                    
                 return render_template(
                     "lab.html",
                     error_message=str(e),
