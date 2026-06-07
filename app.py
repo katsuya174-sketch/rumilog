@@ -5334,7 +5334,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     combined_products = []
     seen_product_keys = set()
 
-    for source_product in db_products + verified_products:
+    for source_product in db_products:
         if not isinstance(source_product, dict):
             continue
 
@@ -5348,9 +5348,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
         seen_product_keys.add(product_key)
         combined_products.append(source_product)
-    seen_product_keys = set()
 
-    for source_product in list(db_products or []) + verified_products:
+    for source_product in verified_products:
         if not isinstance(source_product, dict):
             continue
 
@@ -5385,10 +5384,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             ]
         },
         flush=True
-    )
-    # =========================
-    # DB候補 + 楽天確認済み候補を採点対象に入れる
-    # =========================
+    )   
     for p in combined_products:
         if not isinstance(p, dict):
             continue
@@ -10494,22 +10490,28 @@ def apply_db_product_to_step(step, product, user_data):
         "final": final_score,
     }
 
-    reason = (
-        product.get("reason")
-        or product.get("_improvement_reason")
+    generated_reason = build_recommend_reason(
+        product,
+        step,
+        user_data
+    )
+
+    fallback_reason = (
+        product.get("_improvement_reason")
         or product.get("improvement_reason")
+        or product.get("reason")
         or ""
     )
 
-    if str(reason).strip() in invalid_reasons:
-        reason = ""
+    if str(fallback_reason).strip() in invalid_reasons:
+        fallback_reason = ""
 
     step["recommend_reason"] = (
-        reason
-        or build_recommend_reason(product, step, user_data)
+        generated_reason
+        or fallback_reason
         or build_ai_reason(step, user_data)
     )
-
+    
     step["product_source"] = product.get("_source", "db") or "db"
 
     impact = calculate_step_impact(step, product)
