@@ -6348,7 +6348,7 @@ def normalize_product_identity(brand="", name=""):
         return f"{brand_key} {name_key}".strip()
 
     return name_key
-    
+
 def remove_repeated_brand_from_name(brand, name):
     brand_key = normalize_candidate_name_for_merge(brand)
     name_key = normalize_candidate_name_for_merge(name)
@@ -7199,102 +7199,136 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
     return data
 
 def build_recommend_reason(product, step, user_data):
-    reasons = []
+    if not isinstance(product, dict):
+        product = {}
 
-    purpose = str(step.get("purpose", ""))
-    ingredient_focus = str(step.get("ingredient_focus", ""))
-    skin_oil = str(user_data.get("oil", ""))
-    skin_sens = str(user_data.get("sens", ""))
+    if not isinstance(step, dict):
+        step = {}
 
-    product_concerns = product.get("concerns", [])
-    active_ingredients = product.get("active_ingredients", [])
-    support_ingredients = product.get("support_ingredients", [])
-    skin_types = product.get("skin_types", [])
-    sensitive_ok = product.get("sensitive_ok", "unknown")
+    def to_list(value):
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str) and value.strip():
+            return [value.strip()]
+        return []
 
-    # 目的との一致
-    if "毛穴" in purpose and "pores" in product_concerns:
-        reasons.append("毛穴悩みに向く設計")
-    if ("くすみ" in purpose or "透明感" in purpose or "美白" in purpose) and (
-        "dullness" in product_concerns or "whitening" in product_concerns
-    ):
-        reasons.append("透明感ケア向き")
-    if ("乾燥" in purpose or "保湿" in purpose or "水分" in purpose) and (
-        "dryness" in product_concerns or "barrier" in product_concerns
-    ):
-        reasons.append("保湿・バリアケア向き")
-    if ("赤み" in purpose) and "redness" in product_concerns:
-        reasons.append("赤みケア向き")
-    if ("ニキビ" in purpose) and "acne" in product_concerns:
-        reasons.append("ニキビ悩みに向く設計")
-    if ("ハリ" in purpose or "エイジング" in purpose) and "aging" in product_concerns:
-        reasons.append("ハリ・エイジングケア向き")
-   
+    def clean(value):
+        return str(value or "").strip()
+
+    category = clean(step.get("category"))
+    purpose = clean(step.get("purpose"))
+    ingredient_focus = clean(step.get("ingredient_focus"))
+    section = clean(step.get("_section"))
+
+    oil = clean(user_data.get("oil"))
+    sens = clean(user_data.get("sens"))
+    exp = clean(user_data.get("exp"))
+
+    product_name = clean(product.get("name"))
+    product_concerns = to_list(product.get("concerns", []))
+    active_ingredients = to_list(product.get("active_ingredients", []))
+    support_ingredients = to_list(product.get("support_ingredients", []))
+    main_functions = to_list(product.get("main_functions", []))
+    skin_types = to_list(product.get("skin_types", []))
+    sensitive_ok = clean(product.get("sensitive_ok", "unknown"))
+    texture = clean(product.get("texture"))
+    formulation = to_list(product.get("formulation", []))
+    contraindications = to_list(product.get("contraindications", []))
+
     normalized_ingredient = normalize_ingredient_tag(ingredient_focus)
-    if normalized_ingredient in active_ingredients:
-        reasons.append(f"{ingredient_map.get(normalized_ingredient, normalized_ingredient)}が主役成分")
-    elif normalized_ingredient in support_ingredients:
-        reasons.append(f"{ingredient_map.get(normalized_ingredient, normalized_ingredient)}を補助的に配合")
+    ingredient_label = ingredient_map.get(
+        normalized_ingredient,
+        ingredient_focus
+    )
 
-    for sig in product.get("signature_ingredients", []):
-        if sig in signature_ingredient_labels:
-            reasons.append(signature_ingredient_labels[sig])
+    concern_phrases = []
 
-    # 肌質との一致
-    if skin_oil == "dry" and "dry" in skin_types:
-        reasons.append("乾燥肌向き")
-    elif skin_oil == "oily" and "oily" in skin_types:
-        reasons.append("脂性肌向き")
-    elif skin_oil == "mixed" and "mixed" in skin_types:
-        reasons.append("混合肌向き")
+    if "pores" in product_concerns or "毛穴" in purpose:
+        concern_phrases.append("毛穴まわりの目立ち")
+    if "redness" in product_concerns or "赤み" in purpose:
+        concern_phrases.append("赤み")
+    if "dryness" in product_concerns or "保湿" in purpose or "乾燥" in purpose:
+        concern_phrases.append("乾燥しやすさ")
+    if "barrier" in product_concerns or "バリア" in purpose:
+        concern_phrases.append("バリアの弱り")
+    if "dullness" in product_concerns or "くすみ" in purpose or "透明感" in purpose:
+        concern_phrases.append("くすみ")
+    if "whitening" in product_concerns or "色素沈着" in purpose or "美白" in purpose:
+        concern_phrases.append("色ムラ・色素沈着")
+    if "acne" in product_concerns or "ニキビ" in purpose:
+        concern_phrases.append("ニキビができやすい状態")
+    if "aging" in product_concerns or "ハリ" in purpose or "エイジング" in purpose:
+        concern_phrases.append("ハリ不足")
 
-    # 敏感肌との一致
-    if skin_sens == "high":
+    concern_phrases = list(dict.fromkeys(concern_phrases))
+
+    if concern_phrases:
+        if len(concern_phrases) == 1:
+            first_sentence = f"今の肌では、{concern_phrases[0]}への対応を優先したい状態です。"
+        else:
+            first_sentence = f"今の肌では、{concern_phrases[0]}と{concern_phrases[1]}を同時に見ていきたい状態です。"
+    elif purpose:
+        first_sentence = f"今回の{category}では、{purpose}を優先して選んでいます。"
+    else:
+        first_sentence = f"今回の{category}では、肌状態との相性を優先して選んでいます。"
+
+    ingredient_sentence = ""
+
+    if normalized_ingredient and normalized_ingredient in active_ingredients:
+        ingredient_sentence = f"この商品は{ingredient_label}を軸に、今回の改善方針に直接合わせやすい点を評価しています。"
+    elif normalized_ingredient and normalized_ingredient in support_ingredients:
+        ingredient_sentence = f"{ingredient_label}は補助的な位置づけですが、肌を整える方向性と合っています。"
+    elif main_functions:
+        ingredient_sentence = f"成分面では、{main_functions[0]}を中心に今のケア目的へつなげやすい構成です。"
+    else:
+        ingredient_sentence = "成分情報が限られるため、カテゴリと目的の一致度を中心に判断しています。"
+
+    skin_sentence_parts = []
+
+    if oil == "oily":
+        if "oily" in skin_types or texture in ["light", "watery", "gel", "essence"]:
+            skin_sentence_parts.append("脂性肌でも重くなりすぎにくい点")
+        else:
+            skin_sentence_parts.append("皮脂が出やすい肌でも使い方を調整しやすい点")
+    elif oil == "dry":
+        if "dry" in skin_types or "dryness" in product_concerns or "barrier" in product_concerns:
+            skin_sentence_parts.append("乾燥しやすい肌の支えになりやすい点")
+    elif oil == "mixed":
+        skin_sentence_parts.append("部分的な乾燥と皮脂の両方を見ながら使いやすい点")
+
+    if sens == "high":
         if sensitive_ok == "yes":
-            reasons.append("敏感肌でも使いやすい設計")
+            skin_sentence_parts.append("敏感傾向でも選びやすい点")
         elif sensitive_ok == "unknown":
-            reasons.append("刺激は強すぎない想定")
+            skin_sentence_parts.append("刺激感には様子を見ながら取り入れたい点")
 
+    if exp == "beginner" and normalized_ingredient in ["retinol", "retinal", "retinoid"]:
+        skin_sentence_parts.append("レチノール経験に合わせて少量から試したい点")
 
-    for f in product.get("formulation", []):
-        if f in formulation_labels:
-            reasons.append(formulation_labels[f])
-            break
+    if skin_sentence_parts:
+        skin_sentence = "また、" + "、".join(skin_sentence_parts[:2]) + "も今回の肌状態に合っています。"
+    else:
+        skin_sentence = ""
 
-    if not reasons:
-        reasons.append("肌状態とカテゴリ条件に合いやすいバランス型")
+    caution_sentence = ""
 
-   
-
-    # technology
-    for tech in product.get("technology", []):
-        if tech in technology_labels:
-                reasons.append(technology_labels[tech])
-    # texture
-    tex = product.get("texture")
-    if tex in texture_labels:
-            reasons.append(texture_labels[tex])
-
-    warnings = []
-    for c in product.get("contraindications", []):
+    caution_labels = []
+    for c in contraindications:
         if c in contraindications_labels:
-            warnings.append(contraindications_labels[c])
+            caution_labels.append(contraindications_labels[c])
 
-    # main_functions追加
-    functions = product.get("main_functions", [])
-    for f in functions:
-        if f not in reasons:
-            reasons.append(f)
-            if len(reasons) >= 3:
-                break
+    if caution_labels:
+        caution_sentence = f"一方で、{caution_labels[0]}には注意して使うのが安心です。"
 
-    result = "・".join(reasons[:3])
+    sentences = [
+        first_sentence,
+        ingredient_sentence,
+        skin_sentence,
+        caution_sentence
+    ]
 
-    if warnings:
-        result += f"。注意: {warnings[0]}"
-
-    return result
-
+    return "".join([s for s in sentences if s])
+    
 def build_ai_reason(step, user_data):
     parts = []
 
