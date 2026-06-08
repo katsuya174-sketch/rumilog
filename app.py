@@ -240,9 +240,22 @@ from constants import (
 )
 def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
     import time
+    import random
     from google.genai import errors
 
     last_error = None
+
+    retryable_words = [
+        "503",
+        "UNAVAILABLE",
+        "429",
+        "RESOURCE_EXHAUSTED",
+        "overloaded",
+        "temporarily unavailable",
+        "try again later",
+        "rate limit",
+        "quota",
+    ]
 
     for attempt in range(max_retries):
         try:
@@ -269,33 +282,19 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
             msg = str(e)
 
             print(
-                f"[Gemini retry] attempt={attempt + 1}/{max_retries} error={msg}",
+                f"[GEMINI RETRY ERROR] attempt={attempt + 1}/{max_retries} error={msg}",
                 flush=True
             )
-            retry_match = re.search(
-                r"retry in ([0-9\.]+)s",
-                msg,
-                re.IGNORECASE
-            )
 
-            if retry_match:
-                print(
-                    "[GEMINI RETRY AFTER]",
-                    retry_match.group(1),
-                    "seconds",
-                    flush=True
-                )
-            retryable = (
-                "503" in msg
-                or "UNAVAILABLE" in msg
-                or "429" in msg
-                or "RESOURCE_EXHAUSTED" in msg
+            retryable = any(
+                word.lower() in msg.lower()
+                for word in retryable_words
             )
 
             if not retryable:
                 raise
 
-            if attempt == max_retries - 1:
+            if attempt >= max_retries - 1:
                 raise
 
             retry_after_seconds = None
@@ -313,24 +312,29 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
                     retry_after_seconds = None
 
             if retry_after_seconds is not None:
-                wait_seconds = min(12, max(2, retry_after_seconds))
+                wait_seconds = min(15, max(2, retry_after_seconds))
             else:
-                wait_seconds = min(12, 2 ** attempt)
+                base_wait = min(12, 2 ** attempt)
+                jitter = random.uniform(0.3, 1.2)
+                wait_seconds = base_wait + jitter
 
             print(
                 "[GEMINI RETRY WAIT]",
-                wait_seconds,
+                round(wait_seconds, 2),
                 "seconds",
                 flush=True
             )
 
             time.sleep(wait_seconds)
+
         except Exception as e:
-            print(f"[Gemini fatal] {e}", flush=True)
+            print(
+                f"[GEMINI FATAL ERROR] {e}",
+                flush=True
+            )
             raise
 
     raise last_error
-
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
 from PIL import Image,ImageOps
@@ -9510,7 +9514,7 @@ def extract_user_data(request):
     }
 
 
-def resize_for_gemini(file, max_size=768):
+def resize_for_gemini(file, max_size=640):
     img = Image.open(io.BytesIO(file.read()))
     img = ImageOps.exif_transpose(img)
     img = img.convert("RGB")
@@ -9905,7 +9909,7 @@ product_candidates は候補収集のみ。
 最終選定、順位付け、点数付けは行わない。
 
 各 step の product_candidates は object 配列にする。
-各stepのproduct_candidatesは必ず6件以上、最大8件出す。
+各stepのproduct_candidatesは必ず4件以上、最大5件出す。
 1件だけ、2件だけ、3件だけは禁止。
 0件は禁止。
 候補が少ない場合でも、同じcategoryとingredient_focusに合う現行品を6件以上出す。
@@ -10236,7 +10240,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
                 response_mime_type="application/json",
                 response_schema=schema
             ),
-            max_retries=2
+            max_retries=4
         )
 
         raw_text = response.text.strip()
