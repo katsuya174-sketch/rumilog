@@ -1920,9 +1920,18 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
     if not isinstance(step, dict):
         return step
 
-    product_name = step.get("product", "")
-    category = step.get("category", "")
-    brand = step.get("brand", "")
+    product_name = str(step.get("product", "") or "").strip()
+    category = str(step.get("category", "") or "").strip()
+    brand = str(step.get("brand", "") or "").strip()
+
+    if not brand:
+        top_candidates = step.get("top_candidates", [])
+        if isinstance(top_candidates, list) and top_candidates:
+            first_candidate = top_candidates[0]
+            if isinstance(first_candidate, dict):
+                brand = str(first_candidate.get("brand", "") or "").strip()
+                if brand:
+                    step["brand"] = brand
 
     if not product_name:
         step["amazon_link"] = ""
@@ -1976,6 +1985,7 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
         step["bundle_quantity"] = safe_bundle_quantity(
             rakuten_item.get("bundle_quantity", 1)
         )
+
         try:
             verified_product = build_verified_product_from_step(
                 step,
@@ -1986,7 +1996,8 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
                 upsert_verified_product_cache(verified_product)
 
         except Exception as e:
-            print("[VERIFIED CACHE UPSERT ERROR]", e, flush=True)        
+            print("[VERIFIED CACHE UPSERT ERROR]", e, flush=True)
+
     else:
         if product_source in ["db", "ai+db", "fallback_db"]:
             step["rakuten_link"] = ""
@@ -5997,6 +6008,23 @@ def ensure_required_routine_steps(data):
         or dullness_score <= 65
     )
 
+    for weekly_step in weekly_care:
+        if not isinstance(weekly_step, dict):
+            continue
+
+        weekly_category = weekly_step.get("category", "")
+
+        if weekly_category == "ピーリング":
+            weekly_step.setdefault("frequency", "週1回・夜")
+            weekly_step.setdefault(
+                "risk_note",
+                "レチノールや高濃度ビタミンCと同じ夜は避ける"
+            )
+
+        elif weekly_category == "パック":
+            weekly_step.setdefault("frequency", "週1〜2回・夜")
+            weekly_step.setdefault("risk_note", "")
+
     if needs_peeling and not weekly_has_category("ピーリング"):
         weekly_care.append({
             "category": "ピーリング",
@@ -9765,6 +9793,40 @@ def get_analysis_schema():
                 ]
             },
 
+            "routine_strategy": {
+                "type": "object",
+                "properties": {
+                    "strategy_type": {"type": "string"},
+                    "overall_policy": {"type": "string"},
+                    "morning_policy": {"type": "string"},
+                    "night_policy": {"type": "string"},
+                    "weekly_policy": {"type": "string"},
+                    "active_care_frequency": {"type": "string"},
+                    "recovery_care_frequency": {"type": "string"},
+                    "rotation_targets": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    },
+                    "avoid_combinations": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    },
+                    "reason": {"type": "string"}
+                },
+                "required": [
+                    "strategy_type",
+                    "overall_policy",
+                    "morning_policy",
+                    "night_policy",
+                    "weekly_policy",
+                    "active_care_frequency",
+                    "recovery_care_frequency",
+                    "rotation_targets",
+                    "avoid_combinations",
+                    "reason"
+                ]
+            },
+
             "symmetry_analysis": {
                 "type": "object",
                 "properties": {
@@ -9791,6 +9853,7 @@ def get_analysis_schema():
             "warnings",
             "improvement_plan",
             "moisture_plan",
+            "routine_strategy",
             "symmetry_analysis",
         ]
     }
@@ -10068,6 +10131,50 @@ key_ingredients:
 
 care_direction:
 全体のケア方針を短く出す。
+
+【ルーティン戦略】
+routine_strategy は必ず出す。
+
+目的は、現在の肌状態から、毎日同じ商品を使う固定型が良いのか、成分や商品を日ごとに分けるローテーション型が良いのかを判断すること。
+
+肌スコア改善を最優先にする。
+無理にローテーションにしない。
+固定が最適なら fixed を選ぶ。
+攻め成分を分散した方がよい場合のみ rotation を選ぶ。
+
+routine_strategy:
+strategy_type:
+fixed / rotation
+
+overall_policy:
+全体方針。
+
+morning_policy:
+朝の方針。
+
+night_policy:
+夜の方針。
+
+weekly_policy:
+週ケア方針。
+
+active_care_frequency:
+攻めケアの頻度方針。
+例: 週2回 / 週2〜3回 / 2週間に1回 / 今は控える
+
+recovery_care_frequency:
+回復ケアの頻度方針。
+
+rotation_targets:
+ローテーション対象の成分や目的。
+例: ["レチノール", "アゼライン酸", "ビタミンC", "保湿回復"]
+
+avoid_combinations:
+避ける組み合わせ。
+例: ["レチノールとピーリングを同じ夜に使わない"]
+
+reason:
+なぜその戦略が今の肌状態に合うか。
 
 【保湿計画】
 moisture_plan は必ず以下を出す。
@@ -10750,6 +10857,7 @@ def apply_ai_candidate_to_step(step, user_data, ai_image_db=None):
     step["top_impacts"] = format_top_impacts(impact)
 
     step["buy_lead"] = build_buy_lead(step)
+
 def get_first_concrete_candidate(step):
     candidates = step.get("product_candidates", [])
 
@@ -10816,6 +10924,173 @@ def apply_category_fallback_to_step(step, user_data):
         step["top_candidates"] = []
 
     return normalize_step_price_fields(step)
+
+def build_weekly_usage_plan(data):
+    if not isinstance(data, dict):
+        return []
+
+    routine_strategy = data.get("routine_strategy", {})
+    if not isinstance(routine_strategy, dict):
+        routine_strategy = {}
+
+    strategy_type = str(routine_strategy.get("strategy_type", "fixed") or "fixed").strip()
+
+    morning_steps = data.get("morning", {}).get("steps", [])
+    night_steps = data.get("night", {}).get("steps", [])
+    weekly_steps = data.get("weekly_care", [])
+
+    if not isinstance(morning_steps, list):
+        morning_steps = []
+
+    if not isinstance(night_steps, list):
+        night_steps = []
+
+    if not isinstance(weekly_steps, list):
+        weekly_steps = []
+
+    days = ["月", "火", "水", "木", "金", "土", "日"]
+
+    def step_label(step):
+        if not isinstance(step, dict):
+            return ""
+
+        category = str(step.get("category", "") or "").strip()
+        product = str(step.get("product", "") or "").strip()
+        brand = str(step.get("brand", "") or "").strip()
+
+        if brand and product and not product.startswith(brand):
+            product = f"{brand} {product}"
+
+        if product:
+            return f"{category}: {product}"
+
+        return category
+
+    def is_active_step(step):
+        text = " ".join([
+            str(step.get("category", "") or ""),
+            str(step.get("ingredient_focus", "") or ""),
+            str(step.get("purpose", "") or ""),
+            str(step.get("product", "") or ""),
+        ])
+
+        active_words = [
+            "レチノール",
+            "レチナール",
+            "ビタミンC",
+            "アゼライン酸",
+            "ピーリング",
+            "AHA",
+            "BHA",
+            "PHA",
+        ]
+
+        return any(word in text for word in active_words)
+
+    def is_recovery_step(step):
+        text = " ".join([
+            str(step.get("category", "") or ""),
+            str(step.get("ingredient_focus", "") or ""),
+            str(step.get("purpose", "") or ""),
+            str(step.get("product", "") or ""),
+        ])
+
+        recovery_words = [
+            "保湿",
+            "セラミド",
+            "CICA",
+            "ヒアルロン酸",
+            "バリア",
+            "鎮静",
+            "パック",
+        ]
+
+        return any(word in text for word in recovery_words)
+
+    active_night_steps = [
+        step for step in night_steps
+        if isinstance(step, dict) and is_active_step(step)
+    ]
+
+    recovery_night_steps = [
+        step for step in night_steps
+        if isinstance(step, dict) and is_recovery_step(step)
+    ]
+
+    weekly_active_steps = [
+        step for step in weekly_steps
+        if isinstance(step, dict) and is_active_step(step)
+    ]
+
+    weekly_recovery_steps = [
+        step for step in weekly_steps
+        if isinstance(step, dict) and is_recovery_step(step)
+    ]
+
+    fixed_morning = [
+        step_label(step)
+        for step in morning_steps
+        if step_label(step)
+    ]
+
+    fixed_night_base = [
+        step_label(step)
+        for step in night_steps
+        if step_label(step) and not is_active_step(step)
+    ]
+
+    usage_plan = []
+
+    for index, day in enumerate(days):
+        day_plan = {
+            "day": day,
+            "morning": fixed_morning,
+            "night": [],
+            "special_care": [],
+            "note": ""
+        }
+
+        if strategy_type == "rotation":
+            if index in [0, 3] and active_night_steps:
+                selected_active = active_night_steps[index % len(active_night_steps)]
+                day_plan["night"] = fixed_night_base + [step_label(selected_active)]
+                day_plan["note"] = "攻めケアの日。翌日は肌を休ませる前提で入れます。"
+
+            elif index == 5 and weekly_active_steps:
+                selected_weekly = weekly_active_steps[0]
+                day_plan["night"] = fixed_night_base
+                day_plan["special_care"] = [step_label(selected_weekly)]
+                day_plan["note"] = "週ケアの日。レチノールなど刺激が出やすい成分とは同じ夜に重ねません。"
+
+            elif index == 6 and weekly_recovery_steps:
+                selected_weekly = weekly_recovery_steps[0]
+                day_plan["night"] = fixed_night_base
+                day_plan["special_care"] = [step_label(selected_weekly)]
+                day_plan["note"] = "回復ケアの日。乾燥や赤みを落ち着かせる目的で入れます。"
+
+            else:
+                day_plan["night"] = fixed_night_base
+                day_plan["note"] = "回復寄りの日。肌を休ませて、次の攻めケアに備えます。"
+
+        else:
+            day_plan["night"] = [
+                step_label(step)
+                for step in night_steps
+                if step_label(step)
+            ]
+
+            if index == 5 and weekly_steps:
+                day_plan["special_care"] = [
+                    step_label(step)
+                    for step in weekly_steps
+                    if step_label(step)
+                ]
+
+            day_plan["note"] = "固定ルーティンを軸に、肌を安定させる方針です。"
+
+        usage_plan.append(day_plan)
+
+    return usage_plan
 
 def finalize_budget_info(data, budget_value):
     if not isinstance(data, dict):
@@ -11072,7 +11347,7 @@ def lab_test_function():
             # ⑩ 予算情報
             # =========================
             data = finalize_budget_info(data, budget_value)
-
+            data["weekly_usage_plan"] = build_weekly_usage_plan(data)
             debug_log("PRICE SUMMARY", {
                 "total_price": data.get("total_price", 0),
                 "budget_fit_total": data.get("budget_fit_total", 0),
@@ -11151,7 +11426,7 @@ def lab_test_function():
             # =========================
             # ⑫ 表示
             # =========================
-            data["is_premium"] = is_premium_user()
+            data["dev_mode"] = DEV_MODE or DEV_PREMIUM_MODE
 
             html = render_template(
                 "result.html",

@@ -324,7 +324,7 @@
         <div class="score-detail-box">
             <div class="score-detail-title">有料版 詳細スコア</div>
 
-            {% if data.get("is_premium") %}
+            {% if data.get("is_premium") or data.get("dev_mode") %}
                 <div class="score-detail-row">
                     <span>赤ニキビ跡</span>
                     <span>{{ data.premium_scores.get("acne_marks_red", 0) }}</span>
@@ -373,7 +373,7 @@
         </div>
         {% endif %}
 
-        {% if data.get("is_premium") and data.get("symmetry_analysis") %}
+        {% if (data.get("is_premium") or data.get("dev_mode")) and data.get("symmetry_analysis") %}
         <div class="score-detail-box">
             <div class="score-detail-title">左右差の分析</div>
         
@@ -577,7 +577,9 @@
                         {% endif %}
                     </div>
 
-                    <div class="product-name">{{ step.get("product", "") }}</div>
+                    <div class="product-name">
+                      {{ (step.get("brand", "") ~ " " ~ step.get("product", "")).strip() }}
+                    </div>
 
                     <div class="product-meta">
                         役割: <span class="role-badge">{{ step.get("display_role", step.get("category", "")) }}</span>
@@ -643,8 +645,7 @@
                         </div>
                     </div>
                     {% endif %}
-                {% if data.get("is_premium") %}
-                    {% if step.get("score_detail") %}
+                    {% if data.get("is_premium") or data.get("dev_mode") %}
                     <div class="score-detail-box">
                         <div class="score-detail-title">選定スコア詳細</div>
 
@@ -673,7 +674,7 @@
                 </div>
                 </div>
                 {% endfor %}                                      
-
+                </section>
 
         <section class="routine-shell">
             <div class="routine-header">
@@ -709,8 +710,9 @@
                         {% endif %}
                     </div>
 
-                    <div class="product-name">{{ step.get("product", "") }}</div>
-
+                    <div class="product-name">
+                      {{ (step.get("brand", "") ~ " " ~ step.get("product", "")).strip() }}
+                  </div>
                     <div class="product-meta">
                         役割: <span class="role-badge">{{ step.get("display_role", step.get("category", "")) }}</span>
                     </div>
@@ -762,7 +764,7 @@
                         ベース {{ step.score_detail.base }} / 改善 {{ step.score_detail.improve }} / 最終 {{ step.score_detail.final }}
                     </div>
                     {% endif %}
-                {% if data.get("is_premium") %}
+                    {% if data.get("is_premium") or data.get("dev_mode") %}
                     {% if step.get("top_candidates", [])|length > 1 %}
                     <div class="sub-candidates-box compact">
                         <div class="sub-candidates-title">次点候補</div>
@@ -775,13 +777,6 @@
                         </div>
                     </div>
                     {% endif %}
-                {% else %}
-                    <div class="premium-lock-box">
-                        代替候補は有料プランで確認できます
-                        <a href="/pricing?source=result" class="premium-link">詳しく見る</a>
-                    </div>
-                {% endif %}
-
 
                     {% if step.get("score_detail") %}
                     <div class="score-detail-box">
@@ -803,6 +798,12 @@
                         </div>
                     </div>
                     {% endif %}
+                {% else %}
+                    <div class="premium-lock-box">
+                        詳細スコア・代替候補は有料プランで確認できます
+                        <a href="/pricing?source=result" class="premium-link">詳しく見る</a>
+                    </div>
+                {% endif %}
                 </div>
             </div>
             {% endfor %}
@@ -842,8 +843,9 @@
                         {% endif %}
                     </div>
 
-                    <div class="product-name">{{ step.get("product", "") }}</div>
-                    <div class="product-meta">頻度: {{ step.get("frequency", "") }}</div>
+                    <div class="product-name">
+                        {{ (step.get("brand", "") ~ " " ~ step.get("product", "")).strip() }}
+                    </div>
 
                     <div class="product-meta">
                         役割: <span class="role-badge">{{ step.get("display_role", step.get("category", "")) }}</span>
@@ -935,6 +937,69 @@
             </div>
             {% endfor %}
         </section>
+
+        {% if data.get("is_premium") and data.get("weekly_usage_plan", []) %}
+        <section class="routine-shell">
+            <div class="routine-header">
+                <h2 class="routine-title">7日間改善ルーティン</h2>
+                <div class="routine-chip">Premium</div>
+            </div>
+
+            {% if data.get("routine_strategy") %}
+            <div class="plan-block">
+                <h3>今週の方針</h3>
+                <p>{{ data.routine_strategy.get("overall_policy", "") }}</p>
+                <p>{{ data.routine_strategy.get("reason", "") }}</p>
+            </div>
+            {% endif %}
+
+            {% for day in data.get("weekly_usage_plan", []) %}
+            <div class="plan-block">
+                <h3>{{ day.get("day", "") }}曜日</h3>
+
+                {% if day.get("morning", []) %}
+                <p><strong>朝</strong></p>
+                <ul>
+                    {% for item in day.get("morning", []) %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+
+                {% if day.get("night", []) %}
+                <p><strong>夜</strong></p>
+                <ul>
+                    {% for item in day.get("night", []) %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+
+                {% if day.get("special_care", []) %}
+                <p><strong>週ケア</strong></p>
+                <ul>
+                    {% for item in day.get("special_care", []) %}
+                    <li>{{ item }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+
+                {% if day.get("note", "") %}
+                <p class="form-note">{{ day.get("note", "") }}</p>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </section>
+
+        {% elif not data.get("is_premium") %}
+        <section class="result-card">
+            <h2 class="section-title">7日間改善ルーティン</h2>
+            <div class="premium-lock-box">
+                1週間の使い分けプランは有料プランで確認できます。
+                <a href="/pricing?source=result" class="premium-link">詳しく見る</a>
+            </div>
+        </section>
+        {% endif %}
 
         <section class="result-card">
             <h2 class="section-title">注意点</h2>
