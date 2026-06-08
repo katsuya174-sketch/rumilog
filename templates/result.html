@@ -769,7 +769,7 @@
                         <div class="sub-candidate-names">
                             {% for c in step.get("top_candidates", [])[1:3] %}
                                 <span class="sub-candidate-name-only">
-                                    {% if loop.index == 1 %}2位{% elif loop.index == 2 %}3位{% endif %} {{ c.get("name", "") }}
+                                    {% if loop.index == 1 %}2位{% elif loop.index == 2 %}3位{% endif %} {{ (c.get("brand", "") ~ " " ~ c.get("name", "")).strip() }}
                                 </span>{% if not loop.last %}<span class="sub-candidate-sep"> / </span>{% endif %}
                             {% endfor %}
                         </div>
@@ -904,7 +904,7 @@
                         <div class="sub-candidate-names">
                             {% for c in step.get("top_candidates", [])[1:3] %}
                                 <span class="sub-candidate-name-only">
-                                    {% if loop.index == 1 %}2位{% elif loop.index == 2 %}3位{% endif %} {{ c.get("name", "") }}
+                                    {% if loop.index == 1 %}2位{% elif loop.index == 2 %}3位{% endif %} {{ (c.get("brand", "") ~ " " ~ c.get("name", "")).strip() }}
                                 </span>{% if not loop.last %}<span class="sub-candidate-sep"> / </span>{% endif %}
                             {% endfor %}
                         </div>

@@ -348,6 +348,13 @@ CLICK_LOG_FILE = "product_clicks.json"
 ENABLE_SUBSCRIPTION = False  # 決済導入前はFalse
 DEV_PREMIUM_MODE = False     # 開発中に有料表示を確認したい時だけTrue
 
+def is_premium_user():
+    if DEV_PREMIUM_MODE:
+        return True
+
+    # 後でログイン/決済と接続する
+    # 例: session.get("is_premium") == True
+    return False
 
 def log_product_click(source, product_name, category):
     logs = []
@@ -455,8 +462,6 @@ def is_premium_user():
     将来、ログイン・決済・DB管理に移行しても、
     各画面側のコードは変更しない。
     """
-    if DEV_PREMIUM_MODE:
-        return True
 
     premium_key = request.args.get("premium_key", "")
     valid_key = os.getenv("PREMIUM_PREVIEW_KEY", "")
@@ -5162,6 +5167,93 @@ def is_discontinued_or_suspicious_product(product):
 
     return False
 
+def ensure_required_routine_steps(data):
+    if not isinstance(data, dict):
+        return {}
+
+    for section in ["morning", "night"]:
+        if section not in data or not isinstance(data.get(section), dict):
+            data[section] = {"steps": []}
+
+        if not isinstance(data[section].get("steps"), list):
+            data[section]["steps"] = []
+
+    morning_steps = data["morning"]["steps"]
+    night_steps = data["night"]["steps"]
+
+    def has_category(steps, category):
+        return any(
+            isinstance(s, dict) and s.get("category") == category
+            for s in steps
+        )
+
+    if not has_category(morning_steps, "洗顔"):
+        morning_steps.insert(0, {
+            "category": "洗顔",
+            "role": "main",
+            "purpose": "朝の皮脂・汗を落としてスキンケアのなじみを整える",
+            "ingredient_focus": "低刺激",
+            "risk_note": "",
+            "priority": 1,
+            "product_candidates": []
+        })
+
+    if not has_category(morning_steps, "クリーム"):
+        morning_steps.append({
+            "category": "クリーム",
+            "role": "main",
+            "purpose": "朝の保湿とバリア保護。日中の乾燥や刺激から肌を守る",
+            "ingredient_focus": "セラミド",
+            "risk_note": "",
+            "priority": 8,
+            "product_candidates": []
+        })
+
+    if not has_category(morning_steps, "日焼け止め"):
+        morning_steps.append({
+            "category": "日焼け止め",
+            "role": "main",
+            "purpose": "紫外線による赤み・色素沈着・毛穴悪化を防ぐ",
+            "ingredient_focus": "UV防御",
+            "risk_note": "",
+            "priority": 9,
+            "product_candidates": []
+        })
+
+    if not has_category(night_steps, "クレンジング"):
+        night_steps.insert(0, {
+            "category": "クレンジング",
+            "role": "main",
+            "purpose": "日焼け止め・皮脂・メイク汚れを落とす",
+            "ingredient_focus": "低刺激",
+            "risk_note": "",
+            "priority": 1,
+            "product_candidates": []
+        })
+
+    if not has_category(night_steps, "洗顔"):
+        night_steps.insert(1, {
+            "category": "洗顔",
+            "role": "main",
+            "purpose": "残った汚れを落として毛穴・ニキビ悪化を防ぐ",
+            "ingredient_focus": "低刺激",
+            "risk_note": "",
+            "priority": 2,
+            "product_candidates": []
+        })
+
+    if not has_category(night_steps, "クリーム"):
+        night_steps.append({
+            "category": "クリーム",
+            "role": "main",
+            "purpose": "夜のバリア保護",
+            "ingredient_focus": "セラミド",
+            "risk_note": "",
+            "priority": 9,
+            "product_candidates": []
+        })
+
+    return data
 
 def score_routine_balance(step, product, routine_context=None):
     profile = infer_active_profile(product)
@@ -5878,14 +5970,20 @@ def ensure_required_routine_steps(data):
     if not isinstance(data, dict):
         return {}
 
-    for section in ["morning", "night"]:
-        if section not in data or not isinstance(data.get(section), dict):
-            data[section] = {"steps": []}
-        if not isinstance(data[section].get("steps"), list):
-            data[section]["steps"] = []
+    if "morning" not in data or not isinstance(data.get("morning"), dict):
+        data["morning"] = {"steps": []}
 
-    morning_steps = data["morning"]["steps"]
-    night_steps = data["night"]["steps"]
+    if "night" not in data or not isinstance(data.get("night"), dict):
+        data["night"] = {"steps": []}
+
+    morning_steps = data["morning"].get("steps", [])
+    night_steps = data["night"].get("steps", [])
+
+    if not isinstance(morning_steps, list):
+        morning_steps = []
+
+    if not isinstance(night_steps, list):
+        night_steps = []
 
     def has_category(steps, category):
         return any(
@@ -5897,34 +5995,34 @@ def ensure_required_routine_steps(data):
         morning_steps.insert(0, {
             "category": "洗顔",
             "role": "main",
-            "purpose": "朝の皮脂・汗を落として、次のスキンケアがなじみやすい状態に整える",
+            "purpose": "朝の皮脂・汗を落としてスキンケアのなじみを整える",
             "ingredient_focus": "低刺激",
             "risk_note": "",
             "priority": 1,
             "product_candidates": []
         })
 
-    if not has_category(morning_steps, "クリーム") and not has_category(morning_steps, "乳液"):
-        morning_steps.append({
-            "category": "クリーム",
-            "role": "main",
-            "purpose": "朝の保湿とバリア保護。日中の乾燥や刺激から肌を守る",
-            "ingredient_focus": "セラミド",
-            "risk_note": "",
-            "priority": 8,
-            "product_candidates": []
-        })
+        if not has_category(night_steps, "クリーム"):
+            night_steps.append({
+                "category": "クリーム",
+                "role": "main",
+                "purpose": "夜のバリア保護",
+                "ingredient_focus": "セラミド",
+                "risk_note": "",
+                "priority": 9,
+                "product_candidates": []
+            })
 
-    if not has_category(morning_steps, "日焼け止め"):
-        morning_steps.append({
-            "category": "日焼け止め",
-            "role": "main",
-            "purpose": "紫外線による赤み・色素沈着・毛穴悪化を防ぐ",
-            "ingredient_focus": "UV防御",
-            "risk_note": "",
-            "priority": 9,
-            "product_candidates": []
-        })
+        if not has_category(morning_steps, "日焼け止め"):
+            morning_steps.append({
+                "category": "日焼け止め",
+                "role": "main",
+                "purpose": "紫外線による赤み・色素沈着・毛穴悪化を防ぐ",
+                "ingredient_focus": "UV防御",
+                "risk_note": "",
+                "priority": 9,
+                "product_candidates": []
+            })
 
     if not has_category(night_steps, "クレンジング"):
         night_steps.insert(0, {
@@ -5941,18 +6039,18 @@ def ensure_required_routine_steps(data):
         night_steps.insert(1, {
             "category": "洗顔",
             "role": "main",
-            "purpose": "残った汚れを落として、毛穴・ニキビ悪化を防ぐ",
+            "purpose": "残った汚れを落として毛穴・ニキビ悪化を防ぐ",
             "ingredient_focus": "低刺激",
             "risk_note": "",
             "priority": 2,
             "product_candidates": []
         })
 
-    if not has_category(night_steps, "クリーム") and not has_category(night_steps, "乳液"):
+    if not has_category(night_steps, "クリーム"):
         night_steps.append({
             "category": "クリーム",
             "role": "main",
-            "purpose": "夜の保湿とバリア保護。攻めのケア後の乾燥や刺激感を抑える",
+            "purpose": "夜のバリア保護",
             "ingredient_focus": "セラミド",
             "risk_note": "",
             "priority": 9,
@@ -5962,7 +6060,7 @@ def ensure_required_routine_steps(data):
     if "weekly_care" not in data or not isinstance(data.get("weekly_care"), list):
         data["weekly_care"] = []
 
-    weekly_care = data["weekly_care"]
+    weekly_care = data.get("weekly_care", [])
 
     def weekly_has_category(category):
         return any(
@@ -6009,16 +6107,18 @@ def ensure_required_routine_steps(data):
         weekly_care.append({
             "category": "パック",
             "role": "main",
-            "purpose": "乾燥・赤み・バリア低下を集中保湿で整える",
             "ingredient_focus": "CICA",
-            "risk_note": "",
             "priority": 8,
             "frequency": "週1回・夜",
             "product_candidates": []
         })
 
-    return data
+    data["weekly_care"] = weekly_care
 
+    data["morning"]["steps"] = morning_steps
+    data["night"]["steps"] = night_steps
+
+    return data
 def get_dynamic_score_weights(step, user_data):
     section = step.get("_section", "")
     purpose = normalize_text(step.get("purpose", ""))
@@ -6273,38 +6373,20 @@ def clean_brand_and_product_name(brand, name):
     if not name_text:
         return brand_text, ""
 
-    if not brand_text:
-        return "", name_text
-
     brand_key = normalize_candidate_name_for_merge(brand_text)
+    name_key = normalize_candidate_name_for_merge(name_text)
 
-    if not brand_key:
-        return brand_text, name_text
+    if brand_key:
+        while name_key.startswith(f"{brand_key} {brand_key}"):
+            name_key = name_key[len(brand_key):].strip()
 
-    words = name_text.split()
-    cleaned_words = []
+        if name_key.startswith(brand_key):
+            name_text = name_text[len(brand_text):].strip()
 
-    for word in words:
-        word_key = normalize_candidate_name_for_merge(word)
+        while name_text.startswith(f"{brand_text} {brand_text}"):
+            name_text = name_text[len(brand_text):].strip()
 
-        if word_key and word_key == brand_key:
-            continue
-
-        cleaned_words.append(word)
-
-    cleaned_name = " ".join(cleaned_words).strip()
-
-    name_key = normalize_candidate_name_for_merge(cleaned_name)
-
-    while name_key.startswith(f"{brand_key} {brand_key}"):
-        cleaned_name = cleaned_name[len(brand_text):].strip()
-        name_key = normalize_candidate_name_for_merge(cleaned_name)
-
-    if normalize_candidate_name_for_merge(cleaned_name).startswith(brand_key):
-        if cleaned_name.startswith(brand_text):
-            cleaned_name = cleaned_name[len(brand_text):].strip()
-
-    return brand_text, cleaned_name.strip()
+    return brand_text, name_text.strip()
 
 def normalize_product_identity(brand="", name=""):
     def to_text(value):
@@ -6345,8 +6427,19 @@ def normalize_product_identity(brand="", name=""):
     return name_without_brand_key
 
 def remove_repeated_brand_from_name(brand, name):
-    _, cleaned_name = clean_brand_and_product_name(brand, name)
-    return cleaned_name
+    brand_key = normalize_candidate_name_for_merge(brand)
+    name_key = normalize_candidate_name_for_merge(name)
+
+    if not brand_key or not name_key:
+        return name_key
+
+    while name_key.startswith(f"{brand_key} {brand_key}"):
+        name_key = name_key[len(brand_key):].strip()
+
+    if name_key.startswith(brand_key):
+        name_key = name_key[len(brand_key):].strip()
+
+    return name_key
 
 def merge_candidate_list(original, extra, max_items=20):
     merged = []
@@ -6892,14 +6985,18 @@ def finalize_step_display_fields(step, best, user_data):
         return step
 
     brand = str(best.get("brand", "") or step.get("brand", "") or "").strip()
-    raw_name = clean_display_product_name(
+    name = clean_display_product_name(
         best.get("name") or step.get("product") or ""
     )
 
-    brand, product_name = clean_brand_and_product_name(brand, raw_name)
-
     step["brand"] = brand
-    step["product"] = product_name
+
+    if brand and name and not name.startswith(brand):
+        step["product"] = f"{brand} {name}"
+    else:
+        step["product"] = name
+
+    
 
     base_score = best.get("_base_score", best.get("base_score", step.get("base_score", 0))) or 0
     improve_score = best.get("_improve_score", best.get("improve_score", step.get("improve_score", 0))) or 0
@@ -6928,10 +7025,8 @@ def finalize_step_display_fields(step, best, user_data):
         "final": final_score,
     }
 
-    if isinstance(best.get("_top_candidates"), list) and best.get("_top_candidates"):
+    if not isinstance(step.get("top_candidates"), list):
         step["top_candidates"] = best.get("_top_candidates", [])
-    elif not isinstance(step.get("top_candidates"), list):
-        step["top_candidates"] = []
 
     step["price_ref"] = safe_price(
         best.get("price_ref")
@@ -6968,6 +7063,7 @@ def finalize_step_display_fields(step, best, user_data):
         )
 
     return step
+
 
 def assign_products_to_all_steps(data, products, user_data, budget_value):
     print("MARKET VERSION assign_products_to_all_steps", flush=True)
@@ -7191,7 +7287,7 @@ def build_selection_reason_from_scores(product, step, user_data):
 
     def as_list(value):
         if isinstance(value, list):
-            return [str(v).strip() for v in value if str(v).strip()]
+            return value
         if isinstance(value, str) and value.strip():
             return [value.strip()]
         return []
@@ -7201,15 +7297,12 @@ def build_selection_reason_from_scores(product, step, user_data):
     ingredient_focus = clean(step.get("ingredient_focus"))
     section = clean(step.get("_section"))
 
-    product_name = clean(product.get("name") or product.get("product") or step.get("product"))
-    brand = clean(product.get("brand") or step.get("brand"))
-
-    oil = clean(user_data.get("oil"))
-    sens = clean(user_data.get("sens"))
-
     base_score = safe_price(product.get("_base_score", step.get("base_score", 0)))
     improve_score = safe_price(product.get("_improve_score", step.get("improve_score", 0)))
     routine_score = safe_price(product.get("_routine_score", step.get("routine_score", 0)))
+
+    oil = clean(user_data.get("oil"))
+    sens = clean(user_data.get("sens"))
 
     active_ingredients = as_list(product.get("active_ingredients", []))
     support_ingredients = as_list(product.get("support_ingredients", []))
@@ -7219,84 +7312,66 @@ def build_selection_reason_from_scores(product, step, user_data):
     focus_label = ingredient_map.get(normalized_focus, ingredient_focus)
 
     concern_words = []
-    for word in ["毛穴", "赤み", "乾燥", "保湿", "バリア", "くすみ", "透明感", "色素沈着", "ニキビ", "ハリ", "ざらつき"]:
-        if word and word in purpose:
+
+    for word in ["毛穴", "赤み", "乾燥", "保湿", "バリア", "くすみ", "透明感", "色素沈着", "ニキビ", "ハリ"]:
+        if word in purpose:
             concern_words.append(word)
 
     concern_words = list(dict.fromkeys(concern_words))
 
-    product_label = product_name
-    if brand and product_name and not product_name.startswith(brand):
-        product_label = f"{brand} {product_name}"
-
     if concern_words:
         if len(concern_words) >= 2:
-            first = f"今の肌では、{concern_words[0]}と{concern_words[1]}を同時に整えることを重視したい状態です。"
+            first = f"今の肌では、{concern_words[0]}と{concern_words[1]}を同時に整えたい状態です。"
         else:
-            first = f"今の肌では、{concern_words[0]}を丁寧に整えることを優先したい状態です。"
+            first = f"今の肌では、{concern_words[0]}を優先して整えたい状態です。"
     elif purpose:
-        first = f"今回の{category}では、{purpose}を無理なく支えられることを重視しています。"
+        first = f"今回の{category}では、{purpose}を支えられることを重視しています。"
     else:
-        first = f"今回の{category}では、今の肌に負担をかけにくく、続けやすいことを重視しています。"
+        first = f"今回の{category}では、今の肌に無理なく合うことを重視しています。"
 
-    ingredient_points = []
+    strength_points = []
 
-    if focus_label:
-        if normalized_focus in active_ingredients or focus_label in active_ingredients:
-            ingredient_points.append(f"{focus_label}を主軸にケアできる")
-        elif normalized_focus in support_ingredients or focus_label in support_ingredients:
-            ingredient_points.append(f"{focus_label}で肌を支えやすい")
-        else:
-            ingredient_points.append(f"{focus_label}を意識したケアに合わせやすい")
-
-    if main_functions:
-        ingredient_points.append(f"{main_functions[0]}の役割も期待できる")
-
-    ingredient_points = list(dict.fromkeys([p for p in ingredient_points if p]))
-
-    score_points = []
+    if normalized_focus and normalized_focus in active_ingredients:
+        strength_points.append(f"{focus_label}を中心にケアできる")
+    elif normalized_focus and normalized_focus in support_ingredients:
+        strength_points.append(f"{focus_label}でケアを支えられる")
 
     if improve_score >= max(base_score, routine_score):
-        score_points.append("改善したい悩みに寄せやすい")
+        strength_points.append("改善したい悩みにしっかり寄せられる")
     elif base_score >= max(improve_score, routine_score):
-        score_points.append("今の肌状態との相性が良い")
+        strength_points.append("今の肌状態との相性が良い")
     elif routine_score >= max(base_score, improve_score):
-        score_points.append("ルーティン全体のバランスを崩しにくい")
+        strength_points.append("今のルーティンに入れてもバランスを崩しにくい")
 
     if oil == "oily":
-        score_points.append("皮脂が出やすい肌でも重さが出にくい")
+        strength_points.append("皮脂が出やすい肌でも重くなりにくい")
     elif oil == "dry":
-        score_points.append("乾燥しやすい肌の保湿を支えやすい")
+        strength_points.append("乾燥しやすい肌を支えやすい")
     elif oil == "mixed":
-        score_points.append("乾燥と皮脂の差が出やすい肌でも使いやすい")
+        strength_points.append("乾燥と皮脂の差が出やすい肌でも使いやすい")
 
     if sens in ["high", "middle"]:
-        score_points.append("攻めすぎずに続けやすい")
+        strength_points.append("攻めすぎずに続けやすい")
 
-    score_points = list(dict.fromkeys([p for p in score_points if p]))
+    strength_points = list(dict.fromkeys([p for p in strength_points if p]))
 
-    if product_label and ingredient_points:
-        second = f"{product_label}は、{ingredient_points[0]}点が今のケア目的に合っています。"
-    elif product_label and score_points:
-        second = f"{product_label}は、{score_points[0]}点を評価して選んでいます。"
-    elif ingredient_points:
-        second = f"成分面では、{ingredient_points[0]}点が今の肌に合っています。"
-    elif score_points:
-        second = f"使用バランスでは、{score_points[0]}点が取り入れやすいです。"
+    if len(strength_points) >= 2:
+        second = f"この商品は、{strength_points[0]}うえに、{strength_points[1]}ところを評価しています。"
+    elif len(strength_points) == 1:
+        second = f"この商品は、{strength_points[0]}ところを評価しています。"
+    elif main_functions:
+        second = f"成分や機能面では、{main_functions[0]}を中心に今のケアへ取り入れやすい内容です。"
     else:
         second = "肌への負担とケア効果のバランスを見て、今の状態に合わせやすい候補として選んでいます。"
 
-    if len(score_points) >= 2:
-        second += f"さらに、{score_points[1]}ところも続けやすさにつながります。"
-
     if section == "morning":
-        third = "朝に使いやすい軽さも見ながら、日中の乾燥や皮脂崩れを防ぐ流れに入れています。"
+        third = "朝のケアに入れやすく、日中の皮脂や乾燥の乱れを抑えるサポートになります。"
     elif section == "night":
-        third = "夜のケアに入れることで、日中に乱れた肌を落ち着かせながら、翌朝のなめらかさにつなげやすくなります。"
+        third = "夜のケアで使うことで、日中に受けた乾燥や毛穴まわりの乱れを整える助けになります。"
     elif section == "weekly_care":
-        third = "毎日使うよりも週単位で取り入れることで、攻めすぎずに肌の底上げを狙いやすい位置づけです。"
+        third = "毎日のケアでは補いにくい部分を、週単位で底上げする役割として取り入れやすいです。"
     else:
-        third = "今のルーティンに無理なく組み込みやすい点も選定理由です。"
+        third = "今のスキンケア全体に無理なく組み込みやすい点も選定理由です。"
 
     return first + second + third
 
@@ -7442,60 +7517,48 @@ def build_ai_reason(step, user_data):
     purpose = clean(step.get("purpose"))
     ingredient_focus = clean(step.get("ingredient_focus"))
     section = clean(step.get("_section"))
-    product_name = clean(step.get("product"))
-    brand = clean(step.get("brand"))
 
     oil = clean(user_data.get("oil"))
     sens = clean(user_data.get("sens"))
     exp = clean(user_data.get("exp"))
 
-    product_label = product_name
-    if brand and product_name and not product_name.startswith(brand):
-        product_label = f"{brand} {product_name}"
-
     if purpose:
-        first = f"今回の{category}では、{purpose}を支えられることを重視しています。"
+        first = f"今回の{category}では、{purpose}を優先して組み立てています。"
     else:
-        first = f"今回の{category}では、今の肌に負担をかけにくく、続けやすいことを重視しています。"
+        first = f"今回の{category}では、今の肌状態に合う役割を優先して選んでいます。"
 
     focus_sentence = ""
-    if product_label and ingredient_focus:
-        focus_sentence = f"{product_label}は、{ingredient_focus}を意識したケアに取り入れやすい候補です。"
-    elif ingredient_focus:
-        focus_sentence = f"成分面では、{ingredient_focus}を軸にしたケアとして組み込んでいます。"
+    if ingredient_focus:
+        focus_sentence = f"成分面では{ingredient_focus}を軸に、肌悩みへのつながりを見ています。"
 
     section_sentence = ""
     if section == "morning":
-        section_sentence = "朝は日中の乾燥・皮脂・紫外線の影響を受けやすいため、重さが出にくく使いやすい流れを優先しています。"
+        section_sentence = "朝に使う前提なので、日中の使いやすさや重さも含めて判断しています。"
     elif section == "night":
-        section_sentence = "夜は日中に乱れた肌を整えやすい時間帯なので、保湿と改善ケアのバランスを見て入れています。"
+        section_sentence = "夜のケアでは、日中に受けた刺激や乾燥を整えながら、改善成分を活かしやすい流れを重視しています。"
     elif section == "weekly_care":
-        section_sentence = "週ケアでは、毎日のケアだけでは補いにくいざらつき・乾燥・くすみを無理のない頻度で整える目的です。"
+        section_sentence = "週ケアとして、毎日のケアだけでは補いにくい部分を集中的に整える目的で入れています。"
 
     skin_sentence_parts = []
 
     if oil == "oily":
-        skin_sentence_parts.append("皮脂が出やすい肌でも重くなりにくいこと")
+        skin_sentence_parts.append("皮脂が出やすい肌なので、重さが出すぎないこと")
     elif oil == "dry":
-        skin_sentence_parts.append("乾燥しやすい肌の保湿を支えやすいこと")
+        skin_sentence_parts.append("乾燥しやすい肌なので、保湿の支えになること")
     elif oil == "mixed":
-        skin_sentence_parts.append("乾燥と皮脂の差が出やすい肌でも使いやすいこと")
+        skin_sentence_parts.append("乾燥と皮脂の差が出やすい肌なので、バランスを崩しにくいこと")
 
     if sens == "high":
         skin_sentence_parts.append("刺激感が出にくいこと")
     elif sens == "middle":
         skin_sentence_parts.append("攻めと守りのバランスを取りやすいこと")
 
-    if exp == "beginner" and (
-        "レチノール" in ingredient_focus
-        or "レチナール" in ingredient_focus
-        or "retinol" in ingredient_focus.lower()
-    ):
+    if exp == "beginner" and ("レチノール" in ingredient_focus or "レチナール" in ingredient_focus):
         skin_sentence_parts.append("レチノール経験に合わせて慎重に始めやすいこと")
 
     skin_sentence = ""
     if skin_sentence_parts:
-        skin_sentence = "また、" + "、".join(skin_sentence_parts[:2]) + "も選定理由です。"
+        skin_sentence = "また、" + "、".join(skin_sentence_parts[:2]) + "も今回の選定で見ています。"
 
     return "".join([
         first,
@@ -8268,67 +8331,6 @@ def finalize_step_data(step, user_data):
             "price_ref": to_number(c.get("price_ref", c.get("price", 0))),
         }
 
-    def build_candidate_identity_keys(candidate):
-        brand = candidate.get("brand", "")
-        name = candidate.get("name", "")
-
-        identity = normalize_product_identity(brand, name)
-
-        brand_text, name_text = clean_brand_and_product_name(brand, name)
-        name_only_identity = normalize_candidate_name_for_merge(name_text)
-
-        keys = {identity, name_only_identity}
-        return {k for k in keys if k}
-
-    def preserve_ranked_top_candidates(step):
-        """
-        select_best_market_candidate 側で確定した順位を壊さずに、
-        表示用の型・キーだけを整える。
-        ここでは再ソートしない。
-        """
-        raw_candidates = step.get("top_candidates", [])
-
-        if not isinstance(raw_candidates, list):
-            raw_candidates = []
-
-        normalized_candidates = []
-        seen_keys = set()
-
-        for c in raw_candidates:
-            normalized = normalize_candidate(c)
-            if not normalized:
-                continue
-
-            identity_keys = build_candidate_identity_keys(normalized)
-
-            if not identity_keys:
-                continue
-
-            if seen_keys.intersection(identity_keys):
-                continue
-
-            seen_keys.update(identity_keys)
-            normalized_candidates.append(normalized)
-
-            if len(normalized_candidates) >= 3:
-                break
-
-        if normalized_candidates:
-            return normalized_candidates
-
-        selected_candidate = normalize_candidate({
-            "brand": step.get("brand", ""),
-            "name": step.get("product", ""),
-            "score": step.get("match_score", 0),
-            "base_score": step.get("base_score", 0),
-            "improve_score": step.get("improve_score", 0),
-            "routine_score": step.get("routine_score", 0),
-            "source": step.get("product_source", ""),
-            "price_ref": step.get("price", step.get("price_ref", 0)),
-        })
-
-        return [selected_candidate] if selected_candidate else []
-
     category = clean_text(step.get("category")) or "美容液"
     ingredient_focus = clean_text(step.get("ingredient_focus"))
     purpose = clean_text(step.get("purpose")) or "肌状態に合わせた基本ケア"
@@ -8340,6 +8342,7 @@ def finalize_step_data(step, user_data):
     step = normalize_step_price_fields(step)
 
     current_product = clean_text(step.get("product"))
+    current_brand = clean_text(step.get("brand"))
 
     if not current_product:
         if step.get("product_source") in ["none", "missing"]:
@@ -8396,16 +8399,77 @@ def finalize_step_data(step, user_data):
     for key in ["match_score", "base_score", "improve_score", "routine_score", "priority"]:
         step[key] = to_number(step.get(key, 0))
 
-    step["top_candidates"] = preserve_ranked_top_candidates(step)
+    candidates = []
+
+    for c in step.get("top_candidates", []):
+        normalized = normalize_candidate(c)
+        if normalized:
+            candidates.append(normalized)
+
+    selected_candidate = normalize_candidate({
+        "brand": step.get("brand", ""),
+        "name": step.get("product", ""),
+        "score": step.get("match_score", 0),
+        "base_score": step.get("base_score", 0),
+        "improve_score": step.get("improve_score", 0),
+        "routine_score": step.get("routine_score", 0),
+        "source": step.get("product_source", ""),
+        "price_ref": step.get("price", 0),
+    })
+
+    if selected_candidate:
+        candidates.insert(0, selected_candidate)
+
+    unique_candidates = []
+    seen_keys = set()
+
+    def build_candidate_identity_keys(candidate):
+        brand = candidate.get("brand", "")
+        name = candidate.get("name", "")
+
+        identity = normalize_product_identity(
+            brand,
+            name
+        )
+
+        brand_text, name_text = clean_brand_and_product_name(
+            brand,
+            name
+        )
+
+        name_only_identity = normalize_candidate_name_for_merge(name_text)
+
+        keys = {
+            identity,
+            name_only_identity
+        }
+
+        return {k for k in keys if k}
+
+    for c in candidates:
+        identity_keys = build_candidate_identity_keys(c)
+
+        if not identity_keys:
+            continue
+
+        if seen_keys.intersection(identity_keys):
+            continue
+
+        seen_keys.update(identity_keys)
+        unique_candidates.append(c)
+
+    unique_candidates.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    step["top_candidates"] = unique_candidates[:3]
 
     if step["top_candidates"]:
         best = step["top_candidates"][0]
 
         if not step.get("product"):
-            step["product"] = best.get("name", "")
+            step["product"] = best["name"]
 
         if not step.get("brand") and best.get("brand"):
-            step["brand"] = best.get("brand", "")
+            step["brand"] = best["brand"]
 
         if step.get("match_score", 0) <= 0:
             step["match_score"] = best.get("score", 0)
@@ -8425,7 +8489,6 @@ def finalize_step_data(step, user_data):
     ]
 
     existing_score_detail = step.get("score_detail")
-
     if isinstance(existing_score_detail, dict):
         base = to_number(existing_score_detail.get("base", step.get("base_score", 0)))
         improve = to_number(existing_score_detail.get("improve", step.get("improve_score", 0)))
@@ -10834,6 +10897,29 @@ def finalize_budget_info(data, budget_value):
 
     return data
 
+def step_sort_key(step):
+    category = step.get("category", "")
+    role = step.get("role")
+    priority = step.get("priority", 999)
+
+    base_order = CATEGORY_ORDER.get(category, 99)
+
+    if role == "booster":
+        base_order += 0.5
+
+    return (base_order, priority)
+
+def sort_steps(data):
+    if "morning" in data and "steps" in data["morning"]:
+        data["morning"]["steps"].sort(key=step_sort_key)
+
+    if "night" in data and "steps" in data["night"]:
+        data["night"]["steps"].sort(key=step_sort_key)
+
+    if "weekly_care" in data and isinstance(data["weekly_care"], list):
+        data["weekly_care"].sort(key=step_sort_key)
+
+    return data
 
 def debug_candidate_counts(data):
     print("===== CANDIDATE COUNTS =====")
