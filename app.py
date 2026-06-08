@@ -10890,15 +10890,10 @@ def lab_test_function():
                         "message": message
                     }), 429
 
-                user_error = build_user_friendly_error_message(
-                    str(e)
-                )
-
                 return render_template(
                     "error.html",
-                    error_message=user_error
+                    error_message=message
                 )
-
             global_used = get_global_usage_count()
             global_remaining = GLOBAL_MONTHLY_LIMIT - global_used
             # =========================
@@ -11178,8 +11173,21 @@ def lab_test_function():
             print("ERROR:", e)
             traceback.print_exc()
             print("=====================\n")
-            return f"<pre>{traceback.format_exc()}</pre>"
 
+            user_error = build_user_friendly_error_message(
+                    str(e)
+                )
+
+            if is_ajax:
+                return jsonify({
+                    "success": False,
+                    "message": user_error
+                }), 500
+
+            return render_template(
+                "error.html",
+                error_message=user_error
+            )
     client_ip = get_client_ip()
     remaining_free_count = get_remaining_free_count(client_ip)
     gemini_usage = get_gemini_usage_status()
