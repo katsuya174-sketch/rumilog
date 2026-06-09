@@ -10365,7 +10365,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
     try:
         response = call_gemini_with_retry(
             client,
-            "gemini-2.5-flash",
+            "gemini-3.5-flash",
             contents=[prompt, front_img, left_img, right_img],
             config=types.GenerateContentConfig(
                 temperature=0,
@@ -10415,7 +10415,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
 
     try:
         data = json.loads(raw_text)
-        
+
         print(
             "[ROUTINE STRATEGY]",
             json.dumps(
@@ -11508,6 +11508,16 @@ def lab_test_function():
             # =========================
             data = finalize_budget_info(data, budget_value)
             data["weekly_usage_plan"] = build_weekly_usage_plan(data)
+
+            print(
+                "[WEEKLY USAGE PLAN]",
+                json.dumps(
+                    data.get("weekly_usage_plan", []),
+                    ensure_ascii=False
+                ),
+                flush=True
+            )
+
             debug_log("PRICE SUMMARY", {
                 "total_price": data.get("total_price", 0),
                 "budget_fit_total": data.get("budget_fit_total", 0),
