@@ -11683,8 +11683,10 @@ def lab_test_function():
             # =========================
             # ⑫ 表示
             # =========================
+
+            data = lightweight_result_payload(data)
             data["is_dev_mode"] = DEV_MODE or DEV_PREMIUM_MODE
-            
+
             html = render_template(
                 "result.html",
                 data=data
