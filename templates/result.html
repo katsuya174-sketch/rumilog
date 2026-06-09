@@ -342,11 +342,11 @@
   
               {% if step.get("score_detail") %}
               <div class="score-detail-compact">
-                ベース {{ step.score_detail.base }} / 改善 {{ step.score_detail.improve }} / ルーティン {{ step.score_detail.routine }} / 最終 {{ step.score_detail.final }}
+                  ベース {{ step.score_detail.base }} / 改善 {{ step.score_detail.improve }} / ルーティン {{ step.score_detail.routine }} / 最終 {{ step.score_detail.final }}
               </div>
               {% endif %}
   
-              {% if data.get("is_premium") or data.get("is_dev_mode")%}
+              {% if data.get("is_premium") or data.get("is_dev_mode") %}
                   {% if step.get("top_candidates", [])|length > 1 %}
                   <div class="sub-candidates-box compact">
                       <div class="sub-candidates-title">次点候補</div>
@@ -360,20 +360,17 @@
                       </div>
                   </div>
                   {% endif %}
-  
-
-                  {% else %}
-                      <div class="premium-lock-box">
-                          詳細スコア・次点候補は有料プランで確認できます
-                          <a href="/pricing?source=result" class="premium-link">詳しく見る</a>
-                      </div>
-                  {% endif %}
+              {% else %}
+                  <div class="premium-lock-box">
+                      詳細スコア・次点候補は有料プランで確認できます
+                      <a href="/pricing?source=result" class="premium-link">詳しく見る</a>
+                  </div>
               {% endif %}
+          </div>
       </div>
       {% endfor %}
   </section>
   {% endmacro %}
-
     <div class="result-bg" id="bgEffects"></div>
 
     <div class="result-container">
