@@ -243,6 +243,156 @@
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body class="result-page">
+
+  {% macro render_routine_section(title, chip, steps, show_frequency=False) %}
+  <section class="routine-shell">
+      <div class="routine-header">
+          <h2 class="routine-title">{{ title }}</h2>
+          <div class="routine-chip">{{ chip }}</div>
+      </div>
+  
+      {% for step in steps %}
+      <div
+          class="product-card-new"
+          data-product="{{ step.get('product', '') }}"
+          data-category="{{ step.get('category', '') }}"
+      >
+          <img
+              src="{{ step.get('image', '') }}"
+              alt="{{ step.get('product', '') }}"
+              class="product-img-new {% if not step.get('image') %}is-hidden{% endif %}"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+          >
+  
+          <div class="product-img-empty {% if step.get('image') %}is-hidden{% endif %}">
+              画像読み込み中…
+          </div>
+  
+          <div class="product-body">
+              <div class="product-source {{ step.get('product_source', '') }}">
+                  {% if step.get("product_source", "") == "db" %}
+                      DB選定
+                  {% elif step.get("product_source", "") == "ai" %}
+                      AI候補
+                  {% else %}
+                      カテゴリ提案
+                  {% endif %}
+              </div>
+  
+              <div class="product-name">
+                  {{ (step.get("brand", "") ~ " " ~ step.get("product", "")).strip() }}
+              </div>
+  
+              {% if show_frequency and step.get("frequency", "") %}
+              <div class="product-meta">頻度: {{ step.get("frequency", "") }}</div>
+              {% endif %}
+  
+              <div class="product-meta">
+                  役割: <span class="role-badge">{{ step.get("display_role", step.get("category", "")) }}</span>
+              </div>
+  
+              <div class="product-meta">目的: {{ step.get("purpose", "") }}</div>
+  
+              <div class="product-meta">
+                  <div class="reason-label">理由</div>
+                  <div class="reason-text">{{ step.get("recommend_reason", "") }}</div>
+              </div>
+  
+              {% if step.get("top_impacts", []) %}
+              <div class="product-meta">
+                  <div class="reason-label">改善期待</div>
+                  <div class="reason-text">
+                      {% for item in step.get("top_impacts", []) %}
+                          {{ item.get("label", "") }} +{{ item.get("value", 0) }}{% if not loop.last %} / {% endif %}
+                      {% endfor %}
+                  </div>
+              </div>
+              {% endif %}
+  
+              <div class="product-price">
+                  {% if step.get("rakuten_link") and step.get("price", 0) > 0 %}
+                      参考価格: ¥{{ step.get("price", 0) }}
+                  {% elif step.get("price_band", "") %}
+                      {{ step.get("price_band", "") }}
+                  {% else %}
+                      価格確認中
+                  {% endif %}
+              </div>
+  
+              <div class="buy-lead">
+                  {{ step.get("buy_lead", "") }}
+              </div>
+  
+              <div class="buy-buttons">
+                  <a href="/click?source=amazon&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.amazon_link|urlencode }}" target="_blank" rel="noopener noreferrer">
+                      <button type="button" class="amazon-btn">Amazonで見る</button>
+                  </a>
+  
+                  {% if step.get("rakuten_link") %}
+                  <a href="/click?source=rakuten&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.rakuten_link|urlencode }}" target="_blank" rel="noopener noreferrer">
+                      <button type="button" class="rakuten-btn">楽天で見る</button>
+                  </a>
+                  {% endif %}
+              </div>
+  
+              <div class="product-score">
+                  適合: {{ step.get("base_score", 0) }} / 改善: {{ step.get("improve_score", 0) }}
+              </div>
+  
+              {% if step.get("score_detail") %}
+              <div class="score-detail-compact">
+                  ベース {{ step.score_detail.base }} / 改善 {{ step.score_detail.improve }} / 最終 {{ step.score_detail.final }}
+              </div>
+              {% endif %}
+  
+              {% if data.get("is_premium") or data.get("dev_mode") %}
+                  {% if step.get("top_candidates", [])|length > 1 %}
+                  <div class="sub-candidates-box compact">
+                      <div class="sub-candidates-title">次点候補</div>
+                      <div class="sub-candidate-names">
+                          {% for c in step.get("top_candidates", [])[1:3] %}
+                              <span class="sub-candidate-name-only">
+                                  {% if loop.index == 1 %}2位{% elif loop.index == 2 %}3位{% endif %}
+                                  {{ (c.get("brand", "") ~ " " ~ c.get("name", "")).strip() }}
+                              </span>{% if not loop.last %}<span class="sub-candidate-sep"> / </span>{% endif %}
+                          {% endfor %}
+                      </div>
+                  </div>
+                  {% endif %}
+  
+                  {% if step.get("score_detail") %}
+                  <div class="score-detail-box">
+                      <div class="score-detail-title">選定スコア詳細</div>
+  
+                      <div class="score-detail-row">
+                          <span>ベース</span>
+                          <span>{{ step.score_detail.base }}</span>
+                      </div>
+  
+                      <div class="score-detail-row">
+                          <span>改善</span>
+                          <span>{{ step.score_detail.improve }}</span>
+                      </div>
+  
+                      <div class="score-detail-row total">
+                          <span>最終</span>
+                          <span>{{ step.score_detail.final }}</span>
+                      </div>
+                  </div>
+                  {% endif %}
+              {% else %}
+                  <div class="premium-lock-box">
+                      詳細スコア・代替候補は有料プランで確認できます
+                      <a href="/pricing?source=result" class="premium-link">詳しく見る</a>
+                  </div>
+              {% endif %}
+          </div>
+      </div>
+      {% endfor %}
+  </section>
+  {% endmacro %}
+
     <div class="result-bg" id="bgEffects"></div>
 
     <div class="result-container">
@@ -543,401 +693,6 @@
             </div>
         </section>
 
-        <section class="routine-shell">
-            <div class="routine-header">
-                <h2 class="routine-title">朝のスキンケア</h2>
-                <div class="routine-chip">Morning</div>
-            </div>
-
-            {% for step in data.get("morning", {}).get("steps", []) %}
-            <div
-                class="product-card-new"
-                data-product="{{ step.get('product', '') }}"
-                data-category="{{ step.get('category', '') }}"
-            >
-            <img
-                src="{{ step.get('image', '') }}"
-                alt="{{ step.get('product', '') }}"
-                class="product-img-new {% if not step.get('image') %}is-hidden{% endif %}"
-                loading="lazy"
-                referrerpolicy="no-referrer"
-            >
-
-            <div class="product-img-empty {% if step.get('image') %}is-hidden{% endif %}">
-                画像読み込み中…
-            </div>
-                <div class="product-body">
-                    <div class="product-source {{ step.get('product_source', '') }}">
-                        {% if step.get("product_source", "") == "db" %}
-                            DB選定
-                        {% elif step.get("product_source", "") == "ai" %}
-                            AI候補
-                        {% else %}
-                            カテゴリ提案
-                        {% endif %}
-                    </div>
-
-                    <div class="product-name">
-                      {{ (step.get("brand", "") ~ " " ~ step.get("product", "")).strip() }}
-                    </div>
-
-                    <div class="product-meta">
-                        役割: <span class="role-badge">{{ step.get("display_role", step.get("category", "")) }}</span>
-                    </div>
-
-                    <div class="product-meta">目的: {{ step.get("purpose", "") }}</div>
-
-                    <div class="product-meta">
-                        <div class="reason-label">理由</div>
-                        <div class="reason-text">{{ step.get("recommend_reason", "") }}</div>
-                    </div>
-                    {% if step.get("top_impacts", []) %}
-                    <div class="product-meta">
-                        <div class="reason-label">改善期待</div>
-                        <div class="reason-text">
-                            {% for item in step.get("top_impacts", []) %}
-                                {{ item.get("label", "") }} +{{ item.get("value", 0) }}{% if not loop.last %} / {% endif %}
-                            {% endfor %}
-                        </div>
-                    </div>
-                    {% endif %}
-                    <div class="product-price">
-                        {% if step.get("rakuten_link") and step.get("price", 0) > 0 %}
-                            参考価格: ¥{{ step.get("price", 0) }}
-                        {% elif step.get("price_band", "") %}
-                            {{ step.get("price_band", "") }}
-                        {% else %}
-                            価格確認中
-                        {% endif %}
-                    </div>
-                    <div class="buy-lead">
-                        {{ step.get("buy_lead", "") }}
-                    </div>
-                    <div class="buy-buttons">
-                        <a href="/click?source=amazon&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.amazon_link|urlencode }}" target="_blank" rel="noopener noreferrer">
-                            <button type="button" class="amazon-btn">Amazonで見る</button>
-                        </a>
-                        {% if step.get("rakuten_link") %}
-                        <a href="/click?source=rakuten&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.rakuten_link|urlencode }}" target="_blank" rel="noopener noreferrer">
-                            <button type="button" class="rakuten-btn">楽天で見る</button>
-                        </a>
-                        {% endif %}
-                    </div>
-                    <div class="product-score">
-                        適合: {{ step.get("base_score", 0) }} / 改善: {{ step.get("improve_score", 0) }}
-                    </div>
-
-                    {% if step.get("score_detail") %}
-                    <div class="score-detail-compact">
-                        ベース {{ step.score_detail.base }} / 改善 {{ step.score_detail.improve }} / 最終 {{ step.score_detail.final }}
-                    </div>
-                    {% endif %}
-
-                    {% if step.get("top_candidates", [])|length > 1 %}
-                    <div class="sub-candidates-box compact">
-                        <div class="sub-candidates-title">次点候補</div>
-                        <div class="sub-candidate-names">
-                            {% for c in step.get("top_candidates", [])[1:3] %}
-                                <span class="sub-candidate-name-only">
-                                    {% if loop.index == 1 %}2位{% elif loop.index == 2 %}3位{% endif %} {{ (c.get("brand", "") ~ " " ~ c.get("name", "")).strip() }}
-                                </span>{% if not loop.last %}<span class="sub-candidate-sep"> / </span>{% endif %}
-                            {% endfor %}
-                        </div>
-                    </div>
-                    {% endif %}
-                    {% if data.get("is_premium") or data.get("dev_mode") %}
-                    {% if step.get("score_detail") %}
-                    <div class="score-detail-box">
-                        <div class="score-detail-title">選定スコア詳細</div>
-                
-                        <div class="score-detail-row">
-                            <span>ベース</span>
-                            <span>{{ step.score_detail.base }}</span>
-                        </div>
-                
-                        <div class="score-detail-row">
-                            <span>改善</span>
-                            <span>{{ step.score_detail.improve }}</span>
-                        </div>
-                
-                        <div class="score-detail-row total">
-                            <span>最終</span>
-                            <span>{{ step.score_detail.final }}</span>
-                        </div>
-                    </div>
-                    {% endif %}
-                {% else %}
-                    <div class="premium-lock-box">
-                        詳細スコアは有料プランで確認できます
-                        <a href="/pricing?source=result" class="premium-link">詳しく見る</a>
-                    </div>
-                {% endif %}
-                </div>
-                </div>
-                {% endfor %}                                      
-                </section>
-
-        <section class="routine-shell">
-            <div class="routine-header">
-                <h2 class="routine-title">夜のスキンケア</h2>
-                <div class="routine-chip">Night</div>
-            </div>
-
-            {% for step in data.get("night", {}).get("steps", []) %}
-            <div
-                class="product-card-new"
-                data-product="{{ step.get('product', '') }}"
-                data-category="{{ step.get('category', '') }}"
-            >
-            <img
-                src="{{ step.get('image', '') }}"
-                alt="{{ step.get('product', '') }}"
-                class="product-img-new {% if not step.get('image') %}is-hidden{% endif %}"
-                loading="lazy"
-                referrerpolicy="no-referrer"
-            >
-
-            <div class="product-img-empty {% if step.get('image') %}is-hidden{% endif %}">
-                画像読み込み中…
-            </div>
-                <div class="product-body">
-                    <div class="product-source {{ step.get('product_source', '') }}">
-                        {% if step.get("product_source", "") == "db" %}
-                            DB選定
-                        {% elif step.get("product_source", "") == "ai" %}
-                            AI候補
-                        {% else %}
-                            カテゴリ提案
-                        {% endif %}
-                    </div>
-
-                    <div class="product-name">
-                      {{ (step.get("brand", "") ~ " " ~ step.get("product", "")).strip() }}
-                  </div>
-                    <div class="product-meta">
-                        役割: <span class="role-badge">{{ step.get("display_role", step.get("category", "")) }}</span>
-                    </div>
-
-                    <div class="product-meta">目的: {{ step.get("purpose", "") }}</div>
-
-                    <div class="product-meta">
-                        <div class="reason-label">理由</div>
-                        <div class="reason-text">{{ step.get("recommend_reason", "") }}</div>
-                    </div>
-                    {% if step.get("top_impacts", []) %}
-                    <div class="product-meta">
-                        <div class="reason-label">改善期待</div>
-                        <div class="reason-text">
-                            {% for item in step.get("top_impacts", []) %}
-                                {{ item.get("label", "") }} +{{ item.get("value", 0) }}{% if not loop.last %} / {% endif %}
-                            {% endfor %}
-                        </div>
-                    </div>
-                    {% endif %}
-                    <div class="product-price">
-                        {% if step.get("rakuten_link") and step.get("price", 0) > 0 %}
-                            参考価格: ¥{{ step.get("price", 0) }}
-                        {% elif step.get("price_band", "") %}
-                            {{ step.get("price_band", "") }}
-                        {% else %}
-                            価格確認中
-                        {% endif %}
-                    </div>
-                    <div class="buy-lead">
-                        {{ step.get("buy_lead", "") }}
-                    </div>
-                    <div class="buy-buttons">
-                        <a href="/click?source=amazon&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.amazon_link|urlencode }}" target="_blank" rel="noopener noreferrer">
-                            <button type="button" class="amazon-btn">Amazonで見る</button>
-                        </a>
-                        {% if step.get("rakuten_link") %}
-                        <a href="/click?source=rakuten&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.rakuten_link|urlencode }}" target="_blank" rel="noopener noreferrer">
-                            <button type="button" class="rakuten-btn">楽天で見る</button>
-                        </a>
-                        {% endif %}
-                    </div>
-                    <div class="product-score">
-                        適合: {{ step.get("base_score", 0) }} / 改善: {{ step.get("improve_score", 0) }}
-                    </div>
-
-                    {% if step.get("score_detail") %}
-                    <div class="score-detail-compact">
-                        ベース {{ step.score_detail.base }} / 改善 {{ step.score_detail.improve }} / 最終 {{ step.score_detail.final }}
-                    </div>
-                    {% endif %}
-                    {% if data.get("is_premium") or data.get("dev_mode") %}
-                    {% if step.get("top_candidates", [])|length > 1 %}
-                    <div class="sub-candidates-box compact">
-                        <div class="sub-candidates-title">次点候補</div>
-                        <div class="sub-candidate-names">
-                            {% for c in step.get("top_candidates", [])[1:3] %}
-                                <span class="sub-candidate-name-only">
-                                    {% if loop.index == 1 %}2位{% elif loop.index == 2 %}3位{% endif %} {{ (c.get("brand", "") ~ " " ~ c.get("name", "")).strip() }}
-                                </span>{% if not loop.last %}<span class="sub-candidate-sep"> / </span>{% endif %}
-                            {% endfor %}
-                        </div>
-                    </div>
-                    {% endif %}
-
-                    {% if step.get("score_detail") %}
-                    <div class="score-detail-box">
-                        <div class="score-detail-title">選定スコア詳細</div>
-
-                        <div class="score-detail-row">
-                            <span>ベース</span>
-                            <span>{{ step.score_detail.base }}</span>
-                        </div>
-
-                        <div class="score-detail-row">
-                            <span>改善</span>
-                            <span>{{ step.score_detail.improve }}</span>
-                        </div>
-
-                        <div class="score-detail-row total">
-                            <span>最終</span>
-                            <span>{{ step.score_detail.final }}</span>
-                        </div>
-                    </div>
-                    {% endif %}
-                {% else %}
-                    <div class="premium-lock-box">
-                        詳細スコア・代替候補は有料プランで確認できます
-                        <a href="/pricing?source=result" class="premium-link">詳しく見る</a>
-                    </div>
-                {% endif %}
-                </div>
-            </div>
-            {% endfor %}
-        </section>
-
-        <section class="routine-shell">
-            <div class="routine-header">
-                <h2 class="routine-title">週ケア</h2>
-                <div class="routine-chip">Weekly</div>
-            </div>
-
-            {% for step in data.get("weekly_care", []) %}
-            <div
-                class="product-card-new"
-                data-product="{{ step.get('product', '') }}"
-                data-category="{{ step.get('category', '') }}"
-            >
-            <img
-                src="{{ step.get('image', '') }}"
-                alt="{{ step.get('product', '') }}"
-                class="product-img-new {% if not step.get('image') %}is-hidden{% endif %}"
-                loading="lazy"
-                referrerpolicy="no-referrer"
-            >
-
-            <div class="product-img-empty {% if step.get('image') %}is-hidden{% endif %}">
-                画像読み込み中…
-            </div>
-                <div class="product-body">
-                    <div class="product-source {{ step.get('product_source', '') }}">
-                        {% if step.get("product_source", "") == "db" %}
-                            DB選定
-                        {% elif step.get("product_source", "") == "ai" %}
-                            AI候補
-                        {% else %}
-                            カテゴリ提案
-                        {% endif %}
-                    </div>
-
-                    <div class="product-name">
-                        {{ (step.get("brand", "") ~ " " ~ step.get("product", "")).strip() }}
-                    </div>
-
-                    <div class="product-meta">
-                        役割: <span class="role-badge">{{ step.get("display_role", step.get("category", "")) }}</span>
-                    </div>
-
-                    <div class="product-meta">目的: {{ step.get("purpose", "") }}</div>
-
-                    <div class="product-meta">
-                        <div class="reason-label">理由</div>
-                        <div class="reason-text">{{ step.get("recommend_reason", "") }}</div>
-                    </div>
-                    {% if step.get("top_impacts", []) %}
-                    <div class="product-meta">
-                        <div class="reason-label">改善期待</div>
-                        <div class="reason-text">
-                            {% for item in step.get("top_impacts", []) %}
-                                {{ item.get("label", "") }} +{{ item.get("value", 0) }}{% if not loop.last %} / {% endif %}
-                            {% endfor %}
-                        </div>
-                    </div>
-                    {% endif %}
-
-                    <div class="product-price">
-                        {% if step.get("rakuten_link") and step.get("price", 0) > 0 %}
-                            参考価格: ¥{{ step.get("price", 0) }}
-                        {% elif step.get("price_band", "") %}
-                            {{ step.get("price_band", "") }}
-                        {% else %}
-                            価格確認中
-                        {% endif %}
-                    </div>
-                    <div class="buy-lead">
-                        {{ step.get("buy_lead", "") }}
-                    </div>
-                        <div class="buy-buttons">
-                            <a href="/click?source=amazon&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.amazon_link|urlencode }}" target="_blank" rel="noopener noreferrer">
-                                <button type="button" class="amazon-btn">Amazonで見る</button>
-                            </a>
-                            {% if step.get("rakuten_link") %}
-                            <a href="/click?source=rakuten&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.rakuten_link|urlencode }}" target="_blank" rel="noopener noreferrer">
-                                <button type="button" class="rakuten-btn">楽天で見る</button>
-                            </a>
-                            {% endif %}
-                        </div>
-                    <div class="product-score">
-                        適合: {{ step.get("base_score", 0) }} / 改善: {{ step.get("improve_score", 0) }}
-                    </div>
-
-                    {% if step.get("score_detail") %}
-                    <div class="score-detail-compact">
-                        ベース {{ step.score_detail.base }} / 改善 {{ step.score_detail.improve }} / 最終 {{ step.score_detail.final }}
-                    </div>
-                    {% endif %}
-
-                    {% if step.get("top_candidates", [])|length > 1 %}
-                    <div class="sub-candidates-box compact">
-                        <div class="sub-candidates-title">次点候補</div>
-                        <div class="sub-candidate-names">
-                            {% for c in step.get("top_candidates", [])[1:3] %}
-                                <span class="sub-candidate-name-only">
-                                    {% if loop.index == 1 %}2位{% elif loop.index == 2 %}3位{% endif %} {{ (c.get("brand", "") ~ " " ~ c.get("name", "")).strip() }}
-                                </span>{% if not loop.last %}<span class="sub-candidate-sep"> / </span>{% endif %}
-                            {% endfor %}
-                        </div>
-                    </div>
-                    {% endif %}
-
-                    {% if step.get("score_detail") %}
-                    <div class="score-detail-box">
-                        <div class="score-detail-title">選定スコア詳細</div>
-
-                        <div class="score-detail-row">
-                            <span>ベース</span>
-                            <span>{{ step.score_detail.base }}</span>
-                        </div>
-
-                        <div class="score-detail-row">
-                            <span>改善</span>
-                            <span>{{ step.score_detail.improve }}</span>
-                        </div>
-
-                        <div class="score-detail-row total">
-                            <span>最終</span>
-                            <span>{{ step.score_detail.final }}</span>
-                        </div>
-                    </div>
-                    {% endif %}
-                </div>
-            </div>
-            {% endfor %}
-        </section>
 
         {% if data.get("is_premium") and data.get("weekly_usage_plan", []) %}
         <section class="routine-shell">

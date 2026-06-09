@@ -9967,6 +9967,30 @@ weekly_care は空配列にしない。
 カテゴリは必ず「ピーリング」または「パック」。
 通常の美容液・化粧水・クリームを weekly_care に入れることは禁止。
 
+【週間運用方針】
+
+routine_strategy を出力する。
+
+overall_policy:
+今週の改善方針。
+
+reason:
+なぜその方針にしたか。
+
+rotation_needed:
+毎日同じ構成ではなく、
+使い分けを行うべきなら true。
+
+weekly_focus:
+今週重点的に改善する項目。
+
+例:
+[
+ "毛穴",
+ "赤み",
+ "色素沈着"
+]
+
 【商品候補ルール】
 product_candidates は候補収集のみ。
 最終選定、順位付け、点数付けは行わない。
@@ -10132,15 +10156,17 @@ key_ingredients:
 care_direction:
 全体のケア方針を短く出す。
 
-【ルーティン戦略】
-routine_strategy は必ず出す。
 
-目的は、現在の肌状態から、毎日同じ商品を使う固定型が良いのか、成分や商品を日ごとに分けるローテーション型が良いのかを判断すること。
+【ルーティン戦略】
+routine_strategy は必ず出力する。
+
+目的:
+現在の肌状態から、毎日同じ商品を使う固定型が良いのか、成分や商品を日ごとに分けるローテーション型が良いのかを判断する。
 
 肌スコア改善を最優先にする。
 無理にローテーションにしない。
-固定が最適なら fixed を選ぶ。
-攻め成分を分散した方がよい場合のみ rotation を選ぶ。
+固定が最適なら strategy_type は fixed。
+攻め成分を分散した方が良い場合のみ strategy_type は rotation。
 
 routine_strategy:
 strategy_type:
@@ -10389,7 +10415,15 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
 
     try:
         data = json.loads(raw_text)
-
+        
+        print(
+            "[ROUTINE STRATEGY]",
+            json.dumps(
+                data.get("routine_strategy", {}),
+                ensure_ascii=False
+            ),
+            flush=True
+        )
         set_gemini_cached_analysis(cache_key, data)
 
         return data
@@ -10933,7 +10967,15 @@ def build_weekly_usage_plan(data):
     if not isinstance(routine_strategy, dict):
         routine_strategy = {}
 
-    strategy_type = str(routine_strategy.get("strategy_type", "fixed") or "fixed").strip()
+    strategy_type = str(
+        routine_strategy.get("strategy_type")
+        or routine_strategy.get("type")
+        or "fixed"
+    ).strip()
+
+    rotation_needed = routine_strategy.get("rotation_needed", None)
+    if rotation_needed is True:
+        strategy_type = "rotation"
 
     morning_steps = data.get("morning", {}).get("steps", [])
     night_steps = data.get("night", {}).get("steps", [])
@@ -10948,15 +10990,59 @@ def build_weekly_usage_plan(data):
     if not isinstance(weekly_steps, list):
         weekly_steps = []
 
+    scores = data.get("scores", {})
+    if not isinstance(scores, dict):
+        scores = {}
+
     days = ["月", "火", "水", "木", "金", "土", "日"]
+
+    def clean(value):
+        return str(value or "").strip()
+
+    def score_value(key):
+        try:
+            return safe_price(scores.get(key, 0))
+        except Exception:
+            return 0
+
+    redness_score = score_value("redness")
+    barrier_score = score_value("barrier")
+    hydration_score = score_value("hydration")
+    texture_score = score_value("texture")
+    pores_score = score_value("pores")
+    dullness_score = score_value("dullness")
+
+    is_sensitive_week = (
+        redness_score <= 65
+        or barrier_score <= 65
+        or hydration_score <= 60
+    )
+
+    needs_texture_care = (
+        texture_score <= 65
+        or pores_score <= 65
+        or dullness_score <= 65
+    )
+
+    def step_text(step):
+        if not isinstance(step, dict):
+            return ""
+
+        return " ".join([
+            clean(step.get("category")),
+            clean(step.get("ingredient_focus")),
+            clean(step.get("purpose")),
+            clean(step.get("product")),
+            clean(step.get("brand")),
+        ])
 
     def step_label(step):
         if not isinstance(step, dict):
             return ""
 
-        category = str(step.get("category", "") or "").strip()
-        product = str(step.get("product", "") or "").strip()
-        brand = str(step.get("brand", "") or "").strip()
+        category = clean(step.get("category"))
+        product = clean(step.get("product"))
+        brand = clean(step.get("brand"))
 
         if brand and product and not product.startswith(brand):
             product = f"{brand} {product}"
@@ -10966,34 +11052,38 @@ def build_weekly_usage_plan(data):
 
         return category
 
-    def is_active_step(step):
-        text = " ".join([
-            str(step.get("category", "") or ""),
-            str(step.get("ingredient_focus", "") or ""),
-            str(step.get("purpose", "") or ""),
-            str(step.get("product", "") or ""),
-        ])
+    def has_any(text, words):
+        return any(word in text for word in words)
 
-        active_words = [
+    def is_strong_active_step(step):
+        text = step_text(step)
+
+        strong_words = [
             "レチノール",
             "レチナール",
-            "ビタミンC",
-            "アゼライン酸",
-            "ピーリング",
             "AHA",
             "BHA",
-            "PHA",
+            "ピーリング",
         ]
 
-        return any(word in text for word in active_words)
+        return has_any(text, strong_words)
+
+    def is_mild_active_step(step):
+        text = step_text(step)
+
+        mild_words = [
+            "ビタミンC",
+            "アゼライン酸",
+            "ナイアシンアミド",
+            "トラネキサム酸",
+            "PDRN",
+            "ペプチド",
+        ]
+
+        return has_any(text, mild_words) and not is_strong_active_step(step)
 
     def is_recovery_step(step):
-        text = " ".join([
-            str(step.get("category", "") or ""),
-            str(step.get("ingredient_focus", "") or ""),
-            str(step.get("purpose", "") or ""),
-            str(step.get("product", "") or ""),
-        ])
+        text = step_text(step)
 
         recovery_words = [
             "保湿",
@@ -11002,30 +11092,17 @@ def build_weekly_usage_plan(data):
             "ヒアルロン酸",
             "バリア",
             "鎮静",
+            "ドクダミ",
             "パック",
         ]
 
-        return any(word in text for word in recovery_words)
+        return has_any(text, recovery_words)
 
-    active_night_steps = [
-        step for step in night_steps
-        if isinstance(step, dict) and is_active_step(step)
-    ]
+    def is_peeling_step(step):
+        return "ピーリング" in step_text(step)
 
-    recovery_night_steps = [
-        step for step in night_steps
-        if isinstance(step, dict) and is_recovery_step(step)
-    ]
-
-    weekly_active_steps = [
-        step for step in weekly_steps
-        if isinstance(step, dict) and is_active_step(step)
-    ]
-
-    weekly_recovery_steps = [
-        step for step in weekly_steps
-        if isinstance(step, dict) and is_recovery_step(step)
-    ]
+    def is_pack_step(step):
+        return "パック" in step_text(step)
 
     fixed_morning = [
         step_label(step)
@@ -11033,62 +11110,145 @@ def build_weekly_usage_plan(data):
         if step_label(step)
     ]
 
-    fixed_night_base = [
-        step_label(step)
+    base_night_steps = [
+        step
         for step in night_steps
-        if step_label(step) and not is_active_step(step)
+        if isinstance(step, dict) and not is_strong_active_step(step) and not is_mild_active_step(step)
     ]
+
+    strong_active_steps = [
+        step
+        for step in night_steps
+        if isinstance(step, dict) and is_strong_active_step(step)
+    ]
+
+    mild_active_steps = [
+        step
+        for step in night_steps
+        if isinstance(step, dict) and is_mild_active_step(step)
+    ]
+
+    recovery_steps = [
+        step
+        for step in night_steps
+        if isinstance(step, dict) and is_recovery_step(step)
+    ]
+
+    peeling_steps = [
+        step
+        for step in weekly_steps
+        if isinstance(step, dict) and is_peeling_step(step)
+    ]
+
+    pack_steps = [
+        step
+        for step in weekly_steps
+        if isinstance(step, dict) and is_pack_step(step)
+    ]
+
+    base_night = [
+        step_label(step)
+        for step in base_night_steps
+        if step_label(step)
+    ]
+
+    def labels(steps):
+        return [
+            step_label(step)
+            for step in steps
+            if step_label(step)
+        ]
+
+    def make_day(day, morning=None, night=None, special_care=None, note=""):
+        return {
+            "day": day,
+            "morning": morning or [],
+            "night": night or [],
+            "special_care": special_care or [],
+            "note": note
+        }
+
+    def first_label(steps):
+        if not steps:
+            return ""
+        return step_label(steps[0])
 
     usage_plan = []
 
-    for index, day in enumerate(days):
-        day_plan = {
-            "day": day,
-            "morning": fixed_morning,
-            "night": [],
-            "special_care": [],
-            "note": ""
-        }
+    if strategy_type == "rotation":
+        for index, day in enumerate(days):
+            night = list(base_night)
+            special_care = []
+            note = ""
 
-        if strategy_type == "rotation":
-            if index in [0, 3] and active_night_steps:
-                selected_active = active_night_steps[index % len(active_night_steps)]
-                day_plan["night"] = fixed_night_base + [step_label(selected_active)]
-                day_plan["note"] = "攻めケアの日。翌日は肌を休ませる前提で入れます。"
-
-            elif index == 5 and weekly_active_steps:
-                selected_weekly = weekly_active_steps[0]
-                day_plan["night"] = fixed_night_base
-                day_plan["special_care"] = [step_label(selected_weekly)]
-                day_plan["note"] = "週ケアの日。レチノールなど刺激が出やすい成分とは同じ夜に重ねません。"
-
-            elif index == 6 and weekly_recovery_steps:
-                selected_weekly = weekly_recovery_steps[0]
-                day_plan["night"] = fixed_night_base
-                day_plan["special_care"] = [step_label(selected_weekly)]
-                day_plan["note"] = "回復ケアの日。乾燥や赤みを落ち着かせる目的で入れます。"
+            if is_sensitive_week:
+                if index in [1, 4] and mild_active_steps:
+                    night += [first_label(mild_active_steps)]
+                    note = "肌を大きく攻めすぎず、赤みや乾燥を見ながら穏やかな改善成分を入れる日です。"
+                elif index == 6 and pack_steps:
+                    special_care = [first_label(pack_steps)]
+                    note = "回復ケアの日。乾燥や赤みを落ち着かせる目的で入れます。"
+                else:
+                    night += labels(recovery_steps)
+                    note = "回復寄りの日。バリアを整えて、次の改善ケアに備えます。"
 
             else:
-                day_plan["night"] = fixed_night_base
-                day_plan["note"] = "回復寄りの日。肌を休ませて、次の攻めケアに備えます。"
+                if index in [0, 3] and strong_active_steps:
+                    night += [first_label(strong_active_steps)]
+                    note = "攻めケアの日。翌日は肌を休ませる前提で入れます。"
+                elif index in [2, 5] and mild_active_steps:
+                    selected = mild_active_steps[index % len(mild_active_steps)]
+                    night += [step_label(selected)]
+                    note = "穏やかな改善成分を入れる日。攻めすぎずに悩みへ寄せます。"
+                elif index == 6 and pack_steps:
+                    special_care = [first_label(pack_steps)]
+                    note = "週の最後は回復ケアで整える日です。"
+                elif needs_texture_care and index == 5 and peeling_steps:
+                    special_care = [first_label(peeling_steps)]
+                    note = "角質ケアの日。レチノールや高刺激成分とは同じ夜に重ねません。"
+                else:
+                    night += labels(recovery_steps)
+                    note = "回復寄りの日。肌を休ませて、次のケアの効きやすさを整えます。"
 
-        else:
-            day_plan["night"] = [
-                step_label(step)
-                for step in night_steps
-                if step_label(step)
-            ]
+            usage_plan.append(
+                make_day(
+                    day=day,
+                    morning=fixed_morning,
+                    night=night,
+                    special_care=special_care,
+                    note=note
+                )
+            )
 
-            if index == 5 and weekly_steps:
-                day_plan["special_care"] = [
-                    step_label(step)
-                    for step in weekly_steps
-                    if step_label(step)
-                ]
+        return usage_plan
 
-            day_plan["note"] = "固定ルーティンを軸に、肌を安定させる方針です。"
+    for index, day in enumerate(days):
+        night = [
+            step_label(step)
+            for step in night_steps
+            if step_label(step)
+        ]
 
-        usage_plan.append(day_plan)
+        special_care = []
+        note = routine_strategy.get("overall_policy") or "固定ルーティンを軸に、肌を安定させる方針です。"
+
+        if index == 5 and peeling_steps and needs_texture_care and not is_sensitive_week:
+            special_care = [first_label(peeling_steps)]
+            note = "肌状態に余裕がある週だけ、角質ケアを入れる想定です。赤みや乾燥が強い場合は休みます。"
+
+        elif index == 6 and pack_steps:
+            special_care = [first_label(pack_steps)]
+            note = "週の最後に回復ケアを入れて、乾燥や赤みを整えます。"
+
+        usage_plan.append(
+            make_day(
+                day=day,
+                morning=fixed_morning,
+                night=night,
+                special_care=special_care,
+                note=note
+            )
+        )
 
     return usage_plan
 
