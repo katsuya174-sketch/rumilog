@@ -1462,6 +1462,82 @@ def upsert_verified_product_cache(product):
         flush=True
     )
 
+def is_same_verified_rakuten_product(product_name, rakuten_title, brand=""):
+    product_name = clean_display_product_name(product_name)
+    rakuten_title = str(rakuten_title or "").strip()
+    brand = str(brand or "").strip()
+
+    if not product_name or not rakuten_title:
+        return False
+
+    product_identity = normalize_candidate_name_for_merge(product_name)
+    rakuten_identity = normalize_candidate_name_for_merge(rakuten_title)
+    brand_identity = normalize_candidate_name_for_merge(brand)
+
+    if not product_identity or not rakuten_identity:
+        return False
+
+    product_compact = product_identity.replace(" ", "")
+    rakuten_compact = rakuten_identity.replace(" ", "")
+
+    if product_compact and product_compact in rakuten_compact:
+        return True
+
+    if brand_identity:
+        full_identity = normalize_candidate_name_for_merge(
+            f"{brand} {product_name}"
+        )
+        full_compact = full_identity.replace(" ", "")
+
+        if full_compact and full_compact in rakuten_compact:
+            return True
+
+    product_tokens = [
+        token
+        for token in product_identity.split()
+        if len(token) >= 2
+        and token not in {
+            "美容液",
+            "化粧水",
+            "乳液",
+            "クリーム",
+            "洗顔",
+            "洗顔料",
+            "日焼け止め",
+            "パック",
+            "マスク",
+            "ピーリング",
+            "セラム",
+            "ローション",
+            "ジェル",
+            "本体",
+            "詰替",
+            "詰め替え",
+        }
+    ]
+
+    if not product_tokens:
+        return False
+
+    matched_tokens = [
+        token
+        for token in product_tokens
+        if token in rakuten_identity
+    ]
+
+    required_matches = 1
+
+    if len(product_tokens) >= 3:
+        required_matches = 2
+
+    if len(matched_tokens) < required_matches:
+        return False
+
+    if brand_identity and brand_identity not in rakuten_identity:
+        return False
+
+    return True
+
 def build_verified_product_from_step(step, rakuten_item):
     if not isinstance(step, dict) or not isinstance(rakuten_item, dict):
         return None
@@ -1477,6 +1553,8 @@ def build_verified_product_from_step(step, rakuten_item):
         return value if isinstance(value, dict) else {}
 
     product_name = clean_display_product_name(step.get("product", ""))
+    brand = str(step.get("brand", "") or "").strip()
+
     category = normalize_candidate_category(
         step.get("category", ""),
         fallback=step.get("category", "")
@@ -1487,34 +1565,24 @@ def build_verified_product_from_step(step, rakuten_item):
 
     rakuten_title = str(rakuten_item.get("rakuten_title", "") or "").strip()
 
-    if rakuten_title:
-        product_identity = normalize_candidate_name_for_merge(product_name)
-        rakuten_identity = normalize_candidate_name_for_merge(rakuten_title)
-
-        if product_identity and rakuten_identity:
-            product_tokens = [
-                token for token in product_identity.split()
-                if len(token) >= 2
-            ]
-
-            matched_tokens = [
-                token for token in product_tokens
-                if token in rakuten_identity
-            ]
-
-            if product_tokens and not matched_tokens:
-                print(
-                    "[VERIFIED CACHE REJECT TITLE MISMATCH]",
-                    {
-                        "product": product_name,
-                        "rakuten_title": rakuten_title
-                    },
-                    flush=True
-                )
-                return None
+    if not is_same_verified_rakuten_product(
+        product_name=product_name,
+        rakuten_title=rakuten_title,
+        brand=brand
+    ):
+        print(
+            "[VERIFIED CACHE REJECT TITLE MISMATCH]",
+            {
+                "product": product_name,
+                "brand": brand,
+                "rakuten_title": rakuten_title
+            },
+            flush=True
+        )
+        return None
 
     candidate = {
-        "brand": str(step.get("brand", "") or "").strip(),
+        "brand": brand,
         "name": product_name,
         "category": category,
         "price_ref": safe_price(rakuten_item.get("price", 0)),
@@ -1555,11 +1623,14 @@ def build_verified_product_from_step(step, rakuten_item):
     product["image"] = rakuten_item.get("image", "")
     product["rakuten_link"] = rakuten_item.get("rakuten_link", "")
     product["rakuten_title"] = rakuten_item.get("rakuten_title", "")
+    product["item_code"] = rakuten_item.get("item_code", "")
+    product["shop_name"] = rakuten_item.get("shop_name", "")
     product["verified_at"] = time.time()
     product["_source_hint"] = "verified_cache"
+    product["_source"] = "verified_cache"
 
     return product
-
+    
 def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="", purpose=""):
     global RAKUTEN_COOLDOWN_UNTIL
 
@@ -1572,13 +1643,10 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
     )
 
     if cache_key in _rakuten_item_cache:
+        print("[RAKUTEN CACHE HIT]", product_name, flush=True)
         return _rakuten_item_cache[cache_key]
 
-    print(
-        "[RAKUTEN CACHE HIT]",
-        product_name,
-        flush=True
-    )
+    print("[RAKUTEN CACHE MISS]", product_name, flush=True)
 
     if time.time() < RAKUTEN_COOLDOWN_UNTIL:
         print(
@@ -1591,6 +1659,7 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
         return None
 
     product_name = clean_display_product_name(product_name)
+
     if not product_name:
         print("[RAKUTEN API] product_name empty", flush=True)
         return None
@@ -1640,7 +1709,7 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
     print("[RAKUTEN KEYWORDS]", keywords, flush=True)
 
-    MAX_RAKUTEN_KEYWORDS = 3
+    MAX_RAKUTEN_KEYWORDS = 2
 
     for keyword in keywords[:MAX_RAKUTEN_KEYWORDS]:
         keyword = clean_rakuten_keyword(keyword)
@@ -1653,15 +1722,13 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
             print(f"[RAKUTEN TRY KEYWORD] {keyword}", flush=True)
             print("[RAKUTEN KEYWORD LEN]", len(keyword), flush=True)
 
-            class RakutenRateLimitError(Exception):
-                pass
             wait_for_rakuten_rate_limit()
 
             params = {
                 "applicationId": RAKUTEN_APP_ID,
                 "accessKey": RAKUTEN_ACCESS_KEY,
                 "keyword": keyword,
-                "hits": 20,
+                "hits": 10,
                 "format": "json",
                 "formatVersion": 2,
                 "imageFlag": 1,
@@ -1735,6 +1802,24 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 if not isinstance(item, dict):
                     continue
 
+                rakuten_title = str(item.get("itemName", "") or "").strip()
+
+                if not is_same_verified_rakuten_product(
+                    product_name=product_name,
+                    rakuten_title=rakuten_title,
+                    brand=brand
+                ):
+                    print(
+                        "[RAKUTEN REJECT TITLE MISMATCH]",
+                        {
+                            "product": product_name,
+                            "brand": brand,
+                            "rakuten_title": rakuten_title
+                        },
+                        flush=True
+                    )
+                    continue
+
                 score = score_rakuten_item(
                     item,
                     product_name=product_name,
@@ -1799,6 +1884,8 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                     or "#"
                 ),
                 "image": image_url,
+                "item_code": best.get("itemCode", ""),
+                "shop_name": best.get("shopName", ""),
             }
 
             _rakuten_item_cache[cache_key] = result
@@ -1807,11 +1894,6 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
         except requests.exceptions.RequestException as e:
             print("[RAKUTEN API REQUEST ERROR]", e, flush=True)
             continue
-
-        except RakutenRateLimitError as e:
-            print("[RAKUTEN RATE LIMIT SKIP]", e, flush=True)
-            _rakuten_item_cache[cache_key] = None
-            return None
 
         except Exception as e:
             print("[RAKUTEN API UNKNOWN ERROR]", repr(e), flush=True)
