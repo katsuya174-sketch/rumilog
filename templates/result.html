@@ -692,9 +692,13 @@
                 </p>
             </div>
         </section>
+        {{ render_routine_section("朝のスキンケア", "Morning", data.get("morning", {}).get("steps", [])) }}
 
+        {{ render_routine_section("夜のスキンケア", "Night", data.get("night", {}).get("steps", [])) }}
+        
+        {{ render_routine_section("週ケア", "Weekly", data.get("weekly_care", []), True) }}
 
-        {% if data.get("is_premium") and data.get("weekly_usage_plan", []) %}
+        {% if (data.get("is_premium") or data.get("dev_mode")) and data.get("weekly_usage_plan", []) %}
         <section class="routine-shell">
             <div class="routine-header">
                 <h2 class="routine-title">7日間改善ルーティン</h2>
