@@ -756,7 +756,8 @@
             {% endfor %}
         </section>
 
-            {% elif not data.get("is_premium") and not data.get("is_dev_mode") %}
+        {% if not data.get("is_premium") and not data.get("is_dev_mode") %}
+        <section class="result-card">
             <h2 class="section-title">7日間改善ルーティン</h2>
             <div class="premium-lock-box">
                 1週間の使い分けプランは有料プランで確認できます。
