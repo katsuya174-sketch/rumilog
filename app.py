@@ -11468,9 +11468,16 @@ def lab_test_function():
             # ③ AI分析
             # =========================
 
-            print("[LAB CHECK] before Gemini", flush=True)
             try:
-                data = analyze_skin_with_gemini(user_data, front_img, left_img, right_img)
+                print("[LAB CHECK] before Gemini", flush=True)
+
+                data = analyze_skin_with_gemini(
+                    user_data,
+                    front_img,
+                    left_img,
+                    right_img
+                )
+
                 print("[LAB CHECK] after Gemini", flush=True)
 
             except Exception as e:
