@@ -1836,7 +1836,12 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 continue
 
             scored_items.sort(
-                key=lambda pair: pair[0],
+                key=lambda pair: (
+                    pair[0],
+                    safe_price(pair[1].get("reviewCount", 0)),
+                    safe_price(pair[1].get("reviewAverage", 0)),
+                    -safe_price(pair[1].get("itemPrice", 0))
+                ),
                 reverse=True
             )
 
@@ -2109,6 +2114,39 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
 
     return normalize_step_price_fields(step)
 
+def attach_affiliate_links_to_result(data, affiliate_ai_db):
+    if not isinstance(data, dict):
+        return data
+
+    for section in ["morning", "night"]:
+        section_data = data.get(section, {})
+
+        if not isinstance(section_data, dict):
+            continue
+
+        steps = section_data.get("steps", [])
+
+        if not isinstance(steps, list):
+            continue
+
+        section_data["steps"] = [
+            attach_affiliate_links_to_step(step, affiliate_ai_db)
+            if isinstance(step, dict)
+            else step
+            for step in steps
+        ]
+
+    weekly_care = data.get("weekly_care", [])
+
+    if isinstance(weekly_care, list):
+        data["weekly_care"] = [
+            attach_affiliate_links_to_step(step, affiliate_ai_db)
+            if isinstance(step, dict)
+            else step
+            for step in weekly_care
+        ]
+
+    return data
 
 def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
     for section in ["morning", "night"]:
@@ -6114,14 +6152,12 @@ def ensure_required_routine_steps(data):
         weekly_category = weekly_step.get("category", "")
 
         if weekly_category == "ピーリング":
-            weekly_step.setdefault("frequency", "週1回・夜")
             weekly_step.setdefault(
                 "risk_note",
                 "レチノールや高濃度ビタミンCと同じ夜は避ける"
             )
 
         elif weekly_category == "パック":
-            weekly_step.setdefault("frequency", "週1〜2回・夜")
             weekly_step.setdefault("risk_note", "")
 
     if needs_peeling and not weekly_has_category("ピーリング"):
@@ -12033,7 +12069,8 @@ def result_detail(result_id):
                     data = item
 
                 data["is_premium"] = is_premium_user()
-
+                data = attach_affiliate_links_to_result(data, affiliate_ai_db)
+                data["is_dev_mode"] = True
                 return render_template("result.html", data=data)
 
         return "結果が見つかりません", 404
