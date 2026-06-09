@@ -2114,73 +2114,7 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
 
     return normalize_step_price_fields(step)
 
-
-
-def attach_affiliate_links_to_result(data, affiliate_ai_db):
-    if not isinstance(data, dict):
-        return data
-
-    for section in ["morning", "night"]:
-        section_data = data.get(section, {})
-        if not isinstance(section_data, dict):
-            continue
-
-        steps = section_data.get("steps", [])
-        if not isinstance(steps, list):
-            continue
-
-        section_data["steps"] = [
-            attach_affiliate_links_to_step(step, affiliate_ai_db)
-            if isinstance(step, dict)
-            else step
-            for step in steps
-        ]
-
-    weekly_care = data.get("weekly_care", [])
-    if isinstance(weekly_care, list):
-        data["weekly_care"] = [
-            attach_affiliate_links_to_step(step, affiliate_ai_db)
-            if isinstance(step, dict)
-            else step
-            for step in weekly_care
-        ]
-
-    return data
-
-def attach_affiliate_links_to_result(data, affiliate_ai_db):
-    if not isinstance(data, dict):
-        return data
-
-    for section in ["morning", "night"]:
-        section_data = data.get(section, {})
-
-        if not isinstance(section_data, dict):
-            continue
-
-        steps = section_data.get("steps", [])
-
-        if not isinstance(steps, list):
-            continue
-
-        section_data["steps"] = [
-            attach_affiliate_links_to_step(step, affiliate_ai_db)
-            if isinstance(step, dict)
-            else step
-            for step in steps
-        ]
-
-    weekly_care = data.get("weekly_care", [])
-
-    if isinstance(weekly_care, list):
-        data["weekly_care"] = [
-            attach_affiliate_links_to_step(step, affiliate_ai_db)
-            if isinstance(step, dict)
-            else step
-            for step in weekly_care
-        ]
-
-    return data
-
+   
 def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
     for section in ["morning", "night"]:
         for step in data.get(section, {}).get("steps", []):
@@ -11672,7 +11606,6 @@ def lab_test_function():
             debug_log("BUDGET VALUE", budget_value)
             data = assign_products_to_all_steps(data, products, user_data, budget_value)
             affiliate_ai_db = load_affiliate_links_ai()
-            data = attach_affiliate_links_to_all_steps(data, affiliate_ai_db)
             
             debug_log("AFTER ASSIGN PRODUCTS")
             debug_step_summary("morning assigned", data.get("morning", {}).get("steps", []))
@@ -11690,6 +11623,7 @@ def lab_test_function():
             # ⑨ 最終整形
             # =========================
             data = finalize_result_data(data, user_data)
+            data = attach_affiliate_links_to_all_steps(data, affiliate_ai_db)
 
             debug_log("AFTER FINALIZE")
             debug_step_summary("morning finalized", data.get("morning", {}).get("steps", []))
@@ -11726,14 +11660,6 @@ def lab_test_function():
                 "analysis_date": data.get("analysis_date", "")
             })
 
-            # 無料回数の消費は、診断自体がここまで完了したら進める
-            try:
-                increment_free_usage(client_ip)
-            except Exception as e:
-                print("===== FREE USAGE SAVE ERROR =====")
-                print(e)
-                print("=================================")
-
             try:
                 increment_free_usage(client_ip)
                 increment_global_usage()
@@ -11753,44 +11679,12 @@ def lab_test_function():
                 traceback.print_exc()
                 print("=============================")
                 # 保存に失敗しても結果表示は止めない
-            PRODUCT_LOG_FILE = "product_log.json"
-            def log_displayed_products(data):
-                logs = []
 
-                if os.path.exists(PRODUCT_LOG_FILE):
-                    try:
-                        with open(PRODUCT_LOG_FILE, "r", encoding="utf-8") as f:
-                            logs = json.load(f)
-                            if not isinstance(logs, list):
-                                logs = []
-                    except Exception:
-                        logs = []
-
-                now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                def extract(section_name, steps):
-                    for step in steps:
-                        if not isinstance(step, dict):
-                            continue
-
-                        logs.append({
-                            "time": now,
-                            "section": section_name,
-                            "category": step.get("category", ""),
-                            "product": step.get("product", "")
-                        })
-
-                extract("morning", data.get("morning", {}).get("steps", []))
-                extract("night", data.get("night", {}).get("steps", []))
-                extract("weekly", data.get("weekly_care", []))
-
-                with open(PRODUCT_LOG_FILE, "w", encoding="utf-8") as f:
-                    json.dump(logs, f, ensure_ascii=False, indent=2)
             # =========================
             # ⑫ 表示
             # =========================
-            data["dev_mode"] = DEV_MODE or DEV_PREMIUM_MODE
-
+            data["is_dev_mode"] = DEV_MODE or DEV_PREMIUM_MODE
+            
             html = render_template(
                 "result.html",
                 data=data
