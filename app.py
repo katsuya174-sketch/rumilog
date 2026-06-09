@@ -11412,7 +11412,7 @@ def debug_candidate_counts(data):
 # # AI肌診断ページ
 @app.route("/lab", methods=["GET", "POST"])
 def lab_test_function():
-    
+    print("[LAB ENTER]", request.method, flush=True)
     if request.method == "POST":
         lab_t0 = time.time()
         print("[LAB TIME] start 0.0", flush=True)
@@ -11467,9 +11467,12 @@ def lab_test_function():
             # =========================
             # ③ AI分析
             # =========================
+
+            print("[LAB CHECK] before Gemini", flush=True)
             try:
                 data = analyze_skin_with_gemini(user_data, front_img, left_img, right_img)
-                print("[LAB TIME] after analyze_skin_with_gemini", round(time.time() - lab_t0, 2), flush=True)
+                print("[LAB CHECK] after Gemini", flush=True)
+
             except Exception as e:
                 print("===== LAB ERROR =====")
                 print(e)
@@ -11607,8 +11610,10 @@ def lab_test_function():
             )
             budget_value = parse_budget(user_data.get("budget", ""))
             debug_log("BUDGET VALUE", budget_value)
+
+            print("[LAB CHECK] before assign", flush=True)
             data = assign_products_to_all_steps(data, products, user_data, budget_value)
-            print("[LAB TIME] after assign_products_to_all_steps", round(time.time() - lab_t0, 2), flush=True)
+            print("[LAB CHECK] after assign", flush=True)
             affiliate_ai_db = load_affiliate_links_ai()
             
             debug_log("AFTER ASSIGN PRODUCTS")
@@ -11627,9 +11632,9 @@ def lab_test_function():
             # ⑨ 最終整形
             # =========================
             data = finalize_result_data(data, user_data)
-            print("[LAB TIME] after finalize_result_data", round(time.time() - lab_t0, 2), flush=True)
+            print("[LAB CHECK] before affiliate", flush=True)
             data = attach_affiliate_links_to_all_steps(data, affiliate_ai_db)
-            print("[LAB TIME] after attach_affiliate_links_to_all_steps", round(time.time() - lab_t0, 2), flush=True)
+            print("[LAB CHECK] after affiliate", flush=True)
             debug_log("AFTER FINALIZE")
             debug_step_summary("morning finalized", data.get("morning", {}).get("steps", []))
             debug_step_summary("night finalized", data.get("night", {}).get("steps", []))
