@@ -11414,6 +11414,8 @@ def debug_candidate_counts(data):
 def lab_test_function():
     
     if request.method == "POST":
+        lab_t0 = time.time()
+        print("[LAB TIME] start 0.0", flush=True)
         is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
         try:
             client_ip = get_client_ip()
@@ -11467,6 +11469,7 @@ def lab_test_function():
             # =========================
             try:
                 data = analyze_skin_with_gemini(user_data, front_img, left_img, right_img)
+                print("[LAB TIME] after analyze_skin_with_gemini", round(time.time() - lab_t0, 2), flush=True)
             except Exception as e:
                 print("===== LAB ERROR =====")
                 print(e)
@@ -11605,6 +11608,7 @@ def lab_test_function():
             budget_value = parse_budget(user_data.get("budget", ""))
             debug_log("BUDGET VALUE", budget_value)
             data = assign_products_to_all_steps(data, products, user_data, budget_value)
+            print("[LAB TIME] after assign_products_to_all_steps", round(time.time() - lab_t0, 2), flush=True)
             affiliate_ai_db = load_affiliate_links_ai()
             
             debug_log("AFTER ASSIGN PRODUCTS")
@@ -11623,8 +11627,9 @@ def lab_test_function():
             # ⑨ 最終整形
             # =========================
             data = finalize_result_data(data, user_data)
+            print("[LAB TIME] after finalize_result_data", round(time.time() - lab_t0, 2), flush=True)
             data = attach_affiliate_links_to_all_steps(data, affiliate_ai_db)
-
+            print("[LAB TIME] after attach_affiliate_links_to_all_steps", round(time.time() - lab_t0, 2), flush=True)
             debug_log("AFTER FINALIZE")
             debug_step_summary("morning finalized", data.get("morning", {}).get("steps", []))
             debug_step_summary("night finalized", data.get("night", {}).get("steps", []))
@@ -11635,7 +11640,7 @@ def lab_test_function():
             # =========================
             data = finalize_budget_info(data, budget_value)
             data["weekly_usage_plan"] = build_weekly_usage_plan(data)
-
+            print("[LAB TIME] after build_weekly_usage_plan", round(time.time() - lab_t0, 2), flush=True)
             print(
                 "[WEEKLY USAGE PLAN]",
                 json.dumps(
@@ -11686,7 +11691,7 @@ def lab_test_function():
 
             data = lightweight_result_payload(data)
             data["is_dev_mode"] = DEV_MODE or DEV_PREMIUM_MODE
-
+            print("[LAB TIME] before render_template", round(time.time() - lab_t0, 2), flush=True)
             html = render_template(
                 "result.html",
                 data=data
