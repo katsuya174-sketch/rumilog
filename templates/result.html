@@ -342,7 +342,7 @@
   
               {% if step.get("score_detail") %}
               <div class="score-detail-compact">
-                  ベース {{ step.score_detail.base }} / 改善 {{ step.score_detail.improve }} / 最終 {{ step.score_detail.final }}
+                ベース {{ step.score_detail.base }} / 改善 {{ step.score_detail.improve }} / ルーティン {{ step.score_detail.routine }} / 最終 {{ step.score_detail.final }}
               </div>
               {% endif %}
   
@@ -361,32 +361,7 @@
                   </div>
                   {% endif %}
   
-                  {% if data.get("is_dev_mode") or data.get("is_premium") %}
-                      {% if step.get("score_detail") %}
-                      <div class="score-detail-box">
-                          <div class="score-detail-title">選定スコア詳細</div>
-                  
-                          <div class="score-detail-row">
-                              <span>ベース</span>
-                              <span>{{ step.score_detail.base }}</span>
-                          </div>
-                  
-                          <div class="score-detail-row">
-                              <span>改善</span>
-                              <span>{{ step.score_detail.improve }}</span>
-                          </div>
-                  
-                          <div class="score-detail-row">
-                              <span>ルーティン適合</span>
-                              <span>{{ step.score_detail.routine }}</span>
-                          </div>
-                  
-                          <div class="score-detail-row total">
-                              <span>最終</span>
-                              <span>{{ step.score_detail.final }}</span>
-                          </div>
-                      </div>
-                      {% endif %}
+
                   {% else %}
                       <div class="premium-lock-box">
                           詳細スコア・次点候補は有料プランで確認できます

@@ -11608,6 +11608,12 @@ def lab_test_function():
             )
             data = apply_moisture_plan(data)
             data = ensure_required_routine_steps(data)
+
+            print("[CHECK AFTER ENSURE]", {
+                "morning": [s.get("category") for s in data.get("morning", {}).get("steps", []) if isinstance(s, dict)],
+                "night": [s.get("category") for s in data.get("night", {}).get("steps", []) if isinstance(s, dict)],
+                "weekly": [s.get("category") for s in data.get("weekly_care", []) if isinstance(s, dict)],
+            }, flush=True)
             # serum制限は product選定後のほうが安全
             # ここではまだやらない
 
@@ -11651,6 +11657,13 @@ def lab_test_function():
             # ⑨ 最終整形
             # =========================
             data = finalize_result_data(data, user_data)
+
+            print("[CHECK AFTER FINALIZE]", {
+                "morning": [(s.get("category"), s.get("product")) for s in data.get("morning", {}).get("steps", []) if isinstance(s, dict)],
+                "night": [(s.get("category"), s.get("product")) for s in data.get("night", {}).get("steps", []) if isinstance(s, dict)],
+                "weekly": [(s.get("category"), s.get("product")) for s in data.get("weekly_care", []) if isinstance(s, dict)],
+            }, flush=True)
+
             print("[LAB CHECK] before affiliate", flush=True)
             data = attach_affiliate_links_to_all_steps(data, affiliate_ai_db)
             print("[LAB CHECK] after affiliate", flush=True)
