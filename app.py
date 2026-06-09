@@ -33,6 +33,17 @@ RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
 VERIFIED_PRODUCTS_CACHE_FILE = "verified_products_cache.json"
 VERIFIED_PRODUCTS_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
+
+# ===== Gemini Models =====
+
+ANALYSIS_MODEL = "gemini-3.5-flash"
+
+CANDIDATE_MODEL = "gemini-3.5-flash"
+
+ROUTINE_MODEL = "gemini-3.5-flash"
+
+DETAIL_MODEL = "gemini-3.1-flash-lite"
+
 #DB_POOL = SimpleConnectionPool(
 #   minconn=1,
 #    maxconn=5,
@@ -6252,7 +6263,7 @@ def collect_market_candidates_with_gemini(user_data, analyzed_data):
     prompt = build_candidate_collection_prompt(user_data, analyzed_data)
 
     response = call_gemini_with_quota_guard(
-        model="gemini-2.5-flash",
+        model=CANDIDATE_MODEL,
         contents=[prompt],
         config=types.GenerateContentConfig(
             temperature=0,
@@ -8889,7 +8900,7 @@ def normalize_result(raw_data, image_path=""):
         "budget_fit_total": raw_data.get("budget_fit_total", 0),
         "budget_status": raw_data.get("budget_status", "未判定"),
         "image_path": image_path,
-        "model": "gemini-2.5-flash",
+        "model": ANALYSIS_MODEL,
         "version": "1.0"
     }
     
@@ -10365,7 +10376,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
     try:
         response = call_gemini_with_retry(
             client,
-            "gemini-3.5-flash",
+            ANALYSIS_MODEL,
             contents=[prompt, front_img, left_img, right_img],
             config=types.GenerateContentConfig(
                 temperature=0,
@@ -10475,7 +10486,7 @@ def detailed_analysis_with_gemini(client, user_data, result_data):
 
     response = call_gemini_with_retry(
         client=client,
-        model="gemini-2.5-flash",
+        model=CANDIDATE_MODEL,
         contents=prompt,
         config={
             "temperature": 0
@@ -10654,7 +10665,7 @@ def collect_rich_market_candidates_with_gemini(user_data, analyzed_data):
     prompt = build_rich_candidate_collection_prompt(user_data, analyzed_data)
 
     response = call_gemini_with_quota_guard(
-        model="gemini-2.5-flash",
+        model=DETAIL_MODEL,
         contents=[prompt],
         config=types.GenerateContentConfig(
             temperature=0,
