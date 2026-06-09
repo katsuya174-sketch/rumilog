@@ -250,7 +250,6 @@ from constants import (
     CONCERN_MAP
 )
 def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
-    import time
     import random
     from google.genai import errors
 
@@ -268,8 +267,15 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
         "quota",
     ]
 
+    max_retries = max(1, int(max_retries or 1))
+
     for attempt in range(max_retries):
         try:
+            print(
+                f"[GEMINI CALL START] model={model} attempt={attempt + 1}/{max_retries}",
+                flush=True
+            )
+
             response = client.models.generate_content(
                 model=model,
                 contents=contents,
@@ -285,6 +291,11 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
                     GEMINI_DAILY_LIMIT,
                     flush=True
                 )
+
+            print(
+                f"[GEMINI CALL SUCCESS] model={model} attempt={attempt + 1}/{max_retries}",
+                flush=True
+            )
 
             return response
 
@@ -323,10 +334,10 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
                     retry_after_seconds = None
 
             if retry_after_seconds is not None:
-                wait_seconds = min(15, max(2, retry_after_seconds))
+                wait_seconds = min(3, max(1, retry_after_seconds))
             else:
-                base_wait = min(12, 2 ** attempt)
-                jitter = random.uniform(0.3, 1.2)
+                base_wait = min(2, 1 + attempt)
+                jitter = random.uniform(0.2, 0.6)
                 wait_seconds = base_wait + jitter
 
             print(
@@ -346,6 +357,7 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
             raise
 
     raise last_error
+
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
 from PIL import Image,ImageOps
@@ -781,7 +793,7 @@ def clean_rakuten_image_url(url):
         url = "https:" + url
     return url
 
-import time
+
 
 _last_rakuten_request_time = 0
 
@@ -7930,7 +7942,7 @@ def is_rate_limited(ip, limit=3):
     USAGE_LOG[ip]["count"] += 1
     return False
 
-import time
+
 
 def call_gemini_with_quota_guard(**kwargs):
     return call_gemini_with_retry(
@@ -10500,7 +10512,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
                 response_mime_type="application/json",
                 response_schema=schema
             ),
-            max_retries=4
+            max_retries=1
         )
 
         raw_text = response.text.strip()
