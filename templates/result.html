@@ -346,7 +346,7 @@
               </div>
               {% endif %}
   
-              {% if data.get("is_premium") or data.get("dev_mode") %}
+              {% if data.get("is_premium") or data.get("is_dev_mode")%}
                   {% if step.get("top_candidates", [])|length > 1 %}
                   <div class="sub-candidates-box compact">
                       <div class="sub-candidates-title">次点候補</div>
@@ -479,7 +479,7 @@
         <div class="score-detail-box">
             <div class="score-detail-title">有料版 詳細スコア</div>
 
-            {% if data.get("is_premium") or data.get("dev_mode") %}
+            {% if data.get("is_premium") or data.get("is_dev_mode")%}
                 <div class="score-detail-row">
                     <span>赤ニキビ跡</span>
                     <span>{{ data.premium_scores.get("acne_marks_red", 0) }}</span>
@@ -528,7 +528,7 @@
         </div>
         {% endif %}
 
-        {% if (data.get("is_premium") or data.get("dev_mode")) and data.get("symmetry_analysis") %}
+        {% if (data.get("is_premium") or data.get("is_dev_mode")try_analysis") %}
         <div class="score-detail-box">
             <div class="score-detail-title">左右差の分析</div>
         
@@ -755,6 +755,7 @@
             </div>
             {% endfor %}
         </section>
+        {% endif %}
 
         {% if not data.get("is_premium") and not data.get("is_dev_mode") %}
         <section class="result-card">
