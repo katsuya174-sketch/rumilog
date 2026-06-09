@@ -383,7 +383,7 @@
                   {% endif %}
               {% else %}
                   <div class="premium-lock-box">
-                      詳細スコア・代替候補は有料プランで確認できます
+                    詳細スコア・次点候補は有料プランで確認できます
                       <a href="/pricing?source=result" class="premium-link">詳しく見る</a>
                   </div>
               {% endif %}
@@ -867,159 +867,11 @@
             for (let i = 0; i < 14; i++) createSparkle(bgEffects);
         });
 
-        async function verifyProductCard(card) {
-
-            const product =
-                card.dataset.product || "";
-
-            const category =
-                card.dataset.category || "";
-
-            if (!product) {
-                return;
-            }
-
-            try {
-
-                const params =
-                    new URLSearchParams({
-                        product,
-                        category
-                    });
-
-                const res =
-                    await fetch(
-                        "/api/verify-product?"
-                        + params.toString()
-                    );
-
-                const data =
-                    await res.json();
-
-                if (!data.ok) {
-                    return;
-                }
-
-                const img =
-                    card.querySelector(
-                        "img.product-img-new"
-                    );
-
-                const empty =
-                    card.querySelector(
-                        ".product-img-empty"
-                    );
-
-                if (
-                    img &&
-                    data.image
-                ) {
-
-                    img.src =
-                        data.image;
-
-                    img.style.display =
-                        "block";
-
-                    img.classList.remove(
-                        "is-hidden"
-                    );
-
-                    if (empty) {
-
-                        empty.style.display =
-                            "none";
-
-                        empty.classList.add(
-                            "is-hidden"
-                        );
-
-                    }
-
-                }
-
-                const priceEl =
-                    card.querySelector(
-                        ".product-price"
-                    );
-
-                if (
-                    priceEl &&
-                    Number(data.price) > 0
-                ) {
-
-                    priceEl.textContent =
-                        "参考価格："
-                        + Number(
-                            data.price
-                        ).toLocaleString()
-                        + "円";
-
-                }
-
-                const rakutenButton =
-                    card.querySelector(
-                        "a[href*='source=rakuten']"
-                    );
-
-                if (
-                    rakutenButton &&
-                    data.rakuten_link
-                ) {
-
-                    rakutenButton.href =
-                        "/click?source=rakuten"
-                        + "&product="
-                        + encodeURIComponent(product)
-                        + "&category="
-                        + encodeURIComponent(category)
-                        + "&url="
-                        + encodeURIComponent(
-                            data.rakuten_link
-                        );
-
-                }
-
-            }
-
-            catch (e) {
-
-                console.log(
-                    "[VERIFY ERROR]",
-                    e
-                );
-
-            }
-
-            }
-
-            document.addEventListener(
-            "DOMContentLoaded",
-            async function () {
-
-                const cards =
-                    document.querySelectorAll(
-                        "[data-product]"
-                    );
-
-                for (const card of cards) {
-
-                    await verifyProductCard(
-                        card
-                    );
-
-                    await new Promise(
-                        resolve =>
-                            setTimeout(
-                                resolve,
-                                700
-                            )
-                    );
-
-                }
-
-            }
-            );
+        document.addEventListener("DOMContentLoaded", function () {
+            // 商品名・画像・リンクのズレ防止のため、
+            // 表示後の商品情報自動上書きは停止。
+            // 商品情報はバックエンドで確定したものを表示する。
+        });
     </script>
 </body>
 </html> 

@@ -800,9 +800,6 @@ def wait_for_rakuten_rate_limit():
 def build_rakuten_search_keywords(product_name, brand="", category="", ingredient_focus="", purpose=""):
     name = clean_rakuten_keyword(product_name)
     brand = clean_rakuten_keyword(brand)
-    category = clean_rakuten_keyword(category)
-    ingredient_focus = clean_rakuten_keyword(ingredient_focus)
-    purpose = clean_rakuten_keyword(purpose)
 
     keywords = []
 
@@ -811,21 +808,24 @@ def build_rakuten_search_keywords(product_name, brand="", category="", ingredien
         if value and value not in keywords:
             keywords.append(value)
 
+    if not name:
+        return []
+
     is_high_risk_ai_name = any(
         word in name
         for word in OLD_PRODUCT_WORDS
     )
 
-    if not is_high_risk_ai_name:
-        if brand and name and not name.lower().startswith(brand.lower()):
-            add(f"{brand} {name}")
+    if is_high_risk_ai_name:
+        return []
 
-        add(name)
+    if brand and name and not name.lower().startswith(brand.lower()):
+        add(f"{brand} {name}")
+
+    add(name)
 
     parts = name.split()
 
-    # COSRX ザ ビタミンC23 セラム のように「ザ」が楽天APIで400になりやすいので、
-    # 意味の薄い語を落とした検索語を作る。
     meaningful_parts = [
         p for p in parts
         if p not in {"ザ", "the", "THE"}
@@ -843,29 +843,9 @@ def build_rakuten_search_keywords(product_name, brand="", category="", ingredien
     if len(meaningful_parts) >= 2:
         add(" ".join(meaningful_parts[-2:]))
 
-    if brand and category and ingredient_focus:
-        add(f"{brand} {category} {ingredient_focus}")
-
-    if category and ingredient_focus:
-        add(f"{category} {ingredient_focus}")
-
-    if category and purpose:
-        add(f"{category} {purpose}")
-
-    if category == "クリーム":
-        if brand and ingredient_focus:
-            add(f"{brand} フェイスクリーム {ingredient_focus}")
-
-        if ingredient_focus:
-            add(f"フェイスクリーム {ingredient_focus}")
-            add(f"保湿クリーム {ingredient_focus}")
-
-        add("フェイスクリーム 保湿")
-        add("保湿クリーム")
-
     print("[RAKUTEN KEYWORDS]", keywords, flush=True)
 
-    return keywords[:7]
+    return keywords[:5]
 
 def score_current_product_signal(item):
     if not isinstance(item, dict):
@@ -1082,7 +1062,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             return -9999
 
     elif category == "パック":
-        if not any(word in title for word in [
+        pack_words = [
             "パック",
             "マスク",
             "シートマスク",
@@ -1090,23 +1070,21 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             "sheet mask",
             "face mask",
             "mask"
-        ]):
+        ]
+
+        if not any(word in title for word in pack_words):
             return -9999
 
-        if any(word in title for word in [
+        hard_wrong_pack_words = [
             "化粧水",
             "ローション",
             "トナー",
-            "美容液",
-            "セラム",
-            "クリーム",
-            "乳液",
-            "ミルク",
             "洗顔",
             "クレンジング"
-        ]):
-            return -9999
+        ]
 
+        if any(word in title for word in hard_wrong_pack_words):
+            return -9999
     elif category == "化粧水":
         if any(word in title for word in ["クリーム", "乳液", "ミルク", "美容液", "セラム", "シートマスク", "フェイスマスク", "パック"]):
             return -9999
@@ -1506,6 +1484,34 @@ def build_verified_product_from_step(step, rakuten_item):
 
     if not product_name or not category:
         return None
+
+    rakuten_title = str(rakuten_item.get("rakuten_title", "") or "").strip()
+
+    if rakuten_title:
+        product_identity = normalize_candidate_name_for_merge(product_name)
+        rakuten_identity = normalize_candidate_name_for_merge(rakuten_title)
+
+        if product_identity and rakuten_identity:
+            product_tokens = [
+                token for token in product_identity.split()
+                if len(token) >= 2
+            ]
+
+            matched_tokens = [
+                token for token in product_tokens
+                if token in rakuten_identity
+            ]
+
+            if product_tokens and not matched_tokens:
+                print(
+                    "[VERIFIED CACHE REJECT TITLE MISMATCH]",
+                    {
+                        "product": product_name,
+                        "rakuten_title": rakuten_title
+                    },
+                    flush=True
+                )
+                return None
 
     candidate = {
         "brand": str(step.get("brand", "") or "").strip(),
