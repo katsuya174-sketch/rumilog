@@ -2114,6 +2114,39 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
 
     return normalize_step_price_fields(step)
 
+
+
+def attach_affiliate_links_to_result(data, affiliate_ai_db):
+    if not isinstance(data, dict):
+        return data
+
+    for section in ["morning", "night"]:
+        section_data = data.get(section, {})
+        if not isinstance(section_data, dict):
+            continue
+
+        steps = section_data.get("steps", [])
+        if not isinstance(steps, list):
+            continue
+
+        section_data["steps"] = [
+            attach_affiliate_links_to_step(step, affiliate_ai_db)
+            if isinstance(step, dict)
+            else step
+            for step in steps
+        ]
+
+    weekly_care = data.get("weekly_care", [])
+    if isinstance(weekly_care, list):
+        data["weekly_care"] = [
+            attach_affiliate_links_to_step(step, affiliate_ai_db)
+            if isinstance(step, dict)
+            else step
+            for step in weekly_care
+        ]
+
+    return data
+
 def attach_affiliate_links_to_result(data, affiliate_ai_db):
     if not isinstance(data, dict):
         return data
@@ -9137,6 +9170,7 @@ def prepare_result_for_view(result):
 
     result["skin_score"] = safe_int(result.get("skin_score", 0))
 
+    return result
 
 def lightweight_result_payload(item):
     """
@@ -9161,13 +9195,37 @@ def lightweight_result_payload(item):
         "api_raw",
         "trace",
         "traceback",
+        "images",
+        "image_data",
+        "uploaded_images",
+        "image_base64",
+        "raw_images",
+        "combined_products",
     ]
 
     for key in remove_keys:
         data.pop(key, None)
 
-    return data
+    for section in ["morning", "night"]:
+        section_data = data.get(section, {})
+        if not isinstance(section_data, dict):
+            continue
 
+        steps = section_data.get("steps", [])
+        if not isinstance(steps, list):
+            continue
+
+        for step in steps:
+            if isinstance(step, dict):
+                step.pop("product_candidates", None)
+
+    weekly_care = data.get("weekly_care", [])
+    if isinstance(weekly_care, list):
+        for step in weekly_care:
+            if isinstance(step, dict):
+                step.pop("product_candidates", None)
+
+    return data
 
 def prepare_step(step):
     if not isinstance(step, dict):
@@ -11686,7 +11744,7 @@ def lab_test_function():
             data["client_ip"] = client_ip
             saved_record = None
             try:
-                saved_record = append_result(data)
+                saved_record = append_result(lightweight_result_payload(data))
                 if isinstance(saved_record, dict) and saved_record.get("id"):
                     data["id"] = saved_record["id"]
             except Exception as e:
@@ -12069,7 +12127,6 @@ def result_detail(result_id):
                     data = item
 
                 data["is_premium"] = is_premium_user()
-                data = attach_affiliate_links_to_result(data, affiliate_ai_db)
                 data["is_dev_mode"] = True
                 return render_template("result.html", data=data)
 
