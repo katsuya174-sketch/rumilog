@@ -2137,20 +2137,7 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
     if product_source == "ai_rakuten_verified" and existing_rakuten_link:
         step["amazon_link"] = build_amazon_link(product_name)
 
-    if (
-        product_source in ["db", "ai+db", "fallback_db"]
-        and not str(step.get("image", "") or "").strip()
-    ):
-        print("[AFFILIATE IMAGE TRACE AFTER]", {
-            "product": product_name,
-            "brand": brand,
-            "category": category,
-            "source": product_source,
-            "rakuten": bool(step.get("rakuten_link")),
-            "image": bool(step.get("image")),
-        }, flush=True)
-
-        return normalize_step_price_fields(step)
+    
 
     if product_source not in ["db", "ai+db", "fallback_db"]:
         if "affiliate_links" in step and isinstance(step["affiliate_links"], dict):
