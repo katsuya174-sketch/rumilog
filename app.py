@@ -1520,6 +1520,57 @@ def upsert_verified_product_cache(product):
         flush=True
     )
 
+VERIFIED_BRAND_ALIAS_GROUPS = [
+    ("エストラ", "aestura"),
+    ("サナ", "sana", "なめらか本舗"),
+    ("トゥヴェール", "toutvert", "tout vert", "touver", "tvert"),
+]
+
+
+def is_same_verified_brand_by_alias(brand_identity, rakuten_identity):
+    if not brand_identity:
+        return True
+
+    if brand_identity in rakuten_identity:
+        return True
+
+    brand_compact = brand_identity.replace(" ", "")
+    rakuten_compact = rakuten_identity.replace(" ", "")
+
+    for aliases in VERIFIED_BRAND_ALIAS_GROUPS:
+        normalized_aliases = [
+            normalize_candidate_name_for_merge(alias)
+            for alias in aliases
+            if str(alias or "").strip()
+        ]
+
+        normalized_aliases = [
+            alias
+            for alias in normalized_aliases
+            if alias
+        ]
+
+        alias_compacts = [
+            alias.replace(" ", "")
+            for alias in normalized_aliases
+        ]
+
+        brand_is_in_group = (
+            brand_identity in normalized_aliases
+            or brand_compact in alias_compacts
+        )
+
+        rakuten_is_in_group = any(
+            alias in rakuten_identity
+            or alias.replace(" ", "") in rakuten_compact
+            for alias in normalized_aliases
+        )
+
+        if brand_is_in_group and rakuten_is_in_group:
+            return True
+
+    return False
+
 def is_same_verified_rakuten_product(product_name, rakuten_title, brand=""):
     product_name = clean_display_product_name(product_name)
     rakuten_title = str(rakuten_title or "").strip()
@@ -1591,7 +1642,10 @@ def is_same_verified_rakuten_product(product_name, rakuten_title, brand=""):
     if len(matched_tokens) < required_matches:
         return False
 
-    if brand_identity and brand_identity not in rakuten_identity:
+    if not is_same_verified_brand_by_alias(
+        brand_identity,
+        rakuten_identity
+    ):
         return False
 
     return True
@@ -1906,18 +1960,7 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
             best_score, best = scored_items[0]
 
-            if product_name in [
-                "アトバリア クリーム",
-                "ビタミンC グリーンティーエンザイム ブライトニング セラムゲルマスク"
-            ]:
-                print("[RAKUTEN IMAGE DEBUG]", {
-                    "product": product_name,
-                    "title": best.get("itemName", ""),
-                    "medium_count": len(best.get("mediumImageUrls") or []),
-                    "small_count": len(best.get("smallImageUrls") or []),
-                    "review": best.get("reviewCount", 0),
-                    "shop": best.get("shopName", "")
-                }, flush=True)
+            
 
             image_url = ""
 
@@ -2118,19 +2161,6 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
 
     existing_rakuten_link = str(step.get("rakuten_link", "") or "").strip()
 
-    if (
-        str(step.get("product_source", "") or "").strip() in ["db", "ai+db", "fallback_db"]
-        and not str(step.get("image", "") or "").strip()
-    ):
-        print("[AFFILIATE IMAGE TRACE BEFORE]", {
-            "product": product_name,
-            "brand": brand,
-            "category": category,
-            "source": step.get("product_source", ""),
-            "existing_rakuten": bool(existing_rakuten_link),
-            "existing_image": bool(step.get("image")),
-        }, flush=True)
-
     existing_image = str(step.get("image", "") or "").strip()
     product_source = str(step.get("product_source", "") or "").strip()
 
@@ -2272,6 +2302,7 @@ def normalize_product_name(name):
     text = re.sub(r"(n|neo|ex)$", "", text)
 
     return text
+
 def find_db_product_by_name(products, product_name, category=None):
     target = normalize_product_name(product_name)
 
