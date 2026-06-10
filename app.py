@@ -11680,10 +11680,25 @@ def lab_test_function():
             data = apply_moisture_plan(data)
             data = ensure_required_routine_steps(data)
 
-            print("[CHECK AFTER ENSURE]", {
-                "morning": [s.get("category") for s in data.get("morning", {}).get("steps", []) if isinstance(s, dict)],
-                "night": [s.get("category") for s in data.get("night", {}).get("steps", []) if isinstance(s, dict)],
-                "weekly": [s.get("category") for s in data.get("weekly_care", []) if isinstance(s, dict)],
+            print("[FLOW AFTER ENSURE]", {
+                "night": [
+                    {
+                        "category": s.get("category", ""),
+                        "product": s.get("product", ""),
+                        "source": s.get("product_source", "")
+                    }
+                    for s in data.get("night", {}).get("steps", [])
+                    if isinstance(s, dict) and s.get("category") in ["クリーム", "乳液"]
+                ],
+                "weekly": [
+                    {
+                        "category": s.get("category", ""),
+                        "product": s.get("product", ""),
+                        "source": s.get("product_source", "")
+                    }
+                    for s in data.get("weekly_care", [])
+                    if isinstance(s, dict) and s.get("category") in ["パック", "ピーリング"]
+                ],
             }, flush=True)
             # serum制限は product選定後のほうが安全
             # ここではまだやらない
@@ -11707,9 +11722,31 @@ def lab_test_function():
             budget_value = parse_budget(user_data.get("budget", ""))
             debug_log("BUDGET VALUE", budget_value)
 
-            print("[LAB CHECK] before assign", flush=True)
             data = assign_products_to_all_steps(data, products, user_data, budget_value)
-            print("[LAB CHECK] after assign", flush=True)
+            
+            print("[FLOW AFTER ASSIGN]", {
+                "night": [
+                    {
+                        "category": s.get("category", ""),
+                        "product": s.get("product", ""),
+                        "source": s.get("product_source", ""),
+                        "reason": s.get("recommend_reason", "")
+                    }
+                    for s in data.get("night", {}).get("steps", [])
+                    if isinstance(s, dict) and s.get("category") in ["クリーム", "乳液"]
+                ],
+                "weekly": [
+                    {
+                        "category": s.get("category", ""),
+                        "product": s.get("product", ""),
+                        "source": s.get("product_source", ""),
+                        "reason": s.get("recommend_reason", "")
+                    }
+                    for s in data.get("weekly_care", [])
+                    if isinstance(s, dict) and s.get("category") in ["パック", "ピーリング"]
+                ],
+            }, flush=True)
+            
             affiliate_ai_db = load_affiliate_links_ai()
             
             debug_log("AFTER ASSIGN PRODUCTS")
@@ -11729,15 +11766,33 @@ def lab_test_function():
             # =========================
             data = finalize_result_data(data, user_data)
 
-            print("[CHECK AFTER FINALIZE]", {
-                "morning": [(s.get("category"), s.get("product")) for s in data.get("morning", {}).get("steps", []) if isinstance(s, dict)],
-                "night": [(s.get("category"), s.get("product")) for s in data.get("night", {}).get("steps", []) if isinstance(s, dict)],
-                "weekly": [(s.get("category"), s.get("product")) for s in data.get("weekly_care", []) if isinstance(s, dict)],
+            print("[FLOW AFTER FINALIZE]", {
+                "night": [
+                    {
+                        "category": s.get("category", ""),
+                        "product": s.get("product", ""),
+                        "image": bool(s.get("image")),
+                        "rakuten": bool(s.get("rakuten_link")),
+                        "source": s.get("product_source", "")
+                    }
+                    for s in data.get("night", {}).get("steps", [])
+                    if isinstance(s, dict) and s.get("category") in ["クリーム", "乳液"]
+                ],
+                "weekly": [
+                    {
+                        "category": s.get("category", ""),
+                        "product": s.get("product", ""),
+                        "image": bool(s.get("image")),
+                        "rakuten": bool(s.get("rakuten_link")),
+                        "source": s.get("product_source", "")
+                    }
+                    for s in data.get("weekly_care", [])
+                    if isinstance(s, dict) and s.get("category") in ["パック", "ピーリング"]
+                ],
             }, flush=True)
 
-            print("[LAB CHECK] before affiliate", flush=True)
             data = attach_affiliate_links_to_all_steps(data, affiliate_ai_db)
-            print("[LAB CHECK] after affiliate", flush=True)
+
             debug_log("AFTER FINALIZE")
             debug_step_summary("morning finalized", data.get("morning", {}).get("steps", []))
             debug_step_summary("night finalized", data.get("night", {}).get("steps", []))
