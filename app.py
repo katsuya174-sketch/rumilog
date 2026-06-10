@@ -1887,7 +1887,7 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
     print("[RAKUTEN KEYWORDS]", keywords, flush=True)
 
-    MAX_RAKUTEN_KEYWORDS = 2
+    MAX_RAKUTEN_KEYWORDS = 4
 
     for keyword in keywords[:MAX_RAKUTEN_KEYWORDS]:
         keyword = clean_rakuten_keyword(keyword)
@@ -5294,6 +5294,11 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         if x in signature_ingredient_effects
     ]
 
+    for x in inferred_fields.get("signature_ingredients", []):
+        x = normalize_ingredient_tag(x)
+        if x and x in signature_ingredient_effects and x not in signature_ingredients:
+            signature_ingredients.append(x)
+
     concerns = []
     for c in candidate.get("concerns", []):
         c = normalize_text(c)
@@ -5319,11 +5324,19 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         if s in ["dry", "oily", "mixed", "sensitive", "normal"]:
             skin_types.append(s)
 
+    for s in inferred_fields.get("skin_types", []):
+        s = normalize_text(s)
+        if s in ["dry", "oily", "mixed", "sensitive", "normal"] and s not in skin_types:
+            skin_types.append(s)
+
     sensitive_ok = normalize_text(candidate.get("sensitive_ok", "unknown"))
     if sensitive_ok not in ["yes", "no", "unknown"]:
         sensitive_ok = "unknown"
 
     texture = normalize_text(candidate.get("texture", ""))
+    if not texture:
+        texture = normalize_text(inferred_fields.get("texture", ""))
+
     if texture not in [
         "light",
         "watery",
@@ -5380,10 +5393,20 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         if str(x).strip()
     ]
 
+    for x in inferred_fields.get("formulation", []):
+        x = str(x).strip()
+        if x and x not in formulation:
+            formulation.append(x)
+
     technology = [
         str(x) for x in candidate.get("technology", [])
         if str(x).strip()
     ]
+
+    for x in inferred_fields.get("technology", []):
+        x = str(x).strip()
+        if x and x not in technology:
+            technology.append(x)
 
     contraindications = [
         str(x) for x in candidate.get("contraindications", [])
@@ -5409,6 +5432,14 @@ def build_virtual_product_from_ai_candidate(step, candidate):
     availability_japan = candidate.get("availability_japan", [])
     if not isinstance(availability_japan, list):
         availability_japan = []
+
+    for x in inferred_fields.get("availability_japan", []):
+        x = str(x).strip()
+        if x and x not in availability_japan:
+            availability_japan.append(x)
+
+    if not availability_japan:
+        availability_japan = ["rakuten"]
 
     uv_level = candidate.get("uv_level", {})
     if not isinstance(uv_level, dict):
