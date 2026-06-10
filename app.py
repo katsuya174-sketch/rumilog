@@ -969,11 +969,20 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     name = clean_rakuten_keyword(product_name).lower()
     brand = clean_rakuten_keyword(brand).lower()
 
+    category = normalize_candidate_category(
+        category,
+        fallback=category
+    )
+
     if not title or not name:
         return -9999
 
     def compact_text(value):
-        return re.sub(r"[\s　・_\-ー/／\(\)（）\[\]【】+＋\.。,:：,]", "", str(value).lower())
+        return re.sub(
+            r"[\s　・_\-ー/／\(\)（）\[\]【】+＋\.。,:：,]",
+            "",
+            str(value).lower()
+        )
 
     title_compact = compact_text(title)
     name_compact = compact_text(name)
@@ -1017,7 +1026,6 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         "サンプル",
         "ミニサイズ",
         "トライアル",
-        "セット",
         "まとめ買い",
         "2個",
         "3個",
@@ -1063,8 +1071,39 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             return -9999
 
     elif category == "クリーム":
-        if any(word in title for word in ["化粧水", "ローション", "乳液", "シートマスク", "フェイスマスク", "美容液", "セラム"]):
+        cream_required_words = [
+            "クリーム",
+            "cream",
+            "バーム",
+            "balm",
+            "モイスチャー",
+            "moisture",
+            "保湿"
+        ]
+
+        cream_wrong_words = [
+            "化粧水",
+            "ローション",
+            "トナー",
+            "toner",
+            "lotion",
+            "シートマスク",
+            "フェイスマスク",
+            "薬用マスク",
+            "パック",
+            "洗顔",
+            "クレンジング"
+        ]
+
+        if any(word in title for word in cream_wrong_words):
             return -9999
+
+        if not any(word in title_norm or word in title for word in cream_required_words):
+            if any(word in title for word in ["美容液", "セラム"]):
+                return -9999
+            score_category_penalty = -12
+        else:
+            score_category_penalty = 0
 
     elif category == "日焼け止め":
         if any(word in title for word in ["シートマスク", "フェイスマスク", "薬用マスク", "パック"]):
@@ -1079,6 +1118,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             "マスク",
             "シートマスク",
             "フェイスマスク",
+            "フェイスパック",
             "sheet mask",
             "face mask",
             "mask"
@@ -1088,20 +1128,30 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             return -9999
 
         hard_wrong_pack_words = [
-            "化粧水",
-            "ローション",
-            "トナー",
             "洗顔",
-            "クレンジング"
+            "クレンジング",
+            "メイク落とし",
+            "日焼け止め",
+            "サンスクリーン"
         ]
 
         if any(word in title for word in hard_wrong_pack_words):
             return -9999
+
+        score_category_penalty = 0
+
+        if any(word in title for word in ["化粧水", "ローション", "トナー"]):
+            score_category_penalty = -10
+
     elif category == "化粧水":
         if any(word in title for word in ["クリーム", "乳液", "ミルク", "美容液", "セラム", "シートマスク", "フェイスマスク", "パック"]):
             return -9999
 
+    else:
+        score_category_penalty = 0
+
     score = name_match_score
+    score += locals().get("score_category_penalty", 0)
 
     if brand:
         brand_compact = compact_text(brand)
@@ -1393,12 +1443,6 @@ def load_verified_products_cache():
             continue
 
         valid_items.append(item)
-
-    print(
-        "[VERIFIED CACHE LOADED]",
-        len(valid_items),
-        flush=True
-    )
 
     return valid_items
 
@@ -2115,11 +2159,7 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
             print("[VERIFIED CACHE UPSERT ERROR]", e, flush=True)
 
     else:
-        if product_source in ["db", "ai+db", "fallback_db"]:
-            step["rakuten_link"] = ""
-        else:
-            step["rakuten_link"] = existing_rakuten_link
-
+        step["rakuten_link"] = existing_rakuten_link
         step["image"] = existing_image
 
     step["amazon_link"] = build_amazon_link(product_name)
@@ -4110,21 +4150,103 @@ def score_product(product, step, user_data, budget_value):
         ingredient_tag=ingredient_tag
     )
 
-    # カテゴリ別補正
-    if category in ["クレンジング", "洗顔"]:
+        # カテゴリ別補正
+    if step_category in ["クレンジング", "洗顔"]:
         score += apply_cleansing_score_rules(
             product=product,
             user_data=user_data,
             concern_tags=concern_tags
         )
 
-    elif category == "日焼け止め":
+    elif step_category == "日焼け止め":
         score += apply_sunscreen_score_rules(
             product=product,
             step=step,
             user_data=user_data,
             concern_tags=concern_tags
         )
+
+    elif step_category in ["クリーム", "乳液"]:
+        product_text = normalize_text(" ".join([
+            str(product.get("name", "") or ""),
+            str(product.get("texture", "") or ""),
+            " ".join([str(x) for x in product.get("active_ingredients", []) or []]),
+            " ".join([str(x) for x in product.get("support_ingredients", []) or []]),
+            " ".join([str(x) for x in product.get("main_functions", []) or []]),
+        ]))
+
+        if any(w in product_text for w in [
+            "セラミド",
+            "ヒアルロン酸",
+            "ナイアシンアミド",
+            "パンテノール",
+            "cica",
+            "シカ",
+            "バリア",
+            "保湿",
+            "鎮静"
+        ]):
+            score += 18
+
+        if any(tag in concern_tags for tag in ["dryness", "barrier", "redness"]):
+            score += 12
+
+        if any(w in product_text for w in ["重い", "こってり", "高保湿"]) and normalize_text(user_data.get("oil", "")) == "oily":
+            score -= 6
+
+    elif step_category == "パック":
+        product_text = normalize_text(" ".join([
+            str(product.get("name", "") or ""),
+            str(product.get("texture", "") or ""),
+            " ".join([str(x) for x in product.get("active_ingredients", []) or []]),
+            " ".join([str(x) for x in product.get("support_ingredients", []) or []]),
+            " ".join([str(x) for x in product.get("main_functions", []) or []]),
+        ]))
+
+        if any(w in product_text for w in [
+            "パック",
+            "マスク",
+            "シートマスク",
+            "フェイスマスク",
+            "cica",
+            "シカ",
+            "ヒアルロン酸",
+            "セラミド",
+            "パンテノール",
+            "鎮静",
+            "保湿",
+            "バリア"
+        ]):
+            score += 20
+
+        if any(tag in concern_tags for tag in ["dryness", "barrier", "redness", "dullness"]):
+            score += 12
+
+    elif step_category == "ピーリング":
+        product_text = normalize_text(" ".join([
+            str(product.get("name", "") or ""),
+            " ".join([str(x) for x in product.get("active_ingredients", []) or []]),
+            " ".join([str(x) for x in product.get("main_functions", []) or []]),
+        ]))
+
+        if any(w in product_text for w in [
+            "aha",
+            "bha",
+            "pha",
+            "lha",
+            "グリコール酸",
+            "乳酸",
+            "サリチル酸",
+            "マンデル酸",
+            "ピーリング",
+            "ピール",
+            "角質",
+            "ゴマージュ"
+        ]):
+            score += 18
+
+        if any(tag in concern_tags for tag in ["pores", "texture", "dullness"]):
+            score += 10
 
  
     product_actives = product.get("active_ingredients", [])
@@ -4942,7 +5064,18 @@ def normalize_candidate_category(value, fallback=""):
     if any(w in text for w in ["美容液", "セラム", "エッセンス", "アンプル", "serum", "essence", "ampoule"]):
         return "美容液"
 
-    if any(w in text for w in ["パック", "マスク", "mask", "sheet mask"]):
+    if any(w in text for w in [
+        "パック",
+        "マスク",
+        "シートマスク",
+        "フェイスマスク",
+        "フェイスパック",
+        "部分用マスク",
+        "集中マスク",
+        "mask",
+        "sheet mask",
+        "face mask"
+    ]):
         return "パック"
 
     if any(w in text for w in ["ピーリング", "角質", "exfoliator", "exfoliating", "peeling"]):
@@ -5382,38 +5515,17 @@ def score_routine_balance(step, product, routine_context=None):
 
     return score
 
-def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None, routine_context=None):
+def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None, routine_context=None, verified_products=None):
     if exclude_names is None:
         exclude_names = set()
 
     category = step.get("category", "")
     candidates = normalize_ai_candidates(step)
 
-    print(
-        "[AI NORMALIZED CANDIDATES]",
-        step.get("_section", ""),
-        step.get("category", ""),
-        {
-            "raw_count": len(step.get("product_candidates", [])) if isinstance(step.get("product_candidates", []), list) else "not_list",
-            "normalized_count": len(candidates),
-            "items": [
-                {
-                    "brand": c.get("brand", ""),
-                    "name": c.get("name", ""),
-                    "category": c.get("category", ""),
-                    "confidence": c.get("confidence", ""),
-                    "release_status": c.get("release_status", ""),
-                }
-                for c in candidates
-                if isinstance(c, dict)
-            ]
-        },
-        flush=True
-    )
-
     all_candidates = []
 
-    verified_products = load_verified_products_cache()
+    if verified_products is None:
+        verified_products = load_verified_products_cache()
 
     if not isinstance(db_products, list):
         db_products = []
@@ -5454,27 +5566,6 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         seen_product_keys.add(product_key)
         combined_products.append(source_product)
 
-    print(
-        "[COMBINED PRODUCTS COUNT]",
-        step.get("_section", ""),
-        step.get("category", ""),
-        {
-            "db_products": len(db_products),
-            "verified_products": len(verified_products),
-            "combined_products": len(combined_products),
-            "verified_names": [
-                {
-                    "brand": p.get("brand", ""),
-                    "name": p.get("name", ""),
-                    "category": p.get("category", ""),
-                    "source_hint": p.get("_source_hint", "")
-                }
-                for p in verified_products
-                if isinstance(p, dict)
-            ]
-        },
-        flush=True
-    )   
     for p in combined_products:
         if not isinstance(p, dict):
             continue
@@ -5790,36 +5881,6 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
     sorted_candidates = deduped_candidates
 
-    print(
-        "[SOURCE COUNT]",
-        step.get("_section", ""),
-        step.get("category", ""),
-        {
-            "db": sum(1 for c in sorted_candidates if c.get("_source") == "db"),
-            "ai_db": sum(1 for c in sorted_candidates if c.get("_source") == "ai+db"),
-            "ai_virtual": sum(1 for c in sorted_candidates if c.get("_source") == "ai_virtual"),
-            "verified_cache": sum(1 for c in sorted_candidates if c.get("_source") == "verified_cache"),
-        },
-        flush=True
-    )
-
-    print(
-        "[TOP10 SOURCES]",
-        step.get("_section", ""),
-        step.get("category", ""),
-        [
-            {
-                "name": c.get("name", ""),
-                "source": c.get("_source", ""),
-                "score": c.get("_score", 0),
-                "base": c.get("_base_score", 0),
-                "improve": c.get("_improve_score", 0),
-                "routine": c.get("_routine_score", 0),
-            }
-            for c in sorted_candidates[:10]
-        ],
-        flush=True
-    )
 
     top_candidates = sorted_candidates[:3]
 
@@ -6019,8 +6080,17 @@ def ensure_required_routine_steps(data):
     night_steps = data["night"]["steps"]
 
     def has_category(steps, category):
+        normalized_category = normalize_candidate_category(
+            category,
+            fallback=category
+        )
+
         return any(
-            isinstance(s, dict) and s.get("category") == category
+            isinstance(s, dict)
+            and normalize_candidate_category(
+                s.get("category", ""),
+                fallback=s.get("category", "")
+            ) == normalized_category
             for s in steps
         )
 
@@ -6096,11 +6166,19 @@ def ensure_required_routine_steps(data):
     weekly_care = data["weekly_care"]
 
     def weekly_has_category(category):
-        return any(
-            isinstance(s, dict) and s.get("category") == category
-            for s in weekly_care
+        normalized_category = normalize_candidate_category(
+            category,
+            fallback=category
         )
 
+        return any(
+            isinstance(s, dict)
+            and normalize_candidate_category(
+                s.get("category", ""),
+                fallback=s.get("category", "")
+            ) == normalized_category
+            for s in weekly_care
+        )
     scores = data.get("scores", {})
     if not isinstance(scores, dict):
         scores = {}
@@ -6147,7 +6225,6 @@ def ensure_required_routine_steps(data):
             "ingredient_focus": "PHA",
             "risk_note": "レチノールや高濃度ビタミンCと同じ夜は避ける",
             "priority": 7,
-            "frequency": "週1回・夜",
             "product_candidates": []
         })
 
@@ -6159,7 +6236,6 @@ def ensure_required_routine_steps(data):
             "ingredient_focus": "CICA",
             "risk_note": "",
             "priority": 8,
-            "frequency": "週1回・夜",
             "product_candidates": []
         })
 
@@ -7116,10 +7192,11 @@ def finalize_step_display_fields(step, best, user_data):
     return step
 
 def assign_products_to_all_steps(data, products, user_data, budget_value):
-    print("MARKET VERSION assign_products_to_all_steps", flush=True)
+    
 
     ai_image_db = load_ai_product_images()
     improvement_plan = data.get("improvement_plan", {})
+    verified_products = load_verified_products_cache()
 
     routine_context = {
         "families": [],
@@ -7142,17 +7219,8 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             improvement_plan=improvement_plan,
             exclude_names=used_product_names,
             routine_context=routine_context,
+            verified_products=verified_products,
         )
-
-        print("====== MARKET BATTLE ======", flush=True)
-        print("section:", section_name, flush=True)
-        print("category:", category, flush=True)
-        print("ingredient_focus:", step.get("ingredient_focus", ""), flush=True)
-        print("candidates:", step.get("product_candidates", []), flush=True)
-        print("best:", best.get("name") if best else "なし", flush=True)
-        print("score:", best.get("_score") if best else "なし", flush=True)
-        print("source:", best.get("_source") if best else "なし", flush=True)
-        print("===========================", flush=True)
 
         if not best:
             print(
@@ -7274,11 +7342,6 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
         step = finalize_step_display_fields(step, best, user_data)
         step = normalize_step_price_fields(step)
-
-        print("[FINAL PRODUCT]", step.get("product"), flush=True)
-        print("[FINAL IMAGE]", step.get("image"), flush=True)
-        print("[FINAL REASON]", step.get("recommend_reason"), flush=True)
-        print("[FINAL SCORE DETAIL]", step.get("score_detail"), flush=True)
 
         step["product"] = clean_display_product_name(step.get("product", ""))
 
@@ -9646,7 +9709,14 @@ CATEGORY_ORDER = {
 
 
 def step_sort_key(step):
-    category = step.get("category", "")
+    if not isinstance(step, dict):
+        return (99, 999)
+
+    category = normalize_candidate_category(
+        step.get("category", ""),
+        fallback=step.get("category", "")
+    )
+
     role = step.get("role")
     priority = step.get("priority", 999)
 
@@ -11241,7 +11311,8 @@ def build_weekly_usage_plan(data):
         return "ピーリング" in step_text(step)
 
     def is_pack_step(step):
-        return "パック" in step_text(step)
+        text = step_text(step)
+        return has_any(text, ["パック", "マスク", "シートマスク", "フェイスマスク","フェイスパック"])
 
     fixed_morning = [
         step_label(step)
