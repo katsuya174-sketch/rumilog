@@ -2117,11 +2117,39 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
         return step
 
     existing_rakuten_link = str(step.get("rakuten_link", "") or "").strip()
+
+    if (
+        str(step.get("product_source", "") or "").strip() in ["db", "ai+db", "fallback_db"]
+        and not str(step.get("image", "") or "").strip()
+    ):
+        print("[AFFILIATE IMAGE TRACE BEFORE]", {
+            "product": product_name,
+            "brand": brand,
+            "category": category,
+            "source": step.get("product_source", ""),
+            "existing_rakuten": bool(existing_rakuten_link),
+            "existing_image": bool(step.get("image")),
+        }, flush=True)
+
     existing_image = str(step.get("image", "") or "").strip()
     product_source = str(step.get("product_source", "") or "").strip()
 
     if product_source == "ai_rakuten_verified" and existing_rakuten_link:
         step["amazon_link"] = build_amazon_link(product_name)
+
+    if (
+        product_source in ["db", "ai+db", "fallback_db"]
+        and not str(step.get("image", "") or "").strip()
+    ):
+        print("[AFFILIATE IMAGE TRACE AFTER]", {
+            "product": product_name,
+            "brand": brand,
+            "category": category,
+            "source": product_source,
+            "rakuten": bool(step.get("rakuten_link")),
+            "image": bool(step.get("image")),
+        }, flush=True)
+
         return normalize_step_price_fields(step)
 
     if product_source not in ["db", "ai+db", "fallback_db"]:
