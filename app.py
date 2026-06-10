@@ -1586,26 +1586,23 @@ def is_same_verified_rakuten_product(product_name, rakuten_title, brand=""):
     if not product_identity or not rakuten_identity:
         return False
 
+    if not is_same_verified_brand_by_alias(
+        brand_identity,
+        rakuten_identity
+    ):
+        return False
+
     product_compact = product_identity.replace(" ", "")
     rakuten_compact = rakuten_identity.replace(" ", "")
 
     if product_compact and product_compact in rakuten_compact:
         return True
 
-    if brand_identity:
-        full_identity = normalize_candidate_name_for_merge(
-            f"{brand} {product_name}"
-        )
-        full_compact = full_identity.replace(" ", "")
-
-        if full_compact and full_compact in rakuten_compact:
-            return True
-
     product_tokens = [
         token
-        for token in product_identity.split()
+        for token in re.split(r"[\s　・･\-_ー]+", product_name.lower())
         if len(token) >= 2
-        and token not in {
+        and normalize_candidate_name_for_merge(token) not in {
             "美容液",
             "化粧水",
             "乳液",
@@ -1619,10 +1616,30 @@ def is_same_verified_rakuten_product(product_name, rakuten_title, brand=""):
             "セラム",
             "ローション",
             "ジェル",
-            "本体",
-            "詰替",
-            "詰め替え",
+            "バーム",
+            "エッセンス",
+            "アンプル",
+            "トナー",
+            "ミルク",
+            "クレンジング",
+            "フォーム",
+            "ウォッシュ",
+            "ソープ",
+            "serum",
+            "cream",
+            "lotion",
+            "toner",
+            "essence",
+            "ampoule",
+            "mask",
+            "cleansing",
         }
+    ]
+
+    product_tokens = [
+        normalize_candidate_name_for_merge(token)
+        for token in product_tokens
+        if normalize_candidate_name_for_merge(token)
     ]
 
     if not product_tokens:
@@ -1631,7 +1648,7 @@ def is_same_verified_rakuten_product(product_name, rakuten_title, brand=""):
     matched_tokens = [
         token
         for token in product_tokens
-        if token in rakuten_identity
+        if token in rakuten_compact
     ]
 
     required_matches = 1
@@ -1640,12 +1657,6 @@ def is_same_verified_rakuten_product(product_name, rakuten_title, brand=""):
         required_matches = 2
 
     if len(matched_tokens) < required_matches:
-        return False
-
-    if not is_same_verified_brand_by_alias(
-        brand_identity,
-        rakuten_identity
-    ):
         return False
 
     return True
