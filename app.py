@@ -2173,7 +2173,10 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
         if "affiliate_links" in step and isinstance(step["affiliate_links"], dict):
             step["amazon_link"] = step["affiliate_links"].get("amazon", "")
             step["rakuten_link"] = step["affiliate_links"].get("rakuten", "")
-            return normalize_step_price_fields(step)
+            existing_rakuten_link = step["rakuten_link"]
+
+            if existing_image:
+                return normalize_step_price_fields(step)
 
         matched_links = find_affiliate_links_for_ai_product(
             product_name,
@@ -2184,7 +2187,10 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
         if matched_links:
             step["amazon_link"] = matched_links.get("amazon", "")
             step["rakuten_link"] = matched_links.get("rakuten", "")
-            return normalize_step_price_fields(step)
+            existing_rakuten_link = step["rakuten_link"]
+
+            if existing_image:
+                return normalize_step_price_fields(step)
 
     rakuten_item = fetch_rakuten_item(
         product_name=product_name,
