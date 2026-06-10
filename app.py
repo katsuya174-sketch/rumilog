@@ -1906,12 +1906,18 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
             best_score, best = scored_items[0]
 
-            print(
-                "[RAKUTEN BEST SCORE]",
-                best_score,
-                best.get("itemName", ""),
-                flush=True
-            )
+            if product_name in [
+                "アトバリア クリーム",
+                "ビタミンC グリーンティーエンザイム ブライトニング セラムゲルマスク"
+            ]:
+                print("[RAKUTEN IMAGE DEBUG]", {
+                    "product": product_name,
+                    "title": best.get("itemName", ""),
+                    "medium_count": len(best.get("mediumImageUrls") or []),
+                    "small_count": len(best.get("smallImageUrls") or []),
+                    "review": best.get("reviewCount", 0),
+                    "shop": best.get("shopName", "")
+                }, flush=True)
 
             image_url = ""
 
@@ -12237,6 +12243,13 @@ def result_detail(result_id):
 
                 data["is_premium"] = is_premium_user()
                 data["is_dev_mode"] = True
+
+                if not isinstance(data.get("symmetry_analysis"), dict):
+                    data["symmetry_analysis"] = {
+                        "summary": "",
+                        "left_right_difference": "",
+                        "care_note": ""
+                    }
                 return render_template("result.html", data=data)
 
         return "結果が見つかりません", 404
