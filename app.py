@@ -876,8 +876,10 @@ def score_current_product_signal(item):
     if any(word in text for word in CURRENT_PRODUCT_WORDS):
         score += 20
 
-    if item.get("mediumImageUrls"):
-        score += 10
+    if item.get("mediumImageUrls") or item.get("smallImageUrls"):
+        score += 18
+    else:
+        score -= 20
 
     review_count = safe_int(item.get("reviewCount", 0))
 
@@ -1894,6 +1896,7 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
             scored_items.sort(
                 key=lambda pair: (
                     pair[0],
+                    1 if (pair[1].get("mediumImageUrls") or pair[1].get("smallImageUrls")) else 0,
                     safe_price(pair[1].get("reviewCount", 0)),
                     safe_price(pair[1].get("reviewAverage", 0)),
                     -safe_price(pair[1].get("itemPrice", 0))
@@ -1912,17 +1915,26 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
             image_url = ""
 
-            medium_images = best.get("mediumImageUrls") or []
+            for image_key in ["mediumImageUrls", "smallImageUrls"]:
+                images = best.get(image_key) or []
 
-            if medium_images:
-                first = medium_images[0]
+                if not isinstance(images, list):
+                    continue
 
-                if isinstance(first, dict):
-                    image_url = first.get("imageUrl", "")
-                elif isinstance(first, str):
-                    image_url = first
+                for image in images:
+                    if isinstance(image, dict):
+                        candidate_image_url = str(image.get("imageUrl", "") or "").strip()
+                    elif isinstance(image, str):
+                        candidate_image_url = image.strip()
+                    else:
+                        candidate_image_url = ""
 
-            image_url = str(image_url).replace("http://", "https://")
+                    if candidate_image_url:
+                        image_url = candidate_image_url.replace("http://", "https://")
+                        break
+
+                if image_url:
+                    break
 
             best = normalize_rakuten_item_price(best)
 
@@ -10990,11 +11002,19 @@ def apply_db_product_to_step(step, product, user_data):
     step["price"] = safe_price(product.get("price_ref", 0))
     step["estimated_price"] = step["price"]
 
-    image_file = product.get("image", "")
+    image_file = (
+        product.get("image")
+        or product.get("image_url")
+        or product.get("image_path")
+        or product.get("thumbnail")
+        or product.get("thumbnail_url")
+        or ""
+    )
+
     if image_file:
-        image_file = str(image_file)
+        image_file = str(image_file).strip()
         if image_file.startswith("http://") or image_file.startswith("https://"):
-            step["image"] = image_file
+            step["image"] = image_file.replace("http://", "https://")
         elif image_file.startswith("/static/"):
             step["image"] = image_file
         else:
