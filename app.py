@@ -1743,6 +1743,61 @@ def build_verified_product_from_step(step, rakuten_item):
 
     return product
     
+def extract_rakuten_image_url(item):
+    if not isinstance(item, dict):
+        return ""
+
+    image_keys = [
+        "mediumImageUrls",
+        "smallImageUrls",
+        "imageUrls",
+        "itemImageUrls",
+        "images",
+    ]
+
+    for image_key in image_keys:
+        images = item.get(image_key) or []
+
+        if isinstance(images, str):
+            images = [images]
+
+        if not isinstance(images, list):
+            continue
+
+        for image in images:
+            if isinstance(image, dict):
+                candidate_image_url = (
+                    image.get("imageUrl")
+                    or image.get("url")
+                    or image.get("mediumImageUrl")
+                    or image.get("smallImageUrl")
+                    or ""
+                )
+            elif isinstance(image, str):
+                candidate_image_url = image
+            else:
+                candidate_image_url = ""
+
+            candidate_image_url = str(candidate_image_url or "").strip()
+
+            if candidate_image_url:
+                return candidate_image_url.replace("http://", "https://")
+
+    direct_image_url = (
+        item.get("imageUrl")
+        or item.get("mediumImageUrl")
+        or item.get("smallImageUrl")
+        or item.get("thumbnailUrl")
+        or ""
+    )
+
+    direct_image_url = str(direct_image_url or "").strip()
+
+    if direct_image_url:
+        return direct_image_url.replace("http://", "https://")
+
+    return ""
+
 def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="", purpose=""):
     global RAKUTEN_COOLDOWN_UNTIL
 
@@ -1962,28 +2017,7 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
             
 
-            image_url = ""
-
-            for image_key in ["mediumImageUrls", "smallImageUrls"]:
-                images = best.get(image_key) or []
-
-                if not isinstance(images, list):
-                    continue
-
-                for image in images:
-                    if isinstance(image, dict):
-                        candidate_image_url = str(image.get("imageUrl", "") or "").strip()
-                    elif isinstance(image, str):
-                        candidate_image_url = image.strip()
-                    else:
-                        candidate_image_url = ""
-
-                    if candidate_image_url:
-                        image_url = candidate_image_url.replace("http://", "https://")
-                        break
-
-                if image_url:
-                    break
+            image_url = extract_rakuten_image_url(best)
 
             best = normalize_rakuten_item_price(best)
 
@@ -2199,7 +2233,10 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
     )
 
     if rakuten_item:
-        step["rakuten_link"] = rakuten_item.get("rakuten_link", "")
+        new_rakuten_link = str(rakuten_item.get("rakuten_link", "") or "").strip()
+
+        if new_rakuten_link:
+            step["rakuten_link"] = new_rakuten_link
 
         if rakuten_item.get("image"):
             step["image"] = rakuten_item.get("image", "")
