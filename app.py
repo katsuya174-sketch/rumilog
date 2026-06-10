@@ -11793,6 +11793,31 @@ def lab_test_function():
 
             data = attach_affiliate_links_to_all_steps(data, affiliate_ai_db)
 
+            print("[FLOW AFTER AFFILIATE]", {
+                "night": [
+                    {
+                        "category": s.get("category", ""),
+                        "product": s.get("product", ""),
+                        "image": bool(s.get("image")),
+                        "rakuten": bool(s.get("rakuten_link")),
+                        "source": s.get("product_source", "")
+                    }
+                    for s in data.get("night", {}).get("steps", [])
+                    if isinstance(s, dict) and s.get("category") in ["クリーム", "乳液"]
+                ],
+                "weekly": [
+                    {
+                        "category": s.get("category", ""),
+                        "product": s.get("product", ""),
+                        "image": bool(s.get("image")),
+                        "rakuten": bool(s.get("rakuten_link")),
+                        "source": s.get("product_source", "")
+                    }
+                    for s in data.get("weekly_care", [])
+                    if isinstance(s, dict) and s.get("category") in ["パック", "ピーリング"]
+                ],
+            }, flush=True)
+
             debug_log("AFTER FINALIZE")
             debug_step_summary("morning finalized", data.get("morning", {}).get("steps", []))
             debug_step_summary("night finalized", data.get("night", {}).get("steps", []))
