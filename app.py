@@ -5118,6 +5118,38 @@ def infer_virtual_product_fields(name, category="", ingredient_focus="", purpose
                 safe_retinol_level(rule.get("retinol_level", 0))
             )
 
+    # sensitive_ok 推論
+    sensitive_ok = None
+    SENSITIVE_YES_KEYWORDS = [
+        "低刺激", "敏感肌", "セラミド", "ceramide", "cica", "シカ", "ツボクサ",
+        "ドクダミ", "パンテノール", "panthenol", "ノンコメドジェニック",
+        "アレルギーテスト済", "ノンアルコール", "バリアケア", "バリア強化"
+    ]
+    SENSITIVE_NO_KEYWORDS = [
+        "レチノール", "retinol", "レチナール", "retinal",
+        "高濃度", "高配合", "ピーリング", "ピール", "aha", "bha", "pha",
+        "グリコール酸", "サリチル酸", "マンデル酸"
+    ]
+    if any(k in text for k in SENSITIVE_NO_KEYWORDS):
+        sensitive_ok = "no"
+    elif any(k in text for k in SENSITIVE_YES_KEYWORDS):
+        sensitive_ok = "yes"
+
+    # availability_japan 推論
+    DRUGSTORE_BRAND_KEYWORDS = [
+        "資生堂", "shiseido", "花王", "kao", "キュレル", "curel",
+        "ビオレ", "コーセー", "kose", "雪肌精", "sekkisei",
+        "ニベア", "nivea", "ちふれ", "セザンヌ", "cezanne",
+        "なめらか本舗", "haba", "dhc", "ロート", "rohto",
+        "メンソレータム", "小林製薬", "ハトムギ", "スキンアクア",
+        "アネッサ", "anessa", "マキアージュ", "maquillage",
+        "ソフィーナ", "sofina", "エリクシール", "elixir",
+        "オルビス", "orbis", "ファンケル", "fancl"
+    ]
+    availability_japan = ["amazon", "rakuten"]
+    if any(k in text for k in DRUGSTORE_BRAND_KEYWORDS):
+        availability_japan = ["drugstore", "amazon", "rakuten"]
+
     return {
         "active_ingredients": list(dict.fromkeys(active)),
         "support_ingredients": list(dict.fromkeys(support)),
@@ -5125,7 +5157,9 @@ def infer_virtual_product_fields(name, category="", ingredient_focus="", purpose
         "ingredient_focus": list(dict.fromkeys(focuses)),
         "ingredient_strength": ingredient_strength,
         "retinol_level": retinol_level,
-        "contraindications": list(dict.fromkeys(contraindications))
+        "contraindications": list(dict.fromkeys(contraindications)),
+        "sensitive_ok": sensitive_ok,
+        "availability_japan": availability_japan,
     }
 def normalize_candidate_category(value, fallback=""):
     raw_value = str(value or "").strip()
@@ -5330,6 +5364,8 @@ def build_virtual_product_from_ai_candidate(step, candidate):
     sensitive_ok = normalize_text(candidate.get("sensitive_ok", "unknown"))
     if sensitive_ok not in ["yes", "no", "unknown"]:
         sensitive_ok = "unknown"
+    if sensitive_ok == "unknown" and inferred_fields.get("sensitive_ok") in ["yes", "no"]:
+        sensitive_ok = inferred_fields["sensitive_ok"]
 
     texture = normalize_text(candidate.get("texture", ""))
     if not texture:
@@ -10414,26 +10450,49 @@ skin_types:
 dry / oily / mixed / sensitive / normal
 
 sensitive_ok:
-yes / no / unknown
+yes: 敏感肌向け処方・低刺激・バリアケア系（セラミド・CICA・ドクダミ・パンテノール主体、ノンコメドジェニック等）
+no: 刺激のある成分が主体（レチノール・レチナール・高濃度AHA/BHA/PHAなど）
+unknown: 上記どちらでもない場合のみ。不明でもできる限り yes / no を判断する。
+
+skin_types:
+以下から1つ以上必ず選ぶ（空配列は禁止）。
+dry / oily / mixed / sensitive / normal
+全肌タイプ向けなら ["normal", "dry", "oily", "mixed"] を出す。
+敏感肌向けなら必ず "sensitive" を含める。
+目安：
+ニキビケア・皮脂抑制系 → oily, mixed を必ず含める
+セラミド・バリアケア系 → dry, sensitive を必ず含める
+乾燥ケア・高保湿系 → dry を必ず含める
 
 retinol_level:
 レチノール・レチナール系でなければ0。
 低刺激なら1、標準なら2、高濃度・強めなら3。
 
 main_functions:
-以下の意味に合う日本語で出す。
+以下の値のみ使用する（それ以外は禁止）。
 保湿 / バリア強化 / 鎮静ケア / 毛穴改善 / ニキビ予防 / 皮脂抑制 / 美白ケア / 透明感向上 / ハリ改善 / エイジングケア / 紫外線防御 / キメ改善
+成分との対応目安：
+セラミド・CICA → バリア強化, 鎮静ケア
+ビタミンC・トラネキサム酸 → 美白ケア, 透明感向上
+ナイアシンアミド → 美白ケア, 毛穴改善, 皮脂抑制
+レチノール・ペプチド → エイジングケア, ハリ改善
+AHA/BHA/PHA → 毛穴改善, キメ改善
+ヒアルロン酸 → 保湿
 
 ingredient_focus:
 stepのingredient_focusと一致する成分・目的を配列で出す。
 
 ingredient_strength:
 主要成分の強さを high / medium / low で出す。
+目安：高濃度・医薬部外品 → high / 一般的な配合量 → medium / 微量配合・補助的 → low
 不明なら {{}}。
 
 formulation:
-低刺激、バリア処方、軽い使用感など、分かる範囲でタグを出す。
+以下の値から選ぶ（複数可）。
+low_irritation / barrier_formula / light_texture / rich_texture /
+fragrance_free / alcohol_free / oil_free / non_comedogenic / water_based / oil_based
 不明なら []。
+目安：セラミド・CICA系 → low_irritation, barrier_formula / ニキビ・毛穴系 → oil_free, non_comedogenic
 
 technology:
 リポソーム、ナノカプセル、安定化ビタミンCなど、分かる範囲で出す。
@@ -10448,8 +10507,12 @@ contraindications:
 不明なら []。
 
 availability_japan:
-日本で買える販路を分かる範囲で出す。
-rakuten / amazon / qoo10 / official_jp / store
+日本で買える販路を分かる範囲で出す。必ず1つ以上含める。
+drugstore: ドラッグストア・スーパーで購入可能（日本大手ブランド・プチプラ系）
+amazon: Amazon.co.jpで販売
+rakuten: 楽天市場で販売
+official_jp: ブランド公式サイト・百貨店専売
+不明な場合でも amazon / rakuten は含める。
 
 uv_level:
 日焼け止めのみspfとpaを出す。
@@ -10467,7 +10530,10 @@ name:
 
 confidence:
 0〜100の整数。
-70未満は出力禁止。
+90以上: 現行品確実、成分・名称とも高確信
+80以上: 名称は確実、代表成分は分かる
+70以上: 名称は確実だが成分詳細は不確か
+70未満: 出力禁止
 
 release_status:
 current のみ。
