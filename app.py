@@ -9480,12 +9480,14 @@ def normalize_result(raw_data, image_path=""):
         "warnings": raw_data.get("warnings", []),
         "improvement_plan": raw_data.get("improvement_plan", {}),
         "input_budget": raw_data.get("input_budget", 0),
+        "input_age": raw_data.get("input_age", 0),
         "total_price": raw_data.get("total_price", 0),
         "budget_fit_plan": raw_data.get("budget_fit_plan", {}),
         "budget_fit_total": raw_data.get("budget_fit_total", 0),
         "budget_status": raw_data.get("budget_status", "未判定"),
         "premium_scores": raw_data.get("premium_scores", {}),
         "symmetry_analysis": raw_data.get("symmetry_analysis", {}),
+        "skin_age_estimate": raw_data.get("skin_age_estimate", 0),
         "client_ip": raw_data.get("client_ip", ""),
         "image_path": image_path,
         "model": ANALYSIS_MODEL,
@@ -10473,6 +10475,7 @@ def get_analysis_schema():
                     "right_tendency"
                 ]
             },
+            "skin_age_estimate": {"type": "integer"},
         },
         "required": [
             "skin_score",
@@ -10486,6 +10489,7 @@ def get_analysis_schema():
             "moisture_plan",
             "routine_strategy",
             "symmetry_analysis",
+            "skin_age_estimate",
         ]
     }
 
@@ -10527,6 +10531,12 @@ right_tendency:
 例: 毛穴がやや目立つ / 赤みが少ない / 色素沈着が目立つ
 
 画像から分からない場合は断定せず、控えめに記載する。
+
+【肌年齢推定】
+skin_age_estimate:
+画像から見た肌状態をもとに、肌年齢を年齢（整数）で推定する。
+実年齢より若く見える肌は低め、老化が進んでいる場合は高めに設定する。
+15〜70の整数で返す。画像から判断が難しい場合は実年齢に近い値とする。
 
 【診断方針】
 ・画像から確認できる事実を優先する。
@@ -12571,6 +12581,10 @@ def history():
                 "total_price": item.get("total_price", 0),
                 "budget_status": item.get("budget_status", ""),
                 "premium_scores": item.get("premium_scores", {}),
+                "symmetry_analysis": item.get("symmetry_analysis", {}),
+                "skin_age_estimate": item.get("skin_age_estimate", 0),
+                "input_age": item.get("input_age", 0),
+                "score_diff": {},
             })
 
         labels = []
@@ -12670,6 +12684,40 @@ def history():
             reverse=True
         )[:5]
 
+        # ① 改善ハイライト: 各診断に前回比スコア差分を付与
+        for i in range(1, len(prepared)):
+            prev_scores = prepared[i - 1].get("scores", {}) or {}
+            curr_scores = prepared[i].get("scores", {}) or {}
+            diff_map = {}
+            for key in score_keys:
+                d = safe_int(curr_scores.get(key, 0)) - safe_int(prev_scores.get(key, 0))
+                if d != 0:
+                    diff_map[score_labels.get(key, key)] = d
+            prepared[i]["score_diff"] = diff_map
+
+        # ⑥ 診断ストリーク計算
+        streak = 0
+        try:
+            diag_dates = set()
+            for item in prepared:
+                date_str = (item.get("record_date") or item.get("saved_at") or "")[:10]
+                for fmt in ["%Y/%m/%d", "%Y-%m-%d"]:
+                    try:
+                        diag_dates.add(datetime.strptime(date_str, fmt).date())
+                        break
+                    except ValueError:
+                        continue
+            if diag_dates:
+                today = datetime.now().date()
+                check = today
+                if check not in diag_dates:
+                    check = today - timedelta(days=1)
+                while check in diag_dates:
+                    streak += 1
+                    check -= timedelta(days=1)
+        except Exception:
+            streak = 0
+
         monthly_report = None
         try:
             now = datetime.now()
@@ -12749,7 +12797,8 @@ def history():
             improvement_summary=improvement_summary,
             premium_score_series=premium_score_series,
             is_premium=is_premium_user(),
-            monthly_report=monthly_report
+            monthly_report=monthly_report,
+            streak=streak
         )
 
     except Exception as e:
@@ -12767,7 +12816,8 @@ def history():
             improvement_summary=[],
             premium_score_series={},
             is_premium=is_premium_user(),
-            monthly_report=None
+            monthly_report=None,
+            streak=0
         )
 
 @app.route("/history/<result_id>")

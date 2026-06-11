@@ -21,21 +21,13 @@
           margin: 0 auto;
       }
 
-      h1,
-      h2 {
+      h1, h2 {
           color: #c75b7a;
           font-family: "Kosugi Maru", sans-serif;
       }
 
-      h1 {
-          margin-bottom: 18px;
-          font-size: 22px;
-      }
-
-      h2 {
-          font-size: 16px;
-          margin: 0 0 12px;
-      }
+      h1 { margin-bottom: 10px; font-size: 22px; }
+      h2 { font-size: 16px; margin: 0 0 12px; }
 
       .card {
           background: rgba(255, 248, 252, 0.95);
@@ -60,8 +52,7 @@
           line-height: 1.7;
       }
 
-      .pill-link,
-      .detail-link {
+      .pill-link, .detail-link {
           display: inline-block;
           padding: 10px 18px;
           border-radius: 999px;
@@ -74,9 +65,7 @@
           font-family: "Kosugi Maru", sans-serif;
       }
 
-      .detail-link {
-          margin-top: 12px;
-      }
+      .detail-link { margin-top: 12px; }
 
       .score {
           font-size: 22px;
@@ -86,15 +75,8 @@
           font-family: "Kosugi Maru", sans-serif;
       }
 
-      .meta {
-          color: #666;
-          font-size: 14px;
-      }
-
-      .empty {
-          text-align: center;
-          color: #8a7a80;
-      }
+      .meta { color: #666; font-size: 14px; }
+      .empty { text-align: center; color: #8a7a80; }
 
       .back-link {
           color: #c75b7a;
@@ -108,23 +90,15 @@
           margin: 14px 0;
       }
 
+      /* chart */
       .chart-wrapper {
           position: relative;
           width: 100%;
           box-sizing: border-box;
       }
-
-      .chart-wrapper.chart-sm {
-          height: 200px;
-      }
-
-      .chart-wrapper.chart-md {
-          height: 260px;
-      }
-
-      .chart-wrapper canvas {
-          display: block;
-      }
+      .chart-wrapper.chart-sm { height: 200px; }
+      .chart-wrapper.chart-md { height: 260px; }
+      .chart-wrapper canvas { display: block; }
 
       @media (min-width: 600px) {
           body { padding: 24px; }
@@ -133,22 +107,45 @@
           .chart-wrapper.chart-md { height: 300px; }
       }
 
+      /* ⑥ ストリーク */
+      .streak-bar {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 18px;
+      }
+      .streak-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          background: linear-gradient(135deg, #ffe0ed, #ffd6e8);
+          border: 1.5px solid #f3c9d2;
+          border-radius: 999px;
+          padding: 6px 14px;
+          font-family: "Kosugi Maru", sans-serif;
+          font-size: 14px;
+          color: #c75b7a;
+          font-weight: bold;
+      }
+      .streak-badge .streak-num {
+          font-size: 20px;
+      }
+      .streak-sub {
+          font-size: 12px;
+          color: #a0778a;
+      }
+
       /* 今月の肌レポート */
       .monthly-report-card {
           background: linear-gradient(135deg, rgba(255,224,236,0.5) 0%, rgba(255,248,252,0.95) 100%);
           border: 1.5px solid #f1d5dd;
       }
-
-      .monthly-report-card h2 {
-          margin-bottom: 14px;
-      }
-
+      .monthly-report-card h2 { margin-bottom: 14px; }
       .report-grid {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 10px;
       }
-
       .report-item {
           background: rgba(255,255,255,0.75);
           border: 1px solid #f3c9d2;
@@ -156,14 +153,12 @@
           padding: 12px 10px;
           text-align: center;
       }
-
       .report-label {
           font-size: 11px;
           color: #a0778a;
           margin-bottom: 4px;
           line-height: 1.4;
       }
-
       .report-value {
           font-size: 20px;
           font-weight: bold;
@@ -171,35 +166,116 @@
           font-family: "Kosugi Maru", sans-serif;
           line-height: 1.2;
       }
+      .report-unit { font-size: 12px; font-weight: normal; color: #a0778a; }
+      .report-sub { font-size: 11px; color: #8a7a80; margin-top: 3px; }
+      .report-item.improved { border-color: #e8c8d4; background: rgba(232,200,212,0.15); }
+      .report-item.improved .report-value { color: #b05575; }
+      .report-item.warn { border-color: #f0d0b8; background: rgba(240,208,184,0.15); }
+      .report-item.warn .report-value { color: #c07848; }
 
-      .report-unit {
-          font-size: 12px;
-          font-weight: normal;
+      /* ① 改善ハイライト差分タグ */
+      .diff-tags {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 5px;
+          margin-top: 8px;
+      }
+      .diff-tag {
+          display: inline-block;
+          padding: 2px 8px;
+          border-radius: 999px;
+          font-size: 11px;
+          font-weight: bold;
+      }
+      .diff-tag.up {
+          background: rgba(199,91,122,0.12);
+          color: #b05070;
+          border: 1px solid rgba(199,91,122,0.2);
+      }
+      .diff-tag.down {
+          background: rgba(180,140,100,0.1);
+          color: #9a7040;
+          border: 1px solid rgba(180,140,100,0.2);
+      }
+
+      /* ④ 肌年齢・⑤ 左右差 (プレミアム) */
+      .premium-section {
+          margin-top: 10px;
+          padding-top: 10px;
+          border-top: 1px dashed #e7b8c5;
+      }
+      .premium-section-title {
+          font-size: 11px;
+          font-weight: bold;
+          color: #c75b7a;
+          margin-bottom: 6px;
+          letter-spacing: 0.03em;
+      }
+      .skin-age-row {
+          display: flex;
+          align-items: baseline;
+          gap: 6px;
+      }
+      .skin-age-num {
+          font-size: 26px;
+          font-weight: bold;
+          color: #c75b7a;
+          font-family: "Kosugi Maru", sans-serif;
+          line-height: 1;
+      }
+      .skin-age-unit {
+          font-size: 13px;
           color: #a0778a;
       }
-
-      .report-sub {
+      .skin-age-diff {
+          font-size: 12px;
+          padding: 1px 8px;
+          border-radius: 999px;
+      }
+      .skin-age-diff.young {
+          background: rgba(199,91,122,0.1);
+          color: #b05070;
+      }
+      .skin-age-diff.older {
+          background: rgba(180,140,100,0.1);
+          color: #9a7040;
+      }
+      .symmetry-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 6px;
+          margin-top: 6px;
+      }
+      .symmetry-cell {
+          background: rgba(255,255,255,0.6);
+          border: 1px solid #f1d5dd;
+          border-radius: 10px;
+          padding: 8px 10px;
+          font-size: 12px;
+          color: #666;
+      }
+      .symmetry-cell strong {
+          display: block;
           font-size: 11px;
-          color: #8a7a80;
-          margin-top: 3px;
+          color: #a0778a;
+          margin-bottom: 2px;
       }
-
-      .report-item.improved .report-value {
-          color: #b05575;
+      .symmetry-score-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 6px;
       }
-
-      .report-item.improved {
-          border-color: #e8c8d4;
-          background: rgba(232,200,212,0.15);
+      .symmetry-score-num {
+          font-size: 20px;
+          font-weight: bold;
+          color: #c75b7a;
+          font-family: "Kosugi Maru", sans-serif;
       }
-
-      .report-item.warn {
-          border-color: #f0d0b8;
-          background: rgba(240,208,184,0.15);
-      }
-
-      .report-item.warn .report-value {
-          color: #c07848;
+      .symmetry-summary {
+          font-size: 12px;
+          color: #6b5060;
+          line-height: 1.5;
       }
   </style>
 </head>
@@ -207,6 +283,16 @@
 <body>
     <div class="page">
         <h1>診断履歴</h1>
+
+        <!-- ⑥ ストリーク -->
+        {% if streak and streak > 0 %}
+        <div class="streak-bar">
+            <div class="streak-badge">
+                🔥 <span class="streak-num">{{ streak }}</span>日連続診断中
+            </div>
+            <span class="streak-sub">継続は美肌への近道！</span>
+        </div>
+        {% endif %}
 
         <div class="card">
             <div class="card-title">📦 よく提案される商品</div>
@@ -216,6 +302,7 @@
             <a href="/my-product-ranking" class="pill-link">見てみる</a>
         </div>
 
+        <!-- 今月の肌レポート -->
         {% if is_premium and monthly_report %}
         <div class="card monthly-report-card">
             <h2>📊 今月の肌レポート</h2>
@@ -255,22 +342,15 @@
 
         <div class="card">
             <h2>改善の変化</h2>
-
             {% if improvement_summary %}
                 {% for item in improvement_summary %}
                     <div class="meta">
                         {{ item.label }}：
-                        {% if item.diff > 0 %}
-                            +{{ item.diff }}
-                        {% else %}
-                            {{ item.diff }}
-                        {% endif %}
+                        {% if item.diff > 0 %}+{{ item.diff }}{% else %}{{ item.diff }}{% endif %}
                     </div>
                 {% endfor %}
             {% else %}
-                <div class="meta">
-                    まだ比較できる診断履歴がありません。
-                </div>
+                <div class="meta">まだ比較できる診断履歴がありません。</div>
             {% endif %}
         </div>
 
@@ -283,7 +363,6 @@
 
         <div class="card">
             <h2>有料詳細スコア推移</h2>
-
             {% if is_premium %}
                 <div class="chart-wrapper chart-md">
                     <canvas id="premiumScoreChart"></canvas>
@@ -295,18 +374,28 @@
             {% endif %}
         </div>
 
+        <!-- 診断履歴カード一覧 -->
         {% if history %}
             {% for item in history %}
                 <div class="card">
-                    <div class="meta"><strong>ID:</strong> {{ item.id }}</div>
-                    <div class="meta"><strong>記録日:</strong> {{ item.record_date }}</div>
-                    <div class="meta"><strong>保存日時:</strong> {{ item.saved_at }}</div>
+                    <div class="meta"><strong>記録日:</strong> {{ item.record_date or item.saved_at }}</div>
 
-                    <div class="score">
-                        Skin Score: {{ item.skin_score }}
+                    <div class="score">Skin Score: {{ item.skin_score }}</div>
+
+                    <!-- ① 改善ハイライト -->
+                    {% if item.score_diff %}
+                    <div class="diff-tags">
+                        {% for label, diff in item.score_diff.items() %}
+                            {% if diff > 0 %}
+                                <span class="diff-tag up">{{ label }} +{{ diff }}</span>
+                            {% else %}
+                                <span class="diff-tag down">{{ label }} {{ diff }}</span>
+                            {% endif %}
+                        {% endfor %}
                     </div>
+                    {% endif %}
 
-                    <div class="meta"><strong>肌状態:</strong> {{ item.skin_summary }}</div>
+                    <div class="meta" style="margin-top:6px;"><strong>肌状態:</strong> {{ item.skin_summary }}</div>
 
                     <hr>
 
@@ -314,20 +403,56 @@
                     <div class="meta"><strong>合計:</strong> ¥{{ item.total_price }}</div>
                     <div class="meta"><strong>判定:</strong> {{ item.budget_status }}</div>
 
-                    <a href="/history/{{ item.id }}" class="detail-link">
-                        詳細を見る →
-                    </a>
+                    <!-- ④⑤ プレミアム: 肌年齢 + 左右差 -->
+                    {% if is_premium %}
+                        {% if item.skin_age_estimate and item.skin_age_estimate > 0 %}
+                        <div class="premium-section">
+                            <div class="premium-section-title">✨ 肌年齢推定</div>
+                            <div class="skin-age-row">
+                                <span class="skin-age-num">{{ item.skin_age_estimate }}</span>
+                                <span class="skin-age-unit">歳相当</span>
+                                {% set age_diff = item.skin_age_estimate | int - (item.input_age | default(0) | int) %}
+                                {% if age_diff < 0 %}
+                                    <span class="skin-age-diff young">実年齢より {{ age_diff | abs }}歳若い肌</span>
+                                {% elif age_diff > 0 %}
+                                    <span class="skin-age-diff older">実年齢より {{ age_diff }}歳上の肌</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        {% if item.symmetry_analysis and item.symmetry_analysis.score is defined %}
+                        <div class="premium-section">
+                            <div class="premium-section-title">🔍 左右差分析</div>
+                            <div class="symmetry-score-row">
+                                <span class="symmetry-score-num">{{ item.symmetry_analysis.score }}</span>
+                                <span class="skin-age-unit">/ 100</span>
+                            </div>
+                            {% if item.symmetry_analysis.summary %}
+                            <div class="symmetry-summary">{{ item.symmetry_analysis.summary }}</div>
+                            {% endif %}
+                            {% if item.symmetry_analysis.left_tendency or item.symmetry_analysis.right_tendency %}
+                            <div class="symmetry-grid">
+                                <div class="symmetry-cell">
+                                    <strong>左頬</strong>{{ item.symmetry_analysis.left_tendency }}
+                                </div>
+                                <div class="symmetry-cell">
+                                    <strong>右頬</strong>{{ item.symmetry_analysis.right_tendency }}
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% endif %}
+                    {% endif %}
+
+                    <a href="/history/{{ item.id }}" class="detail-link">詳細を見る →</a>
                 </div>
             {% endfor %}
         {% else %}
-            <div class="card empty">
-                まだ診断履歴はありません。
-            </div>
+            <div class="card empty">まだ診断履歴はありません。</div>
         {% endif %}
 
-        <p>
-            <a href="/lab" class="back-link">← 診断に戻る</a>
-        </p>
+        <p><a href="/lab" class="back-link">← 診断に戻る</a></p>
     </div>
 
     <script id="chart-labels" type="application/json">{{ labels | tojson }}</script>
@@ -346,40 +471,21 @@
         const legendSize = isMobile ? 10 : 11;
 
         const colors = [
-            "#c75b7a",
-            "#d46a8c",
-            "#a63d5c",
-            "#e07a9a",
-            "#8b3a58",
-            "#cc6f90",
-            "#b54f72",
-            "#e7a5ba",
-            "#934060",
-            "#8a7a80"
+            "#c75b7a", "#d46a8c", "#a63d5c", "#e07a9a", "#8b3a58",
+            "#cc6f90", "#b54f72", "#e7a5ba", "#934060", "#8a7a80"
         ];
 
         const labelMap = {
-            oil_balance: "皮脂バランス",
-            redness: "赤み",
-            pores: "毛穴",
-            hydration: "水分",
-            firmness: "ハリ",
-            acne: "ニキビ",
-            dullness: "くすみ",
-            barrier: "バリア",
-            texture: "キメ",
-            tone_evenness: "色ムラ"
+            oil_balance: "皮脂バランス", redness: "赤み", pores: "毛穴",
+            hydration: "水分", firmness: "ハリ", acne: "ニキビ",
+            dullness: "くすみ", barrier: "バリア", texture: "キメ", tone_evenness: "色ムラ"
         };
 
         const premiumLabelMap = {
-            acne_marks_red: "赤ニキビ跡",
-            pigmentation: "色素沈着",
-            enlarged_pores: "開き毛穴",
-            blackhead_pores: "黒ずみ毛穴",
-            translucency: "透明感",
-            tone_uniformity: "肌トーン均一性",
-            skin_balance: "肌バランス",
-            symmetry: "左右差"
+            acne_marks_red: "赤ニキビ跡", pigmentation: "色素沈着",
+            enlarged_pores: "開き毛穴", blackhead_pores: "黒ずみ毛穴",
+            translucency: "透明感", tone_uniformity: "肌トーン均一性",
+            skin_balance: "肌バランス", symmetry: "左右差"
         };
 
         function shortenLabel(label) {
@@ -391,42 +497,26 @@
 
         const commonScales = {
             y: {
-                min: 0,
-                max: 100,
-                ticks: {
-                    stepSize: 20,
-                    font: { size: tickSize },
-                    color: "#a0778a"
-                },
-                grid: {
-                    color: "rgba(199,91,122,0.08)"
-                }
+                min: 0, max: 100,
+                ticks: { stepSize: 20, font: { size: tickSize }, color: "#a0778a" },
+                grid: { color: "rgba(199,91,122,0.08)" }
             },
             x: {
                 ticks: {
-                    font: { size: tickSize },
-                    maxRotation: 45,
-                    minRotation: 0,
+                    font: { size: tickSize }, maxRotation: 45, minRotation: 0,
                     color: "#a0778a",
-                    callback: function(val) {
-                        return shortenLabel(this.getLabelForValue(val));
-                    }
+                    callback: function(val) { return shortenLabel(this.getLabelForValue(val)); }
                 },
-                grid: {
-                    color: "rgba(199,91,122,0.06)"
-                }
+                grid: { color: "rgba(199,91,122,0.06)" }
             }
         };
 
         const commonLegend = {
-            display: true,
-            position: "bottom",
+            display: true, position: "bottom",
             labels: {
-                boxWidth: 10,
-                boxHeight: 10,
+                boxWidth: 10, boxHeight: 10,
                 padding: isMobile ? 6 : 10,
-                font: { size: legendSize },
-                color: "#6b5060"
+                font: { size: legendSize }, color: "#6b5060"
             }
         };
 
@@ -437,30 +527,20 @@
             const gradient = ctx.createLinearGradient(0, 0, 0, scoreCanvas.parentElement.offsetHeight || 200);
             gradient.addColorStop(0, "rgba(199,91,122,0.18)");
             gradient.addColorStop(1, "rgba(199,91,122,0.00)");
-
             new Chart(ctx, {
                 type: "line",
                 data: {
                     labels: chartLabels,
                     datasets: [{
-                        label: "Skin Score",
-                        data: chartScores,
-                        tension: 0.4,
-                        fill: true,
-                        borderColor: "#c75b7a",
-                        backgroundColor: gradient,
-                        pointBackgroundColor: "#c75b7a",
-                        pointBorderColor: "#fff",
-                        pointBorderWidth: 2,
-                        pointRadius: isMobile ? 4 : 5
+                        label: "Skin Score", data: chartScores, tension: 0.4,
+                        fill: true, borderColor: "#c75b7a", backgroundColor: gradient,
+                        pointBackgroundColor: "#c75b7a", pointBorderColor: "#fff",
+                        pointBorderWidth: 2, pointRadius: isMobile ? 4 : 5
                     }]
                 },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { display: false }
-                    },
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
                     scales: commonScales
                 }
             });
@@ -474,24 +554,18 @@
                 data: {
                     labels: chartLabels,
                     datasets: Object.keys(scoreSeries).map((key, index) => ({
-                        label: labelMap[key] || key,
-                        data: scoreSeries[key],
-                        tension: 0.3,
-                        fill: false,
+                        label: labelMap[key] || key, data: scoreSeries[key],
+                        tension: 0.3, fill: false,
                         borderColor: colors[index % colors.length],
                         backgroundColor: colors[index % colors.length],
                         pointBackgroundColor: colors[index % colors.length],
-                        pointBorderColor: "#fff",
-                        pointBorderWidth: 1,
+                        pointBorderColor: "#fff", pointBorderWidth: 1,
                         pointRadius: isMobile ? 2 : 3
                     }))
                 },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: commonLegend
-                    },
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: commonLegend },
                     scales: commonScales
                 }
             });
@@ -505,24 +579,18 @@
                 data: {
                     labels: chartLabels,
                     datasets: Object.keys(premiumScoreSeries).map((key, index) => ({
-                        label: premiumLabelMap[key] || key,
-                        data: premiumScoreSeries[key],
-                        tension: 0.3,
-                        fill: false,
+                        label: premiumLabelMap[key] || key, data: premiumScoreSeries[key],
+                        tension: 0.3, fill: false,
                         borderColor: colors[index % colors.length],
                         backgroundColor: colors[index % colors.length],
                         pointBackgroundColor: colors[index % colors.length],
-                        pointBorderColor: "#fff",
-                        pointBorderWidth: 1,
+                        pointBorderColor: "#fff", pointBorderWidth: 1,
                         pointRadius: isMobile ? 2 : 3
                     }))
                 },
                 options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: commonLegend
-                    },
+                    responsive: true, maintainAspectRatio: false,
+                    plugins: { legend: commonLegend },
                     scales: commonScales
                 }
             });
