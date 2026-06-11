@@ -263,10 +263,11 @@
               class="product-img-new {% if not step.get('image') %}is-hidden{% endif %}"
               loading="lazy"
               referrerpolicy="no-referrer"
+              onerror="this.classList.add('is-hidden'); this.nextElementSibling.classList.remove('is-hidden');"
           >
-  
+
           <div class="product-img-empty {% if step.get('image') %}is-hidden{% endif %}">
-              画像読み込み中…
+              {{ step.get('category', '') or '商品' }}
           </div>
   
           <div class="product-body">

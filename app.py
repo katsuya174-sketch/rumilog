@@ -1833,7 +1833,6 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
             "seconds left",
             flush=True
         )
-        _rakuten_item_cache[cache_key] = None
         return None
 
     product_name = clean_display_product_name(product_name)
@@ -1952,7 +1951,6 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                         flush=True
                     )
 
-                    _rakuten_item_cache[cache_key] = None
                     return None
 
                 if res.status_code == 400 and "keyword is not valid" in res.text:
@@ -2209,10 +2207,10 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
     existing_image = str(step.get("image", "") or "").strip()
     product_source = str(step.get("product_source", "") or "").strip()
 
-    if product_source == "ai_rakuten_verified" and existing_rakuten_link:
+    if existing_image and existing_rakuten_link:
         step["amazon_link"] = build_amazon_link(product_name)
+        return normalize_step_price_fields(step)
 
-    
 
     if product_source not in ["db", "ai+db", "fallback_db"]:
         if "affiliate_links" in step and isinstance(step["affiliate_links"], dict):
