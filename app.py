@@ -373,7 +373,7 @@ CLICK_LOG_FILE = "product_clicks.json"
 
 # ===== 有料会員設定 =====
 ENABLE_SUBSCRIPTION = False  # 決済導入前はFalse
-DEV_PREMIUM_MODE = False     # 開発中に有料表示を確認したい時だけTrue
+DEV_PREMIUM_MODE = True      # 開発中に有料表示を確認したい時だけTrue
 
 
 def log_product_click(source, product_name, category):
@@ -1887,7 +1887,7 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
     print("[RAKUTEN KEYWORDS]", keywords, flush=True)
 
-    MAX_RAKUTEN_KEYWORDS = 4
+    MAX_RAKUTEN_KEYWORDS = 2
 
     for keyword in keywords[:MAX_RAKUTEN_KEYWORDS]:
         keyword = clean_rakuten_keyword(keyword)
@@ -12035,6 +12035,7 @@ def lab_test_function():
             # =========================
 
             data = lightweight_result_payload(data)
+            data["is_premium"] = is_premium_user()
             data["is_dev_mode"] = DEV_MODE or DEV_PREMIUM_MODE
             print("[LAB TIME] before render_template", round(time.time() - lab_t0, 2), flush=True)
             html = render_template(
