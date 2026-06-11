@@ -12473,8 +12473,8 @@ def result_detail(result_id):
                 if not isinstance(data.get("symmetry_analysis"), dict):
                     data["symmetry_analysis"] = {
                         "summary": "",
-                        "left_right_difference": "",
-                        "care_note": ""
+                        "left_tendency": "",
+                        "right_tendency": ""
                     }
                 return render_template("result.html", data=data)
 

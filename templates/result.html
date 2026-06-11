@@ -72,6 +72,24 @@
     color: #8a7a80;
     line-height: 1.5;
 }
+.symmetry-row {
+    padding: 5px 0;
+    border-bottom: 1px dashed #f1d5dd;
+}
+.symmetry-row:last-child {
+    border-bottom: none;
+}
+.symmetry-label {
+    font-size: 11px;
+    color: #c75b7a;
+    font-weight: bold;
+    margin-bottom: 2px;
+}
+.symmetry-text {
+    font-size: 12px;
+    color: #555;
+    line-height: 1.6;
+}
 .product-source {
     display: inline-block;
     font-size: 11px;
@@ -503,24 +521,33 @@
         {% endif %}
 
         {% if data.get("is_premium") or data.get("is_dev_mode") %}
+        {% set sym = data.get("symmetry_analysis") or {} %}
+        {% if sym.get("summary") or sym.get("left_tendency") or sym.get("right_tendency") %}
         <div class="score-detail-box">
             <div class="score-detail-title">左右差の分析</div>
-        
-            <div class="score-detail-row">
-                <span>全体</span>
-                <span>{{ data.symmetry_analysis.get("summary", "") }}</span>
+
+            {% if sym.get("summary") %}
+            <div class="symmetry-row">
+                <div class="symmetry-label">全体</div>
+                <div class="symmetry-text">{{ sym.get("summary") }}</div>
             </div>
-        
-            <div class="score-detail-row">
-                <span>左頬</span>
-                <span>{{ data.symmetry_analysis.get("left_tendency", "") }}</span>
+            {% endif %}
+
+            {% if sym.get("left_tendency") %}
+            <div class="symmetry-row">
+                <div class="symmetry-label">左頬</div>
+                <div class="symmetry-text">{{ sym.get("left_tendency") }}</div>
             </div>
-        
-            <div class="score-detail-row">
-                <span>右頬</span>
-                <span>{{ data.symmetry_analysis.get("right_tendency", "") }}</span>
+            {% endif %}
+
+            {% if sym.get("right_tendency") %}
+            <div class="symmetry-row">
+                <div class="symmetry-label">右頬</div>
+                <div class="symmetry-text">{{ sym.get("right_tendency") }}</div>
             </div>
+            {% endif %}
         </div>
+        {% endif %}
         {% endif %}
 
         <section class="result-card">
