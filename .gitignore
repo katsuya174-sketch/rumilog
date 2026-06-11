@@ -1,5 +1,5 @@
 .env
-_pycache_
+__pycache__
 *.pyc
 free_usage.json
 global_usage.json
