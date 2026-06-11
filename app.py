@@ -370,13 +370,14 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 from PIL import Image,ImageOps
-from flask import Flask, render_template, request,jsonify,redirect
+from flask import Flask, render_template, request, jsonify, redirect, session as flask_session
 from google import genai
 from google.genai import types
 # ==========================================
 # Flask初期設定
 # ==========================================
 app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY", "rumilog-dev-secret-change-in-prod")
 
 CLICK_LOG_FILE = "product_clicks.json"
 
@@ -12523,6 +12524,7 @@ def lab_test_function():
                 print(e)
 
             data["client_ip"] = client_ip
+            flask_session["client_ip"] = client_ip
             saved_record = None
             try:
                 saved_record = append_result(lightweight_result_payload(data))
@@ -12743,7 +12745,7 @@ def admin_product_ranking():
 
 @app.route("/my-product-ranking")
 def my_product_ranking():
-    client_ip = get_client_ip()
+    client_ip = flask_session.get("client_ip") or get_client_ip()
     results = load_results()
 
     ranking = build_product_ranking(
