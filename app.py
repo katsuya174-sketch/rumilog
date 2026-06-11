@@ -11565,11 +11565,57 @@ def build_weekly_usage_plan(data):
         text = step_text(step)
         return has_any(text, ["パック", "マスク", "シートマスク", "フェイスマスク","フェイスパック"])
 
-    fixed_morning = [
-        step_label(step)
-        for step in morning_steps
-        if step_label(step)
-    ]
+    WEEKLY_SHOW_CATEGORIES = {"化粧水", "美容液", "パック", "ピーリング", "ブースター"}
+    WEEKLY_BASE_CATEGORIES = {"洗顔", "洗顔料", "クレンジング", "乳液", "クリーム", "日焼け止め"}
+
+    def step_category(step):
+        return clean(step.get("category")) if isinstance(step, dict) else ""
+
+    def is_show_step(step):
+        return step_category(step) in WEEKLY_SHOW_CATEGORIES
+
+    def is_base_step(step):
+        return step_category(step) in WEEKLY_BASE_CATEGORIES
+
+    def filter_for_weekly(steps, changed_base_labels=None):
+        result = []
+        for step in steps:
+            label = step_label(step)
+            if not label:
+                continue
+            cat = step_category(step)
+            if cat in WEEKLY_SHOW_CATEGORIES:
+                result.append(label)
+            elif cat in WEEKLY_BASE_CATEGORIES and changed_base_labels and label in changed_base_labels:
+                result.append(label)
+        return result
+
+    # ベースカテゴリの変化検出（現状は固定なので空集合、将来のローテーション対応）
+    morning_base_by_cat = {}
+    for s in morning_steps:
+        cat = step_category(s)
+        if cat in WEEKLY_BASE_CATEGORIES:
+            morning_base_by_cat.setdefault(cat, set()).add(step_label(s))
+    changed_base_morning = {
+        step_label(s)
+        for s in morning_steps
+        if step_category(s) in WEEKLY_BASE_CATEGORIES
+        and len(morning_base_by_cat.get(step_category(s), set())) > 1
+    }
+
+    night_base_by_cat = {}
+    for s in night_steps:
+        cat = step_category(s)
+        if cat in WEEKLY_BASE_CATEGORIES:
+            night_base_by_cat.setdefault(cat, set()).add(step_label(s))
+    changed_base_night = {
+        step_label(s)
+        for s in night_steps
+        if step_category(s) in WEEKLY_BASE_CATEGORIES
+        and len(night_base_by_cat.get(step_category(s), set())) > 1
+    }
+
+    fixed_morning = filter_for_weekly(morning_steps, changed_base_morning)
 
     base_night_steps = [
         step
@@ -11607,18 +11653,10 @@ def build_weekly_usage_plan(data):
         if isinstance(step, dict) and is_pack_step(step)
     ]
 
-    base_night = [
-        step_label(step)
-        for step in base_night_steps
-        if step_label(step)
-    ]
+    base_night = filter_for_weekly(base_night_steps, changed_base_night)
 
     def labels(steps):
-        return [
-            step_label(step)
-            for step in steps
-            if step_label(step)
-        ]
+        return filter_for_weekly(steps, changed_base_night)
 
     def make_day(day, morning=None, night=None, special_care=None, note=""):
         return {
@@ -11684,11 +11722,7 @@ def build_weekly_usage_plan(data):
         return usage_plan
 
     for index, day in enumerate(days):
-        night = [
-            step_label(step)
-            for step in night_steps
-            if step_label(step)
-        ]
+        night = filter_for_weekly(night_steps, changed_base_night)
 
         special_care = []
         note = routine_strategy.get("overall_policy") or "固定ルーティンを軸に、肌を安定させる方針です。"
