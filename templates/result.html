@@ -656,46 +656,72 @@
                 </div>
             </div>
 
-            <div class="plan-block" style="margin-top:16px;">
+            <div class="budget-fit-section">
                 <h3>予算内おすすめ構成</h3>
-                <ul>
-                    {% for step in data.get("budget_fit_plan", {}).get("morning", {}).get("steps", []) %}
-                    <li>
-                        朝: {{ step.get("product", "") }} / {{ step.get("purpose", "") }} /
-                        {% if step.get("price", 0) > 0 %}
-                            約¥{{ step.get("price", 0) }}
-                        {% else %}
-                            {{ step.get("price_band", "価格不明") }}
-                        {% endif %}
-                    </li>
-                    {% endfor %}
 
-                    {% for step in data.get("budget_fit_plan", {}).get("night", {}).get("steps", []) %}
-                    <li>
-                        夜: {{ step.get("product", "") }} / {{ step.get("purpose", "") }} /
-                        {% if step.get("price", 0) > 0 %}
-                            約¥{{ step.get("price", 0) }}
-                        {% else %}
-                            {{ step.get("price_band", "価格不明") }}
-                        {% endif %}
-                    </li>
-                    {% endfor %}
+                {% set morning_steps = data.get("budget_fit_plan", {}).get("morning", {}).get("steps", []) %}
+                {% if morning_steps %}
+                <div class="budget-fit-time-header">
+                    <span class="budget-fit-time-chip">🌅 朝</span>
+                </div>
+                {% for step in morning_steps %}
+                <div class="budget-fit-step">
+                    <div class="budget-fit-step-category">{{ step.get("category", "") }}</div>
+                    <div class="budget-fit-step-body">
+                        <div class="budget-fit-step-name">{{ step.get("product", "") }}</div>
+                        {% if step.get("purpose") %}<div class="budget-fit-step-purpose">{{ step.get("purpose", "") }}</div>{% endif %}
+                    </div>
+                    <div class="budget-fit-step-price">
+                        {% if step.get("price", 0) > 0 %}¥{{ step.get("price", 0) }}{% else %}{{ step.get("price_band", "–") }}{% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+                {% endif %}
 
-                    {% for step in data.get("budget_fit_plan", {}).get("weekly_care", []) %}
-                    <li>
-                        週ケア: {{ step.get("product", "") }} / {{ step.get("purpose", "") }} /
-                        {% if step.get("price", 0) > 0 %}
-                            約¥{{ step.get("price", 0) }}
-                        {% else %}
-                            {{ step.get("price_band", "価格不明") }}
-                        {% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
+                {% set night_steps = data.get("budget_fit_plan", {}).get("night", {}).get("steps", []) %}
+                {% if night_steps %}
+                <div class="budget-fit-time-header">
+                    <span class="budget-fit-time-chip">🌙 夜</span>
+                </div>
+                {% for step in night_steps %}
+                <div class="budget-fit-step">
+                    <div class="budget-fit-step-category">{{ step.get("category", "") }}</div>
+                    <div class="budget-fit-step-body">
+                        <div class="budget-fit-step-name">{{ step.get("product", "") }}</div>
+                        {% if step.get("purpose") %}<div class="budget-fit-step-purpose">{{ step.get("purpose", "") }}</div>{% endif %}
+                    </div>
+                    <div class="budget-fit-step-price">
+                        {% if step.get("price", 0) > 0 %}¥{{ step.get("price", 0) }}{% else %}{{ step.get("price_band", "–") }}{% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+                {% endif %}
 
-                <p style="margin-top:10px; font-weight:bold; color:#ff7f9f;">
-                    予算内プラン合計: ¥{{ data.get("budget_fit_total", 0) }}
-                </p>
+                {% set weekly_steps = data.get("budget_fit_plan", {}).get("weekly_care", []) %}
+                {% if weekly_steps %}
+                <div class="budget-fit-time-header">
+                    <span class="budget-fit-time-chip">📅 週ケア</span>
+                </div>
+                {% for step in weekly_steps %}
+                <div class="budget-fit-step">
+                    <div class="budget-fit-step-category">{{ step.get("category", "") }}</div>
+                    <div class="budget-fit-step-body">
+                        <div class="budget-fit-step-name">{{ step.get("product", "") }}</div>
+                        {% if step.get("purpose") %}<div class="budget-fit-step-purpose">{{ step.get("purpose", "") }}</div>{% endif %}
+                    </div>
+                    <div class="budget-fit-step-price">
+                        {% if step.get("price", 0) > 0 %}¥{{ step.get("price", 0) }}{% else %}{{ step.get("price_band", "–") }}{% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+                {% endif %}
+
+                {% if data.get("budget_fit_total", 0) > 0 %}
+                <div class="budget-fit-total">
+                    <span class="budget-fit-total-label">プラン合計</span>
+                    <span class="budget-fit-total-value">¥{{ data.get("budget_fit_total", 0) }}</span>
+                </div>
+                {% endif %}
             </div>
         </section>
         {{ render_routine_section("朝のスキンケア", "Morning", data.get("morning", {}).get("steps", [])) }}
