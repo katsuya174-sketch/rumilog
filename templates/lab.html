@@ -529,9 +529,12 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 <body class="lab-page">
    
     <div id="bgEffects"></div>
+    <div style="text-align:right; padding: 0 16px; margin-bottom: 4px; max-width:640px; margin-left:auto; margin-right:auto;">
+        <a href="/premium" style="font-size:12px; color:#c75b7a; text-decoration:none; background:rgba(199,91,122,0.08); border:1px solid #f0c5d0; border-radius:999px; padding:5px 14px; font-weight:bold;">✨ プレミアム</a>
+    </div>
     <div class="container">
         <h1>るみろぐ</h1>
-    
+
 <p class="subtitle">
     AIがあなたの肌状態を分析し、<br>
     最適なスキンケアを提案します</p>
@@ -542,13 +545,47 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
         開発中：回数制限なし
       </p>
     {% elif remaining_free_count is defined %}
-      <p style="font-size:14px; color:#666; margin-top:8px;">
-        今月の無料診断残り回数：{{ remaining_free_count }}回
-      </p>
+      {% if remaining_free_count <= 0 %}
+        <div style="
+          margin: 14px auto 0;
+          max-width: 360px;
+          background: linear-gradient(135deg, #fff0f4, #ffe6ee);
+          border: 1.5px solid #e8a5bc;
+          border-radius: 16px;
+          padding: 14px 18px;
+          text-align: center;
+          box-shadow: 0 4px 14px rgba(199,91,122,0.12);
+        ">
+          <div style="font-size:13px; color:#c75b7a; font-weight:bold; margin-bottom:6px;">
+            今月の無料診断回数を使い切りました
+          </div>
+          <div style="font-size:12px; color:#9a6070; margin-bottom:10px; line-height:1.6;">
+            プレミアムプランなら月30回まで診断できます。
+          </div>
+          <a href="/premium" style="
+            display:inline-block;
+            padding: 9px 22px;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #e07a9a, #c75b7a);
+            color: #fff;
+            font-size: 13px;
+            font-weight: bold;
+            text-decoration: none;
+            box-shadow: 0 3px 10px rgba(199,91,122,0.3);
+          ">✨ プレミアムプランを見る</a>
+        </div>
+      {% else %}
+        <p style="font-size:14px; color:#666; margin-top:8px;">
+          今月の無料診断残り回数：<strong style="color:{% if remaining_free_count <= 2 %}#c75b7a{% else %}#555{% endif %};">{{ remaining_free_count }}回</strong>
+          {% if remaining_free_count <= 2 %}
+            <a href="/premium" style="font-size:12px; color:#c75b7a; text-decoration:underline; margin-left:6px;">上限を増やす →</a>
+          {% endif %}
+        </p>
+      {% endif %}
     {% endif %}
-    
-    <a href="/pricing" style="font-size:13px; color:#b88b96; text-decoration:underline;">
-      無制限で使う（有料プラン）
+
+    <a href="/premium" style="font-size:13px; color:#b88b96; text-decoration:underline;">
+      無制限で使う（プレミアムプラン）
     </a>
 
     <div style="text-align:center; margin: 10px 0 22px;">

@@ -282,7 +282,10 @@
 
 <body>
     <div class="page">
-        <h1>診断履歴</h1>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
+            <h1 style="margin:0;">診断履歴</h1>
+            <a href="/premium" style="font-size:12px; color:#c75b7a; text-decoration:none; background:rgba(199,91,122,0.08); border:1px solid #f0c5d0; border-radius:999px; padding:5px 14px; font-weight:bold; white-space:nowrap;">✨ プレミアム</a>
+        </div>
 
         <!-- ⑥ ストリーク -->
         {% if streak and streak > 0 %}
@@ -369,7 +372,20 @@
                 </div>
             {% else %}
                 <div class="premium-lock-box">
-                    詳細スコアの推移はプレミアム機能です。
+                    <div style="font-size:13px; color:#9a6070; margin-bottom:10px;">
+                        詳細スコアの推移はプレミアム機能です。
+                    </div>
+                    <a href="/premium" style="
+                        display:inline-block;
+                        padding: 9px 20px;
+                        border-radius: 999px;
+                        background: linear-gradient(135deg, #e07a9a, #c75b7a);
+                        color: #fff;
+                        font-size: 13px;
+                        font-weight: bold;
+                        text-decoration: none;
+                        box-shadow: 0 3px 10px rgba(199,91,122,0.25);
+                    ">✨ プレミアムプランを見る</a>
                 </div>
             {% endif %}
         </div>
@@ -443,6 +459,11 @@
                             {% endif %}
                         </div>
                         {% endif %}
+                    {% else %}
+                        <div style="margin-top:10px; padding-top:10px; border-top:1px dashed #e7b8c5; display:flex; align-items:center; justify-content:space-between; gap:10px;">
+                            <span style="font-size:12px; color:#c0a8b0;">🔒 肌年齢推定・左右差分析</span>
+                            <a href="/premium" style="font-size:11px; color:#c75b7a; text-decoration:none; background:rgba(199,91,122,0.08); border:1px solid #f0c5d0; border-radius:999px; padding:4px 10px; white-space:nowrap;">✨ プレミアムで見る</a>
+                        </div>
                     {% endif %}
 
                     <a href="/history/{{ item.id }}" class="detail-link">詳細を見る →</a>
