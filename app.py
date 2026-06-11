@@ -31,6 +31,9 @@ ANALYSIS_CACHE_VERSION = "v1"
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
+_rakuten_criteria_cache = {}
+_rakuten_criteria_call_count = 0
+MAX_RAKUTEN_CRITERIA_CALLS = 5
 VERIFIED_PRODUCTS_CACHE_FILE = "verified_products_cache.json"
 VERIFIED_PRODUCTS_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
 
@@ -2101,6 +2104,197 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
     _rakuten_item_cache[cache_key] = None
     return None
+
+
+# === Phase 2: criteria-based Rakuten search ===
+
+_TITLE_INGREDIENT_KEYWORDS = {
+    "ナイアシンアミド": "niacinamide",
+    "ニアシンアミド": "niacinamide",
+    "レチノール": "retinol",
+    "レチナール": "retinal",
+    "ビタミンc": "vitamin_c",
+    "ビタミンC": "vitamin_c",
+    "セラミド": "ceramide",
+    "ヒアルロン酸": "hyaluronic",
+    "bha": "bha",
+    "BHA": "bha",
+    "aha": "aha",
+    "AHA": "aha",
+    "pha": "pha",
+    "PHA": "pha",
+    "グリコール酸": "glycolic_acid",
+    "乳酸": "lactic_acid",
+    "サリチル酸": "salicylic_acid",
+    "アゼライン酸": "azelaic_acid",
+    "cica": "cica",
+    "CICA": "cica",
+    "シカ": "cica",
+    "ツボクサ": "centella",
+    "センテラ": "centella",
+    "トラネキサム酸": "tranexamic_acid",
+    "パンテノール": "panthenol",
+    "アルブチン": "arbutin",
+    "コウジ酸": "kojic_acid",
+    "ペプチド": "peptide",
+    "グルタチオン": "glutathione",
+    "スクワラン": "squalane",
+    "グリセリン": "glycerin",
+    "アミノ酸": "amino_acid",
+    "コラーゲン": "collagen",
+    "酵素": "enzyme",
+}
+
+
+def infer_ingredients_from_rakuten_title(title):
+    if not title:
+        return []
+    found = []
+    title_lower = str(title).lower()
+    for keyword, ingredient_id in _TITLE_INGREDIENT_KEYWORDS.items():
+        if keyword.lower() in title_lower and ingredient_id not in found:
+            found.append(ingredient_id)
+    return found
+
+
+def search_rakuten_by_criteria(category, improvement_plan):
+    """
+    improvement_plan の key_ingredients + category で楽天検索し候補商品リストを返す。
+    セッション内でキャッシュ、MAX_RAKUTEN_CRITERIA_CALLS 回を上限とする。
+    """
+    global _rakuten_criteria_cache, _rakuten_criteria_call_count, RAKUTEN_COOLDOWN_UNTIL
+
+    if not RAKUTEN_APP_ID or not RAKUTEN_ACCESS_KEY:
+        return []
+
+    if time.time() < RAKUTEN_COOLDOWN_UNTIL:
+        return []
+
+    if _rakuten_criteria_call_count >= MAX_RAKUTEN_CRITERIA_CALLS:
+        print("[RAKUTEN CRITERIA] session call limit reached", flush=True)
+        return []
+
+    if not isinstance(improvement_plan, dict):
+        return []
+
+    key_ingredients = improvement_plan.get("key_ingredients") or []
+    top_ingredient = next(
+        (clean_rakuten_keyword(i) for i in key_ingredients if clean_rakuten_keyword(i)),
+        None
+    )
+
+    if not top_ingredient:
+        return []
+
+    category_clean = clean_rakuten_keyword(category)
+    if not category_clean:
+        return []
+
+    keyword = f"{category_clean} {top_ingredient}"
+    norm_cat = normalize_candidate_category(category, fallback=category)
+    cache_key = (norm_cat, top_ingredient)
+
+    if cache_key in _rakuten_criteria_cache:
+        print(f"[RAKUTEN CRITERIA CACHE HIT] {cache_key}", flush=True)
+        return _rakuten_criteria_cache[cache_key]
+
+    print(f"[RAKUTEN CRITERIA SEARCH] keyword={keyword}", flush=True)
+    _rakuten_criteria_call_count += 1
+
+    endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401"
+    headers = {
+        "Referer": "https://rumilog.onrender.com",
+        "Origin": "https://rumilog.onrender.com",
+        "User-Agent": "Mozilla/5.0",
+    }
+
+    try:
+        wait_for_rakuten_rate_limit()
+
+        params = {
+            "applicationId": RAKUTEN_APP_ID,
+            "accessKey": RAKUTEN_ACCESS_KEY,
+            "keyword": keyword,
+            "hits": 10,
+            "format": "json",
+            "formatVersion": 2,
+            "imageFlag": 1,
+        }
+
+        if RAKUTEN_AFFILIATE_ID:
+            params["affiliateId"] = RAKUTEN_AFFILIATE_ID
+
+        res = requests.get(endpoint, params=params, headers=headers, timeout=(2, 4))
+        print(f"[RAKUTEN CRITERIA STATUS] {res.status_code}", flush=True)
+
+        if res.status_code == 429:
+            retry_seconds = 10
+            retry_match = re.search(
+                r"Try again in ([0-9\.]+) seconds?", res.text, re.IGNORECASE
+            )
+            if retry_match:
+                try:
+                    retry_seconds = max(3, float(retry_match.group(1)) + 2)
+                except Exception:
+                    pass
+            RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
+            _rakuten_criteria_cache[cache_key] = []
+            return []
+
+        if res.status_code != 200:
+            _rakuten_criteria_cache[cache_key] = []
+            return []
+
+        payload = res.json()
+        items = payload.get("items") or payload.get("Items") or []
+
+        results = []
+
+        for raw_item in items:
+            item = raw_item.get("Item", raw_item) if isinstance(raw_item, dict) else raw_item
+            if not isinstance(item, dict):
+                continue
+
+            item_name = str(item.get("itemName", "") or "").strip()
+            if not item_name:
+                continue
+
+            item = normalize_rakuten_item_price(item)
+            price = safe_price(item.get("raw_price") or item.get("itemPrice") or 0)
+            image_url = extract_rakuten_image_url(item)
+            inferred = infer_ingredients_from_rakuten_title(item_name)
+
+            results.append({
+                "name": clean_display_product_name(item_name[:50]),
+                "brand": "",
+                "category": category,
+                "active_ingredients": inferred,
+                "support_ingredients": [],
+                "concerns": [],
+                "skin_types": [],
+                "formulation": "",
+                "ingredient_strength": {},
+                "main_functions": [],
+                "ingredient_focus": [],
+                "price_ref": price,
+                "raw_price": price,
+                "image": image_url,
+                "rakuten_link": (item.get("affiliateUrl") or item.get("itemUrl") or "#"),
+                "rakuten_title": item_name,
+                "item_code": item.get("itemCode", ""),
+                "shop_name": item.get("shopName", ""),
+                "_source_hint": "rakuten_criteria",
+            })
+
+        print(f"[RAKUTEN CRITERIA] {len(results)} items for '{keyword}'", flush=True)
+        _rakuten_criteria_cache[cache_key] = results
+        return results
+
+    except Exception as e:
+        print(f"[RAKUTEN CRITERIA ERROR] {repr(e)}", flush=True)
+        _rakuten_criteria_cache[cache_key] = []
+        return []
+
 
 def clean_product_title(text):
 
@@ -5778,6 +5972,15 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
         seen_product_keys.add(product_key)
         combined_products.append(source_product)
+
+    # Phase 2: criteria-based Rakuten search
+    if improvement_plan and improvement_plan.get("priority_concerns"):
+        criteria_products = search_rakuten_by_criteria(category, improvement_plan)
+        for cp in criteria_products:
+            cp_key = normalize_product_name(cp.get("rakuten_title", "") or cp.get("name", ""))
+            if cp_key and cp_key not in seen_product_keys:
+                seen_product_keys.add(cp_key)
+                combined_products.append(cp)
 
     for p in combined_products:
         if not isinstance(p, dict):
@@ -11835,6 +12038,11 @@ def lab_test_function():
             # =========================
             # ③ AI分析
             # =========================
+
+            # 診断ごとにcriteria検索キャッシュ/カウンターをリセット
+            global _rakuten_criteria_cache, _rakuten_criteria_call_count
+            _rakuten_criteria_cache = {}
+            _rakuten_criteria_call_count = 0
 
             try:
                 print("[LAB CHECK] before Gemini", flush=True)
