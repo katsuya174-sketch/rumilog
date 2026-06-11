@@ -132,6 +132,75 @@
           .chart-wrapper.chart-sm { height: 240px; }
           .chart-wrapper.chart-md { height: 300px; }
       }
+
+      /* 今月の肌レポート */
+      .monthly-report-card {
+          background: linear-gradient(135deg, rgba(255,224,236,0.5) 0%, rgba(255,248,252,0.95) 100%);
+          border: 1.5px solid #f1d5dd;
+      }
+
+      .monthly-report-card h2 {
+          margin-bottom: 14px;
+      }
+
+      .report-grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+      }
+
+      .report-item {
+          background: rgba(255,255,255,0.75);
+          border: 1px solid #f3c9d2;
+          border-radius: 12px;
+          padding: 12px 10px;
+          text-align: center;
+      }
+
+      .report-label {
+          font-size: 11px;
+          color: #a0778a;
+          margin-bottom: 4px;
+          line-height: 1.4;
+      }
+
+      .report-value {
+          font-size: 20px;
+          font-weight: bold;
+          color: #c75b7a;
+          font-family: "Kosugi Maru", sans-serif;
+          line-height: 1.2;
+      }
+
+      .report-unit {
+          font-size: 12px;
+          font-weight: normal;
+          color: #a0778a;
+      }
+
+      .report-sub {
+          font-size: 11px;
+          color: #8a7a80;
+          margin-top: 3px;
+      }
+
+      .report-item.improved .report-value {
+          color: #b05575;
+      }
+
+      .report-item.improved {
+          border-color: #e8c8d4;
+          background: rgba(232,200,212,0.15);
+      }
+
+      .report-item.warn {
+          border-color: #f0d0b8;
+          background: rgba(240,208,184,0.15);
+      }
+
+      .report-item.warn .report-value {
+          color: #c07848;
+      }
   </style>
 </head>
 
@@ -146,6 +215,36 @@
             </div>
             <a href="/my-product-ranking" class="pill-link">見てみる</a>
         </div>
+
+        {% if is_premium and monthly_report %}
+        <div class="card monthly-report-card">
+            <h2>📊 今月の肌レポート</h2>
+            <div class="report-grid">
+                <div class="report-item">
+                    <div class="report-label">今月の診断回数</div>
+                    <div class="report-value">{{ monthly_report.count }}<span class="report-unit"> 回</span></div>
+                </div>
+                <div class="report-item">
+                    <div class="report-label">今月の平均スコア</div>
+                    <div class="report-value">{{ monthly_report.avg_score }}<span class="report-unit"> 点</span></div>
+                </div>
+                {% if monthly_report.most_improved %}
+                <div class="report-item improved">
+                    <div class="report-label">最も改善した項目</div>
+                    <div class="report-value">{{ monthly_report.most_improved.label }}</div>
+                    <div class="report-sub">+{{ monthly_report.most_improved.diff }}点 UP ✨</div>
+                </div>
+                {% endif %}
+                {% if monthly_report.needs_attention %}
+                <div class="report-item warn">
+                    <div class="report-label">注意が必要な項目</div>
+                    <div class="report-value">{{ monthly_report.needs_attention.label }}</div>
+                    <div class="report-sub">現在 {{ monthly_report.needs_attention.score }}点</div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
 
         <div class="card">
             <h2>Skin Score 推移</h2>

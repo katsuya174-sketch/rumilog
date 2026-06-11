@@ -361,7 +361,7 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
 
     raise last_error
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 from PIL import Image,ImageOps
 from flask import Flask, render_template, request,jsonify,redirect
@@ -12670,6 +12670,76 @@ def history():
             reverse=True
         )[:5]
 
+        monthly_report = None
+        try:
+            now = datetime.now()
+            thirty_days_ago = now - timedelta(days=30)
+
+            monthly_items = []
+            for item in prepared:
+                date_str = (item.get("record_date") or item.get("saved_at") or "")[:10]
+                if not date_str:
+                    continue
+                for fmt in ["%Y/%m/%d", "%Y-%m-%d"]:
+                    try:
+                        item_date = datetime.strptime(date_str, fmt)
+                        if item_date >= thirty_days_ago:
+                            monthly_items.append(item)
+                        break
+                    except ValueError:
+                        continue
+
+            if monthly_items:
+                monthly_scores = [safe_int(item.get("skin_score", 0)) for item in monthly_items]
+                avg_score = round(sum(monthly_scores) / len(monthly_scores))
+
+                most_improved = None
+                needs_attention = None
+
+                if len(monthly_items) >= 2:
+                    first_scores = monthly_items[0].get("scores", {}) or {}
+                    last_scores = monthly_items[-1].get("scores", {}) or {}
+
+                    best_diff = None
+                    best_key = None
+                    worst_score = None
+                    worst_key = None
+
+                    for key in score_keys:
+                        first_val = safe_int(first_scores.get(key, 0))
+                        last_val = safe_int(last_scores.get(key, 0))
+                        diff = last_val - first_val
+
+                        if best_diff is None or diff > best_diff:
+                            best_diff = diff
+                            best_key = key
+
+                        if worst_score is None or last_val < worst_score:
+                            worst_score = last_val
+                            worst_key = key
+
+                    if best_key and best_diff is not None and best_diff > 0:
+                        most_improved = {
+                            "label": score_labels.get(best_key, best_key),
+                            "diff": best_diff
+                        }
+
+                    if worst_key and worst_score is not None:
+                        needs_attention = {
+                            "label": score_labels.get(worst_key, worst_key),
+                            "score": worst_score
+                        }
+
+                monthly_report = {
+                    "count": len(monthly_items),
+                    "avg_score": avg_score,
+                    "most_improved": most_improved,
+                    "needs_attention": needs_attention
+                }
+        except Exception as _e:
+            print(f"monthly_report error: {_e}")
+            monthly_report = None
+
         return render_template(
             "history.html",
             history=prepared,
@@ -12678,7 +12748,8 @@ def history():
             score_series=score_series,
             improvement_summary=improvement_summary,
             premium_score_series=premium_score_series,
-            is_premium=is_premium_user()
+            is_premium=is_premium_user(),
+            monthly_report=monthly_report
         )
 
     except Exception as e:
@@ -12695,7 +12766,8 @@ def history():
             score_series={},
             improvement_summary=[],
             premium_score_series={},
-            is_premium=is_premium_user()
+            is_premium=is_premium_user(),
+            monthly_report=None
         )
 
 @app.route("/history/<result_id>")
