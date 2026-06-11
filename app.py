@@ -12678,7 +12678,7 @@ def history():
             score_series=score_series,
             improvement_summary=improvement_summary,
             premium_score_series=premium_score_series,
-            is_premium=False
+            is_premium=is_premium_user()
         )
 
     except Exception as e:
@@ -12694,7 +12694,8 @@ def history():
             scores=[],
             score_series={},
             improvement_summary=[],
-            premium_score_series={}
+            premium_score_series={},
+            is_premium=is_premium_user()
         )
 
 @app.route("/history/<result_id>")

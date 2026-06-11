@@ -10,55 +10,56 @@
       body {
           font-family: "Hiragino Sans", "Yu Gothic", "Kosugi Maru", sans-serif;
           margin: 0;
-          padding: 24px;
+          padding: 16px;
           background: linear-gradient(180deg, #fffafd 0%, #fff6f8 100%);
           color: #555;
           line-height: 1.8;
       }
-  
+
       .page {
           max-width: 900px;
           margin: 0 auto;
       }
-  
+
       h1,
       h2 {
           color: #c75b7a;
           font-family: "Kosugi Maru", sans-serif;
       }
-  
+
       h1 {
           margin-bottom: 18px;
+          font-size: 22px;
       }
-  
+
       h2 {
-          font-size: 18px;
-          margin: 0 0 14px;
+          font-size: 16px;
+          margin: 0 0 12px;
       }
-  
+
       .card {
           background: rgba(255, 248, 252, 0.95);
           border: 1px solid #f1d5dd;
           border-radius: 16px;
           padding: 16px 14px;
-          margin-bottom: 18px;
+          margin-bottom: 16px;
           box-shadow: 0 4px 12px rgba(199, 91, 122, 0.08);
       }
-  
+
       .card-title {
           font-weight: bold;
           color: #c75b7a;
           margin-bottom: 6px;
           font-family: "Kosugi Maru", sans-serif;
       }
-  
+
       .lead {
           font-size: 13px;
           color: #8a7a80;
           margin-bottom: 12px;
           line-height: 1.7;
       }
-  
+
       .pill-link,
       .detail-link {
           display: inline-block;
@@ -72,11 +73,11 @@
           border: 1px solid #f3c9d2;
           font-family: "Kosugi Maru", sans-serif;
       }
-  
+
       .detail-link {
           margin-top: 12px;
       }
-  
+
       .score {
           font-size: 22px;
           font-weight: bold;
@@ -84,34 +85,52 @@
           margin: 8px 0;
           font-family: "Kosugi Maru", sans-serif;
       }
-  
+
       .meta {
           color: #666;
           font-size: 14px;
       }
-  
+
       .empty {
           text-align: center;
           color: #8a7a80;
       }
-  
+
       .back-link {
           color: #c75b7a;
           text-decoration: underline;
           font-weight: bold;
       }
-  
+
       hr {
           border: none;
           border-top: 1px dashed #e7b8c5;
           margin: 14px 0;
       }
-  
-      canvas {
-          background: rgba(255, 250, 252, 0.75);
-          border: 1px solid #f1d5dd;
-          border-radius: 14px;
-          padding: 10px;
+
+      .chart-wrapper {
+          position: relative;
+          width: 100%;
+          box-sizing: border-box;
+      }
+
+      .chart-wrapper.chart-sm {
+          height: 200px;
+      }
+
+      .chart-wrapper.chart-md {
+          height: 260px;
+      }
+
+      .chart-wrapper canvas {
+          display: block;
+      }
+
+      @media (min-width: 600px) {
+          body { padding: 24px; }
+          h2 { font-size: 18px; }
+          .chart-wrapper.chart-sm { height: 240px; }
+          .chart-wrapper.chart-md { height: 300px; }
       }
   </style>
 </head>
@@ -130,12 +149,14 @@
 
         <div class="card">
             <h2>Skin Score 推移</h2>
-            <canvas id="scoreChart"></canvas>
+            <div class="chart-wrapper chart-sm">
+                <canvas id="scoreChart"></canvas>
+            </div>
         </div>
 
         <div class="card">
             <h2>改善の変化</h2>
-        
+
             {% if improvement_summary %}
                 {% for item in improvement_summary %}
                     <div class="meta">
@@ -156,14 +177,18 @@
 
         <div class="card">
             <h2>項目別スコア推移</h2>
-            <canvas id="detailScoreChart"></canvas>
+            <div class="chart-wrapper chart-md">
+                <canvas id="detailScoreChart"></canvas>
+            </div>
         </div>
 
         <div class="card">
             <h2>有料詳細スコア推移</h2>
-        
+
             {% if is_premium %}
-                <canvas id="premiumScoreChart"></canvas>
+                <div class="chart-wrapper chart-md">
+                    <canvas id="premiumScoreChart"></canvas>
+                </div>
             {% else %}
                 <div class="premium-lock-box">
                     詳細スコアの推移はプレミアム機能です。
@@ -209,138 +234,200 @@
     <script id="chart-labels" type="application/json">{{ labels | tojson }}</script>
     <script id="chart-scores" type="application/json">{{ scores | tojson }}</script>
     <script id="score-series" type="application/json">{{ score_series | tojson }}</script>
-  <script id="premium-score-series" type="application/json">{{ premium_score_series | tojson }}</script>
+    <script id="premium-score-series" type="application/json">{{ premium_score_series | tojson }}</script>
 
-  <script>
-      const chartLabels = JSON.parse(document.getElementById("chart-labels").textContent);
-      const chartScores = JSON.parse(document.getElementById("chart-scores").textContent);
-      const scoreSeries = JSON.parse(document.getElementById("score-series").textContent);
-      const premiumScoreSeries = JSON.parse(document.getElementById("premium-score-series").textContent);
+    <script>
+        const chartLabels = JSON.parse(document.getElementById("chart-labels").textContent);
+        const chartScores = JSON.parse(document.getElementById("chart-scores").textContent);
+        const scoreSeries = JSON.parse(document.getElementById("score-series").textContent);
+        const premiumScoreSeries = JSON.parse(document.getElementById("premium-score-series").textContent);
 
-      const colors = [
-          "#d46a8c",
-          "#c75b7a",
-          "#e7a5ba",
-          "#f3c9d2",
-          "#a63d5c",
-          "#cc6f90",
-          "#e7b8c5",
-          "#b54f72",
-          "#f1d5dd",
-          "#8a7a80"
-      ];
+        const isMobile = window.innerWidth < 600;
+        const tickSize = isMobile ? 10 : 12;
+        const legendSize = isMobile ? 10 : 11;
 
-      const labelMap = {
-          oil_balance: "皮脂バランス",
-          redness: "赤み",
-          pores: "毛穴",
-          hydration: "水分",
-          firmness: "ハリ",
-          acne: "ニキビ",
-          dullness: "くすみ",
-          barrier: "バリア",
-          texture: "キメ",
-          tone_evenness: "色ムラ"
-      };
+        const colors = [
+            "#c75b7a",
+            "#d46a8c",
+            "#a63d5c",
+            "#e07a9a",
+            "#8b3a58",
+            "#cc6f90",
+            "#b54f72",
+            "#e7a5ba",
+            "#934060",
+            "#8a7a80"
+        ];
 
-      const premiumLabelMap = {
-          acne_marks_red: "赤ニキビ跡",
-          pigmentation: "色素沈着",
-          enlarged_pores: "開き毛穴",
-          blackhead_pores: "黒ずみ毛穴",
-          translucency: "透明感",
-          tone_uniformity: "肌トーン均一性",
-          skin_balance: "肌バランス",
-          symmetry: "左右差"
-      };
+        const labelMap = {
+            oil_balance: "皮脂バランス",
+            redness: "赤み",
+            pores: "毛穴",
+            hydration: "水分",
+            firmness: "ハリ",
+            acne: "ニキビ",
+            dullness: "くすみ",
+            barrier: "バリア",
+            texture: "キメ",
+            tone_evenness: "色ムラ"
+        };
 
-      const baseChartOptions = {
-          responsive: true,
-          plugins: {
-              legend: {
-                  display: true
-              }
-          },
-          scales: {
-              y: {
-                  min: 0,
-                  max: 100
-              }
-          }
-      };
+        const premiumLabelMap = {
+            acne_marks_red: "赤ニキビ跡",
+            pigmentation: "色素沈着",
+            enlarged_pores: "開き毛穴",
+            blackhead_pores: "黒ずみ毛穴",
+            translucency: "透明感",
+            tone_uniformity: "肌トーン均一性",
+            skin_balance: "肌バランス",
+            symmetry: "左右差"
+        };
 
-      const canvas = document.getElementById("scoreChart");
+        function shortenLabel(label) {
+            if (!label) return label;
+            const m = label.match(/\d{4}[\/\-](\d{1,2})[\/\-](\d{1,2})/);
+            if (m) return `${parseInt(m[1])}/${parseInt(m[2])}`;
+            return label;
+        }
 
-      if (canvas) {
-          const ctx = canvas.getContext("2d");
+        const commonScales = {
+            y: {
+                min: 0,
+                max: 100,
+                ticks: {
+                    stepSize: 20,
+                    font: { size: tickSize },
+                    color: "#a0778a"
+                },
+                grid: {
+                    color: "rgba(199,91,122,0.08)"
+                }
+            },
+            x: {
+                ticks: {
+                    font: { size: tickSize },
+                    maxRotation: 45,
+                    minRotation: 0,
+                    color: "#a0778a",
+                    callback: function(val) {
+                        return shortenLabel(this.getLabelForValue(val));
+                    }
+                },
+                grid: {
+                    color: "rgba(199,91,122,0.06)"
+                }
+            }
+        };
 
-          new Chart(ctx, {
-              type: "line",
-              data: {
-                  labels: chartLabels,
-                  datasets: [{
-                      label: "Skin Score",
-                      data: chartScores,
-                      tension: 0.3,
-                      fill: false,
-                      borderColor: "#d46a8c",
-                      backgroundColor: "#ffd6e8",
-                      pointBackgroundColor: "#d46a8c",
-                      pointBorderColor: "#fff",
-                      pointRadius: 4
-                  }]
-              },
-              options: baseChartOptions
-          });
-      }
+        const commonLegend = {
+            display: true,
+            position: "bottom",
+            labels: {
+                boxWidth: 10,
+                boxHeight: 10,
+                padding: isMobile ? 6 : 10,
+                font: { size: legendSize },
+                color: "#6b5060"
+            }
+        };
 
-      const detailCanvas = document.getElementById("detailScoreChart");
+        /* ── Skin Score 推移 ── */
+        const scoreCanvas = document.getElementById("scoreChart");
+        if (scoreCanvas) {
+            const ctx = scoreCanvas.getContext("2d");
+            const gradient = ctx.createLinearGradient(0, 0, 0, scoreCanvas.parentElement.offsetHeight || 200);
+            gradient.addColorStop(0, "rgba(199,91,122,0.18)");
+            gradient.addColorStop(1, "rgba(199,91,122,0.00)");
 
-      if (detailCanvas && scoreSeries) {
-          const detailCtx = detailCanvas.getContext("2d");
+            new Chart(ctx, {
+                type: "line",
+                data: {
+                    labels: chartLabels,
+                    datasets: [{
+                        label: "Skin Score",
+                        data: chartScores,
+                        tension: 0.4,
+                        fill: true,
+                        borderColor: "#c75b7a",
+                        backgroundColor: gradient,
+                        pointBackgroundColor: "#c75b7a",
+                        pointBorderColor: "#fff",
+                        pointBorderWidth: 2,
+                        pointRadius: isMobile ? 4 : 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: commonScales
+                }
+            });
+        }
 
-          new Chart(detailCtx, {
-              type: "line",
-              data: {
-                  labels: chartLabels,
-                  datasets: Object.keys(scoreSeries).map((key, index) => ({
-                      label: labelMap[key] || key,
-                      data: scoreSeries[key],
-                      tension: 0.3,
-                      fill: false,
-                      borderColor: colors[index % colors.length],
-                      backgroundColor: colors[index % colors.length],
-                      pointBackgroundColor: colors[index % colors.length],
-                      pointBorderColor: "#fff",
-                      pointRadius: 3
-                  }))
-              },
-              options: baseChartOptions
-          });
-      }
+        /* ── 項目別スコア推移 ── */
+        const detailCanvas = document.getElementById("detailScoreChart");
+        if (detailCanvas && scoreSeries) {
+            new Chart(detailCanvas.getContext("2d"), {
+                type: "line",
+                data: {
+                    labels: chartLabels,
+                    datasets: Object.keys(scoreSeries).map((key, index) => ({
+                        label: labelMap[key] || key,
+                        data: scoreSeries[key],
+                        tension: 0.3,
+                        fill: false,
+                        borderColor: colors[index % colors.length],
+                        backgroundColor: colors[index % colors.length],
+                        pointBackgroundColor: colors[index % colors.length],
+                        pointBorderColor: "#fff",
+                        pointBorderWidth: 1,
+                        pointRadius: isMobile ? 2 : 3
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: commonLegend
+                    },
+                    scales: commonScales
+                }
+            });
+        }
 
-      const premiumCanvas = document.getElementById("premiumScoreChart");
-
-      if (premiumCanvas && premiumScoreSeries) {
-          const premiumCtx = premiumCanvas.getContext("2d");
-
-          new Chart(premiumCtx, {
-              type: "line",
-              data: {
-                  labels: chartLabels,
-                  datasets: Object.keys(premiumScoreSeries).map((key, index) => ({
-                      label: premiumLabelMap[key] || key,
-                      data: premiumScoreSeries[key],
-                      tension: 0.3,
-                      fill: false,
-                      borderColor: colors[index % colors.length],
-                      backgroundColor: colors[index % colors.length],
-                      pointBackgroundColor: colors[index % colors.length],
-                      pointBorderColor: "#fff",
-                      pointRadius: 3
-                  }))
-              },
-              options: baseChartOptions
-          });
-      }
-  </script>
+        /* ── 有料詳細スコア推移 ── */
+        const premiumCanvas = document.getElementById("premiumScoreChart");
+        if (premiumCanvas && premiumScoreSeries) {
+            new Chart(premiumCanvas.getContext("2d"), {
+                type: "line",
+                data: {
+                    labels: chartLabels,
+                    datasets: Object.keys(premiumScoreSeries).map((key, index) => ({
+                        label: premiumLabelMap[key] || key,
+                        data: premiumScoreSeries[key],
+                        tension: 0.3,
+                        fill: false,
+                        borderColor: colors[index % colors.length],
+                        backgroundColor: colors[index % colors.length],
+                        pointBackgroundColor: colors[index % colors.length],
+                        pointBorderColor: "#fff",
+                        pointBorderWidth: 1,
+                        pointRadius: isMobile ? 2 : 3
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: commonLegend
+                    },
+                    scales: commonScales
+                }
+            });
+        }
+    </script>
+</body>
+</html>
