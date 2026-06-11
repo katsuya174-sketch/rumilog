@@ -130,7 +130,7 @@
 
         .btn-checkout {
             width: 100%;
-            padding: 14px;
+            padding: 16px;
             border: none;
             border-radius: 999px;
             background: linear-gradient(135deg, #e07a9a, #c75b7a);
@@ -139,11 +139,27 @@
             font-size: 16px;
             font-weight: bold;
             cursor: pointer;
-            box-shadow: 0 4px 14px rgba(199,91,122,0.3);
-            transition: opacity 0.2s;
+            box-shadow: 0 6px 20px rgba(199,91,122,0.35);
+            transition: opacity 0.2s, transform 0.15s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            letter-spacing: 0.03em;
         }
-        .btn-checkout:hover { opacity: 0.9; }
-        .btn-checkout:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-checkout:hover { opacity: 0.92; transform: translateY(-1px); }
+        .btn-checkout:active { transform: translateY(0); }
+        .btn-checkout:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .stripe-badge {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-size: 11px;
+            color: #b89aa6;
+            margin-top: 10px;
+        }
+        .stripe-badge svg { opacity: 0.6; }
 
         .note {
             font-size: 11px;
@@ -220,15 +236,19 @@
         <form action="/create-checkout-session" method="POST" id="checkout-form">
             <div class="form-group">
                 <label for="email">メールアドレス（プレミアムキーの送付先）</label>
-                <input type="email" id="email" name="email" placeholder="example@email.com" required>
+                <input type="email" id="email" name="email" placeholder="example@email.com" required autocomplete="email">
             </div>
             <button type="submit" class="btn-checkout" id="checkout-btn">
-                Stripeで安全に支払う →
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+                Stripeで安全に支払う
             </button>
         </form>
+        <div class="stripe-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Stripe による安全な決済 · カード情報は当サービスに保存されません
+        </div>
         <p class="note">
-            支払い完了後、入力したメールアドレスに専用リンクをお送りします。<br>
-            決済はStripeで安全に処理されます。カード情報は当サービスに保存されません。
+            支払い完了後、入力したメールアドレスに専用リンクをお送りします。¥980/月・いつでも解約可
         </p>
     </div>
 
@@ -239,8 +259,11 @@
     document.getElementById("checkout-form").addEventListener("submit", function() {
         const btn = document.getElementById("checkout-btn");
         btn.disabled = true;
-        btn.textContent = "処理中...";
+        btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1s linear infinite"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> 処理中...';
     });
 </script>
+<style>
+    @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+</style>
 </body>
 </html>

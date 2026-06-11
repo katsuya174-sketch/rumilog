@@ -382,7 +382,7 @@ CLICK_LOG_FILE = "product_clicks.json"
 
 # ===== 有料会員設定 =====
 ENABLE_SUBSCRIPTION = False  # 決済導入前はFalse
-DEV_PREMIUM_MODE = True      # 開発中に有料表示を確認したい時だけTrue
+DEV_PREMIUM_MODE = False     # 開発中に有料表示を確認したい時だけTrue
 
 
 def log_product_click(source, product_name, category):
