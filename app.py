@@ -4621,9 +4621,9 @@ def build_score_based_improvement_plan(scores, existing_plan=None):
     for rule in rules:
         value = safe_int(scores.get(rule["score_key"], 0))
 
-        if value <= 39:
+        if value <= 44:
             priority_level = 3
-        elif value <= 54:
+        elif value <= 59:
             priority_level = 2
         elif value <= 69:
             priority_level = 1
@@ -4646,7 +4646,7 @@ def build_score_based_improvement_plan(scores, existing_plan=None):
         )
     )
 
-    for item in scored_rules[:5]:
+    for item in scored_rules[:3]:
         priority_concerns.append(item["label"])
 
         for ingredient in item["ingredients"]:
@@ -4660,7 +4660,7 @@ def build_score_based_improvement_plan(scores, existing_plan=None):
         key_ingredients = existing_plan.get("key_ingredients", []) or ["セラミド", "パンテノール"]
 
     return {
-        "priority_concerns": priority_concerns[:5],
+        "priority_concerns": priority_concerns[:3],
         "key_ingredients": key_ingredients[:8],
         "care_direction": "項目別スコアが低い悩みを優先しつつ、刺激を抑えて継続しやすいケアを行う"
     }
