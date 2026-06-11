@@ -361,6 +361,12 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
 
     raise last_error
 
+import stripe
+import secrets
+import smtplib
+import ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 from PIL import Image,ImageOps
@@ -434,9 +440,20 @@ def log_pricing_view(source="unknown"):
         json.dump(data, f, ensure_ascii=False, indent=2)
 
 FREE_LIMIT_FILE = "free_usage.json"
-FREE_MONTHLY_LIMIT = 3
+FREE_MONTHLY_LIMIT = 5
 GLOBAL_MONTHLY_LIMIT = 1000
 GLOBAL_USAGE_FILE = "global_usage.json"
+PREMIUM_KEYS_FILE = "premium_keys.json"
+
+# Stripe初期化
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+STRIPE_PRICE_ID = os.getenv("STRIPE_PRICE_ID", "")
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+SITE_URL = os.getenv("SITE_URL", "")
 # ==========================================
 # 商品カテゴリ → 画像ファイル
 # ==========================================
@@ -479,6 +496,112 @@ def get_client_ip():
         return forwarded.split(",")[0].strip()
     return request.remote_addr or "unknown"
 
+# ==========================================
+# プレミアムキー管理
+# ==========================================
+
+def load_premium_keys():
+    if not os.path.exists(PREMIUM_KEYS_FILE):
+        return {}
+    try:
+        with open(PREMIUM_KEYS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+def save_premium_keys(data):
+    with open(PREMIUM_KEYS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def generate_premium_key():
+    return secrets.token_urlsafe(32)
+
+def validate_premium_key(key):
+    if not key:
+        return False
+    keys = load_premium_keys()
+    entry = keys.get(key)
+    if not entry:
+        return False
+    if entry.get("revoked", False):
+        return False
+    valid_until = entry.get("valid_until", "")
+    if valid_until:
+        try:
+            expiry = datetime.fromisoformat(valid_until)
+            if datetime.now() > expiry:
+                return False
+        except Exception:
+            return False
+    return True
+
+def issue_premium_key(email, stripe_customer_id, stripe_subscription_id):
+    keys = load_premium_keys()
+    # 既存キーがあれば延長
+    for key, entry in keys.items():
+        if entry.get("email") == email and not entry.get("revoked", False):
+            entry["valid_until"] = (datetime.now() + timedelta(days=35)).isoformat()
+            entry["stripe_subscription_id"] = stripe_subscription_id
+            save_premium_keys(keys)
+            return key
+    # 新規発行
+    new_key = generate_premium_key()
+    keys[new_key] = {
+        "email": email,
+        "stripe_customer_id": stripe_customer_id,
+        "stripe_subscription_id": stripe_subscription_id,
+        "valid_until": (datetime.now() + timedelta(days=35)).isoformat(),
+        "revoked": False,
+        "created_at": datetime.now().isoformat()
+    }
+    save_premium_keys(keys)
+    return new_key
+
+def revoke_premium_key_by_subscription(subscription_id):
+    keys = load_premium_keys()
+    for entry in keys.values():
+        if entry.get("stripe_subscription_id") == subscription_id:
+            entry["revoked"] = True
+    save_premium_keys(keys)
+
+def send_premium_email(to_email, key):
+    if not SMTP_USER or not SMTP_PASSWORD:
+        print(f"[EMAIL] SMTP未設定 key={key}", flush=True)
+        return False
+    base_url = SITE_URL.rstrip("/") if SITE_URL else ""
+    premium_url = f"{base_url}/lab?premium_key={key}"
+    subject = "るみろぐ プレミアムプランへようこそ！"
+    body = f"""プレミアムプランへのご登録ありがとうございます。
+
+以下のリンクからプレミアム機能をご利用いただけます。
+ブックマークして毎回ご利用ください。
+
+{premium_url}
+
+━━━━━━━━━━━━━━━━━━━━
+このリンクはあなた専用です。第三者と共有しないでください。
+サブスクリプションが有効な限り、毎月自動で延長されます。
+━━━━━━━━━━━━━━━━━━━━
+るみろぐ サポートチーム
+"""
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = SMTP_USER
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+        context = ssl.create_default_context()
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls(context=context)
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, to_email, msg.as_string())
+        print(f"[EMAIL] 送信成功: {to_email}", flush=True)
+        return True
+    except Exception as e:
+        print(f"[EMAIL ERROR] {repr(e)}", flush=True)
+        return False
+
 def is_premium_user():
     """
     有料会員判定をここに集約する。
@@ -489,8 +612,13 @@ def is_premium_user():
         return True
 
     premium_key = request.args.get("premium_key", "")
-    valid_key = os.getenv("PREMIUM_PREVIEW_KEY", "")
 
+    # Stripe発行キーの検証
+    if validate_premium_key(premium_key):
+        return True
+
+    # 旧プレビューキー（後方互換）
+    valid_key = os.getenv("PREMIUM_PREVIEW_KEY", "")
     if valid_key and premium_key == valid_key:
         return True
 
@@ -12515,6 +12643,84 @@ def db_stats():
 @app.route("/premium")
 def premium():
     return render_template("premium.html")
+
+# ==========================================
+# Stripe決済
+# ==========================================
+
+@app.route("/create-checkout-session", methods=["POST"])
+def create_checkout_session():
+    try:
+        if not stripe.api_key or not STRIPE_PRICE_ID:
+            return jsonify({"error": "Stripe未設定"}), 500
+
+        base_url = SITE_URL.rstrip("/") if SITE_URL else request.host_url.rstrip("/")
+        session = stripe.checkout.Session.create(
+            mode="subscription",
+            line_items=[{"price": STRIPE_PRICE_ID, "quantity": 1}],
+            success_url=f"{base_url}/premium-success",
+            cancel_url=f"{base_url}/premium",
+            customer_email=request.form.get("email") or None,
+            locale="ja",
+        )
+        return redirect(session.url, code=303)
+    except Exception as e:
+        print(f"[STRIPE ERROR] {repr(e)}", flush=True)
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/stripe-webhook", methods=["POST"])
+def stripe_webhook():
+    payload = request.get_data()
+    sig_header = request.headers.get("Stripe-Signature", "")
+
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+    except stripe.error.SignatureVerificationError:
+        print("[STRIPE WEBHOOK] 署名検証失敗", flush=True)
+        return jsonify({"error": "invalid signature"}), 400
+    except Exception as e:
+        print(f"[STRIPE WEBHOOK ERROR] {repr(e)}", flush=True)
+        return jsonify({"error": str(e)}), 400
+
+    event_type = event["type"]
+    print(f"[STRIPE WEBHOOK] event={event_type}", flush=True)
+
+    # 支払い完了（新規 or 更新）
+    if event_type == "checkout.session.completed":
+        session = event["data"]["object"]
+        email = session.get("customer_email") or session.get("customer_details", {}).get("email", "")
+        customer_id = session.get("customer", "")
+        subscription_id = session.get("subscription", "")
+        if email:
+            key = issue_premium_key(email, customer_id, subscription_id)
+            send_premium_email(email, key)
+            print(f"[STRIPE] キー発行: {email}", flush=True)
+
+    # 請求成功（更新時のキー延長）
+    elif event_type == "invoice.payment_succeeded":
+        invoice = event["data"]["object"]
+        email = invoice.get("customer_email", "")
+        customer_id = invoice.get("customer", "")
+        subscription_id = invoice.get("subscription", "")
+        if email and subscription_id:
+            key = issue_premium_key(email, customer_id, subscription_id)
+            print(f"[STRIPE] キー延長: {email}", flush=True)
+
+    # サブスク解約
+    elif event_type == "customer.subscription.deleted":
+        subscription = event["data"]["object"]
+        subscription_id = subscription.get("id", "")
+        if subscription_id:
+            revoke_premium_key_by_subscription(subscription_id)
+            print(f"[STRIPE] キー失効: sub={subscription_id}", flush=True)
+
+    return jsonify({"status": "ok"})
+
+
+@app.route("/premium-success")
+def premium_success():
+    return render_template("premium_success.html")
 
 @app.route("/admin/product-ranking")
 def admin_product_ranking():
