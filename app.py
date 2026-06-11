@@ -9486,6 +9486,7 @@ def normalize_result(raw_data, image_path=""):
         "budget_status": raw_data.get("budget_status", "未判定"),
         "premium_scores": raw_data.get("premium_scores", {}),
         "symmetry_analysis": raw_data.get("symmetry_analysis", {}),
+        "client_ip": raw_data.get("client_ip", ""),
         "image_path": image_path,
         "model": ANALYSIS_MODEL,
         "version": "1.0"
