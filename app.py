@@ -2262,6 +2262,9 @@ def search_rakuten_by_criteria(category, improvement_plan):
             item = normalize_rakuten_item_price(item)
             price = safe_price(item.get("raw_price") or item.get("itemPrice") or 0)
             image_url = extract_rakuten_image_url(item)
+            if not image_url:
+                continue  # 画像なしは候補から除外
+
             inferred = infer_ingredients_from_rakuten_title(item_name)
 
             results.append({
@@ -7679,7 +7682,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             apply_db_product_to_step(step, best, user_data)
             step["product_source"] = source or "db"
 
-        elif source in ["ai", "ai_virtual", "ai_rakuten_verified"]:
+        elif source in ["ai", "ai_virtual", "ai_rakuten_verified", "rakuten_criteria"]:
             step["product"] = best.get("name", category)
             step["price"] = safe_price(
                 best.get("price_ref")
@@ -7689,7 +7692,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             )
             step["estimated_price"] = step["price"]
 
-            if source == "ai_rakuten_verified":
+            if source in ["ai_rakuten_verified", "rakuten_criteria"]:
                 step["image"] = best.get("image", "") or ""
                 step["rakuten_link"] = best.get("rakuten_link", "") or ""
             else:
