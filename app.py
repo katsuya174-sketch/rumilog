@@ -9479,6 +9479,8 @@ def normalize_result(raw_data, image_path=""):
         ],
         "warnings": raw_data.get("warnings", []),
         "improvement_plan": raw_data.get("improvement_plan", {}),
+        "routine_strategy": raw_data.get("routine_strategy", {}),
+        "weekly_usage_plan": raw_data.get("weekly_usage_plan", []),
         "input_budget": raw_data.get("input_budget", 0),
         "input_age": raw_data.get("input_age", 0),
         "total_price": raw_data.get("total_price", 0),
