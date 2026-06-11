@@ -1520,6 +1520,30 @@ def upsert_verified_product_cache(product):
         flush=True
     )
 
+_KATAKANA_ROMAJI_MAP = {
+    'ア': 'a',  'イ': 'i',  'ウ': 'u',  'エ': 'e',  'オ': 'o',
+    'カ': 'ka', 'キ': 'ki', 'ク': 'ku', 'ケ': 'ke', 'コ': 'ko',
+    'サ': 'sa', 'シ': 'si', 'ス': 'su', 'セ': 'se', 'ソ': 'so',
+    'タ': 'ta', 'チ': 'ti', 'ツ': 'tu', 'テ': 'te', 'ト': 'to',
+    'ナ': 'na', 'ニ': 'ni', 'ヌ': 'nu', 'ネ': 'ne', 'ノ': 'no',
+    'ハ': 'ha', 'ヒ': 'hi', 'フ': 'fu', 'ヘ': 'he', 'ホ': 'ho',
+    'マ': 'ma', 'ミ': 'mi', 'ム': 'mu', 'メ': 'me', 'モ': 'mo',
+    'ヤ': 'ya', 'ユ': 'yu', 'ヨ': 'yo',
+    'ラ': 'la', 'リ': 'li', 'ル': 'lu', 'レ': 'le', 'ロ': 'lo',
+    'ワ': 'wa', 'ヲ': 'o',  'ン': 'n',
+    'ガ': 'ga', 'ギ': 'gi', 'グ': 'gu', 'ゲ': 'ge', 'ゴ': 'go',
+    'ザ': 'za', 'ジ': 'zi', 'ズ': 'zu', 'ゼ': 'ze', 'ゾ': 'zo',
+    'ダ': 'da', 'ヂ': 'di', 'ヅ': 'du', 'デ': 'de', 'ド': 'do',
+    'バ': 'ba', 'ビ': 'bi', 'ブ': 'bu', 'ベ': 'be', 'ボ': 'bo',
+    'パ': 'pa', 'ピ': 'pi', 'プ': 'pu', 'ペ': 'pe', 'ポ': 'po',
+    'ァ': 'a',  'ィ': 'i',  'ゥ': 'u',  'ェ': 'e',  'ォ': 'o',
+    'ャ': 'ya', 'ュ': 'yu', 'ョ': 'yo',
+    'ー': '',   'ッ': '',
+}
+
+def katakana_to_romaji_simple(text):
+    return ''.join(_KATAKANA_ROMAJI_MAP.get(ch, ch) for ch in str(text or ''))
+
 VERIFIED_BRAND_ALIAS_GROUPS = [
     ("エストラ", "aestura"),
     ("サナ", "sana", "なめらか本舗"),
@@ -1569,6 +1593,12 @@ def is_same_verified_brand_by_alias(brand_identity, rakuten_identity):
         if brand_is_in_group and rakuten_is_in_group:
             return True
 
+    # カタカナ→ロマ字変換で照合（ルルルン↔LuLuLun など r/l 表記ゆれを吸収）
+    brand_romaji = katakana_to_romaji_simple(brand_compact)
+    rakuten_romaji = katakana_to_romaji_simple(rakuten_compact)
+    if brand_romaji and rakuten_romaji and brand_romaji in rakuten_romaji:
+        return True
+
     return False
 
 def is_same_verified_rakuten_product(product_name, rakuten_title, brand=""):
@@ -1586,11 +1616,10 @@ def is_same_verified_rakuten_product(product_name, rakuten_title, brand=""):
     if not product_identity or not rakuten_identity:
         return False
 
-    if not is_same_verified_brand_by_alias(
+    brand_ok = is_same_verified_brand_by_alias(
         brand_identity,
         rakuten_identity
-    ):
-        return False
+    )
 
     product_compact = product_identity.replace(" ", "")
     rakuten_compact = rakuten_identity.replace(" ", "")
@@ -1651,10 +1680,11 @@ def is_same_verified_rakuten_product(product_name, rakuten_title, brand=""):
         if token in rakuten_compact
     ]
 
-    required_matches = 1
-
-    if len(product_tokens) >= 3:
-        required_matches = 2
+    # ブランド一致しない場合はトークン一致数の閾値を1つ上げて誤照合を防ぐ
+    if brand_ok:
+        required_matches = 1 if len(product_tokens) <= 2 else 2
+    else:
+        required_matches = 2 if len(product_tokens) <= 2 else min(3, len(product_tokens))
 
     if len(matched_tokens) < required_matches:
         return False
