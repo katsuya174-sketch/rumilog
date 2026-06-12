@@ -413,55 +413,66 @@
             
             <div class="result-card">
                 <h2 class="section-title">項目別スコア</h2>
+                {% set reasons = data.get("score_reasons", {}) %}
                 <div class="score-mini-grid">
                         <div class="score-mini">
                             <div class="score-mini-name">皮脂バランス</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("oil_balance", "-") }}</div>
+                            {% if reasons.get("oil_balance") %}<div class="score-mini-reason">{{ reasons.get("oil_balance") }}</div>{% endif %}
                         </div>
-                        
+
                         <div class="score-mini">
                             <div class="score-mini-name">赤み</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("redness", "-") }}</div>
+                            {% if reasons.get("redness") %}<div class="score-mini-reason">{{ reasons.get("redness") }}</div>{% endif %}
                         </div>
-                        
+
                         <div class="score-mini">
                             <div class="score-mini-name">毛穴</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("pores", "-") }}</div>
+                            {% if reasons.get("pores") %}<div class="score-mini-reason">{{ reasons.get("pores") }}</div>{% endif %}
                         </div>
-                        
+
                         <div class="score-mini">
                             <div class="score-mini-name">保湿</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("hydration", "-") }}</div>
+                            {% if reasons.get("hydration") %}<div class="score-mini-reason">{{ reasons.get("hydration") }}</div>{% endif %}
                         </div>
-                        
+
                         <div class="score-mini">
                             <div class="score-mini-name">ハリ</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("firmness", "-") }}</div>
+                            {% if reasons.get("firmness") %}<div class="score-mini-reason">{{ reasons.get("firmness") }}</div>{% endif %}
                         </div>
-                        
+
                         <div class="score-mini">
                             <div class="score-mini-name">ニキビ</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("acne", "-") }}</div>
+                            {% if reasons.get("acne") %}<div class="score-mini-reason">{{ reasons.get("acne") }}</div>{% endif %}
                         </div>
-                        
+
                         <div class="score-mini">
                             <div class="score-mini-name">くすみ</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("dullness", "-") }}</div>
+                            {% if reasons.get("dullness") %}<div class="score-mini-reason">{{ reasons.get("dullness") }}</div>{% endif %}
                         </div>
-                        
+
                         <div class="score-mini">
                             <div class="score-mini-name">バリア</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("barrier", "-") }}</div>
+                            {% if reasons.get("barrier") %}<div class="score-mini-reason">{{ reasons.get("barrier") }}</div>{% endif %}
                         </div>
-                        
+
                         <div class="score-mini">
                             <div class="score-mini-name">キメ</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("texture", "-") }}</div>
+                            {% if reasons.get("texture") %}<div class="score-mini-reason">{{ reasons.get("texture") }}</div>{% endif %}
                         </div>
                         
                         <div class="score-mini">
                             <div class="score-mini-name">色ムラ</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("tone_evenness", "-") }}</div>
+                            {% if reasons.get("tone_evenness") %}<div class="score-mini-reason">{{ reasons.get("tone_evenness") }}</div>{% endif %}
                         </div>
                 </div>
             </div>

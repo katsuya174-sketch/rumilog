@@ -232,6 +232,14 @@ body.result-page {
     color: #ff85a2;
 }
 
+.score-mini-reason {
+    font-size: 11px;
+    color: #9a7a84;
+    margin-top: 6px;
+    line-height: 1.5;
+    text-align: left;
+}
+
 .summary-text,
 .reason-text,
 .plan-text {

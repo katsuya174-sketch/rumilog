@@ -369,7 +369,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
-from PIL import Image,ImageOps
+import numpy as np
+from PIL import Image, ImageOps, ImageFilter
 from flask import Flask, render_template, request, jsonify, redirect, session as flask_session
 from google import genai
 from google.genai import types
@@ -9616,6 +9617,7 @@ def normalize_result(raw_data, image_path=""):
         "budget_fit_plan": raw_data.get("budget_fit_plan", {}),
         "budget_fit_total": raw_data.get("budget_fit_total", 0),
         "budget_status": raw_data.get("budget_status", "未判定"),
+        "score_reasons": raw_data.get("score_reasons", {}),
         "premium_scores": raw_data.get("premium_scores", {}),
         "symmetry_analysis": raw_data.get("symmetry_analysis", {}),
         "skin_age_estimate": raw_data.get("skin_age_estimate", 0),
@@ -10316,6 +10318,31 @@ def resize_for_gemini(file, max_size=640):
     return img.copy()
 
 
+def check_image_quality(file_storage):
+    """(ok: bool, message: str) を返す。エラー時は (True, "") でスキップ。"""
+    try:
+        file_storage.seek(0)
+        img = Image.open(io.BytesIO(file_storage.read())).convert("L")
+        file_storage.seek(0)
+
+        gray = np.array(img, dtype=np.float32)
+
+        brightness = float(gray.mean())
+        if brightness < 35:
+            return False, "画像が暗すぎます。明るい場所で撮り直してください。"
+        if brightness > 240:
+            return False, "画像が明るすぎます。直射日光を避けて撮り直してください。"
+
+        edges = np.array(img.filter(ImageFilter.FIND_EDGES), dtype=np.float32)
+        sharpness = float(edges.mean())
+        if sharpness < 4.0:
+            return False, "画像がぼやけています。カメラを安定させて撮り直してください。"
+
+        return True, ""
+    except Exception:
+        return True, ""
+
+
 def load_uploaded_images(request):
     front_file = request.files.get("front_photo")
     left_file = request.files.get("left_photo")
@@ -10329,6 +10356,11 @@ def load_uploaded_images(request):
 
     if not right_file or right_file.filename == "":
         raise ValueError("右頬画像を選択してください")
+
+    for file, label in [(front_file, "正面"), (left_file, "左頬"), (right_file, "右頬")]:
+        ok, msg = check_image_quality(file)
+        if not ok:
+            raise ValueError(f"【{label}画像】{msg}")
 
     front_img = resize_for_gemini(front_file)
     left_img = resize_for_gemini(left_file)
@@ -10711,6 +10743,23 @@ dullness
 barrier
 texture
 tone_evenness
+
+score_reasons:
+各スコア項目について、そのスコアの根拠を1文（15〜30字）で記述する。
+画像から見えた視覚的な事実のみに基づき、簡潔に記述する。
+出力例:
+{{
+  "oil_balance": "Tゾーンに皮脂のテカリが見られる",
+  "redness": "頰に目立った赤みは確認されない",
+  "pores": "鼻周辺に毛穴の開きが見られる",
+  "hydration": "頰にツヤがありみずみずしい印象",
+  "firmness": "フェイスラインにたるみは見られない",
+  "acne": "顎に炎症性ニキビが1〜2個確認される",
+  "dullness": "全体的に明るく透明感がある",
+  "barrier": "肌表面はなめらかで荒れは見られない",
+  "texture": "キメが細かく整っている",
+  "tone_evenness": "一部に色ムラが見られる"
+}}
 
 【カテゴリ固定】
 category は必ず以下のみ。
