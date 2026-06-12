@@ -36,6 +36,8 @@ _rakuten_item_cache = {}
 _rakuten_criteria_cache = {}
 _rakuten_criteria_call_count = 0
 MAX_RAKUTEN_CRITERIA_CALLS = 50
+_step_rakuten_results = {}       # {(norm_cat, norm_ing): [products]} prefetch→Gemini連携用
+_gemini_product_eval_cache = {}  # {normalized_title: {fields}} Gemini評価キャッシュ
 VERIFIED_PRODUCTS_CACHE_FILE = "verified_products_cache.json"
 VERIFIED_PRODUCTS_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
 
@@ -3128,7 +3130,254 @@ def search_rakuten_for_step(step, improvement_plan):
         f"[RAKUTEN FOR STEP] step={step_label!r} total={len(all_results)}",
         flush=True
     )
+    # prefetch→Gemini評価の橋渡し用にステップキーで保存
+    _sk = _get_step_rakuten_key(step)
+    _step_rakuten_results[_sk] = all_results
     return all_results
+
+
+# ================================================================
+# Phase 2: Gemini バッチ商品評価
+# 楽天検索結果の上位10件をステップごとに1回のGemini呼び出しで評価し
+# active_ingredients / ingredient_strength / concerns / skin_types /
+# sensitive_ok / main_functions / formulation を補完する
+# ================================================================
+
+_PRODUCT_EVAL_VALID_INGREDIENTS = {
+    "retinol", "retinal", "vitamin_c", "niacinamide", "azelaic_acid",
+    "tranexamic_acid", "peptide", "ceramide", "hyaluronic", "cica",
+    "centella", "panthenol", "bha", "aha", "pha", "glycolic_acid",
+    "lactic_acid", "salicylic_acid", "arbutin", "kojic_acid",
+    "glutathione", "squalane", "glycerin", "amino_acid", "collagen", "enzyme",
+}
+
+_PRODUCT_EVAL_VALID_CONCERNS = {
+    "dryness", "aging", "whitening", "dullness", "acne", "pores",
+    "redness", "barrier", "oiliness", "texture", "firmness", "wrinkles",
+    "sensitivity", "pigmentation", "acne_marks",
+}
+
+_PRODUCT_EVAL_SCHEMA = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "idx":                {"type": "integer"},
+            "active_ingredients": {"type": "array", "items": {"type": "string"}},
+            "ingredient_strength": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "ingredient": {"type": "string"},
+                        "level":      {"type": "string"},
+                    },
+                    "required": ["ingredient", "level"],
+                },
+            },
+            "concerns":      {"type": "array", "items": {"type": "string"}},
+            "skin_types":    {"type": "array", "items": {"type": "string"}},
+            "sensitive_ok":  {"type": "string"},
+            "main_functions":{"type": "array", "items": {"type": "string"}},
+            "formulation":   {"type": "array", "items": {"type": "string"}},
+        },
+        "required": [
+            "idx", "active_ingredients", "ingredient_strength",
+            "concerns", "skin_types", "sensitive_ok", "main_functions", "formulation",
+        ],
+    },
+}
+
+
+def _get_step_rakuten_key(step):
+    """ステップを (norm_cat, norm_ing) のキーに変換する。"""
+    cat = normalize_candidate_category(
+        str(step.get("category", "") or ""), fallback=str(step.get("category", "") or "")
+    )
+    ing = normalize_ingredient_tag(str(step.get("ingredient_focus", "") or ""))
+    return (cat, ing)
+
+
+def _build_product_eval_prompt(step, products):
+    category        = str(step.get("category", "") or "")
+    purpose         = str(step.get("purpose", "") or "")
+    ingredient_focus= str(step.get("ingredient_focus", "") or "")
+
+    lines = []
+    for i, p in enumerate(products, start=1):
+        title = str(p.get("rakuten_title") or p.get("name") or "")[:80]
+        price = int(safe_price(p.get("price_ref", 0)))
+        lines.append(f"{i}. {title} (¥{price:,})")
+
+    return (
+        "あなたはスキンケア成分の専門家です。楽天市場の商品タイトルを評価し、"
+        "各商品の成分・効果を推定してください。\n\n"
+        f"【ステップ情報】カテゴリ: {category} / 目的: {purpose} / 注目成分: {ingredient_focus}\n\n"
+        "【成分IDリスト】\n"
+        + ", ".join(sorted(_PRODUCT_EVAL_VALID_INGREDIENTS)) + "\n\n"
+        "【肌悩みタグ】\n"
+        + ", ".join(sorted(_PRODUCT_EVAL_VALID_CONCERNS)) + "\n\n"
+        "【機能タグ（main_functions）】\n"
+        "保湿, バリア強化, 鎮静, 美白, くすみ改善, エイジングケア, ハリ補給, "
+        "毛穴改善, ニキビ改善, 角質ケア, ターンオーバー促進, 皮脂コントロール, 抗酸化, 修復\n\n"
+        "【処方タグ（formulation）】\n"
+        "low_irritation, barrier_formula, oil_control, tone_up, mild_formula\n\n"
+        "【評価対象商品】\n"
+        + "\n".join(lines) + "\n\n"
+        "各商品の idx（1始まり）に対して以下を推定してください:\n"
+        "- active_ingredients: タイトルや成分名から推測できる有効成分IDリスト\n"
+        "- ingredient_strength: 濃度表記がある成分のみ [{ingredient, level}] 形式で\n"
+        "- concerns: 対応する肌悩みタグリスト\n"
+        "- skin_types: 適した肌タイプ (dry/oily/combination/sensitive/normal)\n"
+        "- sensitive_ok: 敏感肌向け表記や低刺激成分中心なら yes、刺激性成分多ければ no、不明なら unknown\n"
+        "- main_functions: 機能タグリスト\n"
+        "- formulation: 処方特性タグリスト\n"
+    )
+
+
+def gemini_evaluate_rakuten_batch(step, rakuten_products):
+    """
+    楽天商品を最大10件まとめてGeminiで評価し、結果を _gemini_product_eval_cache に保存する。
+    キャッシュ済みの商品はスキップする。
+    """
+    if not rakuten_products:
+        return
+
+    # 未キャッシュ商品だけを対象にする
+    uncached = []
+    for p in rakuten_products[:10]:
+        title = str(p.get("rakuten_title") or p.get("name") or "")
+        norm_title = normalize_product_name(title)
+        if norm_title and norm_title not in _gemini_product_eval_cache:
+            uncached.append(p)
+
+    if not uncached:
+        return
+
+    step_label = str(step.get("step_name") or step.get("category") or "")
+    print(f"[GEMINI EVAL] step={step_label!r} evaluating {len(uncached)} products", flush=True)
+
+    try:
+        prompt = _build_product_eval_prompt(step, uncached)
+        config = types.GenerateContentConfig(
+            temperature=0,
+            max_output_tokens=1200,
+            response_mime_type="application/json",
+            response_schema=_PRODUCT_EVAL_SCHEMA,
+        )
+        response = call_gemini_with_retry(client, DETAIL_MODEL, prompt, config=config)
+        if response is None or not response.text:
+            return
+
+        raw = response.text.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
+
+        results = json.loads(raw)
+        if not isinstance(results, list):
+            return
+
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            idx = int(item.get("idx", 0)) - 1  # 1始まり→0始まり
+            if idx < 0 or idx >= len(uncached):
+                continue
+
+            product = uncached[idx]
+            title = str(product.get("rakuten_title") or product.get("name") or "")
+            norm_title = normalize_product_name(title)
+            if not norm_title:
+                continue
+
+            # ingredient_strength をリスト形式からdict形式に変換
+            raw_strength = item.get("ingredient_strength", []) or []
+            strength_dict = {}
+            if isinstance(raw_strength, list):
+                for s in raw_strength:
+                    if isinstance(s, dict) and s.get("ingredient") and s.get("level"):
+                        ing = str(s["ingredient"]).strip()
+                        lvl = str(s["level"]).strip().lower()
+                        if ing in _PRODUCT_EVAL_VALID_INGREDIENTS and lvl in ("high", "medium", "low"):
+                            strength_dict[ing] = lvl
+
+            # 有効タグのみフィルタ
+            actives = [x for x in (item.get("active_ingredients") or [])
+                       if x in _PRODUCT_EVAL_VALID_INGREDIENTS]
+            concerns = [x for x in (item.get("concerns") or [])
+                        if x in _PRODUCT_EVAL_VALID_CONCERNS]
+            skin_types = [x for x in (item.get("skin_types") or [])
+                          if x in ("dry", "oily", "combination", "sensitive", "normal")]
+            sensitive_ok = str(item.get("sensitive_ok", "unknown") or "unknown").lower()
+            if sensitive_ok not in ("yes", "no", "unknown"):
+                sensitive_ok = "unknown"
+            main_functions = [str(x) for x in (item.get("main_functions") or []) if x]
+            formulation = [x for x in (item.get("formulation") or [])
+                           if x in ("low_irritation", "barrier_formula", "oil_control",
+                                    "tone_up", "mild_formula")]
+
+            _gemini_product_eval_cache[norm_title] = {
+                "active_ingredients": actives,
+                "ingredient_strength": strength_dict,
+                "concerns":           concerns,
+                "skin_types":         skin_types,
+                "sensitive_ok":       sensitive_ok,
+                "main_functions":     main_functions,
+                "formulation":        formulation,
+            }
+            print(
+                f"[GEMINI EVAL] cached title={title[:40]!r} "
+                f"actives={actives} sens={sensitive_ok} concerns={len(concerns)}",
+                flush=True
+            )
+
+    except Exception as e:
+        print(f"[GEMINI EVAL ERROR] step={step_label!r} {repr(e)}", flush=True)
+
+
+def apply_gemini_product_eval(product):
+    """
+    _gemini_product_eval_cache からGemini評価を取得して商品dictに適用する。
+    Geminiが返したフィールドで title-inference の値を上書きする。
+    """
+    title = str(product.get("rakuten_title") or product.get("name") or "")
+    norm_title = normalize_product_name(title)
+    if not norm_title:
+        return product
+
+    eval_result = _gemini_product_eval_cache.get(norm_title)
+    if not eval_result:
+        return product
+
+    # active_ingredients: Geminiの方が詳細ならマージ（既存を上書き）
+    if eval_result.get("active_ingredients"):
+        product["active_ingredients"] = eval_result["active_ingredients"]
+
+    # ingredient_strength: Geminiが設定した成分のみ反映
+    if eval_result.get("ingredient_strength"):
+        existing = dict(product.get("ingredient_strength") or {})
+        existing.update(eval_result["ingredient_strength"])
+        product["ingredient_strength"] = existing
+
+    # concerns / skin_types / main_functions / formulation: 上書き（Geminiが信頼性高い）
+    if eval_result.get("concerns"):
+        product["concerns"] = eval_result["concerns"]
+    if eval_result.get("skin_types"):
+        product["skin_types"] = eval_result["skin_types"]
+    if eval_result.get("main_functions"):
+        product["main_functions"] = eval_result["main_functions"]
+    if eval_result.get("formulation"):
+        existing_form = list(product.get("formulation") or [])
+        for f in eval_result["formulation"]:
+            if f not in existing_form:
+                existing_form.append(f)
+        product["formulation"] = existing_form
+
+    # sensitive_ok: unknown → Geminiの値で更新
+    if eval_result.get("sensitive_ok") and eval_result["sensitive_ok"] != "unknown":
+        product["sensitive_ok"] = eval_result["sensitive_ok"]
+
+    return product
 
 
 def clean_product_title(text):
@@ -7010,6 +7259,13 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
         product = dict(p)
 
+        # Phase 2: Gemini評価をキャッシュから適用（方針A・enrich の前に実行）
+        # Geminiが推定した active_ingredients/concerns/skin_types/sensitive_ok/
+        # main_functions/formulation/ingredient_strength をここで上書きすることで
+        # 後続の方針A・enrich がより正確なベースデータから動く
+        if product.get("_source_hint") == "rakuten_criteria":
+            apply_gemini_product_eval(product)
+
         # -------------------------------------------------------
         # 方針A: Rakuten criteria 商品にステップ由来メタデータを付与
         # enrich_product_metadata_from_ingredients の前に実行することで
@@ -8669,7 +8925,20 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
         for future in concurrent.futures.as_completed(futures):
             future.result()  # 例外を再スローさせるため
 
-    print(f"[PREFETCH] 完了 {time.time() - t0:.1f}s", flush=True)
+    print(f"[PREFETCH] Rakuten完了 {time.time() - t0:.1f}s", flush=True)
+
+    # Phase B: Gemini バッチ商品評価（直列・クォータ節約）
+    t1 = time.time()
+    seen_step_keys = set()
+    for step in all_steps:
+        sk = _get_step_rakuten_key(step)
+        if sk in seen_step_keys:
+            continue
+        seen_step_keys.add(sk)
+        products_for_step = _step_rakuten_results.get(sk, [])
+        if products_for_step:
+            gemini_evaluate_rakuten_batch(step, products_for_step)
+    print(f"[PREFETCH] Gemini評価完了 {time.time() - t1:.1f}s", flush=True)
 
 
 def assign_products_to_all_steps(data, products, user_data, budget_value):
