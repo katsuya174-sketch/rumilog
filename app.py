@@ -2470,6 +2470,34 @@ _TITLE_SKIN_TYPE_KEYWORDS = {
     "普通肌": "normal",
 }
 
+# 商品タイトルから成分キーを推定するマッピング（楽天商品の active_ingredients 補完用）
+_TITLE_TO_INGREDIENT_KEY = {
+    "セラミド": "ceramide", "ceramide": "ceramide",
+    "ヒアルロン酸": "hyaluronic", "ヒアルロン": "hyaluronic",
+    "ナイアシンアミド": "niacinamide", "niacinamide": "niacinamide",
+    "ビタミンc": "vitamin_c", "ビタミンC": "vitamin_c", "アスコルビン": "vitamin_c",
+    "レチノール": "retinol", "retinol": "retinol",
+    "レチナール": "retinal",
+    "アゼライン酸": "azelaic_acid", "アゼライン": "azelaic_acid",
+    "トラネキサム酸": "tranexamic_acid",
+    "アルブチン": "arbutin",
+    "コラーゲン": "collagen", "collagen": "collagen",
+    "ペプチド": "peptide", "peptide": "peptide",
+    "cica": "cica", "シカ": "cica", "ツボクサ": "cica",
+    "センテラ": "centella", "centella": "centella",
+    "パンテノール": "panthenol", "パントテン": "panthenol",
+    "スクワラン": "squalane", "squalane": "squalane",
+    "グリセリン": "glycerin", "glycerin": "glycerin",
+    "アミノ酸": "amino_acid",
+    "aha": "aha", "グリコール酸": "glycolic_acid",
+    "乳酸": "lactic_acid",
+    "bha": "bha", "サリチル酸": "salicylic_acid",
+    "pha": "pha", "グルコノラクトン": "pha",
+    "酵素": "enzyme",
+    "グルタチオン": "glutathione",
+    "コウジ酸": "kojic_acid",
+}
+
 
 def enrich_product_metadata_from_ingredients(product):
     """
@@ -2482,9 +2510,30 @@ def enrich_product_metadata_from_ingredients(product):
     if not isinstance(product, dict):
         return product
 
-    inferred = product.get("active_ingredients") or []
+    title = str(product.get("rakuten_title") or product.get("name") or "")
+    title_lower = title.lower()
+
+    inferred = list(product.get("active_ingredients") or [])
+
+    # active_ingredients が空の楽天商品はタイトルから成分キーを補完する
     if not inferred:
-        return product
+        seen_inferred = set()
+        for keyword, ing_key in _TITLE_TO_INGREDIENT_KEY.items():
+            if keyword.lower() in title_lower and ing_key not in seen_inferred:
+                inferred.append(ing_key)
+                seen_inferred.add(ing_key)
+        if inferred:
+            product["active_ingredients"] = inferred
+        else:
+            # タイトルからも成分が取れない場合は肌タイプのみ補完して終了
+            skin_types = list(product.get("skin_types") or [])
+            seen_skin_types = set(skin_types)
+            for keyword, st in _TITLE_SKIN_TYPE_KEYWORDS.items():
+                if keyword in title and st not in seen_skin_types:
+                    skin_types.append(st)
+                    seen_skin_types.add(st)
+            product["skin_types"] = skin_types
+            return product
 
     concerns         = list(product.get("concerns") or [])
     main_functions   = list(product.get("main_functions") or [])
@@ -2511,7 +2560,6 @@ def enrich_product_metadata_from_ingredients(product):
                 seen_focus.add(focus)
 
     # タイトルまたは商品名から肌タイプを推定（DB商品も name フィールドがある）
-    title = str(product.get("rakuten_title") or product.get("name") or "")
     seen_skin_types = set(skin_types)
     for keyword, st in _TITLE_SKIN_TYPE_KEYWORDS.items():
         if keyword in title and st not in seen_skin_types:
@@ -4017,18 +4065,30 @@ def apply_cleansing_score_rules(product, user_data, concern_tags):
     score = 0
 
     product_actives = product.get("active_ingredients", [])
-    product_support = product.get("support_ingredients", [])
-    formulation = product.get("formulation", [])
+    product_support = list(product.get("support_ingredients", []) or [])
+    formulation = list(product.get("formulation", []) or [])
     texture = normalize_text(product.get("texture", ""))
     sensitive_ok = product.get("sensitive_ok", "unknown")
-    functions = product.get("main_functions", [])
-    technology = product.get("technology", [])
-    contraindications = product.get("contraindications", [])
+    functions = list(product.get("main_functions", []) or [])
+    technology = list(product.get("technology", []) or [])
+    contraindications = list(product.get("contraindications", []) or [])
 
     skin = normalize_text(user_data.get("oil", ""))
     sens = normalize_text(user_data.get("sens", ""))
     makeup_level = normalize_text(user_data.get("makeup_level", "medium"))
     morning_cleanse = normalize_text(user_data.get("morning_cleanse", "no"))
+
+    # 楽天商品など構造化メタデータが空の場合はタイトルから補完（公平な評価のため）
+    _no_meta = not functions and not formulation and sensitive_ok == "unknown"
+    if _no_meta:
+        _title = normalize_text(str(product.get("rakuten_title") or product.get("name") or ""))
+        if any(w in _title for w in ["低刺激", "敏感肌", "マイルド", "sensitive", "mild", "刺激レス"]):
+            sensitive_ok = "yes"
+            functions = functions + ["low_irritation"]
+        if any(w in _title for w in ["しっとり", "潤い", "保湿", "バリア", "うるおい"]):
+            functions = functions + ["barrier_preserving", "non_stripping"]
+        if any(w in _title for w in ["エッセンシャルオイル", "精油", "アロマ"]):
+            contraindications = contraindications + ["essential_oil_caution"]
 
     # =========================
     # 敏感肌対応
@@ -4329,11 +4389,20 @@ def apply_sunscreen_score_rules(product, step, user_data, concern_tags):
     if "光ダメージケア" in functions:
         score += 4
 
-    # 👇ここに追加
-    uv_info = product.get("uv_level", {})
+    uv_info = product.get("uv_level") or {}
     spf_raw = str(uv_info.get("spf", 0) or "0").strip()
     spf = int(re.sub(r"[^0-9]", "", spf_raw) or 0)
     pa = str(uv_info.get("pa", "") or "")
+
+    # uv_level が空の楽天商品はタイトルから SPF/PA を抽出してフォールバック
+    if not spf and not pa:
+        title_raw = str(product.get("rakuten_title") or product.get("name") or "")
+        spf_m = re.search(r'(?i)spf\s*(\d+)', title_raw)
+        if spf_m:
+            spf = int(spf_m.group(1))
+        pa_m = re.search(r'(?i)(pa\+{1,4})', title_raw)
+        if pa_m:
+            pa = pa_m.group(1).replace("PA", "").replace("pa", "")  # → "++++", "+++" 等
 
     if spf >= 50:
         score += 10
@@ -4348,8 +4417,6 @@ def apply_sunscreen_score_rules(product, step, user_data, concern_tags):
         score += 5
     elif pa == "++":
         score += 2
-
-    
 
     return score
 
@@ -12176,9 +12243,18 @@ def build_weekly_usage_plan(data):
             product = f"{brand} {product}"
         return f"{category}: {product}" if product else category
 
+    # weekly_care のカテゴリ別デフォルト曜日（Geminiがuse_daysを返さなかった場合）
+    _WEEKLY_DEFAULT_DAYS = {"パック": ["日"], "ピーリング": ["土"]}
+
     def get_use_days(step):
-        v = step.get("use_days", []) if isinstance(step, dict) else []
-        return v if isinstance(v, list) else []
+        if not isinstance(step, dict):
+            return []
+        v = step.get("use_days", [])
+        if isinstance(v, list) and v:
+            return v
+        # 空リストの場合はカテゴリ別デフォルト曜日を返す
+        cat = str(step.get("category") or "").strip()
+        return _WEEKLY_DEFAULT_DAYS.get(cat, ["日"])
 
     def is_display(step):
         return str(step.get("category") or "").strip() in DISPLAY_CATEGORIES if isinstance(step, dict) else False
