@@ -2569,6 +2569,64 @@ def infer_ingredients_from_rakuten_title(title):
     return found
 
 
+# タイトルキーワード → contraindications 推定マッピング
+# DB商品は products.json に実データが入っているため、このルールは楽天商品専用
+_TITLE_CONTRAINDICATION_RULES = [
+    # レチノイド系：朝NG・光感受性・酸との併用注意
+    (
+        ["レチノール", "レチナール", "retinol", "retinal", "レチノイン", "tretinoin"],
+        ["high_irritation_risk", "morning_use_caution", "retinol_same_routine", "photosensitivity"]
+    ),
+    # AHA系：光感受性・酸重複注意・毎日使い注意
+    (
+        ["aha", "グリコール酸", "glycolic", "乳酸", "lactic acid", "マンデル酸", "mandelic",
+         "フルーツ酸", "酒石酸", "クエン酸 酸"],
+        ["high_irritation_risk", "acid_same_routine", "photosensitivity", "morning_use_caution"]
+    ),
+    # BHA系：脂溶性・毛穴向け・敏感肌注意
+    (
+        ["bha", "サリチル酸", "salicylic"],
+        ["high_irritation_risk", "acid_same_routine", "sensitive_skin"]
+    ),
+    # PHA系：マイルドだが酸系であることは明記
+    (
+        ["pha", "グルコノラクトン", "ラクトビオン酸"],
+        ["acid_same_routine", "daily_use_caution"]
+    ),
+    # ピーリング製品全般
+    (
+        ["ピーリング", "ピール", "スキンピール", "角質除去", "ゴマージュ", "スクラブ"],
+        ["high_irritation_risk", "acid_same_routine", "photosensitivity", "daily_use_caution"]
+    ),
+    # 高濃度表記
+    (
+        ["高濃度", "高配合", "30%", "20%", "15%", "10%"],
+        ["high_irritation_risk", "sensitive_skin"]
+    ),
+    # 精油・エッセンシャルオイル
+    (
+        ["精油", "エッセンシャルオイル", "essential oil"],
+        ["essential_oil_caution", "sensitive_skin"]
+    ),
+]
+
+
+def infer_contraindications_from_title(title):
+    """楽天商品タイトルから contraindications タグを推定する。"""
+    if not title:
+        return []
+    title_lower = str(title).lower()
+    result = []
+    seen = set()
+    for keywords, contras in _TITLE_CONTRAINDICATION_RULES:
+        if any(kw.lower() in title_lower for kw in keywords):
+            for c in contras:
+                if c not in seen:
+                    result.append(c)
+                    seen.add(c)
+    return result
+
+
 # 推定成分ID → concerns / main_functions / ingredient_focus の補完マッピング
 _RAKUTEN_INGREDIENT_METADATA = {
     "retinol":        {"concerns": ["aging", "texture", "pores", "dullness", "acne_marks"],    "main_functions": ["エイジングケア", "毛穴改善", "ターンオーバー促進", "ハリ補給"], "ingredient_focus": ["retinoid"]},
@@ -6856,15 +6914,24 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             _itag = normalize_ingredient_tag(step.get("ingredient_focus", "") or "")
             _actives = list(product.get("active_ingredients") or [])
             # ① step の ingredient_tag を active_ingredients に追加
-            #    （build_virtual_product_from_ai_candidate と同じ処理）
+            #    enrich_product_metadata_from_ingredients が後続で concerns/main_functions も
+            #    _RAKUTEN_INGREDIENT_METADATA から自然に補完するため、concerns の強制付与は不要
             if _itag and _itag not in _actives:
                 product["active_ingredients"] = _actives + [_itag]
             # ② availability_japan: 楽天で見つかった商品には最低限 rakuten を付与
             if not (product.get("availability_japan") or []):
                 product["availability_japan"] = ["rakuten"]
-            # ③ concerns: タイトル推定が空だった場合は step の purpose から補完
-            if not (product.get("concerns") or []):
-                product["concerns"] = purpose_to_concern_tags(step.get("purpose", ""))
+            # ③（削除）concerns の強制付与は overcorrection のため廃止
+            #    _itag → enrich_product_metadata_from_ingredients → concerns の自然な連鎖で十分
+            # ④ contraindications: タイトルから刺激性・使用注意事項を推定
+            #    DB商品は products.json の実データを使うので、楽天商品にのみ適用
+            if not (product.get("contraindications") or []):
+                _contra_title = str(
+                    product.get("rakuten_title") or product.get("name") or ""
+                )
+                _inferred_contra = infer_contraindications_from_title(_contra_title)
+                if _inferred_contra:
+                    product["contraindications"] = _inferred_contra
 
         # DB・楽天問わず全商品に同じ基準でメタデータ補完を適用する
         enrich_product_metadata_from_ingredients(product)
@@ -6875,10 +6942,12 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             _itag = normalize_ingredient_tag(step.get("ingredient_focus", "") or "")
             _actives = product.get("active_ingredients", []) or []
             _hit = _itag and _itag in _actives
+            _contra = product.get("contraindications", []) or []
             print(
                 f"[RAKUTEN_META] name={str(product.get('name',''))[:30]} "
-                f"actives={_actives} focus_hit={_hit} "
+                f"focus_hit={_hit} "
                 f"concerns={len(product.get('concerns',[]) or [])} "
+                f"contra={_contra} "
                 f"sens={product.get('sensitive_ok','?')} "
                 f"avail={product.get('availability_japan',[])}",
                 flush=True
