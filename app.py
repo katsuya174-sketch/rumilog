@@ -223,11 +223,9 @@ def get_gemini_usage_status():
 init_results_table()
 init_gemini_usage_table()
 VERIFY_PRODUCT_CACHE = {}
-# ===== DEV_MODE_START =====
-DEV_MODE = False  # ← 開発中はTrue / 公開時はFalseにするか削除
-# ===== DEV_MODE_END =====
+DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
 USE_RICH_CANDIDATE = False
-DISABLE_USAGE_LIMIT = True 
+DISABLE_USAGE_LIMIT = os.getenv("DISABLE_USAGE_LIMIT", "false").lower() == "true"
 from constants import (
     ALLOWED_TAGS,
     PRODUCT_IMAGES,
@@ -385,7 +383,7 @@ CLICK_LOG_FILE = "product_clicks.json"
 
 # ===== 有料会員設定 =====
 ENABLE_SUBSCRIPTION = False  # 決済導入前はFalse
-DEV_PREMIUM_MODE = False     # 開発中に有料表示を確認したい時だけTrue
+DEV_PREMIUM_MODE = os.getenv("DEV_PREMIUM_MODE", "false").lower() == "true"
 
 # ===== 作成者認証 =====
 CREATOR_KEY = os.getenv("CREATOR_KEY", "")
