@@ -2411,6 +2411,11 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
                 rakuten_title = str(item.get("itemName", "") or "").strip()
 
+                # 非スキンケア商品を即リジェクト
+                if category and not _is_rakuten_item_valid_for_category(rakuten_title, category):
+                    print("[RAKUTEN REJECT non-skincare]", rakuten_title[:50], flush=True)
+                    continue
+
                 if not is_same_verified_rakuten_product(
                     product_name=product_name,
                     rakuten_title=rakuten_title,
@@ -2821,6 +2826,58 @@ def enrich_product_metadata_from_ingredients(product):
     return product
 
 
+_CATEGORY_REQUIRED_KEYWORDS = {
+    "クレンジング":  ["クレンジング", "cleansing", "メイク落とし", "make up remover", "makeup remover"],
+    "洗顔":          ["洗顔", "フォーム", "フェイスウォッシュ", "face wash", "cleanser"],
+    "ブースター":    ["ブースター", "導入", "先行美容液", "booster"],
+    "化粧水":        ["化粧水", "トナー", "ローション", "toner", "lotion"],
+    "美容液":        ["美容液", "セラム", "エッセンス", "アンプル", "serum", "essence", "ampoule"],
+    "導入美容液":    ["美容液", "セラム", "エッセンス", "ブースター", "導入", "serum"],
+    "乳液":          ["乳液", "ミルク", "エマルジョン", "emulsion", "milk"],
+    "クリーム":      ["クリーム", "バーム", "cream", "balm", "moisturizer"],
+    "日焼け止め":    ["日焼け止め", "spf", "pa+", "サンスクリーン", "sunscreen", "uv"],
+    "パック":        ["パック", "マスク", "mask", "シートマスク", "フェイスマスク"],
+    "ピーリング":    ["ピーリング", "aha", "bha", "スクラブ", "exfoliant", "peel"],
+}
+
+# スキンケアと無関係なカテゴリのキーワード → 含まれていたら問答無用で除外
+_NON_SKINCARE_REJECT_KEYWORDS = [
+    "口腔", "デンタル", "歯ブラシ", "歯磨き", "フロス", "洗浄機", "電動歯ブラシ",
+    "ジェットウォッシャー", "ウォーターフロッサー",
+    "サプリ", "サプリメント", "健康食品", "内服", "飲む美容",
+    "家電", "電化製品", "洗濯機", "掃除機", "ドライヤー", "ヘアドライヤー",
+    "食品", "飲料", "プロテイン",
+    "スポーツ用品", "フィットネス", "ダンベル",
+]
+
+
+def _is_rakuten_item_valid_for_category(item_name: str, category: str) -> bool:
+    """楽天検索結果の商品名が期待するスキンケアカテゴリに本当に属するか確認する。"""
+    if not item_name:
+        return False
+    name_lower = item_name.lower()
+
+    # 非スキンケアキーワードが含まれていたら即リジェクト
+    for ng in _NON_SKINCARE_REJECT_KEYWORDS:
+        if ng in name_lower:
+            print(f"[CRITERIA REJECT non-skincare] '{item_name[:50]}' contains '{ng}'", flush=True)
+            return False
+
+    # カテゴリ固有キーワードが1つ以上含まれているか確認
+    required = _CATEGORY_REQUIRED_KEYWORDS.get(category, [])
+    if not required:
+        # 定義外カテゴリはスキンケア関連語のどれかがあればOK
+        all_skincare_words = [w for kws in _CATEGORY_REQUIRED_KEYWORDS.values() for w in kws]
+        return any(w in name_lower for w in all_skincare_words)
+
+    if any(w in name_lower for w in required):
+        return True
+
+    # カテゴリキーワードが見当たらない場合は除外（別カテゴリ商品の混入を防ぐ）
+    print(f"[CRITERIA REJECT wrong category] '{item_name[:50]}' for category='{category}'", flush=True)
+    return False
+
+
 def search_rakuten_by_criteria(category, improvement_plan):
     """
     improvement_plan の key_ingredients + category で楽天検索し候補商品リストを返す。
@@ -2921,6 +2978,10 @@ def search_rakuten_by_criteria(category, improvement_plan):
 
             item_name = str(item.get("itemName", "") or "").strip()
             if not item_name:
+                continue
+
+            # カテゴリ適合チェック: 無関係な商品（口腔洗浄機など）を除外
+            if not _is_rakuten_item_valid_for_category(item_name, category):
                 continue
 
             item = normalize_rakuten_item_price(item)
