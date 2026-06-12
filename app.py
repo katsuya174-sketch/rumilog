@@ -35,7 +35,7 @@ RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
 _rakuten_criteria_cache = {}
 _rakuten_criteria_call_count = 0
-MAX_RAKUTEN_CRITERIA_CALLS = 12
+MAX_RAKUTEN_CRITERIA_CALLS = 50
 VERIFIED_PRODUCTS_CACHE_FILE = "verified_products_cache.json"
 VERIFIED_PRODUCTS_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
 
@@ -2864,10 +2864,32 @@ def _is_rakuten_item_valid_for_category(item_name: str, category: str, strict: b
     return False
 
 
-def search_rakuten_by_criteria(category, improvement_plan):
+# 肌悩みタグ → 楽天検索キーワード変換マップ
+_CONCERN_TO_RAKUTEN_KEYWORD = {
+    "dryness":     "保湿",
+    "hydration":   "保湿",
+    "barrier":     "バリアケア",
+    "aging":       "エイジングケア",
+    "firmness":    "ハリ",
+    "wrinkles":    "シワ",
+    "whitening":   "美白",
+    "brightening": "美白",
+    "dullness":    "くすみ",
+    "acne":        "ニキビ",
+    "pores":       "毛穴",
+    "oiliness":    "皮脂",
+    "redness":     "鎮静",
+    "soothing":    "鎮静",
+    "sensitivity": "敏感肌",
+    "texture":     "毛穴",
+    "uv":          "日焼け止め",
+}
+
+
+def _rakuten_criteria_search_single(keyword, category):
     """
-    improvement_plan の key_ingredients + category で楽天検索し候補商品リストを返す。
-    セッション内でキャッシュ、MAX_RAKUTEN_CRITERIA_CALLS 回を上限とする。
+    単一キーワードで楽天商品検索しカテゴリ適合商品リストを返す。
+    セッションキャッシュ・レート制限・セッション上限すべて共通管理。
     """
     global _rakuten_criteria_cache, _rakuten_criteria_call_count, RAKUTEN_COOLDOWN_UNTIL
 
@@ -2881,25 +2903,12 @@ def search_rakuten_by_criteria(category, improvement_plan):
         print("[RAKUTEN CRITERIA] session call limit reached", flush=True)
         return []
 
-    if not isinstance(improvement_plan, dict):
+    keyword = clean_rakuten_keyword(keyword)
+    if not keyword:
         return []
 
-    key_ingredients = improvement_plan.get("key_ingredients") or []
-    top_ingredient = next(
-        (clean_rakuten_keyword(i) for i in key_ingredients if clean_rakuten_keyword(i)),
-        None
-    )
-
-    if not top_ingredient:
-        return []
-
-    category_clean = clean_rakuten_keyword(category)
-    if not category_clean:
-        return []
-
-    keyword = f"{category_clean} {top_ingredient}"
     norm_cat = normalize_candidate_category(category, fallback=category)
-    cache_key = (norm_cat, top_ingredient)
+    cache_key = (norm_cat, keyword)
 
     if cache_key in _rakuten_criteria_cache:
         print(f"[RAKUTEN CRITERIA CACHE HIT] {cache_key}", flush=True)
@@ -2922,14 +2931,12 @@ def search_rakuten_by_criteria(category, improvement_plan):
             "applicationId": RAKUTEN_APP_ID,
             "accessKey": RAKUTEN_ACCESS_KEY,
             "keyword": keyword,
-            "hits": 10,
+            "hits": 20,
             "format": "json",
             "formatVersion": 2,
             "imageFlag": 1,
         }
 
-        # 個別スキンケアカテゴリのジャンルIDで絞り込み（最優先）
-        # → "美容液 ナイアシンアミド" 検索が口腔洗浄機を返すことをAPIレベルで防ぐ
         _genre_id = get_rakuten_genre_id(category, parent_only=False)
         if _genre_id:
             params["genreId"] = _genre_id
@@ -2962,7 +2969,6 @@ def search_rakuten_by_criteria(category, improvement_plan):
         payload = res.json()
         items = payload.get("items") or payload.get("Items") or []
 
-        # genreId 指定で0件の場合はジャンルなしで再検索（API がジャンルIDを無視する場合の保険）
         if not items and "genreId" in params:
             print(f"[RAKUTEN CRITERIA] 0 items with genreId={params['genreId']}, retrying without genreId", flush=True)
             params_no_genre = {k: v for k, v in params.items() if k != "genreId"}
@@ -2986,7 +2992,6 @@ def search_rakuten_by_criteria(category, improvement_plan):
             if not item_name:
                 continue
 
-            # カテゴリ適合チェック: 無関係な商品（口腔洗浄機など）を除外
             if not _is_rakuten_item_valid_for_category(item_name, category):
                 _n_invalid_cat += 1
                 continue
@@ -2996,7 +3001,7 @@ def search_rakuten_by_criteria(category, improvement_plan):
             image_url = extract_rakuten_image_url(item)
             if not image_url:
                 _n_no_image += 1
-                continue  # 画像なしは候補から除外
+                continue
 
             inferred = infer_ingredients_from_rakuten_title(item_name)
 
@@ -3034,6 +3039,95 @@ def search_rakuten_by_criteria(category, improvement_plan):
         print(f"[RAKUTEN CRITERIA ERROR] {repr(e)}", flush=True)
         _rakuten_criteria_cache[cache_key] = []
         return []
+
+
+def search_rakuten_by_criteria(category, improvement_plan):
+    """後方互換: improvement_plan の key_ingredients + category で検索するラッパー。"""
+    if not isinstance(improvement_plan, dict):
+        return []
+    key_ingredients = improvement_plan.get("key_ingredients") or []
+    top_ingredient = next(
+        (clean_rakuten_keyword(i) for i in key_ingredients if clean_rakuten_keyword(i)),
+        None
+    )
+    if not top_ingredient:
+        return []
+    category_clean = clean_rakuten_keyword(category)
+    if not category_clean:
+        return []
+    return _rakuten_criteria_search_single(f"{category_clean} {top_ingredient}", category)
+
+
+def search_rakuten_for_step(step, improvement_plan):
+    """
+    ステップごとに最大3クエリを実行し楽天商品候補を返す。
+    Q1: ingredient_focus + category  （成分軸）
+    Q2: concern_keyword + category   （悩み軸）
+    Q3: category のみ                （広範囲フォールバック）
+    重複排除して最大25件まとめて返す。
+    """
+    category = str(step.get("category", "") or "").strip()
+    category_clean = clean_rakuten_keyword(category)
+    if not category_clean:
+        return []
+
+    ingredient_focus = str(step.get("ingredient_focus", "") or "").strip()
+    concern_tags = purpose_to_concern_tags(step.get("purpose", ""))
+
+    key_ingredients = list((improvement_plan or {}).get("key_ingredients", []) or []) if improvement_plan else []
+    top_from_plan = next(
+        (clean_rakuten_keyword(i) for i in key_ingredients if clean_rakuten_keyword(i)),
+        None
+    )
+
+    queries_seen = set()
+    queries = []
+
+    def add_query(kw):
+        kw = clean_rakuten_keyword(kw)
+        norm = normalize_text(kw)
+        if kw and norm and norm not in queries_seen:
+            queries_seen.add(norm)
+            queries.append(kw)
+
+    # Q1: 成分軸
+    if ingredient_focus:
+        ing_clean = clean_rakuten_keyword(ingredient_focus)
+        if ing_clean:
+            add_query(f"{ing_clean} {category_clean}")
+
+    # Q2: 悩み軸（または improvement_plan の top_ingredient）
+    concern_kw = next(
+        (_CONCERN_TO_RAKUTEN_KEYWORD[tag] for tag in concern_tags if tag in _CONCERN_TO_RAKUTEN_KEYWORD),
+        None
+    )
+    if concern_kw:
+        add_query(f"{concern_kw} {category_clean}")
+    elif top_from_plan:
+        add_query(f"{top_from_plan} {category_clean}")
+
+    # Q3: カテゴリのみ（broad fallback）
+    add_query(category_clean)
+
+    seen_keys = set()
+    all_results = []
+
+    for q in queries[:3]:
+        if len(all_results) >= 25:
+            break
+        results = _rakuten_criteria_search_single(q, category)
+        for r in results:
+            k = normalize_product_name(r.get("rakuten_title", "") or r.get("name", ""))
+            if k and k not in seen_keys:
+                seen_keys.add(k)
+                all_results.append(r)
+
+    print(
+        f"[RAKUTEN FOR STEP] step={str(step.get('step_name') or step.get('category',''))!r} "
+        f"queries={queries} total={len(all_results)}",
+        flush=True
+    )
+    return all_results
 
 
 def clean_product_title(text):
@@ -6874,15 +6968,14 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         seen_product_keys.add(product_key)
         combined_products.append(source_product)
 
-    # Phase 2: criteria-based Rakuten search
+    # Phase 2: criteria-based Rakuten search（常時実行・最大3クエリ）
     n_db_before = len(combined_products)
-    if improvement_plan and improvement_plan.get("priority_concerns"):
-        criteria_products = search_rakuten_by_criteria(category, improvement_plan)
-        for cp in criteria_products:
-            cp_key = normalize_product_name(cp.get("rakuten_title", "") or cp.get("name", ""))
-            if cp_key and cp_key not in seen_product_keys:
-                seen_product_keys.add(cp_key)
-                combined_products.append(cp)
+    criteria_products = search_rakuten_for_step(step, improvement_plan)
+    for cp in criteria_products:
+        cp_key = normalize_product_name(cp.get("rakuten_title", "") or cp.get("name", ""))
+        if cp_key and cp_key not in seen_product_keys:
+            seen_product_keys.add(cp_key)
+            combined_products.append(cp)
     n_rakuten_criteria = len(combined_products) - n_db_before
     _step_name = str(step.get("step_name") or step.get("name") or "")
     print(
