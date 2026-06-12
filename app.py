@@ -12741,11 +12741,18 @@ def stripe_webhook():
     try:
         obj = event["data"]["object"]
 
+        def sg(o, key, default=""):
+            """StripeObject / dict 両対応の安全な値取得"""
+            if isinstance(o, dict):
+                return o.get(key, default)
+            return getattr(o, key, default) or default
+
         # 支払い完了（新規）
         if event_type == "checkout.session.completed":
-            email = obj.get("customer_email") or obj.get("customer_details", {}).get("email", "")
-            customer_id = str(obj.get("customer") or "")
-            subscription_id = str(obj.get("subscription") or "")
+            customer_details = sg(obj, "customer_details", None)
+            email = sg(obj, "customer_email") or sg(customer_details, "email")
+            customer_id = str(sg(obj, "customer"))
+            subscription_id = str(sg(obj, "subscription"))
             print(f"[STRIPE] checkout completed: email={email} sub={subscription_id}", flush=True)
             if email:
                 key = issue_premium_key(email, customer_id, subscription_id)
@@ -12754,11 +12761,16 @@ def stripe_webhook():
 
         # 請求成功（更新時のキー延長）
         elif event_type == "invoice.payment_succeeded":
-            email = str(obj.get("customer_email") or "")
-            customer_id = str(obj.get("customer") or "")
-            # subscription は文字列IDまたは展開オブジェクトの両方に対応
-            sub = obj.get("subscription")
-            subscription_id = str(sub.get("id") if isinstance(sub, dict) else sub or "")
+            email = str(sg(obj, "customer_email"))
+            customer_id = str(sg(obj, "customer"))
+            sub = sg(obj, "subscription", None)
+            # subscription は文字列IDまたは展開StripeObjectの両方に対応
+            if sub is None or sub == "":
+                subscription_id = ""
+            elif isinstance(sub, str):
+                subscription_id = sub
+            else:
+                subscription_id = str(sg(sub, "id"))
             print(f"[STRIPE] invoice succeeded: email={email} sub={subscription_id}", flush=True)
             if email and subscription_id:
                 issue_premium_key(email, customer_id, subscription_id)
@@ -12766,7 +12778,7 @@ def stripe_webhook():
 
         # サブスク解約
         elif event_type == "customer.subscription.deleted":
-            subscription_id = str(obj.get("id") or "")
+            subscription_id = str(sg(obj, "id"))
             print(f"[STRIPE] subscription deleted: sub={subscription_id}", flush=True)
             if subscription_id:
                 revoke_premium_key_by_subscription(subscription_id)
