@@ -29,7 +29,7 @@ import threading
 from psycopg2.pool import SimpleConnectionPool
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v2"
+ANALYSIS_CACHE_VERSION = "v3"
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
@@ -6727,6 +6727,33 @@ def score_routine_balance(step, product, routine_context=None):
             if overlap:
                 score -= len(overlap) * 15
 
+    # -------------------------------------------------------
+    # Gemini 由来の相乗効果ボーナス
+    # -------------------------------------------------------
+    if routine_context and families:
+        synergy_rules = routine_context.get("synergy_rules", [])
+        existing_families = set(routine_context.get("families", []))
+        _bonus_map = {"high": 20, "medium": 12, "low": 6}
+        for rule in synergy_rules:
+            rule_fams = rule.get("families", [])
+            if len(rule_fams) < 2:
+                continue
+            bonus_val = _bonus_map.get(str(rule.get("bonus", "")).lower(), 0)
+            if not bonus_val:
+                continue
+            synergy_found = False
+            for fa in rule_fams:
+                for fb in rule_fams:
+                    if fa == fb:
+                        continue
+                    if fa in families and fb in existing_families:
+                        synergy_found = True
+                        break
+                if synergy_found:
+                    break
+            if synergy_found:
+                score += bonus_val
+
     return score
 
 def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None, routine_context=None, verified_products=None):
@@ -8383,11 +8410,15 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
     _raw_avoid = data.get("routine_strategy", {}).get("avoid_combinations", [])
     avoid_rules = [r for r in _raw_avoid if isinstance(r, dict) and r.get("families")]
 
+    _raw_synergy = data.get("routine_strategy", {}).get("synergy_combinations", [])
+    synergy_rules = [r for r in _raw_synergy if isinstance(r, dict) and r.get("families") and r.get("bonus")]
+
     routine_context = {
         "families": [],
         "strengths": [],
         "selected_products": [],
         "avoid_rules": avoid_rules,
+        "synergy_rules": synergy_rules,
         "assigned_focus_tags": [],
     }
 
@@ -8552,6 +8583,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             "strengths": [],
             "selected_products": [],
             "avoid_rules": avoid_rules,
+            "synergy_rules": synergy_rules,
             "assigned_focus_tags": [],
         }
 
@@ -8574,6 +8606,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
         "strengths": [],
         "selected_products": [],
         "avoid_rules": avoid_rules,
+        "synergy_rules": synergy_rules,
         "assigned_focus_tags": [],
     }
 
@@ -11285,6 +11318,21 @@ def get_analysis_schema():
                             "required": ["families", "reason", "severity"]
                         }
                     },
+                    "synergy_combinations": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "families": {
+                                    "type": "array",
+                                    "items": {"type": "string"}
+                                },
+                                "reason": {"type": "string"},
+                                "bonus": {"type": "string"}
+                            },
+                            "required": ["families", "reason", "bonus"]
+                        }
+                    },
                     "morning_order": {
                         "type": "array",
                         "items": {"type": "string"}
@@ -11305,6 +11353,7 @@ def get_analysis_schema():
                     "recovery_care_frequency",
                     "rotation_targets",
                     "avoid_combinations",
+                    "synergy_combinations",
                     "morning_order",
                     "night_order",
                     "reason"
@@ -11809,6 +11858,29 @@ avoid_combinations:
   {{"families": ["retinoid", "aha_bha"], "scope": "same_session", "reason": "レチノールとAHA/BHAを同時使用するとバリア破壊が加速し赤みが悪化する", "severity": "hard"}},
   {{"families": ["retinoid", "retinoid"], "scope": "any", "reason": "同じルーティンでレチノール系を重複させると刺激過剰になる", "severity": "hard"}},
   {{"families": ["aha_bha", "aha_bha"], "scope": "any", "reason": "酸系を重ねると角質除去が過剰になりバリアを損傷する", "severity": "hard"}}
+]
+
+synergy_combinations:
+この肌状態で同じルーティン内に組み合わせると相乗効果が生まれる成分ペアを出力する。
+コードは相乗効果ルールを一切持たない。ここで指定した内容のみが商品選定時のスコアボーナスに使われる。
+
+各エントリの形式:
+- families: 相乗効果のある成分ファミリーのタグ配列（2つ以上）
+  使用可能タグ: retinoid / aha_bha / strong_vitamin_c / vitamin_c / azelaic / niacinamide / ceramide / barrier / peptide / pdrn / uv_protection
+- reason: なぜこの肌・この組み合わせが相乗効果を生むか（この肌状態に具体的に言及すること）
+- bonus: "high"（大きな相乗効果）/ "medium"（中程度の相乗効果）/ "low"（軽微な相乗効果）
+
+判断基準:
+- バリアスコアが低い → ceramide + niacinamide / ceramide + peptide などバリア回復の相乗効果を重視
+- 美白・くすみ目的 → vitamin_c + niacinamide / vitamin_c + uv_protection などブライトニング相乗効果
+- ターンオーバー促進目的 → aha_bha + niacinamide（刺激緩和しながら美白）
+- 必ず3件以上出力すること
+
+例:
+[
+  {{"families": ["niacinamide", "ceramide"], "reason": "ナイアシンアミドがバリア機能を高め、セラミドの保湿効果を最大化する", "bonus": "high"}},
+  {{"families": ["vitamin_c", "uv_protection"], "reason": "ビタミンCがUVダメージを軽減し、日焼け止めとの相乗効果で色素沈着を予防する", "bonus": "high"}},
+  {{"families": ["aha_bha", "niacinamide"], "reason": "酸系ピーリング後にナイアシンアミドで炎症を鎮め赤みを最小化する", "bonus": "medium"}}
 ]
 
 morning_order:
