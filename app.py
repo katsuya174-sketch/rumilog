@@ -1790,6 +1790,9 @@ def clean_rakuten_keyword(keyword):
         if p and p not in remove_tokens
     ]
 
+    # 単独1桁の数字トークン（例: "6" in "COSRX RX 6 ペプチド"）はRakutenが400を返すため除去
+    parts = [p for p in parts if not (len(p) == 1 and p.isdigit())]
+
     if parts and len(parts[-1]) == 1 and parts[-1].isascii():
         parts = parts[:-1]
 
