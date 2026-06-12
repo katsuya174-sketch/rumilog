@@ -1173,17 +1173,22 @@ def clean_rakuten_image_url(url):
 
 
 _last_rakuten_request_time = 0
+_rakuten_rate_lock = threading.Lock()
 
 def wait_for_rakuten_rate_limit():
+    """スレッドセーフなレートリミッター。
+    スロットを事前予約してからロック外でスリープすることで、
+    複数スレッドのHTTPリクエストが並列に重なれる。
+    """
     global _last_rakuten_request_time
-
-    now = time.time()
-    elapsed = now - _last_rakuten_request_time
-
-    if elapsed < 1.2:
-        time.sleep(1.2 - elapsed)
-
-    _last_rakuten_request_time = time.time()
+    with _rakuten_rate_lock:
+        now = time.time()
+        next_allowed = _last_rakuten_request_time + 1.2
+        sleep_secs = max(0.0, next_allowed - now)
+        # スロットを予約してから解放（スリープ中に他スレッドが次スロットを予約可能）
+        _last_rakuten_request_time = max(now, next_allowed)
+    if sleep_secs > 0:
+        time.sleep(sleep_secs)
 
     
 def build_rakuten_search_keywords(product_name, brand="", category="", ingredient_focus="", purpose=""):
@@ -2931,7 +2936,7 @@ def _rakuten_criteria_search_single(keyword, category):
             "applicationId": RAKUTEN_APP_ID,
             "accessKey": RAKUTEN_ACCESS_KEY,
             "keyword": keyword,
-            "hits": 20,
+            "hits": 15,
             "format": "json",
             "formatVersion": 2,
             "imageFlag": 1,
@@ -3060,10 +3065,10 @@ def search_rakuten_by_criteria(category, improvement_plan):
 
 def search_rakuten_for_step(step, improvement_plan):
     """
-    ステップごとに最大3クエリを実行し楽天商品候補を返す。
-    Q1: ingredient_focus + category  （成分軸）
-    Q2: concern_keyword + category   （悩み軸）
-    Q3: category のみ                （広範囲フォールバック）
+    ステップごとに最大2クエリをアダプティブ実行し楽天商品候補を返す。
+    Q1: ingredient_focus + category  （常時実行）
+    Q2: concern_keyword + category   （Q1が8件未満のときのみ実行）
+    ※Q3（カテゴリのみ）は品質が低いため廃止
     重複排除して最大25件まとめて返す。
     """
     category = str(step.get("category", "") or "").strip()
@@ -3080,51 +3085,47 @@ def search_rakuten_for_step(step, improvement_plan):
         None
     )
 
-    queries_seen = set()
-    queries = []
+    def make_q1():
+        if ingredient_focus:
+            ing_clean = clean_rakuten_keyword(ingredient_focus)
+            if ing_clean:
+                return f"{ing_clean} {category_clean}"
+        if top_from_plan:
+            return f"{top_from_plan} {category_clean}"
+        return category_clean
 
-    def add_query(kw):
-        kw = clean_rakuten_keyword(kw)
-        norm = normalize_text(kw)
-        if kw and norm and norm not in queries_seen:
-            queries_seen.add(norm)
-            queries.append(kw)
-
-    # Q1: 成分軸
-    if ingredient_focus:
-        ing_clean = clean_rakuten_keyword(ingredient_focus)
-        if ing_clean:
-            add_query(f"{ing_clean} {category_clean}")
-
-    # Q2: 悩み軸（または improvement_plan の top_ingredient）
-    concern_kw = next(
-        (_CONCERN_TO_RAKUTEN_KEYWORD[tag] for tag in concern_tags if tag in _CONCERN_TO_RAKUTEN_KEYWORD),
-        None
-    )
-    if concern_kw:
-        add_query(f"{concern_kw} {category_clean}")
-    elif top_from_plan:
-        add_query(f"{top_from_plan} {category_clean}")
-
-    # Q3: カテゴリのみ（broad fallback）
-    add_query(category_clean)
+    def make_q2():
+        concern_kw = next(
+            (_CONCERN_TO_RAKUTEN_KEYWORD[tag] for tag in concern_tags if tag in _CONCERN_TO_RAKUTEN_KEYWORD),
+            None
+        )
+        if concern_kw:
+            return f"{concern_kw} {category_clean}"
+        return None
 
     seen_keys = set()
     all_results = []
 
-    for q in queries[:3]:
-        if len(all_results) >= 25:
-            break
-        results = _rakuten_criteria_search_single(q, category)
+    def collect(results):
         for r in results:
             k = normalize_product_name(r.get("rakuten_title", "") or r.get("name", ""))
             if k and k not in seen_keys:
                 seen_keys.add(k)
                 all_results.append(r)
 
+    q1 = make_q1()
+    if q1:
+        collect(_rakuten_criteria_search_single(q1, category))
+
+    # Q1が不十分なときだけQ2を実行
+    if len(all_results) < 8:
+        q2 = make_q2()
+        if q2 and normalize_text(q2) != normalize_text(q1 or ""):
+            collect(_rakuten_criteria_search_single(q2, category))
+
+    step_label = str(step.get("step_name") or step.get("category") or "")
     print(
-        f"[RAKUTEN FOR STEP] step={str(step.get('step_name') or step.get('category',''))!r} "
-        f"queries={queries} total={len(all_results)}",
+        f"[RAKUTEN FOR STEP] step={step_label!r} total={len(all_results)}",
         flush=True
     )
     return all_results
@@ -8633,12 +8634,52 @@ def finalize_step_display_fields(step, best, user_data):
 
     return step
 
+def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
+    """
+    全ステップのRakuten検索を並列実行してキャッシュに載せる。
+    スコアリングループはキャッシュヒットで瞬時に返すため、
+    並列プリフェッチによって総診断時間を大幅短縮できる。
+    """
+    import concurrent.futures
+
+    all_steps = []
+    for section in ["morning", "night"]:
+        steps = data.get(section, {}).get("steps", [])
+        if isinstance(steps, list):
+            all_steps.extend(s for s in steps if isinstance(s, dict))
+    weekly = data.get("weekly_care", [])
+    if isinstance(weekly, list):
+        all_steps.extend(s for s in weekly if isinstance(s, dict))
+
+    if not all_steps:
+        return
+
+    print(f"[PREFETCH] 全{len(all_steps)}ステップのRakuten検索を並列実行 workers={max_workers}", flush=True)
+    t0 = time.time()
+
+    def fetch(step):
+        try:
+            return search_rakuten_for_step(step, improvement_plan)
+        except Exception as e:
+            print(f"[PREFETCH ERROR] {repr(e)}", flush=True)
+            return []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(fetch, step): step for step in all_steps}
+        for future in concurrent.futures.as_completed(futures):
+            future.result()  # 例外を再スローさせるため
+
+    print(f"[PREFETCH] 完了 {time.time() - t0:.1f}s", flush=True)
+
+
 def assign_products_to_all_steps(data, products, user_data, budget_value):
-    
 
     ai_image_db = load_ai_product_images()
     improvement_plan = data.get("improvement_plan", {})
     verified_products = load_verified_products_cache()
+
+    # 全ステップのRakuten検索を並列プリフェッチ（スコアリングループはキャッシュヒット）
+    prefetch_rakuten_for_all_steps(data, improvement_plan)
 
     _raw_avoid = data.get("routine_strategy", {}).get("avoid_combinations", [])
     avoid_rules = [r for r in _raw_avoid if isinstance(r, dict) and r.get("families")]
