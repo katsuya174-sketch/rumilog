@@ -12136,6 +12136,57 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
             ),
             flush=True
         )
+
+        # ルーティン方針の詳細ログ（ステップ構成と成分指示の確認用）
+        def _fmt_steps(steps):
+            if not isinstance(steps, list):
+                return []
+            return [
+                {
+                    "category":        s.get("category", ""),
+                    "role":            s.get("role", ""),
+                    "ingredient_focus": s.get("ingredient_focus", ""),
+                    "purpose":         s.get("purpose", ""),
+                    "use_days":        s.get("use_days", []),
+                }
+                for s in steps if isinstance(s, dict)
+            ]
+
+        print(
+            "[ROUTINE PLAN] morning steps:",
+            json.dumps(_fmt_steps(data.get("morning", {}).get("steps", [])), ensure_ascii=False),
+            flush=True,
+        )
+        print(
+            "[ROUTINE PLAN] night steps:",
+            json.dumps(_fmt_steps(data.get("night", {}).get("steps", [])), ensure_ascii=False),
+            flush=True,
+        )
+        print(
+            "[ROUTINE PLAN] weekly_care:",
+            json.dumps(_fmt_steps(data.get("weekly_care", [])), ensure_ascii=False),
+            flush=True,
+        )
+
+        # レチノール × アゼライン酸 高濃度クリーム 同時指定チェック
+        _night_ingredients = [
+            s.get("ingredient_focus", "")
+            for s in data.get("night", {}).get("steps", [])
+            if isinstance(s, dict)
+        ]
+        _has_retinol  = any("retinol" in str(i).lower() or "レチノール" in str(i) for i in _night_ingredients)
+        _has_azelaic  = any("azelaic" in str(i).lower() or "アゼライン" in str(i) for i in _night_ingredients)
+        if _has_retinol and _has_azelaic:
+            print(
+                "[ROUTINE WARN] ⚠ Night routine contains BOTH retinol AND azelaic acid — check use_days separation",
+                flush=True,
+            )
+        else:
+            print(
+                f"[ROUTINE CHECK] retinol={'YES' if _has_retinol else 'no'}  azelaic_acid={'YES' if _has_azelaic else 'no'}",
+                flush=True,
+            )
+
         set_gemini_cached_analysis(cache_key, data)
 
         return data
