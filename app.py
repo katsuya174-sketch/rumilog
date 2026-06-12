@@ -8165,6 +8165,10 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
         step["product"] = clean_display_product_name(step.get("product", ""))
 
+        # 画像が取れなかった場合はカテゴリデフォルト画像にフォールバック
+        if not step.get("image"):
+            step["image"] = get_product_image(step.get("category", ""))
+
         return step
 
     for section in ["morning", "night"]:
@@ -12192,6 +12196,8 @@ def build_weekly_usage_plan(data):
 
     # 週間ルーティンに表示するカテゴリ（洗顔・クリームなど日常基礎は省略）
     DISPLAY_CATEGORIES = {"化粧水", "美容液", "パック", "ピーリング", "ブースター"}
+    # 夜ルーティンで use_days に関わらず毎日表示するカテゴリ（基礎保湿は毎日必須）
+    ALWAYS_DAILY_NIGHT = {"化粧水"}
 
     def step_label(step):
         if not isinstance(step, dict):
@@ -12229,14 +12235,18 @@ def build_weekly_usage_plan(data):
 
     usage_plan = []
     for day in days:
-        # 夜: use_daysが空（毎日）またはこの曜日を含むstepを表示
+        # 夜: 化粧水は毎日固定、その他は use_days が空（毎日）または該当曜日のみ
         night_items = [
             step_label(s)
             for s in night_steps
             if isinstance(s, dict)
             and is_display(s)
             and step_label(s)
-            and (not get_use_days(s) or day in get_use_days(s))
+            and (
+                str(s.get("category") or "").strip() in ALWAYS_DAILY_NIGHT
+                or not get_use_days(s)
+                or day in get_use_days(s)
+            )
         ]
 
         # 週ケア: use_daysにこの曜日が含まれるstepのみ表示
