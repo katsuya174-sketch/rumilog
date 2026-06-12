@@ -96,15 +96,15 @@
           width: 100%;
           box-sizing: border-box;
       }
-      .chart-wrapper.chart-sm { height: 200px; }
-      .chart-wrapper.chart-md { height: 260px; }
+      .chart-wrapper.chart-sm { height: 240px; }
+      .chart-wrapper.chart-md { height: 340px; }
       .chart-wrapper canvas { display: block; }
 
       @media (min-width: 600px) {
           body { padding: 24px; }
           h2 { font-size: 18px; }
-          .chart-wrapper.chart-sm { height: 240px; }
-          .chart-wrapper.chart-md { height: 300px; }
+          .chart-wrapper.chart-sm { height: 290px; }
+          .chart-wrapper.chart-md { height: 420px; }
       }
 
       /* ⑥ ストリーク */
@@ -488,13 +488,23 @@
         const premiumScoreSeries = JSON.parse(document.getElementById("premium-score-series").textContent);
 
         const isMobile = window.innerWidth < 600;
-        const tickSize = isMobile ? 10 : 12;
-        const legendSize = isMobile ? 10 : 11;
 
-        const colors = [
-            "#c75b7a", "#d46a8c", "#a63d5c", "#e07a9a", "#8b3a58",
-            "#cc6f90", "#b54f72", "#e7a5ba", "#934060", "#8a7a80"
+        // 視認性の高い多色パレット（ブランドローズ + 差別化しやすい6色）
+        const PALETTE = [
+            "#c75b7a",  // rose (brand)
+            "#4e8fd6",  // cornflower blue
+            "#3dbb9a",  // emerald
+            "#e0873a",  // amber
+            "#9466d6",  // violet
+            "#d94f4f",  // coral red
+            "#2bbfc8",  // sky teal
+            "#7dbb42",  // lime
+            "#d45090",  // hot pink
+            "#7a7a8c",  // slate
         ];
+
+        // 色の多い系列では破線も混ぜて区別しやすくする
+        const DASHES = [[], [], [], [], [5,3], [5,3], [2,3], [2,3], [8,3,2,3], [8,3,2,3]];
 
         const labelMap = {
             oil_balance: "皮脂バランス", redness: "赤み", pores: "毛穴",
@@ -516,38 +526,52 @@
             return label;
         }
 
-        const commonScales = {
-            y: {
-                min: 0, max: 100,
-                ticks: { stepSize: 20, font: { size: tickSize }, color: "#a0778a" },
-                grid: { color: "rgba(199,91,122,0.08)" }
-            },
-            x: {
-                ticks: {
-                    font: { size: tickSize }, maxRotation: 45, minRotation: 0,
-                    color: "#a0778a",
-                    callback: function(val) { return shortenLabel(this.getLabelForValue(val)); }
-                },
-                grid: { color: "rgba(199,91,122,0.06)" }
-            }
+        const darkTooltip = {
+            backgroundColor: "rgba(45,20,32,0.88)",
+            titleColor: "#ffced8", bodyColor: "#f0dce4",
+            borderColor: "rgba(199,91,122,0.35)", borderWidth: 1,
+            padding: 10, cornerRadius: 10,
+            titleFont: { size: 12 }, bodyFont: { size: 12 }
         };
 
-        const commonLegend = {
+        const commonXScale = {
+            ticks: {
+                font: { size: isMobile ? 10 : 11 }, maxRotation: 45, minRotation: 0,
+                color: "#a0778a",
+                callback: function(val) { return shortenLabel(this.getLabelForValue(val)); }
+            },
+            grid: { color: "rgba(199,91,122,0.07)" }
+        };
+
+        const multiLineYScale = {
+            min: 0, max: 100,
+            ticks: { stepSize: 20, font: { size: isMobile ? 10 : 11 }, color: "#a0778a" },
+            grid: { color: "rgba(199,91,122,0.08)" }
+        };
+
+        const multiLineLegend = {
             display: true, position: "bottom",
             labels: {
-                boxWidth: 10, boxHeight: 10,
-                padding: isMobile ? 6 : 10,
-                font: { size: legendSize }, color: "#6b5060"
+                usePointStyle: true, pointStyleWidth: isMobile ? 16 : 22,
+                boxHeight: 3,
+                padding: isMobile ? 9 : 16,
+                font: { size: isMobile ? 10 : 11 }, color: "#5a3848"
             }
         };
 
         /* ── Skin Score 推移 ── */
         const scoreCanvas = document.getElementById("scoreChart");
-        if (scoreCanvas) {
+        if (scoreCanvas && chartScores.length > 0) {
             const ctx = scoreCanvas.getContext("2d");
-            const gradient = ctx.createLinearGradient(0, 0, 0, scoreCanvas.parentElement.offsetHeight || 200);
-            gradient.addColorStop(0, "rgba(199,91,122,0.18)");
+            const h = scoreCanvas.parentElement.offsetHeight || 240;
+            const gradient = ctx.createLinearGradient(0, 0, 0, h);
+            gradient.addColorStop(0, "rgba(199,91,122,0.28)");
+            gradient.addColorStop(0.7, "rgba(199,91,122,0.06)");
             gradient.addColorStop(1, "rgba(199,91,122,0.00)");
+
+            const valid = chartScores.filter(v => v !== null && v !== undefined);
+            const yMin = valid.length ? Math.max(0, Math.floor((Math.min(...valid) - 8) / 10) * 10) : 0;
+
             new Chart(ctx, {
                 type: "line",
                 data: {
@@ -555,65 +579,92 @@
                     datasets: [{
                         label: "Skin Score", data: chartScores, tension: 0.4,
                         fill: true, borderColor: "#c75b7a", backgroundColor: gradient,
+                        borderWidth: 2.5,
                         pointBackgroundColor: "#c75b7a", pointBorderColor: "#fff",
-                        pointBorderWidth: 2, pointRadius: isMobile ? 4 : 5
+                        pointBorderWidth: 2.5,
+                        pointRadius: isMobile ? 5 : 6,
+                        pointHoverRadius: isMobile ? 8 : 10,
+                        pointHoverBorderWidth: 2.5
                     }]
                 },
                 options: {
                     responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: { display: false } },
-                    scales: commonScales
+                    animation: { duration: 600, easing: "easeInOutQuart" },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            ...darkTooltip,
+                            callbacks: {
+                                label: ctx => ` Skin Score: ${ctx.parsed.y} 点`
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            min: yMin, max: 100,
+                            ticks: { stepSize: 10, font: { size: isMobile ? 10 : 11 }, color: "#a0778a" },
+                            grid: { color: "rgba(199,91,122,0.09)" }
+                        },
+                        x: commonXScale
+                    }
                 }
             });
         }
 
         /* ── 項目別スコア推移 ── */
+        function buildMultiDatasets(series, labMap) {
+            return Object.keys(series).map((key, i) => ({
+                label: labMap[key] || key,
+                data: series[key],
+                tension: 0.35, fill: false,
+                borderColor: PALETTE[i % PALETTE.length],
+                backgroundColor: PALETTE[i % PALETTE.length],
+                borderDash: DASHES[i % DASHES.length],
+                borderWidth: isMobile ? 1.8 : 2.2,
+                pointBackgroundColor: PALETTE[i % PALETTE.length],
+                pointBorderColor: "#fff", pointBorderWidth: 1.5,
+                pointRadius: isMobile ? 3 : 4,
+                pointHoverRadius: isMobile ? 6 : 8
+            }));
+        }
+
+        const multiOptions = {
+            responsive: true, maintainAspectRatio: false,
+            animation: { duration: 700, easing: "easeInOutQuart" },
+            interaction: { mode: "index", intersect: false },
+            plugins: {
+                legend: multiLineLegend,
+                tooltip: {
+                    ...darkTooltip,
+                    mode: "index", intersect: false,
+                    callbacks: {
+                        title: items => items[0] ? shortenLabel(items[0].label) : "",
+                        label: ctx => {
+                            const v = ctx.parsed.y;
+                            return v !== null ? ` ${ctx.dataset.label}: ${v}` : null;
+                        }
+                    }
+                }
+            },
+            scales: { y: multiLineYScale, x: commonXScale }
+        };
+
         const detailCanvas = document.getElementById("detailScoreChart");
-        if (detailCanvas && scoreSeries) {
+        if (detailCanvas && scoreSeries && Object.keys(scoreSeries).length > 0) {
             new Chart(detailCanvas.getContext("2d"), {
                 type: "line",
-                data: {
-                    labels: chartLabels,
-                    datasets: Object.keys(scoreSeries).map((key, index) => ({
-                        label: labelMap[key] || key, data: scoreSeries[key],
-                        tension: 0.3, fill: false,
-                        borderColor: colors[index % colors.length],
-                        backgroundColor: colors[index % colors.length],
-                        pointBackgroundColor: colors[index % colors.length],
-                        pointBorderColor: "#fff", pointBorderWidth: 1,
-                        pointRadius: isMobile ? 2 : 3
-                    }))
-                },
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: commonLegend },
-                    scales: commonScales
-                }
+                data: { labels: chartLabels, datasets: buildMultiDatasets(scoreSeries, labelMap) },
+                options: multiOptions
             });
         }
 
         /* ── 有料詳細スコア推移 ── */
         const premiumCanvas = document.getElementById("premiumScoreChart");
-        if (premiumCanvas && premiumScoreSeries) {
+        if (premiumCanvas && premiumScoreSeries && Object.keys(premiumScoreSeries).length > 0) {
             new Chart(premiumCanvas.getContext("2d"), {
                 type: "line",
-                data: {
-                    labels: chartLabels,
-                    datasets: Object.keys(premiumScoreSeries).map((key, index) => ({
-                        label: premiumLabelMap[key] || key, data: premiumScoreSeries[key],
-                        tension: 0.3, fill: false,
-                        borderColor: colors[index % colors.length],
-                        backgroundColor: colors[index % colors.length],
-                        pointBackgroundColor: colors[index % colors.length],
-                        pointBorderColor: "#fff", pointBorderWidth: 1,
-                        pointRadius: isMobile ? 2 : 3
-                    }))
-                },
-                options: {
-                    responsive: true, maintainAspectRatio: false,
-                    plugins: { legend: commonLegend },
-                    scales: commonScales
-                }
+                data: { labels: chartLabels, datasets: buildMultiDatasets(premiumScoreSeries, premiumLabelMap) },
+                options: multiOptions
             });
         }
     </script>
