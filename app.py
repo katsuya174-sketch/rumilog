@@ -16,6 +16,7 @@ print("AFF:", RAKUTEN_AFFILIATE_ID)
 # Gemini APIを使った肌診断 + 履歴管理
 # ==========================================
 
+import hmac
 import io
 import json
 import traceback
@@ -371,7 +372,7 @@ from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 import numpy as np
 from PIL import Image, ImageOps, ImageFilter
-from flask import Flask, render_template, request, jsonify, redirect, session as flask_session
+from flask import Flask, render_template, request, jsonify, redirect, make_response, session as flask_session
 from google import genai
 from google.genai import types
 # ==========================================
@@ -385,6 +386,22 @@ CLICK_LOG_FILE = "product_clicks.json"
 # ===== 有料会員設定 =====
 ENABLE_SUBSCRIPTION = False  # 決済導入前はFalse
 DEV_PREMIUM_MODE = False     # 開発中に有料表示を確認したい時だけTrue
+
+# ===== 作成者認証 =====
+CREATOR_KEY = os.getenv("CREATOR_KEY", "")
+
+def _creator_token():
+    """CREATOR_KEY から一方向トークンを生成する"""
+    if not CREATOR_KEY:
+        return ""
+    return hmac.new(CREATOR_KEY.encode(), b"rumilog_creator", hashlib.sha256).hexdigest()
+
+def is_creator():
+    """cookieに有効な作成者トークンがあればTrue"""
+    token = _creator_token()
+    if not token:
+        return False
+    return request.cookies.get("creator_token") == token
 
 
 def log_product_click(source, product_name, category):
@@ -636,6 +653,8 @@ def is_premium_user():
     各画面側のコードは変更しない。
     """
     if DEV_PREMIUM_MODE:
+        return True
+    if is_creator():
         return True
 
     premium_key = request.args.get("premium_key", "")
@@ -12176,10 +12195,13 @@ def lab_test_function():
         is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
         try:
             client_ip = get_client_ip()
+            _is_creator = is_creator()
             _is_premium = is_premium_user()
             _premium_key = request.args.get("premium_key", "")
 
-            if _is_premium:
+            if _is_creator:
+                pass  # 作成者は制限なし
+            elif _is_premium:
                 if not can_use_premium_diagnosis(_premium_key):
                     return render_template(
                         "lab.html",
@@ -12546,7 +12568,9 @@ def lab_test_function():
             })
 
             try:
-                if _is_premium:
+                if _is_creator:
+                    pass  # 作成者はカウントしない
+                elif _is_premium:
                     increment_premium_usage(_premium_key)
                 else:
                     increment_free_usage(client_ip)
@@ -12617,10 +12641,11 @@ def lab_test_function():
                 error_message=user_error
             )
     client_ip = get_client_ip()
+    _is_creator = is_creator()
     is_premium = is_premium_user()
     premium_key = request.args.get("premium_key", "")
     remaining_free_count = get_remaining_free_count(client_ip)
-    remaining_premium_count = get_remaining_premium_count(premium_key) if is_premium else None
+    remaining_premium_count = get_remaining_premium_count(premium_key) if (is_premium and not _is_creator) else None
     gemini_usage = get_gemini_usage_status()
     return render_template(
         "lab.html",
@@ -12629,8 +12654,24 @@ def lab_test_function():
         gemini_usage=gemini_usage,
         DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT,
         is_premium=is_premium,
+        is_creator=_is_creator,
         premium_key=premium_key
     )
+
+@app.route("/creator-auth")
+def creator_auth():
+    key = request.args.get("key", "")
+    if not CREATOR_KEY or key != CREATOR_KEY:
+        return "403 Forbidden", 403
+    token = _creator_token()
+    resp = make_response(redirect("/lab"))
+    resp.set_cookie(
+        "creator_token", token,
+        max_age=365 * 24 * 3600,
+        httponly=True,
+        samesite="Lax"
+    )
+    return resp
 
 @app.route("/admin/db-stats")
 def db_stats():
