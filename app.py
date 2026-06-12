@@ -35,7 +35,7 @@ RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
 _rakuten_criteria_cache = {}
 _rakuten_criteria_call_count = 0
-MAX_RAKUTEN_CRITERIA_CALLS = 5
+MAX_RAKUTEN_CRITERIA_CALLS = 12
 VERIFIED_PRODUCTS_CACHE_FILE = "verified_products_cache.json"
 VERIFIED_PRODUCTS_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
 
@@ -3873,22 +3873,22 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     """
     score = 0
 
-    product_concerns = product.get("concerns", [])
-    product_actives = product.get("active_ingredients", [])
-    product_support = product.get("support_ingredients", [])
-    product_skin_types = product.get("skin_types", [])
+    product_concerns = list(product.get("concerns", []) or [])
+    product_actives = list(product.get("active_ingredients", []) or [])
+    product_support = list(product.get("support_ingredients", []) or [])
+    product_skin_types = list(product.get("skin_types", []) or [])
     sensitive_ok = product.get("sensitive_ok", "unknown")
     retinol_level = safe_retinol_level(
         product.get("retinol_level", 0)
     )
     price_ref = safe_price(product.get("price_ref", 0))
     availability = product.get("availability_japan", [])
-    product_functions = product.get("main_functions", [])
-    product_focuses = product.get("ingredient_focus", [])
-    product_formulation = product.get("formulation", [])
-    product_technology = product.get("technology", [])
+    product_functions = list(product.get("main_functions", []) or [])
+    product_focuses = list(product.get("ingredient_focus", []) or [])
+    product_formulation = list(product.get("formulation", []) or [])
+    product_technology = list(product.get("technology", []) or [])
     product_texture = normalize_text(product.get("texture", ""))
-    product_contra = product.get("contraindications", [])
+    product_contra = list(product.get("contraindications", []) or [])
     ingredient_strength_map = product.get("ingredient_strength", {})
     if not isinstance(ingredient_strength_map, dict):
         ingredient_strength_map = {}
@@ -3899,6 +3899,18 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     sens = normalize_text(user_data.get("sens", ""))
     oil = normalize_text(user_data.get("oil", ""))
     retinol_limit = normalize_retinol_limit(user_data.get("exp", ""))
+
+    # 楽天商品などメタデータが空の場合はタイトルから補完（公平評価）
+    _has_meta = bool(product_formulation or product_functions or sensitive_ok != "unknown")
+    if not _has_meta:
+        _t = normalize_text(str(product.get("rakuten_title") or product.get("name") or ""))
+        if any(w in _t for w in ["低刺激", "敏感肌", "sensitive", "マイルド", "mild", "刺激レス", "ノンコメドジェニック"]):
+            sensitive_ok = "yes"
+            product_formulation = product_formulation + ["low_irritation"]
+        if any(w in _t for w in ["バリア", "保湿", "しっとり", "うるおい", "セラミド"]):
+            product_formulation = list(set(product_formulation + ["barrier_formula"]))
+        if any(w in _t for w in ["オイリー", "さっぱり", "脂性", "皮脂"]):
+            product_formulation = list(set(product_formulation + ["oil_control"]))
 
     # -------------------------------------------------
     # 1. ingredient_focus（step側）と active/support 一致
@@ -5094,6 +5106,15 @@ def collect_product_terms(product):
         terms.add(name)
     if brand:
         terms.add(brand)
+
+    # 楽天タイトルを個別トークンに分解して追加（score_improvement の keyword マッチに使用）
+    rakuten_title = str(product.get("rakuten_title") or "")
+    if rakuten_title:
+        import re as _re
+        for token in _re.split(r'[\s　・,/\-（）()【】「」]', rakuten_title):
+            t = normalize_text_value(token.strip())
+            if t and len(t) >= 2:
+                terms.add(t)
 
     return terms
 
