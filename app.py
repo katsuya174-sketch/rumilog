@@ -12220,7 +12220,9 @@ def lab_test_function():
             ip = request.remote_addr
 
             if is_rate_limited(ip):
-                return "<h2>本日の診断回数の上限に達しました</h2>"
+                if is_ajax:
+                    return jsonify({"success": False, "error": "本日の診断回数の上限に達しました。明日またお試しください。"}), 429
+                return render_template("lab.html", error="本日の診断回数の上限に達しました。明日またお試しください。", is_premium=_is_premium, premium_key=_premium_key, DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT)
             validate_lab_dependencies()
             # =========================
             # ① 入力取得
