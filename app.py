@@ -7310,7 +7310,9 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     log_candidate_battle(
         step,
         sorted_candidates,
-        best
+        best,
+        user_data=user_data,
+        budget_value=budget_value,
     )
 
     return best
@@ -9526,7 +9528,100 @@ def validate_lab_dependencies():
     if missing:
         raise RuntimeError("不足している関数: " + ", ".join(missing))
 
-def log_candidate_battle(step, candidates, selected=None):
+def _score_breakdown(product, step, user_data, budget_value):
+    """DB vs Rakuten スコア差分デバッグ用: 主要コンポーネント別の加点/減点を返す"""
+    purpose = step.get("purpose", "")
+    ingredient_focus = step.get("ingredient_focus", "")
+    ingredient_tag = normalize_ingredient_tag(ingredient_focus)
+    concern_tags = purpose_to_concern_tags(purpose)
+    purpose_norm = normalize_text(purpose)
+
+    actives = list(product.get("active_ingredients", []) or [])
+    support = list(product.get("support_ingredients", []) or [])
+    concerns = list(product.get("concerns", []) or [])
+    functions = list(product.get("main_functions", []) or [])
+    focuses = list(product.get("ingredient_focus", []) or [])
+    skins = list(product.get("skin_types", []) or [])
+    sigs = list(product.get("signature_ingredients", []) or [])
+    strength_map = product.get("ingredient_strength", {}) or {}
+    sensitive_ok = product.get("sensitive_ok", "unknown")
+    avail = list(product.get("availability_japan", []) or [])
+    price_ref = safe_price(product.get("price_ref", 0))
+    sens = normalize_text((user_data or {}).get("sens", ""))
+    oil = normalize_text((user_data or {}).get("oil", ""))
+
+    bd = {}
+    bd["category_match"] = 40
+
+    # ingredient_focus active/support/miss
+    if ingredient_tag:
+        if ingredient_tag in actives:
+            strength_bonus = (get_strength_score(strength_map.get(ingredient_tag)) or 0)
+            bd["focus_active"] = 25 + strength_bonus
+        elif ingredient_tag in support:
+            bd["focus_support"] = 10
+        else:
+            bd["focus_miss"] = -15
+
+    # score_goal_fit: concerns (cap=24) + main_functions×8 + ingredient_focus×6
+    concern_hits = [c for c in concern_tags if c in concerns]
+    if concern_hits:
+        bd["goal_concerns"] = min(len(concern_hits) * 12, 24)
+    func_hits = [f for f in functions if normalize_text(f) and (normalize_text(f) in purpose_norm or purpose_norm in normalize_text(f))]
+    if func_hits:
+        bd["goal_functions"] = len(func_hits) * 8
+    focus_hits = [f for f in focuses if normalize_text(f) and (normalize_text(f) in purpose_norm or purpose_norm in normalize_text(f))]
+    if focus_hits:
+        bd["goal_ing_focus"] = len(focus_hits) * 6
+
+    # apply_common: concerns×8
+    if concern_hits:
+        bd["common_concerns"] = len(concern_hits) * 8
+
+    # apply_common: functions×6
+    if func_hits:
+        bd["common_functions"] = len(func_hits) * 6
+
+    # apply_common: ingredient_focus (product's focus list)×6
+    if focus_hits:
+        bd["common_ing_focus"] = len(focus_hits) * 6
+
+    # skin_types
+    user_skins = normalize_skin_type(oil, sens)
+    skin_hits = [s for s in user_skins if s in skins]
+    if skin_hits:
+        bd["skin_types"] = len(skin_hits) * 6
+
+    # sensitive_ok
+    if sens == "high":
+        if sensitive_ok == "yes":
+            bd["sensitive_ok"] = 12
+        elif sensitive_ok == "no":
+            bd["sensitive_ok"] = -15
+
+    # availability
+    avail_score = get_availability_score(avail)
+    if avail_score:
+        bd["availability"] = avail_score
+
+    # budget
+    if budget_value and budget_value > 0:
+        bscore = get_budget_fit_score(price_ref, budget_value)
+        if bscore:
+            bd["budget"] = bscore
+
+    # signature ingredients bonus (approximate: each known sig = +8)
+    if sigs:
+        bd["signature"] = f"(sigs={sigs})"
+
+    # ingredient_tag extra +15 at end of score_product
+    if ingredient_tag and ingredient_tag in actives:
+        bd["focus_extra_15"] = 15
+
+    return bd
+
+
+def log_candidate_battle(step, candidates, selected=None, user_data=None, budget_value=0):
     section = step.get("_section", "")
     category = step.get("category", "")
     purpose = step.get("purpose", "")
@@ -9574,6 +9669,37 @@ def log_candidate_battle(step, candidates, selected=None):
 
     if selected:
         print(f">>> WINNER: {selected.get('name','')} (src={selected.get('_source','')}, score={selected.get('_score',0)})", flush=True)
+
+    # --- DB上位 vs 楽天上位の詳細比較 ---
+    _db_top = next((c for c in candidates if c.get("_source") not in ("rakuten_criteria", "ai_virtual", "ai+db")), None)
+    _rak_top = next((c for c in candidates if c.get("_source") == "rakuten_criteria"), None)
+
+    if _db_top or _rak_top:
+        print("  --- DB vs Rakuten 詳細比較 ---", flush=True)
+        for label, c in [("DB_TOP ", _db_top), ("RAK_TOP", _rak_top)]:
+            if not c:
+                continue
+            actives = c.get("active_ingredients", []) or []
+            concerns = c.get("concerns", []) or []
+            functions = c.get("main_functions", []) or []
+            focuses = c.get("ingredient_focus", []) or []
+            skins = c.get("skin_types", []) or []
+            strength_map = c.get("ingredient_strength", {}) or {}
+            avail = c.get("availability_japan", []) or []
+            sens_val = c.get("sensitive_ok", "?")
+            price = safe_price(c.get("price_ref", 0))
+            print(f"  [{label}] {str(c.get('name',''))[:35]} (base={c.get('_base_score',0):.1f})", flush=True)
+            print(f"    actives={actives}", flush=True)
+            print(f"    strength={strength_map}", flush=True)
+            print(f"    concerns={concerns}", flush=True)
+            print(f"    functions={functions}", flush=True)
+            print(f"    ing_focus={focuses}", flush=True)
+            print(f"    skin_types={skins} / sensitive_ok={sens_val}", flush=True)
+            print(f"    avail={avail} / price={price}", flush=True)
+            if user_data is not None:
+                bd = _score_breakdown(c, step, user_data, budget_value)
+                bd_str = " | ".join(f"{k}={v:+d}" if isinstance(v, int) else f"{k}={v}" for k, v in bd.items())
+                print(f"    breakdown: {bd_str}", flush=True)
 
     print("===================================\n", flush=True)
 
