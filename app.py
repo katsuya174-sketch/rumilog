@@ -3341,6 +3341,89 @@ def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
     return data
 
 
+# 楽天商品名 Gemini 整形キャッシュ（同一タイトルを複数回処理しない）
+_rakuten_name_clean_cache: dict = {}
+
+
+def gemini_clean_rakuten_product_names(data):
+    """楽天商品名（長いマーケティング文言入り）をGeminiで短くユーザー向けに整形する。
+    rakuten_criteria / ai_rakuten_verified ソースのステップのみ対象。
+    DETAIL_MODEL を使い1回のバッチ呼び出しで全ステップを処理する。
+    """
+    # 対象ステップを収集
+    targets = []
+    all_steps = []
+    for section in ["morning", "night"]:
+        for s in data.get(section, {}).get("steps", []):
+            if isinstance(s, dict):
+                all_steps.append(s)
+    for s in data.get("weekly_care", []):
+        if isinstance(s, dict):
+            all_steps.append(s)
+
+    for step in all_steps:
+        source = step.get("product_source", "")
+        if source not in ["ai_rakuten_verified", "rakuten_criteria"]:
+            continue
+        raw_title = str(step.get("rakuten_title", "") or step.get("product", "") or "").strip()
+        if not raw_title:
+            continue
+        targets.append({"step": step, "title": raw_title})
+
+    if not targets:
+        return data
+
+    # キャッシュ済みは即適用、未キャッシュだけをGeminiに送る
+    uncached = []
+    for t in targets:
+        if t["title"] in _rakuten_name_clean_cache:
+            t["step"]["product"] = _rakuten_name_clean_cache[t["title"]]
+        else:
+            uncached.append(t)
+
+    if not uncached:
+        return data
+
+    # バッチプロンプト作成
+    lines = [f"{i+1}. {t['title']}" for i, t in enumerate(uncached)]
+    prompt = (
+        "以下の楽天商品タイトルを、ユーザー向けに短く読みやすい商品名に整形してください。\n\n"
+        "ルール:\n"
+        "- ブランド名 + 商品名 のみ残す\n"
+        "- 容量・個数は残す（例: 100mL、30g、2個セット）\n"
+        "- 除去するもの: 送料無料、ポイント、セール、公式、正規品、【】《》の装飾、レビュー特典、"
+        "倍・円OFFなどの値引き表現、詰め替え用でない場合の「詰め替え」\n"
+        "- 各行「番号: 整形後の名前」の形式で回答\n\n"
+        + "\n".join(lines)
+    )
+
+    try:
+        config = types.GenerateContentConfig(
+            temperature=0.1,
+            max_output_tokens=600,
+        )
+        response = call_gemini_with_retry(client, DETAIL_MODEL, prompt, config=config)
+        resp_text = response.text.strip() if response and response.text else ""
+
+        for line in resp_text.split("\n"):
+            line = line.strip()
+            m = re.match(r'^(\d+)[.:）\s]+(.+)$', line)
+            if not m:
+                continue
+            idx = int(m.group(1)) - 1
+            cleaned = m.group(2).strip()
+            if 0 <= idx < len(uncached) and cleaned:
+                original_title = uncached[idx]["title"]
+                _rakuten_name_clean_cache[original_title] = cleaned
+                uncached[idx]["step"]["product"] = cleaned
+                print(f"[GEMINI NAME CLEAN] {original_title[:40]} -> {cleaned}", flush=True)
+
+    except Exception as e:
+        print(f"[GEMINI NAME CLEAN ERROR] {e}", flush=True)
+
+    return data
+
+
 AI_PRODUCT_IMAGES_FILE = "ai_product_images.json"
 
 def load_ai_product_images():
@@ -8519,6 +8602,8 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             if source in ["ai_rakuten_verified", "rakuten_criteria"]:
                 step["image"] = best.get("image", "") or ""
                 step["rakuten_link"] = best.get("rakuten_link", "") or ""
+                # 整形前の元タイトルを保持（後でGeminiで商品名を整形するために使う）
+                step["rakuten_title"] = best.get("rakuten_title", "") or ""
             else:
                 image_path = None
                 if ai_image_db:
@@ -13044,6 +13129,9 @@ def lab_test_function():
             }, flush=True)
 
             data = attach_affiliate_links_to_all_steps(data, affiliate_ai_db)
+
+            # 楽天商品名をGeminiで短く整形（rakuten_criteria / ai_rakuten_verified のみ対象）
+            data = gemini_clean_rakuten_product_names(data)
 
             print("[FLOW AFTER AFFILIATE]", {
                 "night": [
