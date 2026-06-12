@@ -9917,7 +9917,7 @@ def build_product_ranking(results, client_ip=None, limit=20):
     return ranking
 
 # トップページ
-@app.route("/", methods=["GET", "POST"])
+@app.route("/", methods=["GET"])
 def home():
     return redirect("/lab")
 
@@ -12720,8 +12720,9 @@ def create_checkout_session():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route("/stripe-webhook", methods=["POST"])
+@app.route("/stripe-webhook", methods=["POST"], strict_slashes=False)
 def stripe_webhook():
+    print("[STRIPE WEBHOOK] リクエスト受信", flush=True)
     payload = request.get_data()
     sig_header = request.headers.get("Stripe-Signature", "")
 
