@@ -12735,37 +12735,50 @@ def stripe_webhook():
         print(f"[STRIPE WEBHOOK ERROR] {repr(e)}", flush=True)
         return jsonify({"error": str(e)}), 400
 
-    event_type = event["type"]
+    event_type = event.get("type", "") if isinstance(event, dict) else getattr(event, "type", "")
     print(f"[STRIPE WEBHOOK] event={event_type}", flush=True)
 
-    # 支払い完了（新規 or 更新）
-    if event_type == "checkout.session.completed":
-        session = event["data"]["object"]
-        email = session.get("customer_email") or session.get("customer_details", {}).get("email", "")
-        customer_id = session.get("customer", "")
-        subscription_id = session.get("subscription", "")
-        if email:
-            key = issue_premium_key(email, customer_id, subscription_id)
-            send_premium_email(email, key)
-            print(f"[STRIPE] キー発行: {email}", flush=True)
+    try:
+        obj = event["data"]["object"]
 
-    # 請求成功（更新時のキー延長）
-    elif event_type == "invoice.payment_succeeded":
-        invoice = event["data"]["object"]
-        email = invoice.get("customer_email", "")
-        customer_id = invoice.get("customer", "")
-        subscription_id = invoice.get("subscription", "")
-        if email and subscription_id:
-            key = issue_premium_key(email, customer_id, subscription_id)
-            print(f"[STRIPE] キー延長: {email}", flush=True)
+        # 支払い完了（新規）
+        if event_type == "checkout.session.completed":
+            email = obj.get("customer_email") or obj.get("customer_details", {}).get("email", "")
+            customer_id = str(obj.get("customer") or "")
+            subscription_id = str(obj.get("subscription") or "")
+            print(f"[STRIPE] checkout completed: email={email} sub={subscription_id}", flush=True)
+            if email:
+                key = issue_premium_key(email, customer_id, subscription_id)
+                send_premium_email(email, key)
+                print(f"[STRIPE] キー発行完了: {email}", flush=True)
 
-    # サブスク解約
-    elif event_type == "customer.subscription.deleted":
-        subscription = event["data"]["object"]
-        subscription_id = subscription.get("id", "")
-        if subscription_id:
-            revoke_premium_key_by_subscription(subscription_id)
-            print(f"[STRIPE] キー失効: sub={subscription_id}", flush=True)
+        # 請求成功（更新時のキー延長）
+        elif event_type == "invoice.payment_succeeded":
+            email = str(obj.get("customer_email") or "")
+            customer_id = str(obj.get("customer") or "")
+            # subscription は文字列IDまたは展開オブジェクトの両方に対応
+            sub = obj.get("subscription")
+            subscription_id = str(sub.get("id") if isinstance(sub, dict) else sub or "")
+            print(f"[STRIPE] invoice succeeded: email={email} sub={subscription_id}", flush=True)
+            if email and subscription_id:
+                issue_premium_key(email, customer_id, subscription_id)
+                print(f"[STRIPE] キー延長完了: {email}", flush=True)
+
+        # サブスク解約
+        elif event_type == "customer.subscription.deleted":
+            subscription_id = str(obj.get("id") or "")
+            print(f"[STRIPE] subscription deleted: sub={subscription_id}", flush=True)
+            if subscription_id:
+                revoke_premium_key_by_subscription(subscription_id)
+                print(f"[STRIPE] キー失効完了: sub={subscription_id}", flush=True)
+
+        else:
+            print(f"[STRIPE WEBHOOK] 未処理イベント: {event_type}", flush=True)
+
+    except Exception as e:
+        print(f"[STRIPE WEBHOOK 処理エラー] event={event_type} error={repr(e)}", flush=True)
+        traceback.print_exc()
+        return jsonify({"error": "internal processing error"}), 500
 
     return jsonify({"status": "ok"})
 
