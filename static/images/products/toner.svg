@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <rect width="120" height="120" rx="18" fill="#fff5f8"/>
+  <rect x="8" y="8" width="104" height="104" rx="14" fill="none" stroke="#f3c9d2" stroke-width="1.5"/>
+  <!-- bottle body (tall slim) -->
+  <rect x="40" y="32" width="40" height="62" rx="10" fill="#fce8f0"/>
+  <rect x="40" y="32" width="40" height="62" rx="10" fill="none" stroke="#e0a8bc" stroke-width="1.5"/>
+  <!-- cap -->
+  <rect x="46" y="20" width="28" height="16" rx="6" fill="#e8b8cc"/>
+  <rect x="46" y="20" width="28" height="16" rx="6" fill="none" stroke="#d090a8" stroke-width="1.2"/>
+  <!-- label -->
+  <rect x="48" y="54" width="24" height="2.5" rx="1.2" fill="#e0a8bc"/>
+  <rect x="48" y="60" width="18" height="2" rx="1" fill="#edcad6"/>
+  <rect x="48" y="66" width="20" height="2" rx="1" fill="#edcad6"/>
+  <!-- liquid fill -->
+  <rect x="40" y="74" width="40" height="20" rx="0 0 10 10" fill="#f5d8e8" opacity="0.5"/>
+</svg>

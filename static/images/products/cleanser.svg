@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <rect width="120" height="120" rx="18" fill="#fff5f8"/>
+  <rect x="8" y="8" width="104" height="104" rx="14" fill="none" stroke="#f3c9d2" stroke-width="1.5"/>
+  <!-- bottle body -->
+  <rect x="42" y="38" width="36" height="52" rx="8" fill="#f9e0e8"/>
+  <rect x="42" y="38" width="36" height="52" rx="8" fill="none" stroke="#e0a8bc" stroke-width="1.5"/>
+  <!-- cap -->
+  <rect x="47" y="26" width="26" height="16" rx="6" fill="#e8b8cc"/>
+  <rect x="47" y="26" width="26" height="16" rx="6" fill="none" stroke="#d090a8" stroke-width="1.2"/>
+  <!-- pump top -->
+  <rect x="57" y="18" width="6" height="12" rx="3" fill="#d090a8"/>
+  <!-- label line -->
+  <rect x="50" y="56" width="20" height="2" rx="1" fill="#e0a8bc"/>
+  <rect x="50" y="62" width="14" height="2" rx="1" fill="#e0a8bc"/>
+  <!-- foam bubbles -->
+  <circle cx="34" cy="60" r="5" fill="#fce8f0" stroke="#e8b8cc" stroke-width="1"/>
+  <circle cx="28" cy="54" r="3.5" fill="#fce8f0" stroke="#e8b8cc" stroke-width="1"/>
+  <circle cx="30" cy="67" r="4" fill="#fce8f0" stroke="#e8b8cc" stroke-width="1"/>
+</svg>

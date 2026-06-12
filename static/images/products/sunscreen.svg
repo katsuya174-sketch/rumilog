@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <rect width="120" height="120" rx="18" fill="#fffaf0"/>
+  <rect x="8" y="8" width="104" height="104" rx="14" fill="none" stroke="#f5dfa0" stroke-width="1.5"/>
+  <!-- tube body -->
+  <rect x="38" y="36" width="44" height="62" rx="10" fill="#fff5d0"/>
+  <rect x="38" y="36" width="44" height="62" rx="10" fill="none" stroke="#e8c870" stroke-width="1.5"/>
+  <!-- tube cap -->
+  <rect x="44" y="24" width="32" height="16" rx="6" fill="#f5d878"/>
+  <rect x="44" y="24" width="32" height="16" rx="6" fill="none" stroke="#d4a830" stroke-width="1.2"/>
+  <!-- SPF text area -->
+  <rect x="46" y="52" width="28" height="14" rx="4" fill="#ffe88a" opacity="0.7"/>
+  <rect x="48" y="55" width="24" height="2.5" rx="1" fill="#c8a020"/>
+  <rect x="50" y="60" width="16" height="2" rx="1" fill="#d4b830"/>
+  <!-- sun rays -->
+  <circle cx="88" cy="36" r="8" fill="#ffd040" opacity="0.8"/>
+  <line x1="88" y1="22" x2="88" y2="26" stroke="#ffd040" stroke-width="2" stroke-linecap="round"/>
+  <line x1="88" y1="46" x2="88" y2="50" stroke="#ffd040" stroke-width="2" stroke-linecap="round"/>
+  <line x1="74" y1="36" x2="78" y2="36" stroke="#ffd040" stroke-width="2" stroke-linecap="round"/>
+  <line x1="98" y1="36" x2="102" y2="36" stroke="#ffd040" stroke-width="2" stroke-linecap="round"/>
+</svg>

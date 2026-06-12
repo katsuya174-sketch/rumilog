@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <rect width="120" height="120" rx="18" fill="#fff5f8"/>
+  <rect x="8" y="8" width="104" height="104" rx="14" fill="none" stroke="#f3c9d2" stroke-width="1.5"/>
+  <!-- dropper bottle body -->
+  <ellipse cx="60" cy="82" rx="22" ry="26" fill="#fce8f0"/>
+  <ellipse cx="60" cy="82" rx="22" ry="26" fill="none" stroke="#e0a8bc" stroke-width="1.5"/>
+  <!-- neck -->
+  <rect x="54" y="44" width="12" height="22" rx="4" fill="#f5d8e8"/>
+  <rect x="54" y="44" width="12" height="22" rx="4" fill="none" stroke="#e0a8bc" stroke-width="1.2"/>
+  <!-- dropper cap -->
+  <ellipse cx="60" cy="38" rx="10" ry="8" fill="#e8b8cc"/>
+  <ellipse cx="60" cy="38" rx="10" ry="8" fill="none" stroke="#d090a8" stroke-width="1.2"/>
+  <!-- dropper tip -->
+  <line x1="60" y1="22" x2="60" y2="34" stroke="#d090a8" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="60" cy="20" r="3" fill="#c75b7a" opacity="0.7"/>
+  <!-- label -->
+  <rect x="46" y="74" width="28" height="2.5" rx="1.2" fill="#e0a8bc"/>
+  <rect x="48" y="80" width="22" height="2" rx="1" fill="#edcad6"/>
+</svg>

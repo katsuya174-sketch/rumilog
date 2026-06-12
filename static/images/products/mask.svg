@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <rect width="120" height="120" rx="18" fill="#fff5f8"/>
+  <rect x="8" y="8" width="104" height="104" rx="14" fill="none" stroke="#f3c9d2" stroke-width="1.5"/>
+  <!-- mask pouch -->
+  <rect x="22" y="28" width="76" height="64" rx="12" fill="#fce8f0"/>
+  <rect x="22" y="28" width="76" height="64" rx="12" fill="none" stroke="#e0a8bc" stroke-width="1.5"/>
+  <!-- seal line top -->
+  <rect x="22" y="40" width="76" height="4" fill="#f5d0e0"/>
+  <!-- face shape on pack -->
+  <ellipse cx="60" cy="67" rx="22" ry="16" fill="#fff5f8" opacity="0.7" stroke="#edcad6" stroke-width="1"/>
+  <!-- eye holes -->
+  <ellipse cx="51" cy="63" rx="5" ry="3.5" fill="#fce8f0"/>
+  <ellipse cx="69" cy="63" rx="5" ry="3.5" fill="#fce8f0"/>
+  <!-- mouth curve -->
+  <path d="M52 72 Q60 77 68 72" stroke="#e0a8bc" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <!-- drops -->
+  <circle cx="34" cy="58" r="3" fill="#f0c8d8" opacity="0.8"/>
+  <circle cx="86" cy="65" r="2.5" fill="#f0c8d8" opacity="0.8"/>
+</svg>

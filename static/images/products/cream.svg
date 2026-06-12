@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120">
+  <rect width="120" height="120" rx="18" fill="#fff5f8"/>
+  <rect x="8" y="8" width="104" height="104" rx="14" fill="none" stroke="#f3c9d2" stroke-width="1.5"/>
+  <!-- jar body -->
+  <rect x="28" y="60" width="64" height="36" rx="8" fill="#fce8f0"/>
+  <rect x="28" y="60" width="64" height="36" rx="8" fill="none" stroke="#e0a8bc" stroke-width="1.5"/>
+  <!-- jar lid -->
+  <rect x="24" y="46" width="72" height="18" rx="8" fill="#f5d0e0"/>
+  <rect x="24" y="46" width="72" height="18" rx="8" fill="none" stroke="#d8a0bc" stroke-width="1.5"/>
+  <!-- cream texture on lid -->
+  <path d="M38 52 Q50 46 60 52 Q70 58 82 52" stroke="#e8b8cc" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <!-- label on jar -->
+  <rect x="38" y="70" width="44" height="2.5" rx="1.2" fill="#e0a8bc"/>
+  <rect x="42" y="76" width="36" height="2" rx="1" fill="#edcad6"/>
+  <!-- shine -->
+  <ellipse cx="80" cy="56" rx="5" ry="3" fill="white" opacity="0.4" transform="rotate(-20,80,56)"/>
+</svg>

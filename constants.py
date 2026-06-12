@@ -1,14 +1,14 @@
 PRODUCT_IMAGES = {
-    "クレンジング": "cleanser.jpg",
-    "洗顔": "cleanser.jpg",
-    "ブースター": "serum.jpg",
-    "化粧水": "toner.jpg",
-    "美容液": "serum.jpg",
-    "クリーム": "cream.jpg",
-    "乳液": "cream.jpg",
-    "日焼け止め": "sunscreen.jpg",
-    "パック": "mask.jpg",
-    "ピーリング": "peeling.jpg"
+    "クレンジング": "cleanser.svg",
+    "洗顔": "cleanser.svg",
+    "ブースター": "serum.svg",
+    "化粧水": "toner.svg",
+    "美容液": "serum.svg",
+    "クリーム": "cream.svg",
+    "乳液": "cream.svg",
+    "日焼け止め": "sunscreen.svg",
+    "パック": "mask.svg",
+    "ピーリング": "peeling.svg"
 }
 CATEGORY_TAGS = [
     "クレンジング",

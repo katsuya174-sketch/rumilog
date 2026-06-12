@@ -8076,7 +8076,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             step["product"] = ""
             step["price"] = 0
             step["estimated_price"] = 0
-            step["image"] = ""
+            step["image"] = get_product_image(step.get("category", ""))
             step["rakuten_link"] = ""
             step["amazon_link"] = ""
             step["product_source"] = "none"
