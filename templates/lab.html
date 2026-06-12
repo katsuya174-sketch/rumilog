@@ -545,6 +545,52 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
     border-radius: 999px;
     transition: width 0.4s;
 }
+.concern-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-top: 4px;
+}
+.concern-chip {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border: 2px solid #ffe0e5;
+    border-radius: 12px;
+    background: #fff;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: #8f6f78;
+    user-select: none;
+    transition: border-color 0.2s, background 0.2s, color 0.2s;
+}
+.concern-chip input[type="checkbox"] { display: none; }
+.concern-chip .concern-check {
+    width: 18px;
+    height: 18px;
+    border: 2px solid #ffc0cc;
+    border-radius: 5px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    color: transparent;
+    background: #fff;
+    transition: all 0.15s;
+}
+.concern-chip.checked {
+    border-color: #ff9fba;
+    background: #fff0f5;
+    color: #c75b7a;
+    font-weight: 600;
+}
+.concern-chip.checked .concern-check {
+    background: linear-gradient(135deg, #ff9fba, #ff6f9c);
+    border-color: #ff9fba;
+    color: #fff;
+}
     </style>
 </head>
 <body class="lab-page">
@@ -784,13 +830,43 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                     <option value="per_item">1アイテムあたり</option>
                 </select>
             
-                <input type="text" name="budget" id="budget" placeholder="例：5000（円）">
+                <input type="number" name="budget" id="budget" placeholder="例：5000" min="0" step="100">
             
                 <p class="form-note">
                     ※月間トータルを選んだ場合は、朝・夜・週ケアを含む合計予算です
                 </p>
             </div>
               
+
+            <div class="form-group">
+                <label>🪷 肌の悩み（複数選択可）</label>
+                <div class="concern-grid">
+                    <label class="concern-chip" for="c_acne">
+                        <input type="checkbox" name="concerns" value="acne" id="c_acne" onchange="syncConcernChip(this)">
+                        <span class="concern-check">✓</span>ニキビ・吹き出物
+                    </label>
+                    <label class="concern-chip" for="c_pores">
+                        <input type="checkbox" name="concerns" value="pores" id="c_pores" onchange="syncConcernChip(this)">
+                        <span class="concern-check">✓</span>毛穴・テカり
+                    </label>
+                    <label class="concern-chip" for="c_spots">
+                        <input type="checkbox" name="concerns" value="spots" id="c_spots" onchange="syncConcernChip(this)">
+                        <span class="concern-check">✓</span>シミ・くすみ
+                    </label>
+                    <label class="concern-chip" for="c_aging">
+                        <input type="checkbox" name="concerns" value="aging" id="c_aging" onchange="syncConcernChip(this)">
+                        <span class="concern-check">✓</span>シワ・たるみ
+                    </label>
+                    <label class="concern-chip" for="c_dryness">
+                        <input type="checkbox" name="concerns" value="dryness" id="c_dryness" onchange="syncConcernChip(this)">
+                        <span class="concern-check">✓</span>乾燥・かさつき
+                    </label>
+                    <label class="concern-chip" for="c_redness">
+                        <input type="checkbox" name="concerns" value="redness" id="c_redness" onchange="syncConcernChip(this)">
+                        <span class="concern-check">✓</span>肌荒れ・赤み
+                    </label>
+                </div>
+            </div>
 
             <button id="submitBtn" type="submit">診断する</button>
 
@@ -839,6 +915,11 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
       document.querySelectorAll('.count-bar-fill[data-pct]').forEach(function(el) {
         requestAnimationFrame(function() { el.style.width = (parseFloat(el.dataset.pct) || 0) + '%'; });
       });
+
+      function syncConcernChip(cb) {
+        var chip = cb.closest('.concern-chip');
+        if (chip) chip.classList.toggle('checked', cb.checked);
+      }
 
       let starInterval;
       let loadingTimer = null;

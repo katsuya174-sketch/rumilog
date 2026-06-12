@@ -446,6 +446,30 @@ FREE_MONTHLY_LIMIT = 5
 PREMIUM_MONTHLY_LIMIT = 30
 GLOBAL_MONTHLY_LIMIT = 1000
 GLOBAL_USAGE_FILE = "global_usage.json"
+
+# フォーム選択肢 → 内部 concern タグ
+_CONCERN_FORM_TAGS = {
+    "acne":    ["acne"],
+    "pores":   ["pores", "oil_control"],
+    "spots":   ["whitening", "dullness"],
+    "aging":   ["aging"],
+    "dryness": ["dryness", "barrier"],
+    "redness": ["redness", "barrier"],
+}
+_CONCERN_LABELS_JA = {
+    "acne":    "ニキビ・吹き出物",
+    "pores":   "毛穴・テカり",
+    "spots":   "シミ・くすみ",
+    "aging":   "シワ・たるみ",
+    "dryness": "乾燥・かさつき",
+    "redness": "肌荒れ・赤み",
+}
+
+def get_user_concern_tags(user_data):
+    tags = []
+    for c in (user_data.get("concerns") or []):
+        tags.extend(_CONCERN_FORM_TAGS.get(c, []))
+    return list(dict.fromkeys(tags))
 PREMIUM_KEYS_FILE = "premium_keys.json"
 
 # Stripe初期化
@@ -4861,7 +4885,13 @@ def score_product(product, step, user_data, budget_value):
     elif "normal" in product_skin_types:
         score += 2
 
-    
+    # ユーザーが明示した肌悩みと商品 concerns の一致ボーナス
+    user_concern_tags = get_user_concern_tags(user_data)
+    if user_concern_tags:
+        product_concerns = product.get("concerns") or []
+        for tag in user_concern_tags:
+            if tag in product_concerns:
+                score += 8
 
     return score
 
@@ -7089,6 +7119,7 @@ def build_candidate_collection_prompt(user_data, analyzed_data):
 敏感度: {user_data.get("sens", "")}
 レチノール経験: {user_data.get("exp", "")}
 予算: {user_data.get("budget", "")}
+肌の悩み（ユーザー申告）: {', '.join([_CONCERN_LABELS_JA.get(c, c) for c in (user_data.get('concerns') or [])]) or '未回答'}
 
 【診断結果JSON】
 {json.dumps(analyzed_data, ensure_ascii=False)}
@@ -10437,6 +10468,7 @@ def extract_user_data(request):
         "sens": request.form.get("sensitivity", ""),
         "exp": request.form.get("retinol_exp", ""),
         "budget": request.form.get("budget", ""),
+        "concerns": request.form.getlist("concerns"),
         "record_date": datetime.today().strftime("%Y-%m-%d")
     }
 
@@ -10806,6 +10838,9 @@ def build_analysis_prompt(user_data):
 敏感度: {user_data['sens']}
 レチノール経験: {user_data['exp']}
 予算: {user_data['budget']}
+肌の悩み（ユーザー申告）: {', '.join([_CONCERN_LABELS_JA.get(c, c) for c in (user_data.get('concerns') or [])]) or '未回答'}
+
+※「肌の悩み」はユーザーが最も改善したい優先事項です。スコアが低い項目より、ユーザー申告の悩みを優先的にアドレスする商品ステップを構成してください。
 
 【画像情報】
 1枚目: 正面
@@ -11621,6 +11656,7 @@ def build_rich_candidate_collection_prompt(user_data, analyzed_data):
 敏感度: {user_data.get("sens", "")}
 レチノール経験: {user_data.get("exp", "")}
 予算: {user_data.get("budget", "")}
+肌の悩み（ユーザー申告）: {', '.join([_CONCERN_LABELS_JA.get(c, c) for c in (user_data.get('concerns') or [])]) or '未回答'}
 
 【診断結果JSON】
 {json.dumps(analyzed_data, ensure_ascii=False)}
