@@ -29,7 +29,7 @@ import threading
 from psycopg2.pool import SimpleConnectionPool
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v1"
+ANALYSIS_CACHE_VERSION = "v2"
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
@@ -6820,54 +6820,29 @@ def score_routine_balance(step, product, routine_context=None):
     elif irritation_risk == "medium":
         score -= 4
 
-    if routine_context:
+    if routine_context and families:
         existing_families = set(routine_context.get("families", []))
-        existing_strengths = routine_context.get("strengths", [])
+        avoid_rules = routine_context.get("avoid_rules", [])
 
-        profile_pair = set(profile.get("pair_well_with", set()))
-        profile_avoid = set(profile.get("avoid_with", set()))
-
-        for family in existing_families:
-            if family in profile_pair:
-                score += 10
-            if family in profile_avoid:
-                score -= 18
-
-        if "vitamin_c" in families and "vitamin_c" in existing_families:
-            score -= 8
-
-        if "retinoid" in families and "retinoid" in existing_families:
-            score -= 16
-
-        if "aha_bha" in families and "aha_bha" in existing_families:
-            score -= 14
-
-        if (
-            "retinoid" in families and "aha_bha" in existing_families
-        ) or (
-            "aha_bha" in families and "retinoid" in existing_families
-        ):
-            score -= 24
-
-        if (
-            "vitamin_c" in families and "retinoid" in existing_families
-        ) or (
-            "retinoid" in families and "vitamin_c" in existing_families
-        ):
-            score += 8
-
-        if (
-            "barrier" in families
-            and (
-                "retinoid" in existing_families
-                or "aha_bha" in existing_families
-                or "vitamin_c" in existing_families
-            )
-        ):
-            score += 12
-
-        if strength == "high" and "high" in existing_strengths:
-            score -= 16
+        # Gemini-derived compatibility check — no ingredient knowledge in code
+        for rule in avoid_rules:
+            rule_fams = rule.get("families", [])
+            if len(rule_fams) < 2:
+                continue
+            conflict = False
+            for i, fa in enumerate(rule_fams):
+                for j, fb in enumerate(rule_fams):
+                    if i == j:
+                        continue
+                    if fa in families and fb in existing_families:
+                        conflict = True
+                        break
+                if conflict:
+                    break
+            if conflict:
+                if rule.get("severity") == "hard":
+                    return -9999  # hard block: remove from selection entirely
+                # soft: no score penalty — surfaces as warning only
 
     return score
 
@@ -8522,10 +8497,14 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
     improvement_plan = data.get("improvement_plan", {})
     verified_products = load_verified_products_cache()
 
+    _raw_avoid = data.get("routine_strategy", {}).get("avoid_combinations", [])
+    avoid_rules = [r for r in _raw_avoid if isinstance(r, dict) and r.get("families")]
+
     routine_context = {
         "families": [],
         "strengths": [],
-        "selected_products": []
+        "selected_products": [],
+        "avoid_rules": avoid_rules,
     }
 
     def assign_one_step(step, used_product_names, section_name,routine_context):
@@ -8682,7 +8661,8 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
         routine_context = {
             "families": [],
             "strengths": [],
-            "selected_products": []
+            "selected_products": [],
+            "avoid_rules": avoid_rules,
         }
 
         steps = data.get(section, {}).get("steps", [])
@@ -8702,7 +8682,8 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
     weekly_routine_context = {
         "families": [],
         "strengths": [],
-        "selected_products": []
+        "selected_products": [],
+        "avoid_rules": avoid_rules,
     }
 
     weekly_steps = data.get("weekly_care", [])
@@ -10037,24 +10018,31 @@ def build_rule_based_warnings(data, user_data):
 
     ingredient_tags = list(dict.fromkeys(ingredient_tags))
 
-    # 敏感肌 × 攻め成分
-    if sens == "high":
-        if any(tag in ingredient_tags for tag in ["retinol", "retinal", "aha", "bha", "pha", "salicylic_acid", "glycolic_acid", "lactic_acid", "mandelic_acid"]):
-            warnings.append("敏感傾向があるため、攻めの成分は少量から様子を見て使うのがおすすめです")
+    # Gemini-derived combination warnings (soft severity) and residual violations (hard that slipped through)
+    avoid_rules = data.get("routine_strategy", {}).get("avoid_combinations", [])
+    if avoid_rules:
+        routine_families = set()
+        for step in all_steps:
+            profile = infer_active_profile(step)
+            routine_families.update(profile.get("families", set()))
 
-    # レチノール初心者
-    if exp == "beginner":
-        if any(tag in ingredient_tags for tag in ["retinol", "retinal"]):
-            warnings.append("レチノール系は初心者のため、使用頻度を低めから始めるのがおすすめです")
+        for rule in avoid_rules:
+            if not isinstance(rule, dict):
+                continue
+            rule_fams = set(rule.get("families", []))
+            if not rule_fams:
+                continue
+            reason = str(rule.get("reason", "")).strip()
+            if not reason:
+                continue
+            # Warn if every family in the rule appears somewhere in the assigned routine
+            if rule_fams.issubset(routine_families):
+                warnings.append(reason)
 
-    # 酸系とレチノールの併用注意
-    if any(tag in ingredient_tags for tag in ["retinol", "retinal"]) and any(tag in ingredient_tags for tag in ["aha", "bha", "pha", "salicylic_acid", "glycolic_acid", "lactic_acid", "mandelic_acid"]):
-        warnings.append("レチノール系と角質ケア系を同じタイミングで重ねると刺激が出やすいため注意してください")
-
-    # 朝の強い角質ケア注意
+    # 朝の角質ケア × 日焼け止め注意（成分組み合わせではなくUV対策の注意）
     for step in data.get("morning", {}).get("steps", []):
         ing = normalize_ingredient_tag(step.get("ingredient_focus", ""))
-        if ing in ["aha", "bha", "pha", "glycolic_acid", "salicylic_acid", "lactic_acid", "mandelic_acid"]:
+        if ing in ["aha_bha", "pha"]:
             warnings.append("朝に角質ケア系を使う場合は、日焼け止めを丁寧に使うのがおすすめです")
             break
 
@@ -11392,7 +11380,19 @@ def get_analysis_schema():
                     },
                     "avoid_combinations": {
                         "type": "array",
-                        "items": {"type": "string"}
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "families": {
+                                    "type": "array",
+                                    "items": {"type": "string"}
+                                },
+                                "scope": {"type": "string"},
+                                "reason": {"type": "string"},
+                                "severity": {"type": "string"}
+                            },
+                            "required": ["families", "reason", "severity"]
+                        }
                     },
                     "morning_order": {
                         "type": "array",
@@ -11895,8 +11895,30 @@ rotation_targets:
 例: ["レチノール", "アゼライン酸", "ビタミンC", "保湿回復"]
 
 avoid_combinations:
-避ける組み合わせ。
-例: ["レチノールとピーリングを同じ夜に使わない"]
+この肌状態・ユーザー経験をもとに、同じルーティン内で組み合わせるべきでない成分ペアを出力する。
+コードは成分ルールを一切持たない。ここで指定した内容のみが商品選定時の除外・警告に使われる。
+
+各エントリの形式:
+- families: 避ける成分ファミリーのタグ配列（2つ以上）
+  使用可能タグ: retinoid / aha_bha / strong_vitamin_c / vitamin_c / azelaic / niacinamide / ceramide / barrier / peptide / pdrn
+  同系統重複（例: ["retinoid","retinoid"]）は「同種を2製品使うな」という意味
+- scope: "same_session"（同じ朝/夜の中で重ねない）または "any"（ルーティン全体で同時使用しない）
+- reason: なぜこの肌・この成分濃度でこの組み合わせが問題になるか（この肌スコアと経験値に具体的に言及すること）
+- severity: "hard"（商品選定から除外）/ "soft"（選定は許容するが警告として表示）
+
+判断基準:
+- 敏感度が高い・バリアスコア低い → 刺激重複に厳しく "hard" を多用
+- レチノール未経験（exp=beginner/none）→ retinoidを含むペアは "hard" にしやすい
+- 肌が健康で経験豊富 → "soft" で許容するケースあり
+- 同系統重複（レチノール×レチノール、酸×酸）は原則 "hard"
+- 必ず3件以上出力すること
+
+例:
+[
+  {{"families": ["retinoid", "aha_bha"], "scope": "same_session", "reason": "レチノールとAHA/BHAを同時使用するとバリア破壊が加速し赤みが悪化する", "severity": "hard"}},
+  {{"families": ["retinoid", "retinoid"], "scope": "any", "reason": "同じルーティンでレチノール系を重複させると刺激過剰になる", "severity": "hard"}},
+  {{"families": ["aha_bha", "aha_bha"], "scope": "any", "reason": "酸系を重ねると角質除去が過剰になりバリアを損傷する", "severity": "hard"}}
+]
 
 morning_order:
 朝ルーティンの使用順序を番号付き文字列の配列で返す。
