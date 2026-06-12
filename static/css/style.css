@@ -335,40 +335,32 @@ body.result-page {
    週間ルーティン
 ============================= */
 .wplan-policy {
-    background: linear-gradient(135deg, #fff5f8, #fff0f4);
-    border-radius: 14px;
-    border: 1px solid #ffd6e0;
-    padding: 14px 16px;
-    margin-bottom: 16px;
-}
-.wplan-policy-text {
-    font-size: 14px;
-    color: #6a4050;
+    font-size: 13px;
+    color: #7a5060;
     line-height: 1.7;
+    margin-bottom: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid #f5e0e8;
 }
 .wplan-policy-sub {
     font-size: 12px;
     color: #a07880;
-    margin-top: 6px;
-    line-height: 1.6;
+    margin-top: 4px;
 }
 
 .wplan-order-block {
-    background: #fffafc;
-    border: 1px solid #ffe3ea;
-    border-radius: 14px;
-    padding: 14px 16px;
-    margin-bottom: 16px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
+    margin-bottom: 16px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #f5e0e8;
 }
 .wplan-order-title {
     font-size: 11px;
     font-weight: bold;
     color: #c75b7a;
     letter-spacing: 0.06em;
-    margin-bottom: 2px;
 }
 .wplan-order-row {
     display: flex;
@@ -380,19 +372,12 @@ body.result-page {
     font-size: 11px;
     font-weight: bold;
     border-radius: 999px;
-    padding: 3px 10px;
+    padding: 2px 9px;
     white-space: nowrap;
     flex-shrink: 0;
-    margin-top: 1px;
 }
-.wplan-order-label.morning-label {
-    background: #fff3e0;
-    color: #c07030;
-}
-.wplan-order-label.night-label {
-    background: #ede8f5;
-    color: #7060a0;
-}
+.wplan-order-label.morning-label { background: #fff3e0; color: #b06020; }
+.wplan-order-label.night-label   { background: #ede8f5; color: #6050a0; }
 .wplan-order-steps {
     display: flex;
     flex-wrap: wrap;
@@ -401,85 +386,79 @@ body.result-page {
 }
 .wplan-order-step {
     font-size: 11px;
-    color: #6a4050;
-    background: #fff0f4;
-    border: 1px solid #ffccd8;
-    border-radius: 8px;
-    padding: 2px 8px;
-    line-height: 1.5;
+    color: #7a5060;
+    background: #fff6f9;
+    border: 1px solid #f0d0dc;
+    border-radius: 6px;
+    padding: 1px 7px;
 }
-.wplan-order-arrow {
-    color: #e8a5bc;
+.wplan-order-arrow { color: #e0b0c0; font-size: 11px; }
+
+/* 日ごとのリスト */
+.wplan-rows { display: flex; flex-direction: column; }
+.wplan-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid #f5e8ee;
+}
+.wplan-row:last-child { border-bottom: none; }
+
+.wplan-day-badge {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    background: linear-gradient(135deg, #ffb0c8, #e87095);
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    font-family: 'Kosugi Maru', sans-serif;
+    margin-top: 2px;
+}
+.wplan-row-secs {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+.wplan-row-sec {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.wplan-sec-icon {
     font-size: 11px;
+    font-weight: bold;
+    white-space: nowrap;
+    padding-top: 2px;
     flex-shrink: 0;
 }
-
-.wplan-days-scroll {
-    display: grid;
-    grid-template-columns: repeat(7, minmax(118px, 1fr));
-    gap: 8px;
-    overflow-x: auto;
-    padding-bottom: 6px;
+.wplan-sec-icon.m { color: #b06020; }
+.wplan-sec-icon.n { color: #6050a0; }
+.wplan-sec-icon.w { color: #208060; }
+.wplan-sec-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
 }
-.wplan-day-card {
-    background: #fff;
-    border: 1px solid #ffe3ea;
-    border-radius: 16px;
-    overflow: hidden;
-    min-width: 118px;
-}
-.wplan-day-header {
-    background: linear-gradient(135deg, #ff9fba, #e87095);
-    color: #fff;
-    text-align: center;
-    font-weight: bold;
-    font-size: 14px;
-    padding: 8px 6px;
-    font-family: 'Kosugi Maru', sans-serif;
-    letter-spacing: 0.04em;
-}
-.wplan-section {
-    padding: 8px 10px;
-    border-bottom: 1px solid #fff0f4;
-}
-.wplan-section:last-child {
-    border-bottom: none;
-}
-.wplan-section.morning-section { background: #fffdf5; }
-.wplan-section.night-section   { background: #f8f5ff; }
-.wplan-section.weekly-section  { background: #f3fef6; }
-
-.wplan-section-label {
-    font-size: 10px;
-    font-weight: bold;
-    margin-bottom: 5px;
-    letter-spacing: 0.04em;
-}
-.morning-section .wplan-section-label { color: #c08030; }
-.night-section   .wplan-section-label { color: #7060a0; }
-.weekly-section  .wplan-section-label { color: #30906a; }
-
-.wplan-item {
+.wplan-sec-item {
     font-size: 11px;
     color: #6a4050;
-    line-height: 1.5;
-    padding: 2px 0;
-    border-bottom: 1px dashed #f5e8ee;
+    background: #fff6f9;
+    border: 1px solid #f0d0dc;
+    border-radius: 6px;
+    padding: 1px 8px;
+    line-height: 1.6;
 }
-.wplan-item:last-child { border-bottom: none; }
-
-.wplan-empty {
-    font-size: 11px;
-    color: #c0a8b0;
-    text-align: center;
-    padding: 12px 6px;
-}
-
-@media (max-width: 600px) {
-    .wplan-days-scroll {
-        grid-template-columns: repeat(7, 122px);
-    }
-}
+.wplan-sec-item.n { background: #f3f0ff; border-color: #d0c8ee; color: #504070; }
+.wplan-sec-item.w { background: #edf7f1; border-color: #b8d8c4; color: #306050; }
 
 .product-card-new {
     display: flex;
