@@ -2559,7 +2559,7 @@ def extract_rakuten_item_code_from_url(url):
 def fetch_rakuten_item_by_code(item_code):
     """Fetch Rakuten item directly by itemCode (shopId:itemId) — guaranteed image for DB products."""
     global RAKUTEN_COOLDOWN_UNTIL
-    if not item_code or not RAKUTEN_APP_ID or not RAKUTEN_ACCESS_KEY:
+    if not item_code or not RAKUTEN_APP_ID:
         return None
 
     cache_key = ("_code_", item_code)
@@ -2572,15 +2572,13 @@ def fetch_rakuten_item_by_code(item_code):
 
     try:
         wait_for_rakuten_rate_limit()
-        endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401"
+        # Standard endpoint — the only one that supports itemCode parameter
+        endpoint = "https://app.rakuten.co.jp/services/api/IchibaItem/Search/20170706"
         headers = {
-            "Referer": "https://rumilog.onrender.com",
-            "Origin": "https://rumilog.onrender.com",
             "User-Agent": "Mozilla/5.0",
         }
         params = {
             "applicationId": RAKUTEN_APP_ID,
-            "accessKey": RAKUTEN_ACCESS_KEY,
             "itemCode": item_code,
             "hits": 1,
             "format": "json",
