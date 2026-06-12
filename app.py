@@ -4397,6 +4397,7 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
 
     # -------------------------------------------------
     # 1. ingredient_focus（step側）と active/support 一致
+    # Geminiが指定した成分を持つ商品を優先的に選定する
     # -------------------------------------------------
     if ingredient_tag:
         if ingredient_tag in product_actives:
@@ -4405,6 +4406,10 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
 
         elif ingredient_tag in product_support:
             score += 10
+
+        else:
+            # stepのfocus成分を一切持たない商品は選定優先度を下げる
+            score -= 15
 
     # -------------------------------------------------
     # 2. concerns一致
@@ -6844,6 +6849,30 @@ def score_routine_balance(step, product, routine_context=None):
                     return -9999  # hard block: remove from selection entirely
                 # soft: no score penalty — surfaces as warning only
 
+    # -------------------------------------------------------
+    # Non-focus active ingredient overlap penalty
+    # stepのingredient_focusに指定されていない成分が
+    # 他のステップのfocusと重複している場合はスコアを下げる
+    # -------------------------------------------------------
+    if routine_context:
+        assigned_focus_tags = set(routine_context.get("assigned_focus_tags", []))
+        if assigned_focus_tags:
+            step_focus_tag = normalize_ingredient_tag(step.get("ingredient_focus", "") or "")
+            product_active_tags = {
+                t for t in (
+                    normalize_ingredient_tag(x)
+                    for x in (product.get("active_ingredients") or [])
+                    if x
+                )
+                if t
+            }
+            # focus成分そのものの重複は意図的なので除外
+            non_focus_actives = product_active_tags - ({step_focus_tag} if step_focus_tag else set())
+            # 他ステップがすでにカバーしている成分との重複
+            overlap = non_focus_actives & assigned_focus_tags
+            if overlap:
+                score -= len(overlap) * 15
+
     return score
 
 def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None, routine_context=None, verified_products=None):
@@ -8505,6 +8534,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
         "strengths": [],
         "selected_products": [],
         "avoid_rules": avoid_rules,
+        "assigned_focus_tags": [],
     }
 
     def assign_one_step(step, used_product_names, section_name,routine_context):
@@ -8558,6 +8588,11 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
         routine_context["families"].extend(profile.get("families", []))
         routine_context["strengths"].append(profile.get("strength", "low"))
         routine_context["selected_products"].append(product_name)
+
+        # このステップのfocus成分タグを記録 — 後続ステップのnon-focus重複検出に使う
+        _step_focus_tag = normalize_ingredient_tag(step.get("ingredient_focus", "") or "")
+        if _step_focus_tag:
+            routine_context["assigned_focus_tags"].append(_step_focus_tag)
 
         step["top_candidates"] = best.get("_top_candidates", [])
         source = best.get("_source", "")
@@ -8663,6 +8698,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             "strengths": [],
             "selected_products": [],
             "avoid_rules": avoid_rules,
+            "assigned_focus_tags": [],
         }
 
         steps = data.get(section, {}).get("steps", [])
@@ -8684,6 +8720,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
         "strengths": [],
         "selected_products": [],
         "avoid_rules": avoid_rules,
+        "assigned_focus_tags": [],
     }
 
     weekly_steps = data.get("weekly_care", [])
