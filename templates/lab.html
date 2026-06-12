@@ -524,6 +524,27 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
     font-size: 14px;
     line-height: 1.6;
 }
+.count-num {
+    font-size: 18px;
+    margin-left: 4px;
+    color: #4a3540;
+}
+.count-num.count-warn { color: #c75b7a; }
+.count-bar-track {
+    height: 6px;
+    background: #fde8f0;
+    border-radius: 999px;
+    overflow: hidden;
+    max-width: 240px;
+    margin: 0 auto;
+}
+.count-bar-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #e07a9a, #c75b7a);
+    border-radius: 999px;
+    transition: width 0.4s;
+}
     </style>
 </head>
 <body class="lab-page">
@@ -543,10 +564,23 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 
     
     {% if DISABLE_USAGE_LIMIT %}
-      <p style="font-size:14px; color:#666; margin-top:8px;">
-        開発中：回数制限なし
-      </p>
-    {% elif remaining_free_count is defined %}
+      <p style="font-size:14px; color:#666; margin-top:8px;">開発中：回数制限なし</p>
+    {% elif is_premium and remaining_premium_count is defined %}
+      {# プレミアム会員の残り回数 #}
+      {% set pct = (remaining_premium_count / 30 * 100) | int %}
+      <div style="margin: 14px auto 0; max-width: 360px; text-align:center;">
+        <p style="font-size:13px; color:#a0778a; margin:0 0 6px;">
+          今月の診断残り回数
+          <strong class="count-num{% if remaining_premium_count <= 5 %} count-warn{% endif %}">{{ remaining_premium_count }}</strong>
+          <span style="font-size:12px; color:#b89aa6;">/ 30回</span>
+          <span style="display:inline-block; background:linear-gradient(135deg,#ffe6ee,#ffd6e8); color:#c75b7a; font-size:10px; font-weight:bold; border-radius:999px; padding:1px 8px; margin-left:6px; vertical-align:middle;">✨ Premium</span>
+        </p>
+        <div class="count-bar-track">
+          <div class="count-bar-fill" data-pct="{{ pct }}"></div>
+        </div>
+      </div>
+    {% elif not is_premium and remaining_free_count is defined %}
+      {# 無料会員の残り回数 #}
       {% if remaining_free_count <= 0 %}
         <div style="
           margin: 14px auto 0;
@@ -577,12 +611,20 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           ">✨ プレミアムプランを見る</a>
         </div>
       {% else %}
-        <p style="font-size:14px; color:#666; margin-top:8px;">
-          今月の無料診断残り回数：<strong style="color:{% if remaining_free_count <= 2 %}#c75b7a{% else %}#555{% endif %};">{{ remaining_free_count }}回</strong>
-          {% if remaining_free_count <= 2 %}
-            <a href="/premium" style="font-size:12px; color:#c75b7a; text-decoration:underline; margin-left:6px;">上限を増やす →</a>
-          {% endif %}
-        </p>
+        {% set pct_free = (remaining_free_count / 5 * 100) | int %}
+        <div style="margin: 14px auto 0; max-width: 360px; text-align:center;">
+          <p style="font-size:13px; color:#a0778a; margin:0 0 6px;">
+            今月の診断残り回数
+            <strong class="count-num{% if remaining_free_count <= 2 %} count-warn{% endif %}">{{ remaining_free_count }}</strong>
+            <span style="font-size:12px; color:#b89aa6;">/ 5回</span>
+            {% if remaining_free_count <= 2 %}
+              <a href="/premium" style="font-size:11px; color:#c75b7a; text-decoration:underline; margin-left:6px;">上限を増やす →</a>
+            {% endif %}
+          </p>
+          <div class="count-bar-track">
+            <div class="count-bar-fill" data-pct="{{ pct_free }}"></div>
+          </div>
+        </div>
       {% endif %}
     {% endif %}
 
@@ -794,6 +836,10 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
         
     </div>
     <script>
+      document.querySelectorAll('.count-bar-fill[data-pct]').forEach(function(el) {
+        requestAnimationFrame(function() { el.style.width = (parseFloat(el.dataset.pct) || 0) + '%'; });
+      });
+
       let starInterval;
       let loadingTimer = null;
       let loadingStartTime = null;

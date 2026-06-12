@@ -443,6 +443,7 @@ def log_pricing_view(source="unknown"):
 
 FREE_LIMIT_FILE = "free_usage.json"
 FREE_MONTHLY_LIMIT = 5
+PREMIUM_MONTHLY_LIMIT = 30
 GLOBAL_MONTHLY_LIMIT = 1000
 GLOBAL_USAGE_FILE = "global_usage.json"
 PREMIUM_KEYS_FILE = "premium_keys.json"
@@ -728,7 +729,40 @@ def get_remaining_free_count(ip):
     used_count = get_free_usage_count(ip)
     remaining = FREE_MONTHLY_LIMIT - used_count
     return max(0, remaining)
-    
+
+
+def get_premium_usage_count(key):
+    keys = load_premium_keys()
+    entry = keys.get(key)
+    if not entry:
+        return 0
+    month_key = get_current_month_key()
+    return int(entry.get("monthly_usage", {}).get(month_key, 0))
+
+
+def increment_premium_usage(key):
+    if DISABLE_USAGE_LIMIT:
+        return 0
+    keys = load_premium_keys()
+    entry = keys.get(key)
+    if not entry:
+        return 0
+    month_key = get_current_month_key()
+    monthly = entry.setdefault("monthly_usage", {})
+    monthly[month_key] = int(monthly.get(month_key, 0)) + 1
+    save_premium_keys(keys)
+    return monthly[month_key]
+
+
+def can_use_premium_diagnosis(key):
+    return get_premium_usage_count(key) < PREMIUM_MONTHLY_LIMIT
+
+
+def get_remaining_premium_count(key):
+    if DISABLE_USAGE_LIMIT:
+        return 999
+    return max(0, PREMIUM_MONTHLY_LIMIT - get_premium_usage_count(key))
+
 
 def load_products():
     with open("products.json", "r", encoding="utf-8") as f:
@@ -2285,6 +2319,101 @@ def infer_ingredients_from_rakuten_title(title):
         if keyword.lower() in title_lower and ingredient_id not in found:
             found.append(ingredient_id)
     return found
+
+
+# 推定成分ID → concerns / main_functions / ingredient_focus の補完マッピング
+_RAKUTEN_INGREDIENT_METADATA = {
+    "retinol":        {"concerns": ["aging", "texture", "pores", "dullness", "acne_marks"],    "main_functions": ["エイジングケア", "毛穴改善", "ターンオーバー促進", "ハリ補給"], "ingredient_focus": ["retinoid"]},
+    "retinal":        {"concerns": ["aging", "texture", "pores", "dullness", "acne_marks"],    "main_functions": ["エイジングケア", "毛穴改善", "ターンオーバー促進"],             "ingredient_focus": ["retinoid"]},
+    "vitamin_c":      {"concerns": ["dullness", "whitening", "aging", "pigmentation"],         "main_functions": ["美白", "ハリ補給", "くすみ改善", "抗酸化"],                    "ingredient_focus": ["vitamin_c"]},
+    "niacinamide":    {"concerns": ["pores", "dullness", "whitening", "oiliness", "barrier"],  "main_functions": ["美白", "毛穴改善", "バリア強化", "皮脂コントロール"],           "ingredient_focus": ["niacinamide"]},
+    "azelaic_acid":   {"concerns": ["acne", "redness", "dullness", "pigmentation"],            "main_functions": ["ニキビ改善", "赤み鎮静", "美白"],                              "ingredient_focus": ["azelaic"]},
+    "tranexamic_acid":{"concerns": ["dullness", "whitening", "pigmentation"],                  "main_functions": ["美白", "シミ改善", "くすみ改善"],                              "ingredient_focus": ["tranexamic"]},
+    "peptide":        {"concerns": ["aging", "firmness"],                                      "main_functions": ["エイジングケア", "ハリ補給", "弾力補給"],                      "ingredient_focus": ["peptide"]},
+    "ceramide":       {"concerns": ["dryness", "barrier", "redness"],                          "main_functions": ["バリア強化", "保湿", "鎮静"],                                  "ingredient_focus": ["ceramide"]},
+    "hyaluronic":     {"concerns": ["dryness", "barrier"],                                     "main_functions": ["保湿", "潤い補給"],                                            "ingredient_focus": ["hyaluronic_acid"]},
+    "cica":           {"concerns": ["redness", "barrier", "acne"],                             "main_functions": ["鎮静", "バリア強化", "修復"],                                  "ingredient_focus": ["centella"]},
+    "centella":       {"concerns": ["redness", "barrier", "acne"],                             "main_functions": ["鎮静", "バリア強化", "修復"],                                  "ingredient_focus": ["centella"]},
+    "panthenol":      {"concerns": ["redness", "barrier", "dryness"],                          "main_functions": ["鎮静", "バリア強化", "保湿"],                                  "ingredient_focus": ["panthenol"]},
+    "bha":            {"concerns": ["pores", "acne", "texture", "oiliness"],                   "main_functions": ["毛穴改善", "ニキビ改善", "角質ケア"],                           "ingredient_focus": ["aha_bha"]},
+    "aha":            {"concerns": ["texture", "dullness", "pores"],                           "main_functions": ["角質ケア", "くすみ改善", "毛穴改善"],                           "ingredient_focus": ["aha_bha"]},
+    "pha":            {"concerns": ["texture", "dullness", "pores"],                           "main_functions": ["角質ケア", "くすみ改善"],                                       "ingredient_focus": ["pha"]},
+    "glycolic_acid":  {"concerns": ["texture", "dullness", "pores"],                           "main_functions": ["角質ケア", "くすみ改善"],                                       "ingredient_focus": ["aha_bha"]},
+    "lactic_acid":    {"concerns": ["texture", "dullness", "dryness"],                         "main_functions": ["角質ケア", "保湿"],                                            "ingredient_focus": ["aha_bha"]},
+    "salicylic_acid": {"concerns": ["pores", "acne", "oiliness"],                              "main_functions": ["毛穴改善", "ニキビ改善"],                                       "ingredient_focus": ["aha_bha"]},
+    "arbutin":        {"concerns": ["dullness", "whitening", "pigmentation"],                  "main_functions": ["美白", "シミ改善"],                                            "ingredient_focus": ["arbutin"]},
+    "kojic_acid":     {"concerns": ["dullness", "whitening", "pigmentation"],                  "main_functions": ["美白", "シミ改善"],                                            "ingredient_focus": ["kojic_acid"]},
+    "glutathione":    {"concerns": ["dullness", "whitening"],                                  "main_functions": ["美白", "抗酸化"],                                              "ingredient_focus": ["glutathione"]},
+    "squalane":       {"concerns": ["dryness", "barrier"],                                     "main_functions": ["保湿", "バリア強化"],                                           "ingredient_focus": ["squalane"]},
+    "glycerin":       {"concerns": ["dryness"],                                                "main_functions": ["保湿", "潤い補給"],                                            "ingredient_focus": ["glycerin"]},
+    "amino_acid":     {"concerns": ["dryness", "barrier"],                                     "main_functions": ["保湿", "バリア強化"],                                           "ingredient_focus": ["amino_acid"]},
+    "collagen":       {"concerns": ["firmness", "dryness", "aging"],                           "main_functions": ["エイジングケア", "ハリ補給", "保湿"],                           "ingredient_focus": ["collagen"]},
+    "enzyme":         {"concerns": ["pores", "texture", "dullness"],                           "main_functions": ["角質ケア", "毛穴改善", "くすみ改善"],                           "ingredient_focus": ["enzyme"]},
+}
+
+# タイトルから肌タイプを推定するキーワード
+_TITLE_SKIN_TYPE_KEYWORDS = {
+    "乾燥肌": "dry", "乾燥": "dry",
+    "敏感肌": "sensitive", "低刺激": "sensitive", "刺激レス": "sensitive",
+    "オイリー": "oily", "脂性肌": "oily", "皮脂": "oily",
+    "混合肌": "combination",
+    "普通肌": "normal",
+}
+
+
+def enrich_product_metadata_from_ingredients(product):
+    """
+    active_ingredients からDB・楽天商品を問わず concerns / main_functions /
+    ingredient_focus / skin_types を補完する。
+    既存フィールドは上書きせず、欠けている項目だけを追加する。
+    楽天商品はフィールドが空なので補完量が多く、DB商品はすでに充実しているので
+    影響は最小限になる。スコアリングの基準は両者で同一。
+    """
+    if not isinstance(product, dict):
+        return product
+
+    inferred = product.get("active_ingredients") or []
+    if not inferred:
+        return product
+
+    concerns         = list(product.get("concerns") or [])
+    main_functions   = list(product.get("main_functions") or [])
+    ingredient_focus = list(product.get("ingredient_focus") or [])
+    skin_types       = list(product.get("skin_types") or [])
+
+    seen_concerns  = set(concerns)
+    seen_functions = set(main_functions)
+    seen_focus     = set(ingredient_focus)
+
+    for ing in inferred:
+        meta = _RAKUTEN_INGREDIENT_METADATA.get(ing, {})
+        for c in meta.get("concerns", []):
+            if c not in seen_concerns:
+                concerns.append(c)
+                seen_concerns.add(c)
+        for f in meta.get("main_functions", []):
+            if f not in seen_functions:
+                main_functions.append(f)
+                seen_functions.add(f)
+        for focus in meta.get("ingredient_focus", []):
+            if focus not in seen_focus:
+                ingredient_focus.append(focus)
+                seen_focus.add(focus)
+
+    # タイトルまたは商品名から肌タイプを推定（DB商品も name フィールドがある）
+    title = str(product.get("rakuten_title") or product.get("name") or "")
+    seen_skin_types = set(skin_types)
+    for keyword, st in _TITLE_SKIN_TYPE_KEYWORDS.items():
+        if keyword in title and st not in seen_skin_types:
+            skin_types.append(st)
+            seen_skin_types.add(st)
+
+    product["concerns"]          = concerns
+    product["main_functions"]    = main_functions
+    product["ingredient_focus"]  = ingredient_focus
+    product["skin_types"]        = skin_types
+
+    return product
 
 
 def search_rakuten_by_criteria(category, improvement_plan):
@@ -6136,6 +6265,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             continue
 
         product = dict(p)
+        # DB・楽天問わず全商品に同じ基準でメタデータ補完を適用する
+        enrich_product_metadata_from_ingredients(product)
 
         base_score = score_product(product, step, user_data, budget_value)
 
@@ -6255,6 +6386,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             if brand and not product.get("brand"):
                 product["brand"] = brand
 
+            enrich_product_metadata_from_ingredients(product)
             base_score = score_product(
                 product,
                 step,
@@ -6327,6 +6459,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         if is_non_cosmetic(virtual):
             continue
 
+        enrich_product_metadata_from_ingredients(virtual)
         base_score = score_product(
             virtual,
             step,
@@ -10474,6 +10607,10 @@ def get_analysis_schema():
             "ingredient_focus": {"type": "string"},
             "risk_note": {"type": "string"},
             "priority": {"type": "integer"},
+            "use_days": {
+                "type": "array",
+                "items": {"type": "string"}
+            },
             "product_candidates": {
                 "type": "array",
                 "items": product_candidate_schema
@@ -10487,6 +10624,7 @@ def get_analysis_schema():
             "ingredient_focus",
             "risk_note",
             "priority",
+            "use_days",
             "product_candidates"
         ]
     }
@@ -10796,6 +10934,26 @@ PHA
 UV防御
 低刺激
 
+【use_days ルール】
+夜ルーティン（night）の各 step と週ケア（weekly_care）の各 step に use_days を必ず設定する。
+
+use_days:
+この step を使用する曜日のリスト。毎日使用する場合は空配列 [] にする。
+
+設定方針:
+- 成分の刺激性・濃度・ユーザーの肌状態（バリアスコア・赤みスコア・水分スコア等）を総合的に判断して決める。
+- コードは成分名や刺激性を一切判断しない。Gemini がここで全て決める。
+- 毎日使っても問題ない成分（保湿・バリア補修系等）は [] にする。
+- 刺激性が高く頻度制限が必要な成分は ["月", "木"] のように具体的な曜日を指定する。
+- 週1回の成分は ["土"] のように1曜日のみ指定する。
+- 連続使用禁止の成分は必ず1日以上の間隔を空けた曜日を選ぶ。
+- 朝ルーティン（morning）の step は use_days は [] で固定（毎日）。
+
+weekly_care の use_days:
+weekly_care の各 step にも use_days を設定する。
+ピーリングやパックを使う曜日を具体的に指定する。
+例: パック → ["日"]、ピーリング → ["土"]
+
 【週ケアルール】
 weekly_care は空配列にしない。
 肌状態に応じて、ピーリングまたはパックを1〜2件出す。
@@ -10804,7 +10962,7 @@ weekly_care は空配列にしない。
 毛穴詰まり、ざらつき、くすみ、キメ乱れが目立つ場合。
 
 パックを出す条件:
-乾燥、赤み、バリア低下、刺激リスク、レチノール使用中の回復ケアが必要な場合。
+乾燥、赤み、バリア低下、刺激リスク、強成分使用中の回復ケアが必要な場合。
 
 ただし、肌状態から週ケアが不要と判断できる場合のみ、weekly_care は最小限にする。
 カテゴリは必ず「ピーリング」または「パック」。
@@ -11842,6 +12000,10 @@ def apply_category_fallback_to_step(step, user_data):
     return normalize_step_price_fields(step)
 
 def build_weekly_usage_plan(data):
+    """
+    各stepのuse_daysフィールドに従って7日間のスケジュールを組み立てる。
+    成分名・刺激性・スコア閾値の判断はGeminiに委譲し、コードは一切行わない。
+    """
     if not isinstance(data, dict):
         return []
 
@@ -11849,323 +12011,72 @@ def build_weekly_usage_plan(data):
     if not isinstance(routine_strategy, dict):
         routine_strategy = {}
 
-    strategy_type = str(
-        routine_strategy.get("strategy_type")
-        or routine_strategy.get("type")
-        or "fixed"
-    ).strip()
-
-    rotation_needed = routine_strategy.get("rotation_needed", None)
-    if rotation_needed is True:
-        strategy_type = "rotation"
-
     morning_steps = data.get("morning", {}).get("steps", [])
-    night_steps = data.get("night", {}).get("steps", [])
-    weekly_steps = data.get("weekly_care", [])
+    night_steps   = data.get("night",   {}).get("steps", [])
+    weekly_steps  = data.get("weekly_care", [])
 
-    if not isinstance(morning_steps, list):
-        morning_steps = []
-
-    if not isinstance(night_steps, list):
-        night_steps = []
-
-    if not isinstance(weekly_steps, list):
-        weekly_steps = []
-
-    scores = data.get("scores", {})
-    if not isinstance(scores, dict):
-        scores = {}
+    if not isinstance(morning_steps, list): morning_steps = []
+    if not isinstance(night_steps, list):   night_steps   = []
+    if not isinstance(weekly_steps, list):  weekly_steps  = []
 
     days = ["月", "火", "水", "木", "金", "土", "日"]
 
-    def clean(value):
-        return str(value or "").strip()
-
-    def score_value(key):
-        try:
-            return safe_price(scores.get(key, 0))
-        except Exception:
-            return 0
-
-    redness_score = score_value("redness")
-    barrier_score = score_value("barrier")
-    hydration_score = score_value("hydration")
-    texture_score = score_value("texture")
-    pores_score = score_value("pores")
-    dullness_score = score_value("dullness")
-
-    is_sensitive_week = (
-        redness_score <= 65
-        or barrier_score <= 65
-        or hydration_score <= 60
-    )
-
-    needs_texture_care = (
-        texture_score <= 65
-        or pores_score <= 65
-        or dullness_score <= 65
-    )
-
-    def step_text(step):
-        if not isinstance(step, dict):
-            return ""
-
-        return " ".join([
-            clean(step.get("category")),
-            clean(step.get("ingredient_focus")),
-            clean(step.get("purpose")),
-            clean(step.get("product")),
-            clean(step.get("brand")),
-        ])
+    # 7日間プランに表示するカテゴリ（洗顔・クリームなど日常基礎は省略）
+    DISPLAY_CATEGORIES = {"化粧水", "美容液", "パック", "ピーリング", "ブースター"}
 
     def step_label(step):
         if not isinstance(step, dict):
             return ""
-
-        category = clean(step.get("category"))
-        product = clean(step.get("product"))
-        brand = clean(step.get("brand"))
-
+        category = str(step.get("category") or "").strip()
+        product  = str(step.get("product")  or "").strip()
+        brand    = str(step.get("brand")    or "").strip()
         if brand and product and not product.startswith(brand):
             product = f"{brand} {product}"
+        return f"{category}: {product}" if product else category
 
-        if product:
-            return f"{category}: {product}"
+    def get_use_days(step):
+        v = step.get("use_days", []) if isinstance(step, dict) else []
+        return v if isinstance(v, list) else []
 
-        return category
+    def is_display(step):
+        return str(step.get("category") or "").strip() in DISPLAY_CATEGORIES if isinstance(step, dict) else False
 
-    def has_any(text, words):
-        return any(word in text for word in words)
-
-    def is_strong_active_step(step):
-        text = step_text(step)
-
-        strong_words = [
-            "レチノール",
-            "レチナール",
-            "AHA",
-            "BHA",
-            "ピーリング",
-        ]
-
-        return has_any(text, strong_words)
-
-    def is_mild_active_step(step):
-        text = step_text(step)
-
-        mild_words = [
-            "ビタミンC",
-            "アゼライン酸",
-            "ナイアシンアミド",
-            "トラネキサム酸",
-            "PDRN",
-            "ペプチド",
-        ]
-
-        return has_any(text, mild_words) and not is_strong_active_step(step)
-
-    def is_recovery_step(step):
-        text = step_text(step)
-
-        recovery_words = [
-            "保湿",
-            "セラミド",
-            "CICA",
-            "ヒアルロン酸",
-            "バリア",
-            "鎮静",
-            "ドクダミ",
-            "パック",
-        ]
-
-        return has_any(text, recovery_words)
-
-    def is_peeling_step(step):
-        return "ピーリング" in step_text(step)
-
-    def is_pack_step(step):
-        text = step_text(step)
-        return has_any(text, ["パック", "マスク", "シートマスク", "フェイスマスク","フェイスパック"])
-
-    WEEKLY_SHOW_CATEGORIES = {"化粧水", "美容液", "パック", "ピーリング", "ブースター"}
-    WEEKLY_BASE_CATEGORIES = {"洗顔", "洗顔料", "クレンジング", "乳液", "クリーム", "日焼け止め"}
-
-    def step_category(step):
-        return clean(step.get("category")) if isinstance(step, dict) else ""
-
-    def is_show_step(step):
-        return step_category(step) in WEEKLY_SHOW_CATEGORIES
-
-    def is_base_step(step):
-        return step_category(step) in WEEKLY_BASE_CATEGORIES
-
-    def filter_for_weekly(steps, changed_base_labels=None):
-        result = []
-        for step in steps:
-            label = step_label(step)
-            if not label:
-                continue
-            cat = step_category(step)
-            if cat in WEEKLY_SHOW_CATEGORIES:
-                result.append(label)
-            elif cat in WEEKLY_BASE_CATEGORIES and changed_base_labels and label in changed_base_labels:
-                result.append(label)
-        return result
-
-    # ベースカテゴリの変化検出（現状は固定なので空集合、将来のローテーション対応）
-    morning_base_by_cat = {}
-    for s in morning_steps:
-        cat = step_category(s)
-        if cat in WEEKLY_BASE_CATEGORIES:
-            morning_base_by_cat.setdefault(cat, set()).add(step_label(s))
-    changed_base_morning = {
-        step_label(s)
-        for s in morning_steps
-        if step_category(s) in WEEKLY_BASE_CATEGORIES
-        and len(morning_base_by_cat.get(step_category(s), set())) > 1
-    }
-
-    night_base_by_cat = {}
-    for s in night_steps:
-        cat = step_category(s)
-        if cat in WEEKLY_BASE_CATEGORIES:
-            night_base_by_cat.setdefault(cat, set()).add(step_label(s))
-    changed_base_night = {
-        step_label(s)
-        for s in night_steps
-        if step_category(s) in WEEKLY_BASE_CATEGORIES
-        and len(night_base_by_cat.get(step_category(s), set())) > 1
-    }
-
-    fixed_morning = filter_for_weekly(morning_steps, changed_base_morning)
-
-    base_night_steps = [
-        step
-        for step in night_steps
-        if isinstance(step, dict) and not is_strong_active_step(step) and not is_mild_active_step(step)
+    # 朝は毎日固定（use_daysに関わらず全表示カテゴリを並べる）
+    fixed_morning = [
+        step_label(s) for s in morning_steps
+        if isinstance(s, dict) and is_display(s) and step_label(s)
     ]
 
-    strong_active_steps = [
-        step
-        for step in night_steps
-        if isinstance(step, dict) and is_strong_active_step(step)
-    ]
-
-    mild_active_steps = [
-        step
-        for step in night_steps
-        if isinstance(step, dict) and is_mild_active_step(step)
-    ]
-
-    recovery_steps = [
-        step
-        for step in night_steps
-        if isinstance(step, dict) and is_recovery_step(step)
-    ]
-
-    peeling_steps = [
-        step
-        for step in weekly_steps
-        if isinstance(step, dict) and is_peeling_step(step)
-    ]
-
-    pack_steps = [
-        step
-        for step in weekly_steps
-        if isinstance(step, dict) and is_pack_step(step)
-    ]
-
-    base_night = filter_for_weekly(base_night_steps, changed_base_night)
-
-    def labels(steps):
-        return filter_for_weekly(steps, changed_base_night)
-
-    def make_day(day, morning=None, night=None, special_care=None, note=""):
-        return {
-            "day": day,
-            "morning": morning or [],
-            "night": night or [],
-            "special_care": special_care or [],
-            "note": note
-        }
-
-    def first_label(steps):
-        if not steps:
-            return ""
-        return step_label(steps[0])
+    overall_note = str(routine_strategy.get("overall_policy") or "")
 
     usage_plan = []
+    for day in days:
+        # 夜: use_daysが空（毎日）またはこの曜日を含むstepを表示
+        night_items = [
+            step_label(s)
+            for s in night_steps
+            if isinstance(s, dict)
+            and is_display(s)
+            and step_label(s)
+            and (not get_use_days(s) or day in get_use_days(s))
+        ]
 
-    if strategy_type == "rotation":
-        for index, day in enumerate(days):
-            night = list(base_night)
-            special_care = []
-            note = ""
+        # 週ケア: use_daysにこの曜日が含まれるstepのみ表示
+        special_care = [
+            step_label(s)
+            for s in weekly_steps
+            if isinstance(s, dict)
+            and step_label(s)
+            and day in get_use_days(s)
+        ]
 
-            if is_sensitive_week:
-                if index in [1, 4] and mild_active_steps:
-                    night += [first_label(mild_active_steps)]
-                    note = "肌を大きく攻めすぎず、赤みや乾燥を見ながら穏やかな改善成分を入れる日です。"
-                elif index == 6 and pack_steps:
-                    special_care = [first_label(pack_steps)]
-                    note = "回復ケアの日。乾燥や赤みを落ち着かせる目的で入れます。"
-                else:
-                    night += labels(recovery_steps)
-                    note = "回復寄りの日。バリアを整えて、次の改善ケアに備えます。"
-
-            else:
-                if index in [0, 3] and strong_active_steps:
-                    night += [first_label(strong_active_steps)]
-                    note = "攻めケアの日。翌日は肌を休ませる前提で入れます。"
-                elif index in [2, 5] and mild_active_steps:
-                    selected = mild_active_steps[index % len(mild_active_steps)]
-                    night += [step_label(selected)]
-                    note = "穏やかな改善成分を入れる日。攻めすぎずに悩みへ寄せます。"
-                elif index == 6 and pack_steps:
-                    special_care = [first_label(pack_steps)]
-                    note = "週の最後は回復ケアで整える日です。"
-                elif needs_texture_care and index == 5 and peeling_steps:
-                    special_care = [first_label(peeling_steps)]
-                    note = "角質ケアの日。レチノールや高刺激成分とは同じ夜に重ねません。"
-                else:
-                    night += labels(recovery_steps)
-                    note = "回復寄りの日。肌を休ませて、次のケアの効きやすさを整えます。"
-
-            usage_plan.append(
-                make_day(
-                    day=day,
-                    morning=fixed_morning,
-                    night=night,
-                    special_care=special_care,
-                    note=note
-                )
-            )
-
-        return usage_plan
-
-    for index, day in enumerate(days):
-        night = filter_for_weekly(night_steps, changed_base_night)
-
-        special_care = []
-        note = routine_strategy.get("overall_policy") or "固定ルーティンを軸に、肌を安定させる方針です。"
-
-        if index == 5 and peeling_steps and needs_texture_care and not is_sensitive_week:
-            special_care = [first_label(peeling_steps)]
-            note = "肌状態に余裕がある週だけ、角質ケアを入れる想定です。赤みや乾燥が強い場合は休みます。"
-
-        elif index == 6 and pack_steps:
-            special_care = [first_label(pack_steps)]
-            note = "週の最後に回復ケアを入れて、乾燥や赤みを整えます。"
-
-        usage_plan.append(
-            make_day(
-                day=day,
-                morning=fixed_morning,
-                night=night,
-                special_care=special_care,
-                note=note
-            )
-        )
+        usage_plan.append({
+            "day": day,
+            "morning": fixed_morning,
+            "night": night_items,
+            "special_care": special_care,
+            "note": overall_note,
+        })
 
     return usage_plan
 
@@ -12209,11 +12120,24 @@ def lab_test_function():
         is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
         try:
             client_ip = get_client_ip()
+            _is_premium = is_premium_user()
+            _premium_key = request.args.get("premium_key", "")
 
-            if not can_use_free_diagnosis(client_ip):
+            if _is_premium:
+                if not can_use_premium_diagnosis(_premium_key):
+                    return render_template(
+                        "lab.html",
+                        error=f"今月の診断回数（月{PREMIUM_MONTHLY_LIMIT}回）に達しました。来月また利用できます。",
+                        is_premium=True,
+                        premium_key=_premium_key,
+                        remaining_premium_count=0,
+                        DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT
+                    )
+            elif not can_use_free_diagnosis(client_ip):
                 return render_template(
                     "lab.html",
                     error=f"無料診断は月{FREE_MONTHLY_LIMIT}回までです。続けて利用するには有料プランをご利用ください。",
+                    remaining_free_count=0,
                     DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT
                 )
 
@@ -12566,7 +12490,10 @@ def lab_test_function():
             })
 
             try:
-                increment_free_usage(client_ip)
+                if _is_premium:
+                    increment_premium_usage(_premium_key)
+                else:
+                    increment_free_usage(client_ip)
                 increment_global_usage()
             except Exception as e:
                 print("===== USAGE SAVE ERROR =====")
@@ -12634,13 +12561,15 @@ def lab_test_function():
                 error_message=user_error
             )
     client_ip = get_client_ip()
-    remaining_free_count = get_remaining_free_count(client_ip)
-    gemini_usage = get_gemini_usage_status()
     is_premium = is_premium_user()
     premium_key = request.args.get("premium_key", "")
+    remaining_free_count = get_remaining_free_count(client_ip)
+    remaining_premium_count = get_remaining_premium_count(premium_key) if is_premium else None
+    gemini_usage = get_gemini_usage_status()
     return render_template(
         "lab.html",
         remaining_free_count=remaining_free_count,
+        remaining_premium_count=remaining_premium_count,
         gemini_usage=gemini_usage,
         DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT,
         is_premium=is_premium,
@@ -12697,7 +12626,9 @@ def db_stats():
 
 @app.route("/premium")
 def premium():
-    return render_template("premium.html")
+    is_premium = is_premium_user()
+    premium_key = request.args.get("premium_key", "")
+    return render_template("premium.html", is_premium=is_premium, premium_key=premium_key)
 
 # ==========================================
 # Stripe決済
