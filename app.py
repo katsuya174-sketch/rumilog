@@ -2304,8 +2304,6 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
         seen_keywords.add(keyword_key)
         keywords.append(cleaned_keyword)
 
-    print("[RAKUTEN KEYWORDS]", keywords, flush=True)
-
     # 「keyword is not valid」400 が返った場合は continue して次を試すため
     # 英語のみの長いキーワードが弾かれてもフォールバックが機能するよう上限を上げる
     MAX_RAKUTEN_KEYWORDS = 4
