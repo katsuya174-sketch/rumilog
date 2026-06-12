@@ -2971,6 +2971,8 @@ def search_rakuten_by_criteria(category, improvement_plan):
                 print(f"[RAKUTEN CRITERIA] retry without genreId -> {len(items)} items", flush=True)
 
         results = []
+        _n_invalid_cat = 0
+        _n_no_image = 0
 
         for raw_item in items:
             item = raw_item.get("Item", raw_item) if isinstance(raw_item, dict) else raw_item
@@ -2983,12 +2985,14 @@ def search_rakuten_by_criteria(category, improvement_plan):
 
             # カテゴリ適合チェック: 無関係な商品（口腔洗浄機など）を除外
             if not _is_rakuten_item_valid_for_category(item_name, category):
+                _n_invalid_cat += 1
                 continue
 
             item = normalize_rakuten_item_price(item)
             price = safe_price(item.get("raw_price") or item.get("itemPrice") or 0)
             image_url = extract_rakuten_image_url(item)
             if not image_url:
+                _n_no_image += 1
                 continue  # 画像なしは候補から除外
 
             inferred = infer_ingredients_from_rakuten_title(item_name)
@@ -3015,7 +3019,11 @@ def search_rakuten_by_criteria(category, improvement_plan):
                 "_source_hint": "rakuten_criteria",
             })
 
-        print(f"[RAKUTEN CRITERIA] {len(results)} items for '{keyword}'", flush=True)
+        print(
+            f"[RAKUTEN CRITERIA] keyword='{keyword}' "
+            f"raw={len(items)} / invalid_cat={_n_invalid_cat} / no_image={_n_no_image} / final={len(results)}",
+            flush=True
+        )
         _rakuten_criteria_cache[cache_key] = results
         return results
 
@@ -6873,12 +6881,15 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
                 seen_product_keys.add(cp_key)
                 combined_products.append(cp)
     n_rakuten_criteria = len(combined_products) - n_db_before
+    _step_name = str(step.get("step_name") or step.get("name") or "")
     print(
-        f"[SELECT_CANDIDATE] category={category} / "
+        f"[SELECT_CANDIDATE] step={_step_name!r} category={category} / "
         f"db+verified={n_db_before} / rakuten_criteria={n_rakuten_criteria} / "
-        f"ai_candidates={len(candidates)}",
+        f"combined_total={len(combined_products)} / ai_candidates={len(candidates)}",
         flush=True
     )
+    _scored_db = 0
+    _scored_rakuten = 0
 
     for p in combined_products:
         if not isinstance(p, dict):
@@ -6996,6 +7007,11 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         product["_routine_score"] = round(routine_score, 1)
         product["_improvement_reason"] = improvement_reason
         product["_source"] = product.get("_source_hint", "db")
+
+        if product.get("_source_hint") == "rakuten_criteria":
+            _scored_rakuten += 1
+        else:
+            _scored_db += 1
 
         all_candidates.append(product)
 
@@ -7279,6 +7295,14 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         "routine": best.get("_routine_score", 0),
         "final": best.get("_score", 0)
     }
+
+    _scored_ai = sum(1 for c in all_candidates if c.get("_source") in ("ai+db", "ai_virtual"))
+    print(
+        f"[SCORED] step={_step_name!r} category={category} / "
+        f"db={_scored_db} / rakuten={_scored_rakuten} / ai={_scored_ai} / "
+        f"total={len(all_candidates)} / winner={best.get('name','')!r} src={best.get('_source','')}",
+        flush=True
+    )
 
     log_candidate_battle(
         step,
