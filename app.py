@@ -600,6 +600,36 @@ def issue_premium_key(email, stripe_customer_id, stripe_subscription_id):
     save_premium_keys(keys)
     return new_key
 
+def issue_premium_key_manual(email, days=35):
+    """管理者によるStripe不経由の手動発行"""
+    keys = load_premium_keys()
+    for key, entry in keys.items():
+        if entry.get("email") == email and not entry.get("revoked", False):
+            entry["valid_until"] = (datetime.now() + timedelta(days=days)).isoformat()
+            entry["manual"] = True
+            save_premium_keys(keys)
+            return key
+    new_key = generate_premium_key()
+    keys[new_key] = {
+        "email": email,
+        "stripe_customer_id": None,
+        "stripe_subscription_id": None,
+        "valid_until": (datetime.now() + timedelta(days=days)).isoformat(),
+        "revoked": False,
+        "manual": True,
+        "created_at": datetime.now().isoformat(),
+    }
+    save_premium_keys(keys)
+    return new_key
+
+def revoke_premium_key_direct(key):
+    keys = load_premium_keys()
+    if key in keys:
+        keys[key]["revoked"] = True
+        save_premium_keys(keys)
+        return True
+    return False
+
 def revoke_premium_key_by_subscription(subscription_id):
     keys = load_premium_keys()
     for entry in keys.values():
@@ -12673,6 +12703,44 @@ def creator_auth():
     )
     return resp
 
+def _admin_authorized():
+    return request.args.get("key") == os.getenv("ADMIN_KEY", "") and os.getenv("ADMIN_KEY", "")
+
+@app.route("/admin/premium-keys", methods=["GET"])
+def admin_premium_keys():
+    if not _admin_authorized():
+        return "403 Forbidden", 403
+    keys = load_premium_keys()
+    admin_key = request.args.get("key", "")
+    from datetime import datetime
+    return render_template("admin_premium.html", keys=keys, admin_key=admin_key,
+                           site_url=SITE_URL.rstrip("/") if SITE_URL else request.host_url.rstrip("/"),
+                           now_str=datetime.utcnow().isoformat())
+
+@app.route("/admin/premium-keys/issue", methods=["POST"])
+def admin_issue_key():
+    if request.args.get("key") != os.getenv("ADMIN_KEY", "") or not os.getenv("ADMIN_KEY", ""):
+        return "403 Forbidden", 403
+    email = request.form.get("email", "").strip()
+    days  = int(request.form.get("days", 35))
+    send  = request.form.get("send_email") == "1"
+    admin_key = request.args.get("key", "")
+    if not email:
+        return redirect(f"/admin/premium-keys?key={admin_key}&error=email_required")
+    key = issue_premium_key_manual(email, days)
+    if send:
+        send_premium_email(email, key)
+    return redirect(f"/admin/premium-keys?key={admin_key}&issued={key}&email={email}")
+
+@app.route("/admin/premium-keys/revoke", methods=["POST"])
+def admin_revoke_key():
+    if request.args.get("key") != os.getenv("ADMIN_KEY", "") or not os.getenv("ADMIN_KEY", ""):
+        return "403 Forbidden", 403
+    target_key = request.form.get("target_key", "")
+    admin_key  = request.args.get("key", "")
+    revoke_premium_key_direct(target_key)
+    return redirect(f"/admin/premium-keys?key={admin_key}&revoked=1")
+
 @app.route("/admin/db-stats")
 def db_stats():
     admin_key = request.args.get("key", "")
@@ -12920,7 +12988,7 @@ def product_click():
 def pricing():
     source = request.args.get("source", "unknown")
     log_pricing_view(source)
-    return render_template("pricing.html")
+    return redirect("/premium", code=301)
 # 診断履歴ページ
 @app.route("/history")
 def history():

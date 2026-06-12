@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>プレミアムキー管理 | 管理者</title>
+<style>
+* { box-sizing: border-box; }
+body {
+    font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
+    background: #f7f3f5;
+    margin: 0;
+    padding: 24px 16px;
+    color: #4a3540;
+    font-size: 14px;
+}
+.page { max-width: 860px; margin: 0 auto; }
+h1 { font-size: 20px; color: #c75b7a; margin: 0 0 4px; }
+.subtitle { font-size: 12px; color: #a08090; margin-bottom: 24px; }
+
+.card {
+    background: #fff;
+    border: 1px solid #ecd8e0;
+    border-radius: 16px;
+    padding: 20px 22px;
+    margin-bottom: 20px;
+    box-shadow: 0 2px 8px rgba(199,91,122,0.07);
+}
+.card h2 { font-size: 15px; color: #c75b7a; margin: 0 0 14px; }
+
+.alert {
+    padding: 10px 14px;
+    border-radius: 10px;
+    font-size: 13px;
+    margin-bottom: 16px;
+}
+.alert.success { background: #e8f5ee; color: #287a50; border: 1px solid #b0d8c4; }
+.alert.error   { background: #fef0f0; color: #b03030; border: 1px solid #f0c0c0; }
+
+.key-box {
+    background: #f5f0f3;
+    border: 1px solid #e0d0d8;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-family: monospace;
+    font-size: 13px;
+    word-break: break-all;
+    color: #5a3550;
+    margin: 4px 0 10px;
+    cursor: text;
+    user-select: all;
+}
+.url-box {
+    background: #fff5f8;
+    border: 1px solid #f0d0dc;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    word-break: break-all;
+    color: #7a3550;
+    margin-bottom: 4px;
+}
+.url-box a { color: #c75b7a; }
+
+label { display: block; font-size: 12px; color: #a08090; margin-bottom: 4px; font-weight: 600; }
+input[type="email"], input[type="number"] {
+    width: 100%;
+    padding: 9px 12px;
+    border: 1px solid #e0d0d8;
+    border-radius: 10px;
+    font-size: 13px;
+    outline: none;
+    margin-bottom: 12px;
+    background: #fff;
+    color: #4a3540;
+    transition: border-color 0.2s;
+}
+input:focus { border-color: #c75b7a; }
+.check-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    font-size: 13px;
+    color: #6a5060;
+}
+.btn {
+    padding: 10px 22px;
+    border: none;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: bold;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+.btn:hover { opacity: 0.85; }
+.btn-primary { background: linear-gradient(135deg, #e07a9a, #c75b7a); color: #fff; }
+.btn-danger  { background: #f5e0e0; color: #b03030; border: 1px solid #e0b0b0; padding: 6px 14px; font-size: 12px; }
+
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th {
+    text-align: left;
+    padding: 8px 10px;
+    background: #f7f0f3;
+    color: #a08090;
+    font-weight: 600;
+    border-bottom: 2px solid #ecd8e0;
+}
+td {
+    padding: 9px 10px;
+    border-bottom: 1px solid #f0e8ec;
+    vertical-align: top;
+}
+tr:last-child td { border-bottom: none; }
+.badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: bold;
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+.badge.active  { background: #e0f5ea; color: #287a50; }
+.badge.revoked { background: #f5e0e0; color: #a03030; }
+.badge.expired { background: #f0f0f0; color: #888; }
+.badge.manual  { background: #fff0d8; color: #a06010; }
+.key-short { font-family: monospace; font-size: 11px; color: #7a5060; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="page">
+    <h1>プレミアムキー管理</h1>
+    <p class="subtitle">管理者専用ページ — このURLを他者に共有しないでください</p>
+
+    {% set issued_key = request.args.get("issued") %}
+    {% set issued_email = request.args.get("email") %}
+    {% if issued_key %}
+    <div class="alert success">
+        ✅ キーを発行しました（{{ issued_email }}）
+        <div class="key-box">{{ issued_key }}</div>
+        <div class="url-box">プレミアムURL：
+            <a href="{{ site_url }}/lab?premium_key={{ issued_key }}" target="_blank">
+                {{ site_url }}/lab?premium_key={{ issued_key }}
+            </a>
+        </div>
+        <div style="font-size:11px; color:#a08090; margin-top:4px;">※ キーはクリックでコピーできます</div>
+    </div>
+    {% endif %}
+    {% if request.args.get("revoked") %}
+    <div class="alert success">✅ キーを失効させました</div>
+    {% endif %}
+    {% if request.args.get("error") == "email_required" %}
+    <div class="alert error">❌ メールアドレスを入力してください</div>
+    {% endif %}
+
+    <!-- 新規発行フォーム -->
+    <div class="card">
+        <h2>新規キー発行</h2>
+        <form method="POST" action="/admin/premium-keys/issue?key={{ admin_key }}">
+            <label>メールアドレス</label>
+            <input type="email" name="email" placeholder="user@example.com" required>
+            <label>有効期間（日数）</label>
+            <input type="number" name="days" value="35" min="1" max="400">
+            <div class="check-row">
+                <input type="checkbox" name="send_email" value="1" id="send_email">
+                <label for="send_email" style="display:inline; margin:0; font-size:13px; color:#6a5060; font-weight:normal;">
+                    SMTP設定済みの場合、発行キーをメールで送信する
+                </label>
+            </div>
+            <button type="submit" class="btn btn-primary">発行する</button>
+        </form>
+    </div>
+
+    <!-- キー一覧 -->
+    <div class="card">
+        <h2>発行済みキー一覧（{{ keys | length }}件）</h2>
+        {% if keys %}
+        <table>
+            <thead>
+                <tr>
+                    <th>メール</th>
+                    <th>ステータス</th>
+                    <th>有効期限</th>
+                    <th>発行日</th>
+                    <th>キー</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for key, entry in keys.items() | sort(attribute='1.created_at', reverse=True) %}
+                <tr>
+                    <td>{{ entry.get("email", "—") }}</td>
+                    <td>
+                        {% if entry.get("revoked") %}
+                            <span class="badge revoked">失効</span>
+                        {% elif entry.get("valid_until", "") < now_str %}
+                            <span class="badge expired">期限切れ</span>
+                        {% else %}
+                            <span class="badge active">有効</span>
+                        {% endif %}
+                        {% if entry.get("manual") %}
+                            <span class="badge manual">手動</span>
+                        {% endif %}
+                    </td>
+                    <td>{{ entry.get("valid_until", "")[:10] }}</td>
+                    <td>{{ entry.get("created_at", "")[:10] }}</td>
+                    <td>
+                        <span class="key-short" title="{{ key }}" onclick="navigator.clipboard.writeText('{{ key }}'); this.textContent='✅コピー済み'">
+                            {{ key[:12] }}…
+                        </span>
+                    </td>
+                    <td>
+                        {% if not entry.get("revoked") %}
+                        <form method="POST" action="/admin/premium-keys/revoke?key={{ admin_key }}" style="display:inline;">
+                            <input type="hidden" name="target_key" value="{{ key }}">
+                            <button type="submit" class="btn btn-danger"
+                                onclick="return confirm('このキーを失効させますか？')">失効</button>
+                        </form>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color:#b0a0a8; font-size:13px;">発行済みキーはありません</p>
+        {% endif %}
+    </div>
+
+</div>
+</body>
+</html>
