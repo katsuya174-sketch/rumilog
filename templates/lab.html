@@ -529,7 +529,11 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 <body class="lab-page">
    
     <div id="bgEffects"></div>
+    {% if is_premium and premium_key %}
+    <a href="/customer-portal?premium_key={{ premium_key }}" style="position:fixed; top:14px; right:16px; z-index:999; font-size:13px; color:#c75b7a; text-decoration:none; background:#fff0f5; border:1.5px solid #e8a5bc; border-radius:999px; padding:6px 16px; font-weight:bold; box-shadow:0 2px 8px rgba(199,91,122,0.18);">✨ サブスク管理</a>
+    {% else %}
     <a href="/premium" style="position:fixed; top:14px; right:16px; z-index:999; font-size:13px; color:#c75b7a; text-decoration:none; background:#fff0f5; border:1.5px solid #e8a5bc; border-radius:999px; padding:6px 16px; font-weight:bold; box-shadow:0 2px 8px rgba(199,91,122,0.18);">✨ プレミアム</a>
+    {% endif %}
     <div class="container">
         <h1>るみろぐ</h1>
 

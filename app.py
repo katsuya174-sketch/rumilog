@@ -12636,11 +12636,15 @@ def lab_test_function():
     client_ip = get_client_ip()
     remaining_free_count = get_remaining_free_count(client_ip)
     gemini_usage = get_gemini_usage_status()
+    is_premium = is_premium_user()
+    premium_key = request.args.get("premium_key", "")
     return render_template(
         "lab.html",
         remaining_free_count=remaining_free_count,
         gemini_usage=gemini_usage,
-        DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT
+        DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT,
+        is_premium=is_premium,
+        premium_key=premium_key
     )
 
 @app.route("/admin/db-stats")
@@ -12798,6 +12802,33 @@ def stripe_webhook():
 @app.route("/premium-success")
 def premium_success():
     return render_template("premium_success.html")
+
+
+@app.route("/customer-portal")
+def customer_portal():
+    premium_key = request.args.get("premium_key", "")
+    if not premium_key:
+        return redirect("/premium")
+
+    keys = load_premium_keys()
+    entry = keys.get(premium_key)
+    if not entry or entry.get("revoked", False):
+        return redirect("/premium")
+
+    customer_id = entry.get("stripe_customer_id", "")
+    if not customer_id or not stripe.api_key:
+        return render_template("error.html", error_message="カスタマー情報が見つかりません。サポートにお問い合わせください。")
+
+    try:
+        base_url = SITE_URL.rstrip("/") if SITE_URL else request.host_url.rstrip("/")
+        portal_session = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=f"{base_url}/lab?premium_key={premium_key}"
+        )
+        return redirect(portal_session.url)
+    except Exception as e:
+        print(f"[PORTAL ERROR] {repr(e)}", flush=True)
+        return render_template("error.html", error_message="カスタマーポータルへの接続に失敗しました。しばらく経ってからお試しください。")
 
 @app.route("/admin/product-ranking")
 def admin_product_ranking():
