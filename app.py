@@ -8470,6 +8470,14 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
         profile = infer_active_profile(best)
 
+        # routine_context更新前に相乗効果・悩みタグを計算
+        _product_families = profile.get("families", set())
+        _existing_families = set(routine_context.get("families", []))
+        step["synergy_note"] = build_synergy_note(
+            _product_families, _existing_families, synergy_rules
+        )
+        step["concern_tags"] = build_concern_tags(best, step)
+
         routine_context["families"].extend(profile.get("families", []))
         routine_context["strengths"].append(profile.get("strength", "low"))
         routine_context["selected_products"].append(product_name)
@@ -8622,6 +8630,78 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             )
 
     return data
+
+_SYNERGY_FAMILY_LABELS = {
+    "retinoid": "レチノイド",
+    "aha_bha": "AHA/BHA",
+    "vitamin_c": "ビタミンC",
+    "strong_vitamin_c": "高濃度ビタミンC",
+    "niacinamide": "ナイアシンアミド",
+    "ceramide": "セラミド",
+    "barrier": "バリア成分",
+    "peptide": "ペプチド",
+    "pdrn": "PDRN",
+    "azelaic": "アゼライン酸",
+    "uv_protection": "紫外線防御",
+}
+
+def build_synergy_note(product_families, existing_families, synergy_rules):
+    product_fam_set = set(product_families)
+    existing_fam_set = set(existing_families)
+    for rule in synergy_rules:
+        rule_fams = rule.get("families", [])
+        if len(rule_fams) < 2:
+            continue
+        rule_fam_set = set(rule_fams)
+        product_contrib = product_fam_set & rule_fam_set
+        existing_contrib = existing_fam_set & rule_fam_set
+        if not (product_contrib and existing_contrib):
+            continue
+        reason = str(rule.get("reason", "")).strip()
+        labels = list(dict.fromkeys(
+            _SYNERGY_FAMILY_LABELS.get(f, f)
+            for f in rule_fams
+            if f in (product_contrib | existing_contrib)
+        ))
+        combo = "と".join(labels[:2]) if len(labels) >= 2 else (labels[0] if labels else "成分")
+        if reason:
+            return f"{combo}の相乗効果が期待できます。{reason}"
+        return f"{combo}の組み合わせで相乗効果が期待できます。"
+    return ""
+
+_CONCERN_LABEL_MAP = {
+    "pores": "毛穴ケア",
+    "redness": "赤み鎮静",
+    "dryness": "乾燥対策",
+    "barrier": "バリア強化",
+    "dullness": "くすみ改善",
+    "whitening": "美白",
+    "pigmentation": "色素沈着",
+    "acne": "ニキビ対策",
+    "aging": "エイジングケア",
+    "firmness": "ハリ補給",
+    "texture": "質感改善",
+    "oiliness": "皮脂コントロール",
+    "acne_marks": "ニキビ跡",
+}
+_PURPOSE_KEYWORD_LABELS = [
+    ("毛穴", "毛穴ケア"), ("赤み", "赤み鎮静"), ("乾燥", "乾燥対策"),
+    ("バリア", "バリア強化"), ("くすみ", "くすみ改善"), ("美白", "美白"),
+    ("色素沈着", "色素沈着"), ("ニキビ", "ニキビ対策"), ("ハリ", "ハリ補給"),
+    ("ざらつき", "質感改善"), ("皮脂", "皮脂コントロール"),
+]
+
+def build_concern_tags(product, step):
+    concerns = product.get("concerns", []) if isinstance(product, dict) else []
+    purpose = str((step.get("purpose") or "") if isinstance(step, dict) else "").strip()
+    tags = []
+    for key, label in _CONCERN_LABEL_MAP.items():
+        if key in concerns:
+            tags.append(label)
+    for keyword, label in _PURPOSE_KEYWORD_LABELS:
+        if keyword in purpose and label not in tags:
+            tags.append(label)
+    return tags[:4]
 
 def build_selection_reason_from_scores(product, step, user_data):
     if not isinstance(product, dict):
