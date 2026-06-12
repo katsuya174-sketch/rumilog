@@ -6845,10 +6845,31 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             continue
 
         product = dict(p)
+
+        # -------------------------------------------------------
+        # 方針A: Rakuten criteria 商品にステップ由来メタデータを付与
+        # enrich_product_metadata_from_ingredients の前に実行することで
+        # ingredient_tag → concerns/main_functions/ingredient_focus の
+        # 連鎖補完が正しく機能する
+        # -------------------------------------------------------
+        if product.get("_source_hint") == "rakuten_criteria":
+            _itag = normalize_ingredient_tag(step.get("ingredient_focus", "") or "")
+            _actives = list(product.get("active_ingredients") or [])
+            # ① step の ingredient_tag を active_ingredients に追加
+            #    （build_virtual_product_from_ai_candidate と同じ処理）
+            if _itag and _itag not in _actives:
+                product["active_ingredients"] = _actives + [_itag]
+            # ② availability_japan: 楽天で見つかった商品には最低限 rakuten を付与
+            if not (product.get("availability_japan") or []):
+                product["availability_japan"] = ["rakuten"]
+            # ③ concerns: タイトル推定が空だった場合は step の purpose から補完
+            if not (product.get("concerns") or []):
+                product["concerns"] = purpose_to_concern_tags(step.get("purpose", ""))
+
         # DB・楽天問わず全商品に同じ基準でメタデータ補完を適用する
         enrich_product_metadata_from_ingredients(product)
 
-        # 楽天criteriaのメタデータ欠損ログ（デバッグ用）
+        # 楽天criteriaのメタデータ確認ログ
         _src_hint = product.get("_source_hint", "")
         if _src_hint == "rakuten_criteria":
             _itag = normalize_ingredient_tag(step.get("ingredient_focus", "") or "")
