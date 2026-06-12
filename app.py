@@ -10777,6 +10777,14 @@ def get_analysis_schema():
                         "type": "array",
                         "items": {"type": "string"}
                     },
+                    "morning_order": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    },
+                    "night_order": {
+                        "type": "array",
+                        "items": {"type": "string"}
+                    },
                     "reason": {"type": "string"}
                 },
                 "required": [
@@ -10789,6 +10797,8 @@ def get_analysis_schema():
                     "recovery_care_frequency",
                     "rotation_targets",
                     "avoid_combinations",
+                    "morning_order",
+                    "night_order",
                     "reason"
                 ]
             },
@@ -11264,6 +11274,16 @@ rotation_targets:
 avoid_combinations:
 避ける組み合わせ。
 例: ["レチノールとピーリングを同じ夜に使わない"]
+
+morning_order:
+朝ルーティンの使用順序を番号付き文字列の配列で返す。
+ブースタータイプの美容液（導入美容液・肌なじみ優先）は化粧水の前に置く。
+例: ["①洗顔", "②ブースター（導入美容液・化粧水前）", "③化粧水", "④日焼け止め"]
+
+night_order:
+夜ルーティンの使用順序を番号付き文字列の配列で返す。
+美容液の中でもブースタータイプは化粧水前、重い油性成分系は化粧水後に置くなど、商品の役割・テクスチャーに基づいた順序を設定する。
+例: ["①クレンジング", "②洗顔", "③ブースター導入美容液（化粧水前）", "④化粧水", "⑤レチノール美容液", "⑥クリーム"]
 
 reason:
 なぜその戦略が今の肌状態に合うか。
@@ -12037,7 +12057,7 @@ def apply_category_fallback_to_step(step, user_data):
 
 def build_weekly_usage_plan(data):
     """
-    各stepのuse_daysフィールドに従って7日間のスケジュールを組み立てる。
+    各stepのuse_daysフィールドに従って週間スケジュールを組み立てる。
     成分名・刺激性・スコア閾値の判断はGeminiに委譲し、コードは一切行わない。
     """
     if not isinstance(data, dict):
@@ -12057,7 +12077,7 @@ def build_weekly_usage_plan(data):
 
     days = ["月", "火", "水", "木", "金", "土", "日"]
 
-    # 7日間プランに表示するカテゴリ（洗顔・クリームなど日常基礎は省略）
+    # 週間ルーティンに表示するカテゴリ（洗顔・クリームなど日常基礎は省略）
     DISPLAY_CATEGORIES = {"化粧水", "美容液", "パック", "ピーリング", "ブースター"}
 
     def step_label(step):

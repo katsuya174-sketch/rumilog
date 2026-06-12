@@ -743,62 +743,90 @@
         {{ render_routine_section("週ケア", "Weekly", data.get("weekly_care", []), True) }}
 
         {% if (data.get("is_premium") or data.get("is_dev_mode")) and data.get("weekly_usage_plan", []) %}
+        {% set strategy = data.get("routine_strategy") or {} %}
         <section class="routine-shell">
             <div class="routine-header">
-                <h2 class="routine-title">7日間改善ルーティン</h2>
+                <h2 class="routine-title">週間ルーティン</h2>
                 <div class="routine-chip">Premium</div>
             </div>
 
-            {% if data.get("routine_strategy") %}
-            <div class="plan-block">
-                <h3>今週の方針</h3>
-                <p>{{ data.routine_strategy.get("overall_policy", "") }}</p>
-                <p>{{ data.routine_strategy.get("reason", "") }}</p>
+            {% if strategy.get("overall_policy") %}
+            <div class="wplan-policy">
+                <div class="wplan-policy-text">{{ strategy.overall_policy }}</div>
+                {% if strategy.get("reason") %}
+                <div class="wplan-policy-sub">{{ strategy.reason }}</div>
+                {% endif %}
             </div>
             {% endif %}
 
-            {% for day in data.get("weekly_usage_plan", []) %}
-            <div class="plan-block">
-                <h3>{{ day.get("day", "") }}曜日</h3>
-
-                {% if day.get("morning", []) %}
-                <p><strong>朝</strong></p>
-                <ul>
-                    {% for item in day.get("morning", []) %}
-                    <li>{{ item }}</li>
-                    {% endfor %}
-                </ul>
+            {% if strategy.get("morning_order") or strategy.get("night_order") %}
+            <div class="wplan-order-block">
+                <div class="wplan-order-title">使用順序</div>
+                {% if strategy.get("morning_order") %}
+                <div class="wplan-order-row">
+                    <span class="wplan-order-label morning-label">☀ 朝</span>
+                    <div class="wplan-order-steps">
+                        {% for step in strategy.morning_order %}
+                        <span class="wplan-order-step">{{ step }}</span>
+                        {% if not loop.last %}<span class="wplan-order-arrow">→</span>{% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
                 {% endif %}
-
-                {% if day.get("night", []) %}
-                <p><strong>夜</strong></p>
-                <ul>
-                    {% for item in day.get("night", []) %}
-                    <li>{{ item }}</li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
-
-                {% if day.get("special_care", []) %}
-                <p><strong>週ケア</strong></p>
-                <ul>
-                    {% for item in day.get("special_care", []) %}
-                    <li>{{ item }}</li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
-
-                {% if day.get("note", "") %}
-                <p class="form-note">{{ day.get("note", "") }}</p>
+                {% if strategy.get("night_order") %}
+                <div class="wplan-order-row">
+                    <span class="wplan-order-label night-label">🌙 夜</span>
+                    <div class="wplan-order-steps">
+                        {% for step in strategy.night_order %}
+                        <span class="wplan-order-step">{{ step }}</span>
+                        {% if not loop.last %}<span class="wplan-order-arrow">→</span>{% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
                 {% endif %}
             </div>
-            {% endfor %}
+            {% endif %}
+
+            <div class="wplan-days-scroll">
+                {% for day in data.get("weekly_usage_plan", []) %}
+                <div class="wplan-day-card">
+                    <div class="wplan-day-header">{{ day.get("day", "") }}</div>
+                    {% if day.get("morning") %}
+                    <div class="wplan-section morning-section">
+                        <div class="wplan-section-label">☀ 朝</div>
+                        {% for item in day.morning %}
+                        <div class="wplan-item">{{ item }}</div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% if day.get("night") %}
+                    <div class="wplan-section night-section">
+                        <div class="wplan-section-label">🌙 夜</div>
+                        {% for item in day.night %}
+                        <div class="wplan-item">{{ item }}</div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% if day.get("special_care") %}
+                    <div class="wplan-section weekly-section">
+                        <div class="wplan-section-label">✦ 週ケア</div>
+                        {% for item in day.special_care %}
+                        <div class="wplan-item">{{ item }}</div>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                    {% if not day.get("morning") and not day.get("night") and not day.get("special_care") %}
+                    <div class="wplan-empty">—</div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
         </section>
         {% endif %}
 
         {% if not data.get("is_premium") and not data.get("is_dev_mode") %}
         <section class="result-card">
-            <h2 class="section-title">7日間改善ルーティン</h2>
+            <h2 class="section-title">週間ルーティン</h2>
             <div class="premium-lock-box">
                 1週間の使い分けプランは有料プランで確認できます。
                 <a href="/pricing?source=result" class="premium-link">詳しく見る</a>
