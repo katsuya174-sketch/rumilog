@@ -13829,7 +13829,16 @@ def history():
             reverse=True
         )[:5]
 
-        # ① 改善ハイライト: 各診断に前回比スコア差分を付与
+        # ① 改善ハイライト: 各診断に前回比スコア差分と期間ラベルを付与
+        def _parse_date(item):
+            date_str = (item.get("record_date") or item.get("saved_at") or "")[:10]
+            for fmt in ["%Y/%m/%d", "%Y-%m-%d"]:
+                try:
+                    return datetime.strptime(date_str, fmt).date()
+                except ValueError:
+                    pass
+            return None
+
         for i in range(1, len(prepared)):
             prev_scores = prepared[i - 1].get("scores", {}) or {}
             curr_scores = prepared[i].get("scores", {}) or {}
@@ -13839,6 +13848,34 @@ def history():
                 if d != 0:
                     diff_map[score_labels.get(key, key)] = d
             prepared[i]["score_diff"] = diff_map
+
+            # 改善ハイライト: 上昇 >= 3点 の項目のみ抽出・ソート
+            highlights = sorted(
+                [(label, d) for label, d in diff_map.items() if d >= 3],
+                key=lambda x: x[1],
+                reverse=True
+            )[:3]
+            prepared[i]["improvement_highlights"] = highlights
+
+            # 前回診断からの日数ラベル
+            try:
+                d_curr = _parse_date(prepared[i])
+                d_prev = _parse_date(prepared[i - 1])
+                if d_curr and d_prev:
+                    days = (d_curr - d_prev).days
+                    if days <= 7:
+                        period_label = "先週比"
+                    elif days <= 14:
+                        period_label = "2週間前比"
+                    elif days <= 31:
+                        period_label = "先月比"
+                    else:
+                        period_label = "前回比"
+                    prepared[i]["period_label"] = period_label
+                else:
+                    prepared[i]["period_label"] = "前回比"
+            except Exception:
+                prepared[i]["period_label"] = "前回比"
 
         # ⑥ 診断ストリーク計算
         streak = 0

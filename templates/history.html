@@ -173,12 +173,49 @@
       .report-item.warn { border-color: #f0d0b8; background: rgba(240,208,184,0.15); }
       .report-item.warn .report-value { color: #c07848; }
 
-      /* ① 改善ハイライト差分タグ */
+      /* ① 改善ハイライト */
+      .improvement-highlight-box {
+          margin-top: 8px;
+          padding: 9px 12px;
+          border-radius: 12px;
+          background: linear-gradient(135deg, rgba(255,224,236,0.55) 0%, rgba(255,248,252,0.9) 100%);
+          border: 1.5px solid #f3c9d2;
+      }
+      .improvement-highlight-label {
+          font-size: 11px;
+          color: #a07080;
+          margin-bottom: 5px;
+          font-weight: bold;
+          letter-spacing: 0.04em;
+      }
+      .improvement-highlight-items {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 5px;
+      }
+      .improvement-highlight-item {
+          display: inline-flex;
+          align-items: center;
+          gap: 3px;
+          background: rgba(255,255,255,0.85);
+          border: 1.5px solid #f3c9d2;
+          border-radius: 999px;
+          padding: 4px 11px;
+          font-size: 13px;
+          font-weight: bold;
+          color: #c75b7a;
+          font-family: "Kosugi Maru", sans-serif;
+      }
+      .improvement-highlight-item.big {
+          background: linear-gradient(135deg, #ffe6ee, #ffd6e8);
+          border-color: #e8a0b8;
+          font-size: 14px;
+      }
       .diff-tags {
           display: flex;
           flex-wrap: wrap;
           gap: 5px;
-          margin-top: 8px;
+          margin-top: 6px;
       }
       .diff-tag {
           display: inline-block;
@@ -399,7 +436,18 @@
                     <div class="score">Skin Score: {{ item.skin_score }}</div>
 
                     <!-- ① 改善ハイライト -->
-                    {% if item.score_diff %}
+                    {% if item.improvement_highlights %}
+                    <div class="improvement-highlight-box">
+                        <div class="improvement-highlight-label">✨ {{ item.period_label or "前回比" }} 改善</div>
+                        <div class="improvement-highlight-items">
+                            {% for label, diff in item.improvement_highlights %}
+                            <span class="improvement-highlight-item{% if diff >= 7 %} big{% endif %}">
+                                {{ label }} +{{ diff }}点UP
+                            </span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    {% elif item.score_diff %}
                     <div class="diff-tags">
                         {% for label, diff in item.score_diff.items() %}
                             {% if diff > 0 %}
