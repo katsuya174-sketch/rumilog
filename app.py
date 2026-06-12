@@ -6808,6 +6808,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         combined_products.append(source_product)
 
     # Phase 2: criteria-based Rakuten search
+    n_db_before = len(combined_products)
     if improvement_plan and improvement_plan.get("priority_concerns"):
         criteria_products = search_rakuten_by_criteria(category, improvement_plan)
         for cp in criteria_products:
@@ -6815,6 +6816,13 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             if cp_key and cp_key not in seen_product_keys:
                 seen_product_keys.add(cp_key)
                 combined_products.append(cp)
+    n_rakuten_criteria = len(combined_products) - n_db_before
+    print(
+        f"[SELECT_CANDIDATE] category={category} / "
+        f"db+verified={n_db_before} / rakuten_criteria={n_rakuten_criteria} / "
+        f"ai_candidates={len(candidates)}",
+        flush=True
+    )
 
     for p in combined_products:
         if not isinstance(p, dict):
@@ -6839,6 +6847,21 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         product = dict(p)
         # DB・楽天問わず全商品に同じ基準でメタデータ補完を適用する
         enrich_product_metadata_from_ingredients(product)
+
+        # 楽天criteriaのメタデータ欠損ログ（デバッグ用）
+        _src_hint = product.get("_source_hint", "")
+        if _src_hint == "rakuten_criteria":
+            _itag = normalize_ingredient_tag(step.get("ingredient_focus", "") or "")
+            _actives = product.get("active_ingredients", []) or []
+            _hit = _itag and _itag in _actives
+            print(
+                f"[RAKUTEN_META] name={str(product.get('name',''))[:30]} "
+                f"actives={_actives} focus_hit={_hit} "
+                f"concerns={len(product.get('concerns',[]) or [])} "
+                f"sens={product.get('sensitive_ok','?')} "
+                f"avail={product.get('availability_japan',[])}",
+                flush=True
+            )
 
         base_score = score_product(product, step, user_data, budget_value)
 
@@ -9393,36 +9416,51 @@ def log_candidate_battle(step, candidates, selected=None):
     category = step.get("category", "")
     purpose = step.get("purpose", "")
     ingredient_focus = step.get("ingredient_focus", "")
+    ingredient_tag = normalize_ingredient_tag(ingredient_focus)
 
-    print("\n===== CANDIDATE BATTLE DETAIL =====")
-    print(f"section: {section}")
-    print(f"category: {category}")
-    print(f"purpose: {purpose}")
-    print(f"ingredient_focus: {ingredient_focus}")
+    print("\n===== CANDIDATE BATTLE DETAIL =====", flush=True)
+    print(f"section={section} / category={category} / ingredient_focus={ingredient_focus}", flush=True)
 
     if not candidates:
-        print("no candidates")
-        print("===================================\n")
+        print("no candidates", flush=True)
+        print("===================================\n", flush=True)
         return
 
-    for idx, c in enumerate(candidates[:5], start=1):
+    # ソース別の集計
+    source_counts = {}
+    for c in candidates:
+        src = c.get("_source", "unknown")
+        source_counts[src] = source_counts.get(src, 0) + 1
+    print(f"candidates total={len(candidates)} / by_source={source_counts}", flush=True)
+
+    for idx, c in enumerate(candidates[:8], start=1):
         if not isinstance(c, dict):
             continue
+        src = c.get("_source", "?")
+        actives = c.get("active_ingredients", []) or []
+        has_focus = ingredient_tag and ingredient_tag in actives
+        sensitive_ok = c.get("sensitive_ok", "?")
+        avail = c.get("availability_japan", []) or []
+        concerns_count = len(c.get("concerns", []) or [])
+        functions_count = len(c.get("main_functions", []) or [])
 
         print(
-            f"{idx}. "
-            f"name={c.get('name', '')} / "
-            f"source={c.get('_source', '')} / "
-            f"final={c.get('_score', 0)} / "
-            f"base={c.get('_base_score', 0)} / "
-            f"improve={c.get('_improve_score', 0)} / "
-            f"price={c.get('price_ref', 0)}"
+            f"  [{idx}] src={src:<14} final={c.get('_score',0):>6.1f} "
+            f"base={c.get('_base_score',0):>5.1f} "
+            f"imp={c.get('_improve_score',0):>5.1f} "
+            f"routine={c.get('_routine_score',0):>5.1f} | "
+            f"focus_hit={'YES' if has_focus else 'NO '} "
+            f"sens={sensitive_ok:<7} "
+            f"avail={len(avail)} "
+            f"concerns={concerns_count} funcs={functions_count} | "
+            f"name={str(c.get('name',''))[:30]}",
+            flush=True
         )
 
     if selected:
-        print(f"WINNER: {selected.get('name', '')} ({selected.get('_source', '')})")
+        print(f">>> WINNER: {selected.get('name','')} (src={selected.get('_source','')}, score={selected.get('_score',0)})", flush=True)
 
-    print("===================================\n")
+    print("===================================\n", flush=True)
 
 
 def count_selected_sources(data):
