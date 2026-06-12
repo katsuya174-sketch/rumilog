@@ -662,7 +662,7 @@ _start_cleanup_scheduler()
 
 
 def _enrich_db_products_images():
-    """起動時バックグラウンド: affiliate_item_id から楽天画像URLを取得し products.json に永続保存する。
+    """起動時バックグラウンド: 商品名・ブランドでキーワード検索し画像URLを products.json に永続保存する。
     image フィールドが空の商品のみ対象。一度保存すれば次回起動から API 呼び出し不要。
     """
     import time as _time
@@ -697,40 +697,11 @@ def _enrich_db_products_images():
             if str(_p.get("image") or "").strip():
                 continue  # 既に画像あり
 
-            _aff_url = str(_p.get("affiliate_item_id", "") or "").strip()
-            if not _aff_url:
-                continue
+            _name = str(_p.get("name", "") or "").strip()
+            _brand = str(_p.get("brand", "") or "").strip()
+            _category = str(_p.get("category", "") or "").strip()
 
-            # affiliate URL から楽天 itemCode (shopId:itemId) を抽出
-            import urllib.parse as _up
-            import re as _re
-            _item_code = ""
-
-            # ?pc= パラメータに本来の商品URLがURLエンコードされている
-            try:
-                _parsed = _up.urlparse(_aff_url)
-                _qs = _up.parse_qs(_parsed.query)
-                for _key in ["pc", "url", "link"]:
-                    if _key in _qs:
-                        _decoded = _up.unquote(_qs[_key][0])
-                        _m = _re.search(r'item\.rakuten\.co\.jp/([^/?#\s]+)/([^/?#\s]+)', _decoded)
-                        if _m:
-                            _shop = _m.group(1).rstrip('/')
-                            _item = _m.group(2).rstrip('/')
-                            if _shop and _item:
-                                _item_code = f"{_shop}:{_item}"
-                            break
-            except Exception:
-                pass
-
-            # フォールバック: 直接URLの場合
-            if not _item_code:
-                _m2 = _re.search(r'item\.rakuten\.co\.jp/([^/?#\s]+)/([^/?#\s]+)', _aff_url)
-                if _m2:
-                    _item_code = f"{_m2.group(1).rstrip('/')}:{_m2.group(2).rstrip('/')}"
-
-            if not _item_code:
-                print(f"[ENRICH DB IMAGES] Cannot parse item code: {_aff_url[:60]}", flush=True)
+            if not _name:
                 _failed += 1
                 continue
 
@@ -741,7 +712,12 @@ def _enrich_db_products_images():
                 print(f"[ENRICH DB IMAGES] Rate limit, waiting {_wait:.1f}s", flush=True)
                 _time.sleep(_wait)
 
-            _result = fetch_rakuten_item_by_code(_item_code)
+            # itemCode APIは400を返し続けるため、商品名でキーワード検索する
+            _result = fetch_rakuten_item(
+                product_name=_name,
+                category=_category,
+                brand=_brand,
+            )
 
             if _result and _result.get("image"):
                 _p["image"] = _result["image"]
@@ -750,14 +726,14 @@ def _enrich_db_products_images():
                 _needs_save = True
                 _done += 1
                 print(
-                    f"[ENRICH DB IMAGES] OK  {_p.get('name','?')[:35]:35s} -> {_result['image'][:50]}",
+                    f"[ENRICH DB IMAGES] OK  {_name[:35]:35s} -> {_result['image'][:50]}",
                     flush=True,
                 )
             else:
-                print(f"[ENRICH DB IMAGES] FAIL {_p.get('name','?')[:40]}", flush=True)
+                print(f"[ENRICH DB IMAGES] FAIL {_name[:40]}", flush=True)
                 _failed += 1
 
-            _time.sleep(0.4)  # API レート制限への配慮
+            _time.sleep(0.5)  # API レート制限への配慮
 
         if _needs_save:
             with open(PRODUCTS_FILE, "w", encoding="utf-8") as _f:
@@ -2525,125 +2501,6 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
     return None
 
 
-def extract_rakuten_item_code_from_url(url):
-    """Extract itemCode (shopId:itemId) from a Rakuten item URL or affiliate URL."""
-    if not url:
-        return ""
-    url = str(url).strip()
-    # Direct item URL: https://item.rakuten.co.jp/shopId/itemId/
-    m = re.search(r'item\.rakuten\.co\.jp/([^/?#\s]+)/([^/?#\s]+)', url)
-    if m:
-        shop_id = m.group(1).rstrip('/')
-        item_id = m.group(2).rstrip('/')
-        if shop_id and item_id:
-            return f"{shop_id}:{item_id}"
-    # Affiliate URL with URL-encoded item URL: ?pc=https%3A%2F%2Fitem.rakuten.co.jp%2F...
-    try:
-        import urllib.parse as _up
-        parsed = _up.urlparse(url)
-        qs = _up.parse_qs(parsed.query)
-        for key in ["pc", "url", "link", "redirect"]:
-            if key in qs:
-                decoded = _up.unquote(qs[key][0])
-                m2 = re.search(r'item\.rakuten\.co\.jp/([^/?#\s]+)/([^/?#\s]+)', decoded)
-                if m2:
-                    shop_id = m2.group(1).rstrip('/')
-                    item_id = m2.group(2).rstrip('/')
-                    if shop_id and item_id:
-                        return f"{shop_id}:{item_id}"
-    except Exception:
-        pass
-    return ""
-
-
-def fetch_rakuten_item_by_code(item_code):
-    """Fetch Rakuten item directly by itemCode (shopId:itemId) — guaranteed image for DB products."""
-    global RAKUTEN_COOLDOWN_UNTIL
-    if not item_code or not RAKUTEN_APP_ID:
-        return None
-
-    cache_key = ("_code_", item_code)
-    if cache_key in _rakuten_item_cache:
-        print(f"[RAKUTEN CODE CACHE HIT] {item_code}", flush=True)
-        return _rakuten_item_cache[cache_key]
-
-    if time.time() < RAKUTEN_COOLDOWN_UNTIL:
-        return None
-
-    try:
-        wait_for_rakuten_rate_limit()
-        # Standard endpoint — the only one that supports itemCode parameter
-        endpoint = "https://app.rakuten.co.jp/services/api/IchibaItem/Search/20170706"
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-        }
-        params = {
-            "applicationId": RAKUTEN_APP_ID,
-            "itemCode": item_code,
-            "hits": 1,
-            "format": "json",
-            "formatVersion": 2,
-            "imageFlag": 1,
-        }
-        if RAKUTEN_AFFILIATE_ID:
-            params["affiliateId"] = RAKUTEN_AFFILIATE_ID
-
-        res = requests.get(endpoint, params=params, headers=headers, timeout=(2, 5))
-        print(f"[RAKUTEN ITEM CODE] {item_code} -> {res.status_code}", flush=True)
-
-        if res.status_code == 429:
-            retry_seconds = 10
-            m429 = re.search(r"Try again in ([0-9\.]+) seconds?", res.text, re.IGNORECASE)
-            if m429:
-                try:
-                    retry_seconds = max(3, float(m429.group(1)) + 2)
-                except Exception:
-                    pass
-            RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
-            _rakuten_item_cache[cache_key] = None
-            return None
-
-        if res.status_code != 200:
-            print(f"[RAKUTEN ITEM CODE ERROR] {item_code} status={res.status_code}", flush=True)
-            _rakuten_item_cache[cache_key] = None
-            return None
-
-        payload = res.json()
-        items = payload.get("items") or payload.get("Items") or []
-        if not items:
-            print(f"[RAKUTEN ITEM CODE] no items for {item_code}", flush=True)
-            _rakuten_item_cache[cache_key] = None
-            return None
-
-        raw_item = items[0]
-        item = raw_item.get("Item", raw_item) if isinstance(raw_item, dict) else raw_item
-        if not isinstance(item, dict):
-            _rakuten_item_cache[cache_key] = None
-            return None
-
-        image_url = extract_rakuten_image_url(item)
-        item = normalize_rakuten_item_price(item)
-        raw_price = safe_price(item.get("raw_price") or item.get("itemPrice") or 0)
-
-        result = {
-            "name": str(item.get("itemName", "") or "").strip(),
-            "rakuten_title": str(item.get("itemName", "") or "").strip(),
-            "price": raw_price,
-            "normalized_price": raw_price,
-            "raw_price": raw_price,
-            "rakuten_link": item.get("affiliateUrl") or item.get("itemUrl") or "",
-            "image": image_url,
-            "item_code": item_code,
-        }
-
-        print(f"[RAKUTEN ITEM CODE OK] {item_code} image={'YES' if image_url else 'no'}", flush=True)
-        _rakuten_item_cache[cache_key] = result
-        return result
-
-    except Exception as e:
-        print(f"[RAKUTEN ITEM CODE ERROR] {item_code}: {e}", flush=True)
-        _rakuten_item_cache[cache_key] = None
-        return None
 
 
 # === Phase 2: criteria-based Rakuten search ===
@@ -3237,24 +3094,6 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
     if existing_image and not _is_placeholder and existing_rakuten_link:
         step["amazon_link"] = build_amazon_link(product_name)
         return normalize_step_price_fields(step)
-
-    # For DB products: fetch image directly by item code extracted from affiliate URL
-    if product_source in ["db", "ai+db", "fallback_db"]:
-        _affiliate_url = str(step.get("affiliate_item_id", "") or existing_rakuten_link or "").strip()
-        _item_code = extract_rakuten_item_code_from_url(_affiliate_url)
-        if _item_code:
-            _item_by_code = fetch_rakuten_item_by_code(_item_code)
-            if _item_by_code:
-                if _item_by_code.get("image"):
-                    step["image"] = _item_by_code["image"]
-                if _item_by_code.get("rakuten_link"):
-                    step["rakuten_link"] = _item_by_code["rakuten_link"]
-                if safe_price(step.get("price", 0)) <= 0 and _item_by_code.get("price"):
-                    step["price"] = safe_price(_item_by_code["price"])
-                    step["estimated_price"] = step["price"]
-                step["amazon_link"] = build_amazon_link(product_name)
-                return normalize_step_price_fields(step)
-        # Fall through to keyword-based fetch if item code approach fails
 
     if product_source not in ["db", "ai+db", "fallback_db"]:
         if "affiliate_links" in step and isinstance(step["affiliate_links"], dict):
