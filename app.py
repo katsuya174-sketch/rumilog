@@ -2342,6 +2342,13 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 "imageFlag": 1,
             }
 
+            # カテゴリが分かる場合はスキンケア親ジャンル(100944)で絞り込み
+            # → 口腔洗浄機・家電など無関係ジャンルを API レベルで排除
+            if category:
+                _gid = get_rakuten_genre_id(category, parent_only=True)
+                if _gid:
+                    params["genreId"] = _gid
+
             if RAKUTEN_AFFILIATE_ID:
                 params["affiliateId"] = RAKUTEN_AFFILIATE_ID
 
@@ -2397,6 +2404,16 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 or payload.get("Items")
                 or []
             )
+
+            # genreId 指定で0件 → ジャンルなしで再試行
+            if not items and "genreId" in params:
+                print(f"[RAKUTEN] 0 items with genreId={params['genreId']}, retrying without", flush=True)
+                _params_ng = {k: v for k, v in params.items() if k != "genreId"}
+                wait_for_rakuten_rate_limit()
+                _res2 = requests.get(endpoint, params=_params_ng, headers=headers, timeout=(2, 4))
+                if _res2.status_code == 200:
+                    _pl2 = _res2.json()
+                    items = _pl2.get("items") or _pl2.get("Items") or []
 
             if not items:
                 continue
@@ -2825,6 +2842,35 @@ def enrich_product_metadata_from_ingredients(product):
     return product
 
 
+# 楽天市場 スキンケア関連ジャンルID
+# 親カテゴリ: 100944 (スキンケア全般) — fetch_rakuten_item の広域フィルタに使用
+# 個別カテゴリ ID — search_rakuten_by_criteria の厳密フィルタに使用
+_RAKUTEN_SKINCARE_PARENT_GENRE_ID = 100944
+
+_CATEGORY_GENRE_IDS = {
+    "クレンジング":  210450,
+    "洗顔":          216301,
+    "ブースター":    216348,  # 導入・先行美容液は美容液カテゴリ扱い
+    "化粧水":        216307,
+    "美容液":        216348,
+    "導入美容液":    216348,
+    "乳液":          216387,
+    "クリーム":      216424,
+    "日焼け止め":    216492,
+    "パック":        503020,
+    "ピーリング":    503044,
+}
+
+
+def get_rakuten_genre_id(category: str, parent_only: bool = False) -> int | None:
+    """カテゴリ名から楽天ジャンルIDを返す。
+    parent_only=True なら常にスキンケア親カテゴリ(100944)を返す。
+    """
+    if parent_only:
+        return _RAKUTEN_SKINCARE_PARENT_GENRE_ID
+    return _CATEGORY_GENRE_IDS.get(category) or _RAKUTEN_SKINCARE_PARENT_GENRE_ID
+
+
 _CATEGORY_REQUIRED_KEYWORDS = {
     "クレンジング":  ["クレンジング", "cleansing", "メイク落とし", "make up remover", "makeup remover"],
     "洗顔":          ["洗顔", "フォーム", "フェイスウォッシュ", "face wash", "cleanser"],
@@ -2953,6 +2999,13 @@ def search_rakuten_by_criteria(category, improvement_plan):
             "imageFlag": 1,
         }
 
+        # 個別スキンケアカテゴリのジャンルIDで絞り込み（最優先）
+        # → "美容液 ナイアシンアミド" 検索が口腔洗浄機を返すことをAPIレベルで防ぐ
+        _genre_id = get_rakuten_genre_id(category, parent_only=False)
+        if _genre_id:
+            params["genreId"] = _genre_id
+            print(f"[RAKUTEN CRITERIA] genreId={_genre_id} for category={category}", flush=True)
+
         if RAKUTEN_AFFILIATE_ID:
             params["affiliateId"] = RAKUTEN_AFFILIATE_ID
 
@@ -2979,6 +3032,17 @@ def search_rakuten_by_criteria(category, improvement_plan):
 
         payload = res.json()
         items = payload.get("items") or payload.get("Items") or []
+
+        # genreId 指定で0件の場合はジャンルなしで再検索（API がジャンルIDを無視する場合の保険）
+        if not items and "genreId" in params:
+            print(f"[RAKUTEN CRITERIA] 0 items with genreId={params['genreId']}, retrying without genreId", flush=True)
+            params_no_genre = {k: v for k, v in params.items() if k != "genreId"}
+            wait_for_rakuten_rate_limit()
+            res2 = requests.get(endpoint, params=params_no_genre, headers=headers, timeout=(2, 4))
+            if res2.status_code == 200:
+                payload = res2.json()
+                items = payload.get("items") or payload.get("Items") or []
+                print(f"[RAKUTEN CRITERIA] retry without genreId -> {len(items)} items", flush=True)
 
         results = []
 
