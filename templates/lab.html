@@ -492,6 +492,19 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
     color: #b88b96;
 }
 
+.photo-quality-warning {
+    display: none;
+    margin-top: 6px;
+    padding: 5px 8px;
+    border-radius: 8px;
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    color: #856404;
+    font-size: 0.72rem;
+    line-height: 1.4;
+    text-align: left;
+}
+
 @media (max-width: 480px) {
     .photo-action-row,
     .camera-buttons {
@@ -767,18 +780,21 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                     <div class="photo-preview-title">正面</div>
                     <img id="front_preview" class="photo-preview-image" alt="正面プレビュー">
                     <div id="front_status" class="photo-preview-status">未登録</div>
+                    <div id="front_quality_warning" class="photo-quality-warning"></div>
                 </div>
-        
+
                 <div id="left_card" class="photo-preview-card">
                     <div class="photo-preview-title">左頬</div>
                     <img id="left_preview" class="photo-preview-image" alt="左頬プレビュー">
                     <div id="left_status" class="photo-preview-status">未登録</div>
+                    <div id="left_quality_warning" class="photo-quality-warning"></div>
                 </div>
-        
+
                 <div id="right_card" class="photo-preview-card">
                     <div class="photo-preview-title">右頬</div>
                     <img id="right_preview" class="photo-preview-image" alt="右頬プレビュー">
                     <div id="right_status" class="photo-preview-status">未登録</div>
+                    <div id="right_quality_warning" class="photo-quality-warning"></div>
                 </div>
             </div>
         
@@ -938,6 +954,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
               statusId: "front_status",
               cardId: "front_card",
               chipId: "stepFront",
+              warningId: "front_quality_warning",
               label: "正面"
           },
           {
@@ -947,6 +964,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
               statusId: "left_status",
               cardId: "left_card",
               chipId: "stepLeft",
+              warningId: "left_quality_warning",
               label: "左頬"
           },
           {
@@ -956,6 +974,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
               statusId: "right_status",
               cardId: "right_card",
               chipId: "stepRight",
+              warningId: "right_quality_warning",
               label: "右頬"
           }
       ];
@@ -1237,11 +1256,54 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           input.files = dt.files;
       }
   
+      function checkImageQualityCanvas(file, callback) {
+          const reader = new FileReader();
+          reader.onload = function(e) {
+              const img = new Image();
+              img.onload = function() {
+                  try {
+                      const SIZE = 150;
+                      const canvas = document.createElement("canvas");
+                      canvas.width = SIZE; canvas.height = SIZE;
+                      const ctx = canvas.getContext("2d");
+                      ctx.drawImage(img, 0, 0, SIZE, SIZE);
+                      const pixels = ctx.getImageData(0, 0, SIZE, SIZE).data;
+                      const total = SIZE * SIZE;
+                      const gray = new Float32Array(total);
+                      let sumB = 0;
+                      for (let i = 0; i < total; i++) {
+                          const v = pixels[i*4]*0.299 + pixels[i*4+1]*0.587 + pixels[i*4+2]*0.114;
+                          gray[i] = v; sumB += v;
+                      }
+                      const avgB = sumB / total;
+                      if (avgB < 35) { callback({ ok: false, message: "⚠️ 画像が暗すぎます。明るい場所で撮り直すと精度が上がります。" }); return; }
+                      if (avgB > 240) { callback({ ok: false, message: "⚠️ 画像が明るすぎます。直射日光を避けて撮り直してください。" }); return; }
+                      let sumL = 0, sumL2 = 0, cnt = 0;
+                      for (let y = 1; y < SIZE - 1; y++) {
+                          for (let x = 1; x < SIZE - 1; x++) {
+                              const idx = y * SIZE + x;
+                              const lap = 4*gray[idx] - gray[idx-1] - gray[idx+1] - gray[idx-SIZE] - gray[idx+SIZE];
+                              sumL += lap; sumL2 += lap*lap; cnt++;
+                          }
+                      }
+                      const lapVar = (sumL2 / cnt) - Math.pow(sumL / cnt, 2);
+                      const sharpness = Math.sqrt(Math.max(0, lapVar));
+                      if (sharpness < 6) { callback({ ok: false, message: "⚠️ 画像がぼやけています。カメラを安定させて撮り直すと精度が上がります。" }); return; }
+                      callback({ ok: true, message: "" });
+                  } catch(err) { callback({ ok: true, message: "" }); }
+              };
+              img.onerror = function() { callback({ ok: true, message: "" }); };
+              img.src = e.target.result;
+          };
+          reader.readAsDataURL(file);
+      }
+
       function showPreviewFromFile(item, file) {
           const preview = document.getElementById(item.previewId);
           const status = document.getElementById(item.statusId);
           const card = document.getElementById(item.cardId);
-  
+          const warning = item.warningId ? document.getElementById(item.warningId) : null;
+
           const reader = new FileReader();
           reader.onload = function(e) {
               if (preview) {
@@ -1250,10 +1312,18 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
               }
           };
           reader.readAsDataURL(file);
-  
+
           if (status) status.textContent = `${item.label}を登録済み`;
           if (card) card.classList.add("active");
-  
+          if (warning) { warning.style.display = "none"; warning.textContent = ""; }
+
+          checkImageQualityCanvas(file, function(result) {
+              if (!result.ok && warning) {
+                  warning.textContent = result.message;
+                  warning.style.display = "block";
+              }
+          });
+
           refreshStepUI();
       }
   
