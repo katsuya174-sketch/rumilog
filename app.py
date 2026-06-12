@@ -25,6 +25,7 @@ import requests
 import re
 import copy
 import time
+import threading
 from psycopg2.pool import SimpleConnectionPool
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
@@ -630,6 +631,35 @@ def revoke_premium_key_direct(key):
         return True
     return False
 
+def cleanup_expired_premium_keys():
+    """期限切れ・失効済みエントリをpremium_keys.jsonから削除する"""
+    try:
+        keys = load_premium_keys()
+        now_iso = datetime.now().isoformat()
+        to_delete = [
+            k for k, entry in keys.items()
+            if entry.get("revoked", False) or (
+                entry.get("valid_until", "") and entry["valid_until"] < now_iso
+            )
+        ]
+        for k in to_delete:
+            del keys[k]
+        if to_delete:
+            save_premium_keys(keys)
+            print(f"[CLEANUP] 期限切れキーを{len(to_delete)}件削除しました", flush=True)
+    except Exception as e:
+        print(f"[CLEANUP ERROR] {repr(e)}", flush=True)
+
+def _start_cleanup_scheduler():
+    def loop():
+        while True:
+            time.sleep(24 * 3600)  # 24時間ごと
+            cleanup_expired_premium_keys()
+    t = threading.Thread(target=loop, daemon=True)
+    t.start()
+
+_start_cleanup_scheduler()
+
 def revoke_premium_key_by_subscription(subscription_id):
     keys = load_premium_keys()
     for entry in keys.values():
@@ -818,6 +848,15 @@ def increment_premium_usage(key):
     entry = keys.get(key)
     if not entry:
         return 0
+    if entry.get("revoked", False):
+        return 0
+    valid_until = entry.get("valid_until", "")
+    if valid_until:
+        try:
+            if datetime.now() > datetime.fromisoformat(valid_until):
+                return 0
+        except Exception:
+            return 0
     month_key = get_current_month_key()
     monthly = entry.setdefault("monthly_usage", {})
     monthly[month_key] = int(monthly.get(month_key, 0)) + 1
@@ -12817,7 +12856,7 @@ def create_checkout_session():
         return redirect(session.url, code=303)
     except Exception as e:
         print(f"[STRIPE ERROR] {repr(e)}", flush=True)
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": "決済処理中にエラーが発生しました。しばらくしてから再度お試しください。"}), 500
 
 
 @app.route("/stripe-webhook", methods=["POST"], strict_slashes=False)
