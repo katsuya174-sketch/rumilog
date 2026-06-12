@@ -7044,65 +7044,19 @@ def ensure_required_routine_steps(data):
             ) == normalized_category
             for s in weekly_care
         )
-    scores = data.get("scores", {})
-    if not isinstance(scores, dict):
-        scores = {}
-
-    hydration_score = safe_price(scores.get("hydration", 0))
-    barrier_score = safe_price(scores.get("barrier", 0))
-    redness_score = safe_price(scores.get("redness", 0))
-    texture_score = safe_price(scores.get("texture", 0))
-    pores_score = safe_price(scores.get("pores", 0))
-    dullness_score = safe_price(scores.get("dullness", 0))
-
-    needs_recovery_pack = (
-        hydration_score <= 65
-        or barrier_score <= 65
-        or redness_score <= 65
-    )
-
-    needs_peeling = (
-        texture_score <= 65
-        or pores_score <= 65
-        or dullness_score <= 65
-    )
-
+    # パック・ピーリングの要否・頻度はAIが判断する。コード側で強制挿入しない。
+    # risk_note のデフォルト値のみ設定する。
     for weekly_step in weekly_care:
         if not isinstance(weekly_step, dict):
             continue
-
         weekly_category = weekly_step.get("category", "")
-
         if weekly_category == "ピーリング":
             weekly_step.setdefault(
                 "risk_note",
                 "レチノールや高濃度ビタミンCと同じ夜は避ける"
             )
-
         elif weekly_category == "パック":
             weekly_step.setdefault("risk_note", "")
-
-    if needs_peeling and not weekly_has_category("ピーリング"):
-        weekly_care.append({
-            "category": "ピーリング",
-            "role": "main",
-            "purpose": "毛穴詰まり・ざらつき・くすみを週1回の角質ケアで整える",
-            "ingredient_focus": "PHA",
-            "risk_note": "レチノールや高濃度ビタミンCと同じ夜は避ける",
-            "priority": 7,
-            "product_candidates": []
-        })
-
-    if needs_recovery_pack and not weekly_has_category("パック"):
-        weekly_care.append({
-            "category": "パック",
-            "role": "main",
-            "purpose": "乾燥・赤み・バリア低下を集中保湿で整える",
-            "ingredient_focus": "CICA",
-            "risk_note": "",
-            "priority": 8,
-            "product_candidates": []
-        })
 
     return data
 
@@ -11153,16 +11107,22 @@ weekly_care の各 step にも use_days を設定する。
 例: パック → ["日"]、ピーリング → ["土"]
 
 【週ケアルール】
-weekly_care は空配列にしない。
-肌状態に応じて、ピーリングまたはパックを1〜2件出す。
+パックとピーリングは、肌状態から本当に必要と判断した場合のみ出力する。
+不要と判断した場合は weekly_care を [] にしてよい。
 
-ピーリングを出す条件:
-毛穴詰まり、ざらつき、くすみ、キメ乱れが目立つ場合。
+ピーリングを出す条件（いずれかが当てはまる場合のみ）:
+- 毛穴詰まり・ざらつき・くすみ・キメ乱れが明確に目立つ
+- texture / pores / dullness スコアが低く角質ケアの優先度が高い
 
-パックを出す条件:
-乾燥、赤み、バリア低下、刺激リスク、強成分使用中の回復ケアが必要な場合。
+パックを出す場合のみ:
+- 乾燥・赤み・バリア低下が顕著で集中ケアが必要
+- 刺激の強い成分（レチノール・AHA等）を夜に使っており回復ケアが必要
 
-ただし、肌状態から週ケアが不要と判断できる場合のみ、weekly_care は最小限にする。
+頻度・使用曜日は以下の観点でAIが判断する:
+- 肌が弱い・赤みスコア低い → 週1回（例: ["日"]）
+- 比較的健康な肌でピーリングが有効 → 週1〜2回（例: ["水", "土"]）
+- パックは週1回が目安
+
 カテゴリは必ず「ピーリング」または「パック」。
 通常の美容液・化粧水・クリームを weekly_care に入れることは禁止。
 
