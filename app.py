@@ -1220,7 +1220,9 @@ def build_rakuten_search_keywords(product_name, brand="", category="", ingredien
         if p not in {"ザ", "the", "THE"}
     ]
 
-    if brand and meaningful_parts:
+    # brand + meaningful_parts は name が brand で始まらない場合のみ追加
+    # （始まる場合は「brand brand name」という冗長キーワードになるため）
+    if brand and meaningful_parts and not name.lower().startswith(brand.lower()):
         add(f"{brand} {' '.join(meaningful_parts)}")
 
     if meaningful_parts:
@@ -1232,9 +1234,20 @@ def build_rakuten_search_keywords(product_name, brand="", category="", ingredien
     if len(meaningful_parts) >= 2:
         add(" ".join(meaningful_parts[-2:]))
 
+    # 英字のみの長いキーワードは楽天APIが拒否する場合がある
+    # → 独立した数字トークンを除いた短縮版を追加してフォールバックを確保する
+    def _strip_number_tokens(k):
+        return " ".join(p for p in k.split() if not p.isdigit()).strip()
+
+    for kw in list(keywords):
+        if len(kw) > 25 and all(ord(c) < 128 or c == " " for c in kw):
+            _short = _strip_number_tokens(kw)
+            if _short and _short != kw and len(_short) >= 4:
+                add(_short)
+
     print("[RAKUTEN KEYWORDS]", keywords, flush=True)
 
-    return keywords[:5]
+    return keywords[:6]
 
 def score_current_product_signal(item):
     if not isinstance(item, dict):
@@ -2293,7 +2306,9 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
     print("[RAKUTEN KEYWORDS]", keywords, flush=True)
 
-    MAX_RAKUTEN_KEYWORDS = 2
+    # 「keyword is not valid」400 が返った場合は continue して次を試すため
+    # 英語のみの長いキーワードが弾かれてもフォールバックが機能するよう上限を上げる
+    MAX_RAKUTEN_KEYWORDS = 4
 
     for keyword in keywords[:MAX_RAKUTEN_KEYWORDS]:
         keyword = clean_rakuten_keyword(keyword)
