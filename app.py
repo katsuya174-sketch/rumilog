@@ -2411,9 +2411,8 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
                 rakuten_title = str(item.get("itemName", "") or "").strip()
 
-                # 非スキンケア商品を即リジェクト
-                if category and not _is_rakuten_item_valid_for_category(rakuten_title, category):
-                    print("[RAKUTEN REJECT non-skincare]", rakuten_title[:50], flush=True)
+                # 非スキンケア商品を即リジェクト（口腔洗浄機・家電等の混入防止）
+                if category and not _is_rakuten_item_valid_for_category(rakuten_title, category, strict=False):
                     continue
 
                 if not is_same_verified_rakuten_product(
@@ -2842,39 +2841,51 @@ _CATEGORY_REQUIRED_KEYWORDS = {
 
 # スキンケアと無関係なカテゴリのキーワード → 含まれていたら問答無用で除外
 _NON_SKINCARE_REJECT_KEYWORDS = [
-    "口腔", "デンタル", "歯ブラシ", "歯磨き", "フロス", "洗浄機", "電動歯ブラシ",
-    "ジェットウォッシャー", "ウォーターフロッサー",
+    # 口腔ケア・歯科
+    "口腔", "口内", "デンタル", "歯科", "歯ブラシ", "歯磨き", "フロス",
+    "電動歯ブラシ", "ジェットウォッシャー", "ウォーターフロッサー",
+    "水圧洗浄", "口腔洗浄",
+    # サプリ・健康食品
     "サプリ", "サプリメント", "健康食品", "内服", "飲む美容",
-    "家電", "電化製品", "洗濯機", "掃除機", "ドライヤー", "ヘアドライヤー",
-    "食品", "飲料", "プロテイン",
+    # 家電・生活家電
+    "家電", "電化製品", "洗濯機", "掃除機", "電動シェーバー",
+    "電気シェーバー", "ドライヤー", "ヘアドライヤー",
+    # 食品・飲料
+    "食品", "飲料", "プロテイン", "コラーゲン飲料",
+    # スポーツ・フィットネス
     "スポーツ用品", "フィットネス", "ダンベル",
 ]
 
 
-def _is_rakuten_item_valid_for_category(item_name: str, category: str) -> bool:
-    """楽天検索結果の商品名が期待するスキンケアカテゴリに本当に属するか確認する。"""
+def _is_rakuten_item_valid_for_category(item_name: str, category: str, strict: bool = True) -> bool:
+    """楽天検索結果の商品名がスキンケアカテゴリに属するか確認する。
+
+    strict=True  (criteria search): 非スキンケア拒否 + カテゴリキーワード必須チェック
+    strict=False (keyword search) : 非スキンケア拒否のみ（正規商品タイトルに必ずしもカテゴリ語が入らないため）
+    """
     if not item_name:
         return False
     name_lower = item_name.lower()
 
-    # 非スキンケアキーワードが含まれていたら即リジェクト
+    # 非スキンケアキーワードが含まれていたら即リジェクト（モード問わず）
     for ng in _NON_SKINCARE_REJECT_KEYWORDS:
         if ng in name_lower:
-            print(f"[CRITERIA REJECT non-skincare] '{item_name[:50]}' contains '{ng}'", flush=True)
+            print(f"[RAKUTEN REJECT non-skincare] '{item_name[:50]}' contains '{ng}'", flush=True)
             return False
 
-    # カテゴリ固有キーワードが1つ以上含まれているか確認
+    if not strict:
+        return True  # キーワード検索では拒否チェックのみで十分
+
+    # criteria search: カテゴリ固有キーワードが1つ以上含まれているか確認
     required = _CATEGORY_REQUIRED_KEYWORDS.get(category, [])
     if not required:
-        # 定義外カテゴリはスキンケア関連語のどれかがあればOK
         all_skincare_words = [w for kws in _CATEGORY_REQUIRED_KEYWORDS.values() for w in kws]
         return any(w in name_lower for w in all_skincare_words)
 
     if any(w in name_lower for w in required):
         return True
 
-    # カテゴリキーワードが見当たらない場合は除外（別カテゴリ商品の混入を防ぐ）
-    print(f"[CRITERIA REJECT wrong category] '{item_name[:50]}' for category='{category}'", flush=True)
+    print(f"[RAKUTEN REJECT wrong category] '{item_name[:50]}' for category='{category}'", flush=True)
     return False
 
 
