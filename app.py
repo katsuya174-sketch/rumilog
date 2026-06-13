@@ -258,8 +258,9 @@ from constants import (
     AI_INGREDIENT_MAP,
     CONCERN_MAP
 )
-def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
+def call_gemini_with_retry(client, model, contents, config=None, max_retries=2, timeout=60):
     import random
+    import concurrent.futures
     from google.genai import errors
 
     last_error = None
@@ -281,32 +282,45 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2):
     for attempt in range(max_retries):
         try:
             print(
-                f"[GEMINI CALL START] model={model} attempt={attempt + 1}/{max_retries}",
+                f"[GEMINI CALL START] model={model} attempt={attempt + 1}/{max_retries} timeout={timeout}s",
                 flush=True
             )
+            _t_start = time.time()
 
-            response = client.models.generate_content(
-                model=model,
-                contents=contents,
-                config=config
-            )
+            # concurrent.futures でタイムアウトを強制（SDK に timeout 引数なし）
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as _ex:
+                _future = _ex.submit(
+                    client.models.generate_content,
+                    model=model, contents=contents, config=config
+                )
+                try:
+                    response = _future.result(timeout=timeout)
+                except concurrent.futures.TimeoutError:
+                    raise TimeoutError(
+                        f"Gemini timeout after {timeout}s (model={model})"
+                    )
 
+            elapsed = time.time() - _t_start
             current_count = increment_gemini_usage()
             if current_count is not None:
                 print(
-                    "[GEMINI REQUEST COUNT]",
-                    current_count,
-                    "/",
-                    GEMINI_DAILY_LIMIT,
+                    f"[GEMINI REQUEST COUNT] {current_count} / {GEMINI_DAILY_LIMIT}",
                     flush=True
                 )
 
             print(
-                f"[GEMINI CALL SUCCESS] model={model} attempt={attempt + 1}/{max_retries}",
+                f"[GEMINI CALL SUCCESS] model={model} elapsed={elapsed:.1f}s attempt={attempt + 1}/{max_retries}",
                 flush=True
             )
 
             return response
+
+        except TimeoutError as e:
+            last_error = e
+            print(f"[GEMINI TIMEOUT] {e} attempt={attempt + 1}/{max_retries}", flush=True)
+            if attempt >= max_retries - 1:
+                raise
+            time.sleep(2)
 
         except (errors.ServerError, errors.APIError) as e:
             last_error = e
@@ -3353,7 +3367,10 @@ def gemini_evaluate_rakuten_batch(step, rakuten_products):
             response_mime_type="application/json",
             response_schema=_PRODUCT_EVAL_SCHEMA,
         )
-        response = call_gemini_with_retry(client, DETAIL_MODEL, prompt, config=config)
+        response = call_gemini_with_retry(
+            client, DETAIL_MODEL, prompt, config=config,
+            max_retries=1, timeout=30  # 商品評価はスキップ可能なため短めのタイムアウト
+        )
         if response is None or not response.text:
             return
 
@@ -3420,6 +3437,9 @@ def gemini_evaluate_rakuten_batch(step, rakuten_products):
                 flush=True
             )
 
+    except TimeoutError as e:
+        # 商品評価タイムアウト: 診断全体は継続（Gemini評価なしで楽天商品をスコアリング）
+        print(f"[GEMINI EVAL TIMEOUT] step={step_label!r} {e} → skip eval", flush=True)
     except Exception as e:
         print(f"[GEMINI EVAL ERROR] step={step_label!r} {repr(e)}", flush=True)
     finally:
@@ -10003,7 +10023,8 @@ def call_gemini_with_quota_guard(**kwargs):
         model=kwargs.get("model"),
         contents=kwargs.get("contents"),
         config=kwargs.get("config"),
-        max_retries=3
+        max_retries=2,
+        timeout=60
     )
     
 
