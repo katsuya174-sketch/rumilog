@@ -38,8 +38,12 @@ _rakuten_criteria_call_count = 0
 MAX_RAKUTEN_CRITERIA_CALLS = 50
 _step_rakuten_results = {}       # {(norm_cat, norm_ing): [products]} prefetch→Gemini連携用
 _gemini_product_eval_cache = {}  # {normalized_title: {fields}} Gemini評価キャッシュ
+_gemini_eval_cache_lock = None   # threading.Lock() — app起動後に初期化
+_gemini_eval_cache_loaded = False
+GEMINI_EVAL_CACHE_FILE = "gemini_product_eval_cache.json"
 VERIFIED_PRODUCTS_CACHE_FILE = "verified_products_cache.json"
 VERIFIED_PRODUCTS_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
+GEMINI_EVAL_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
 
 # ===== Gemini Models =====
 
@@ -1176,6 +1180,10 @@ def clean_rakuten_image_url(url):
 
 _last_rakuten_request_time = 0
 _rakuten_rate_lock = threading.Lock()
+
+# Gemini評価キャッシュ用ロック（並列Phase B対応）
+import threading as _threading_mod
+_gemini_eval_cache_lock = _threading_mod.Lock()
 
 def wait_for_rakuten_rate_limit():
     """スレッドセーフなレートリミッター。
@@ -3235,21 +3243,70 @@ def _build_product_eval_prompt(step, products):
     )
 
 
+def _load_gemini_eval_cache_if_needed():
+    """gemini_product_eval_cache.json からメモリキャッシュにロード（初回のみ）。"""
+    global _gemini_product_eval_cache, _gemini_eval_cache_loaded
+    if _gemini_eval_cache_loaded:
+        return
+    with _gemini_eval_cache_lock:
+        if _gemini_eval_cache_loaded:
+            return
+        try:
+            with open(GEMINI_EVAL_CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                now = time.time()
+                loaded = 0
+                for k, v in data.items():
+                    if not isinstance(v, dict):
+                        continue
+                    cached_at = v.get("cached_at", 0)
+                    if now - cached_at > GEMINI_EVAL_CACHE_TTL_SECONDS:
+                        continue
+                    _gemini_product_eval_cache[k] = {
+                        key: val for key, val in v.items() if key != "cached_at"
+                    }
+                    loaded += 1
+                print(f"[GEMINI EVAL CACHE] ファイルから{loaded}件ロード", flush=True)
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            print(f"[GEMINI EVAL CACHE LOAD ERROR] {repr(e)}", flush=True)
+        _gemini_eval_cache_loaded = True
+
+
+def _save_gemini_eval_cache():
+    """メモリキャッシュを gemini_product_eval_cache.json に保存。"""
+    with _gemini_eval_cache_lock:
+        try:
+            now = time.time()
+            data = {}
+            for k, v in _gemini_product_eval_cache.items():
+                entry = dict(v)
+                entry.setdefault("cached_at", now)
+                data[k] = entry
+            with open(GEMINI_EVAL_CACHE_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            print(f"[GEMINI EVAL CACHE] {len(data)}件を保存", flush=True)
+        except Exception as e:
+            print(f"[GEMINI EVAL CACHE SAVE ERROR] {repr(e)}", flush=True)
+
+
 def gemini_evaluate_rakuten_batch(step, rakuten_products):
     """
     楽天商品を最大10件まとめてGeminiで評価し、結果を _gemini_product_eval_cache に保存する。
-    キャッシュ済みの商品はスキップする。
+    キャッシュ済みの商品はスキップする。スレッドセーフ（並列Phase B対応）。
     """
     if not rakuten_products:
         return
 
-    # 未キャッシュ商品だけを対象にする
-    uncached = []
-    for p in rakuten_products[:10]:
-        title = str(p.get("rakuten_title") or p.get("name") or "")
-        norm_title = normalize_product_name(title)
-        if norm_title and norm_title not in _gemini_product_eval_cache:
-            uncached.append(p)
+    # 未キャッシュ商品だけを対象にする（ロック内でスナップショット取得）
+    with _gemini_eval_cache_lock:
+        uncached = [
+            p for p in rakuten_products[:10]
+            if normalize_product_name(str(p.get("rakuten_title") or p.get("name") or ""))
+            not in _gemini_product_eval_cache
+        ]
 
     if not uncached:
         return
@@ -3316,15 +3373,16 @@ def gemini_evaluate_rakuten_batch(step, rakuten_products):
                            if x in ("low_irritation", "barrier_formula", "oil_control",
                                     "tone_up", "mild_formula")]
 
-            _gemini_product_eval_cache[norm_title] = {
-                "active_ingredients": actives,
-                "ingredient_strength": strength_dict,
-                "concerns":           concerns,
-                "skin_types":         skin_types,
-                "sensitive_ok":       sensitive_ok,
-                "main_functions":     main_functions,
-                "formulation":        formulation,
-            }
+            with _gemini_eval_cache_lock:
+                _gemini_product_eval_cache[norm_title] = {
+                    "active_ingredients": actives,
+                    "ingredient_strength": strength_dict,
+                    "concerns":           concerns,
+                    "skin_types":         skin_types,
+                    "sensitive_ok":       sensitive_ok,
+                    "main_functions":     main_functions,
+                    "formulation":        formulation,
+                }
             print(
                 f"[GEMINI EVAL] cached title={title[:40]!r} "
                 f"actives={actives} sens={sensitive_ok} concerns={len(concerns)}",
@@ -3345,7 +3403,8 @@ def apply_gemini_product_eval(product):
     if not norm_title:
         return product
 
-    eval_result = _gemini_product_eval_cache.get(norm_title)
+    with _gemini_eval_cache_lock:
+        eval_result = _gemini_product_eval_cache.get(norm_title)
     if not eval_result:
         return product
 
@@ -8927,9 +8986,12 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
 
     print(f"[PREFETCH] Rakuten完了 {time.time() - t0:.1f}s", flush=True)
 
-    # Phase B: Gemini バッチ商品評価（直列・クォータ節約）
+    # Phase B: Gemini バッチ商品評価（並列実行 + ファイルキャッシュ）
+    _load_gemini_eval_cache_if_needed()
     t1 = time.time()
+
     seen_step_keys = set()
+    steps_to_eval = []
     for step in all_steps:
         sk = _get_step_rakuten_key(step)
         if sk in seen_step_keys:
@@ -8937,7 +8999,21 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
         seen_step_keys.add(sk)
         products_for_step = _step_rakuten_results.get(sk, [])
         if products_for_step:
-            gemini_evaluate_rakuten_batch(step, products_for_step)
+            steps_to_eval.append((step, products_for_step))
+
+    if steps_to_eval:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            futures = [
+                executor.submit(gemini_evaluate_rakuten_batch, s, p)
+                for s, p in steps_to_eval
+            ]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"[PREFETCH GEMINI ERROR] {repr(e)}", flush=True)
+
+    _save_gemini_eval_cache()
     print(f"[PREFETCH] Gemini評価完了 {time.time() - t1:.1f}s", flush=True)
 
 
