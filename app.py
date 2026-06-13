@@ -46,14 +46,14 @@ VERIFIED_PRODUCTS_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
 GEMINI_EVAL_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
 
 # ===== Gemini Models =====
+# gemini-3.5-flash(旧) → gemini-2.0-flash-lite: 最新・高速・低コストモデルに変更
+ANALYSIS_MODEL = "gemini-2.0-flash-lite"
 
-ANALYSIS_MODEL = "gemini-3.5-flash"
+CANDIDATE_MODEL = "gemini-2.0-flash-lite"
 
-CANDIDATE_MODEL = "gemini-3.5-flash"
+ROUTINE_MODEL = "gemini-2.0-flash-lite"
 
-ROUTINE_MODEL = "gemini-3.5-flash"
-
-DETAIL_MODEL = "gemini-3.1-flash-lite"
+DETAIL_MODEL = "gemini-2.0-flash-lite"
 
 #DB_POOL = SimpleConnectionPool(
 #   minconn=1,
@@ -279,6 +279,24 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2, 
 
     max_retries = max(1, int(max_retries or 1))
 
+    # 呼び出し前にクォータ残数とプロンプト概算トークン数をログ出力
+    try:
+        _usage_status = get_gemini_usage_status()
+        _quota_used = _usage_status.get("used", "?")
+        _quota_limit = _usage_status.get("limit", "?")
+        _quota_remaining = _usage_status.get("remaining", "?")
+        # テキスト部分のトークン概算（文字数÷3、日本語は1文字≒1トークン）
+        _text_chars = sum(len(str(c)) for c in (contents if isinstance(contents, list) else [contents])
+                          if isinstance(c, str))
+        _approx_tokens = max(_text_chars // 3, _text_chars)  # 日本語重みで多めに見積もる
+        print(
+            f"[GEMINI PRE-CALL] model={model} quota={_quota_used}/{_quota_limit}(remaining={_quota_remaining})"
+            f" prompt≈{_approx_tokens}tokens",
+            flush=True
+        )
+    except Exception:
+        pass
+
     for attempt in range(max_retries):
         try:
             print(
@@ -303,8 +321,9 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2, 
             elapsed = time.time() - _t_start
             current_count = increment_gemini_usage()
             if current_count is not None:
+                _warn = " ⚠️ NEAR LIMIT" if current_count >= GEMINI_DAILY_LIMIT * 0.8 else ""
                 print(
-                    f"[GEMINI REQUEST COUNT] {current_count} / {GEMINI_DAILY_LIMIT}",
+                    f"[GEMINI REQUEST COUNT] {current_count} / {GEMINI_DAILY_LIMIT}{_warn}",
                     flush=True
                 )
 
