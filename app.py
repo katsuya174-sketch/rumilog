@@ -46,7 +46,7 @@ VERIFIED_PRODUCTS_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
 GEMINI_EVAL_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
 
 # ===== Gemini Models =====
-ANALYSIS_MODEL = "gemini-2.0-flash"       # 肌分析: 画像理解精度優先（2.5より高速）
+ANALYSIS_MODEL = "gemini-2.5-flash"       # 肌分析: 画像理解精度優先（2.0-flash無料枠切れのため移行）
 
 CANDIDATE_MODEL = "gemini-2.0-flash-lite"  # 候補選定: 速度優先
 
