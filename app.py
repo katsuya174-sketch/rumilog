@@ -46,7 +46,7 @@ VERIFIED_PRODUCTS_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
 GEMINI_EVAL_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
 
 # ===== Gemini Models =====
-ANALYSIS_MODEL = "gemini-2.5-flash"       # 肌分析: 画像理解精度優先
+ANALYSIS_MODEL = "gemini-2.0-flash"       # 肌分析: 画像理解精度優先（2.5より高速）
 
 CANDIDATE_MODEL = "gemini-2.0-flash-lite"  # 候補選定: 速度優先
 
@@ -12418,7 +12418,7 @@ weekly_care例: パック→["日"] ピーリング→["土"]
 パック条件: 乾燥・バリア低下顕著または刺激成分使用後の回復ケアが必要な時のみ。
 
 【product_candidates】
-各stepに4-5件必須(0-3件禁止)。現行販売中の正式名称確実な商品のみ。stepのcategoryと完全一致必須。
+各stepに3-4件必須(0-2件禁止)。現行販売中の正式名称確実な商品のみ。stepのcategoryと完全一致必須。
 
 各候補のフィールドルール:
 - confidence: 70未満出力禁止(90+:確実 80+:名称確実 70+:成分不確か)
@@ -12617,8 +12617,8 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
                 response_mime_type="application/json",
                 response_schema=schema
             ),
-            max_retries=2,  # タイムアウト時に1回リトライ
-            timeout=90      # 画像3枚+長プロンプトのため60s→90sに延長
+            max_retries=1,  # タイムアウト時リトライしない（2回×90s=180sでgunicorn SIGKILL防止）
+            timeout=120     # 出力JSON大のため90s→120sに延長
         )
 
         raw_text = response.text.strip()
