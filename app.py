@@ -759,8 +759,8 @@ def _enrich_db_products_images():
 
 
 def _start_image_enrichment():
-    _t = threading.Thread(target=_enrich_db_products_images, daemon=True)
-    _t.start()
+    # Phase3: 固定DB廃止により不要になったため無効化
+    pass
 
 
 _start_image_enrichment()
@@ -13969,12 +13969,9 @@ def lab_test_function():
             # ここではまだやらない
 
             # =========================
-            # ⑥ DB読み込み
+            # ⑥ DB読み込み（Phase3: 固定DB廃止 → 空リストを渡し楽天+Geminiのみで選定）
             # =========================
-            products = load_products()
-            
-
-            validate_and_log_products(products)
+            products = []
 
             # =========================
             # ⑦ 商品割当
