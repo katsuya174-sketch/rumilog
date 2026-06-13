@@ -1196,6 +1196,29 @@ _last_rakuten_request_time = 0
 _rakuten_rate_lock = threading.Lock()
 _rakuten_call_count_lock = threading.Lock()
 
+
+def _mem_mb() -> float:
+    """/proc/self/status から RSS (MB) を返す。Linux以外は resource モジュールで代替。"""
+    try:
+        with open("/proc/self/status") as _f:
+            for _line in _f:
+                if _line.startswith("VmRSS:"):
+                    return int(_line.split()[1]) / 1024  # kB → MB
+    except Exception:
+        pass
+    try:
+        import resource as _resource
+        return _resource.getrusage(_resource.RUSAGE_SELF).ru_maxrss / 1024
+    except Exception:
+        return -1.0
+
+
+def _log_mem(label: str) -> float:
+    """メモリ使用量を [MEM] プレフィックスで出力し MB 値を返す。"""
+    mb = _mem_mb()
+    print(f"[MEM] {label}: {mb:.1f}MB", flush=True)
+    return mb
+
 # Gemini評価キャッシュ用ロック（並列Phase B対応）
 import threading as _threading_mod
 _gemini_eval_cache_lock = _threading_mod.Lock()
@@ -9049,6 +9072,7 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
         return
 
     t0 = time.time()
+    _log_mem("prefetch-start")
     print(
         f"[PREFETCH START] steps={len(all_steps)} rate_gap={RAKUTEN_RATE_GAP}s workers={max_workers}",
         flush=True
@@ -9074,9 +9098,10 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
             future.result()
 
     t_phase_a = time.time() - t0
+    _log_mem("phase-A-done")
     print(f"[PREFETCH] Phase-A(Rakuten) {t_phase_a:.1f}s", flush=True)
 
-    # Phase B: Gemini バッチ商品評価（並列実行 + ファイルキャッシュ）
+    # Phase B: Gemini バッチ商品評価（直列 + ファイルキャッシュ）
     _load_gemini_eval_cache_if_needed()
     t1 = time.time()
 
@@ -9106,6 +9131,7 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
     _save_gemini_eval_cache()
     t_phase_b = time.time() - t1
     t_total = time.time() - t0
+    _log_mem("phase-B-done")
     print(
         f"[PREFETCH TIMELINE] Phase-A={t_phase_a:.1f}s Phase-B={t_phase_b:.1f}s Total={t_total:.1f}s",
         flush=True
@@ -9114,6 +9140,7 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
     # prefetch完了後にセッションキャッシュを解放（Gemini評価はファイルキャッシュに永続化済み）
     _step_rakuten_results = {}
     _rakuten_criteria_cache = {}
+    _log_mem("cache-freed")
 
 
 def assign_products_to_all_steps(data, products, user_data, budget_value):
@@ -13861,6 +13888,8 @@ def lab_test_function():
             _rakuten_criteria_call_count = 0
             _step_rakuten_results = {}
 
+            _log_mem("diag-start")
+
             try:
                 print("[LAB CHECK] before Gemini", flush=True)
 
@@ -13872,6 +13901,7 @@ def lab_test_function():
                 )
 
                 print("[LAB CHECK] after Gemini", flush=True)
+                _log_mem("after-gemini-analysis")
 
             except Exception as e:
                 print("===== LAB ERROR =====")
@@ -14028,9 +14058,11 @@ def lab_test_function():
             )
             budget_value = parse_budget(user_data.get("budget", ""))
             debug_log("BUDGET VALUE", budget_value)
+            _log_mem("before-assign-products")
 
             data = assign_products_to_all_steps(data, products, user_data, budget_value)
-            
+            _log_mem("after-assign-products")
+
             print("[FLOW AFTER ASSIGN]", {
                 "night": [
                     {
@@ -14197,6 +14229,7 @@ def lab_test_function():
             data["is_premium"] = is_premium_user()
             data["is_dev_mode"] = DEV_MODE or DEV_PREMIUM_MODE
             print("[LAB TIME] before render_template", round(time.time() - lab_t0, 2), flush=True)
+            _log_mem("before-render")
             html = render_template(
                 "result.html",
                 data=data
