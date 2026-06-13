@@ -12060,6 +12060,178 @@ def pick_uploaded_file(request, normal_name, camera_name):
 
     return None
 
+def get_analysis_schema_phase1():
+    """Phase 1: 肌スコア・分析・改善方針のみ（画像3枚で呼ぶ）出力は小さい"""
+    _score_keys = ["oil_balance","redness","pores","hydration","firmness","acne","dullness","barrier","texture","tone_evenness"]
+    score_obj = {
+        "type": "object",
+        "properties": {k: {"type": "integer"} for k in _score_keys},
+        "required": _score_keys
+    }
+    reason_obj = {
+        "type": "object",
+        "properties": {k: {"type": "string"} for k in _score_keys},
+        "required": _score_keys
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "skin_summary": {"type": "string"},
+            "scores": score_obj,
+            "score_reasons": reason_obj,
+            "symmetry_analysis": {
+                "type": "object",
+                "properties": {
+                    "score": {"type": "integer"},
+                    "summary": {"type": "string"},
+                    "left_tendency": {"type": "string"},
+                    "right_tendency": {"type": "string"}
+                },
+                "required": ["score","summary","left_tendency","right_tendency"]
+            },
+            "skin_age_estimate": {"type": "integer"},
+            "improvement_plan": {
+                "type": "object",
+                "properties": {
+                    "priority_concerns": {"type": "array", "items": {"type": "string"}},
+                    "key_ingredients": {"type": "array", "items": {"type": "string"}},
+                    "care_direction": {"type": "string"}
+                },
+                "required": ["priority_concerns","key_ingredients","care_direction"]
+            },
+            "moisture_plan": {
+                "type": "object",
+                "properties": {
+                    "moisture_level": {"type": "string"},
+                    "need_emulsion": {"type": "boolean"},
+                    "need_cream": {"type": "boolean"},
+                    "need_double_moisture": {"type": "boolean"},
+                    "reason": {"type": "string"}
+                },
+                "required": ["moisture_level","need_emulsion","need_cream","need_double_moisture","reason"]
+            }
+        },
+        "required": ["skin_summary","scores","score_reasons","symmetry_analysis","skin_age_estimate","improvement_plan","moisture_plan"]
+    }
+
+
+def get_analysis_schema_phase2():
+    """Phase 2: ルーティン・商品候補のみ（テキストのみで呼ぶ）"""
+    product_candidate_schema = {
+        "type": "object",
+        "properties": {
+            "brand": {"type": "string"},
+            "name": {"type": "string"},
+            "category": {"type": "string"},
+            "confidence": {"type": "integer"},
+            "release_status": {"type": "string"},
+            "active_ingredients": {"type": "array", "items": {"type": "string"}},
+            "support_ingredients": {"type": "array", "items": {"type": "string"}},
+            "concerns": {"type": "array", "items": {"type": "string"}},
+            "skin_types": {"type": "array", "items": {"type": "string"}},
+            "sensitive_ok": {"type": "string"},
+            "retinol_level": {"type": "integer"},
+            "main_functions": {"type": "array", "items": {"type": "string"}},
+            "ingredient_focus": {"type": "array", "items": {"type": "string"}},
+            "ingredient_strength": {"type": "object"},
+            "formulation": {"type": "array", "items": {"type": "string"}},
+            "technology": {"type": "array", "items": {"type": "string"}},
+            "texture": {"type": "string"},
+            "contraindications": {"type": "array", "items": {"type": "string"}},
+            "availability_japan": {"type": "array", "items": {"type": "string"}},
+            "uv_level": {"type": "object"},
+            "reason": {"type": "string"}
+        },
+        "required": [
+            "brand","name","category","confidence","release_status",
+            "active_ingredients","support_ingredients","concerns","skin_types",
+            "sensitive_ok","retinol_level","main_functions","ingredient_focus",
+            "ingredient_strength","formulation","technology","texture",
+            "contraindications","availability_japan","uv_level","reason"
+        ]
+    }
+    step_schema = {
+        "type": "object",
+        "properties": {
+            "category": {"type": "string"},
+            "role": {"type": "string"},
+            "purpose": {"type": "string"},
+            "ingredient_focus": {"type": "string"},
+            "risk_note": {"type": "string"},
+            "priority": {"type": "integer"},
+            "use_days": {"type": "array", "items": {"type": "string"}},
+            "product_candidates": {"type": "array", "items": product_candidate_schema},
+            "selection_reason": {"type": "string"}
+        },
+        "required": ["category","role","purpose","ingredient_focus","risk_note","priority","use_days","product_candidates"]
+    }
+    routine_strategy_schema = {
+        "type": "object",
+        "properties": {
+            "strategy_type": {"type": "string"},
+            "overall_policy": {"type": "string"},
+            "morning_policy": {"type": "string"},
+            "night_policy": {"type": "string"},
+            "weekly_policy": {"type": "string"},
+            "active_care_frequency": {"type": "string"},
+            "recovery_care_frequency": {"type": "string"},
+            "rotation_targets": {"type": "array", "items": {"type": "string"}},
+            "avoid_combinations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "families": {"type": "array", "items": {"type": "string"}},
+                        "scope": {"type": "string"},
+                        "reason": {"type": "string"},
+                        "severity": {"type": "string"}
+                    },
+                    "required": ["families","reason","severity"]
+                }
+            },
+            "synergy_combinations": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "families": {"type": "array", "items": {"type": "string"}},
+                        "reason": {"type": "string"},
+                        "bonus": {"type": "string"}
+                    },
+                    "required": ["families","reason","bonus"]
+                }
+            },
+            "morning_order": {"type": "array", "items": {"type": "string"}},
+            "night_order": {"type": "array", "items": {"type": "string"}},
+            "reason": {"type": "string"}
+        },
+        "required": [
+            "strategy_type","overall_policy","morning_policy","night_policy","weekly_policy",
+            "active_care_frequency","recovery_care_frequency","rotation_targets",
+            "avoid_combinations","synergy_combinations","morning_order","night_order","reason"
+        ]
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "morning": {
+                "type": "object",
+                "properties": {"steps": {"type": "array", "items": step_schema}},
+                "required": ["steps"]
+            },
+            "night": {
+                "type": "object",
+                "properties": {"steps": {"type": "array", "items": step_schema}},
+                "required": ["steps"]
+            },
+            "weekly_care": {"type": "array", "items": step_schema},
+            "warnings": {"type": "array", "items": {"type": "string"}},
+            "routine_strategy": routine_strategy_schema
+        },
+        "required": ["morning","night","weekly_care","warnings","routine_strategy"]
+    }
+
+
 def get_analysis_schema():
     product_candidate_schema = {
         "type": "object",
@@ -12379,6 +12551,120 @@ def get_analysis_schema():
         ]
     }
 
+def build_analysis_prompt_phase1(user_data):
+    """Phase 1: 肌スコア・分析・改善方針のみ。画像3枚で呼ぶ。出力は小さい。"""
+    _concerns_ja = ', '.join([_CONCERN_LABELS_JA.get(c, c) for c in (user_data.get('concerns') or [])]) or '未回答'
+    return f"""肌分析AIです。3枚の肌画像（1:正面 2:左頬 3:右頬）を分析し、肌スコアと改善方針のみJSONで返す。ルーティン・商品候補は出力しない。
+
+【ユーザー情報】
+年齢:{user_data['age']} 皮脂:{user_data['oil']} 敏感度:{user_data['sens']} 予算:{user_data['budget']}
+悩み:{_concerns_ja}
+
+【スコア(0-100)】画像の視覚的事実のみ。同じ画像では必ず同じ値。
+85+:良好 65-84:軽微課題 45-64:改善余地 25-44:要改善 0-24:深刻
+oil_balance:テカリ均一さ redness:赤み面積 pores:毛穴の目立ち hydration:ツヤ水分感
+firmness:ハリたるみ acne:ニキビ炎症 dullness:くすみ barrier:肌表面の荒れ
+texture:キメ tone_evenness:色ムラシミ
+score_reasons:各スコアの画像的根拠を1文(15-30字)で。
+
+symmetry_analysis: score(0-100,左右差少=高)/summary/left_tendency/right_tendency。不明は控えめに。
+skin_age_estimate: 画像から15-70の整数で推定。
+skin_summary: 肌状態の総合コメント(30-60字)。
+improvement_plan: priority_concerns(配列)/key_ingredients(配列)/care_direction(短文)
+moisture_plan: moisture_level/need_emulsion(bool)/need_cream(bool)/need_double_moisture(bool)/reason
+
+JSONのみ返す。説明・Markdown・前置き禁止。JSONキーは英語、値は日本語。"""
+
+
+def build_analysis_prompt_phase2(user_data, phase1):
+    """Phase 2: ルーティン・商品候補。画像不要、phase1結果をコンテキストに使う。"""
+    _concerns_ja = ', '.join([_CONCERN_LABELS_JA.get(c, c) for c in (user_data.get('concerns') or [])]) or '未回答'
+    scores = phase1.get("scores", {})
+    ip = phase1.get("improvement_plan", {})
+    mp = phase1.get("moisture_plan", {})
+    _sk = ["oil_balance","redness","pores","hydration","firmness","acne","dullness","barrier","texture","tone_evenness"]
+    _score_line = " ".join(f"{k}={scores.get(k,'?')}" for k in _sk)
+    _pc = "/".join(ip.get("priority_concerns") or []) or "未設定"
+    _ki = "/".join(ip.get("key_ingredients") or []) or "未設定"
+    _cd = ip.get("care_direction") or "未設定"
+    _ml = mp.get("moisture_level","?")
+    _em = mp.get("need_emulsion","?")
+    _cr = mp.get("need_cream","?")
+    return f"""日本の市販スキンケアと肌分析に詳しい美容アドバイザーです。
+肌分析済みの結果をもとに、ルーティン構成と商品候補のみJSONで返す。画像分析は完了済み。
+
+【ユーザー情報】
+年齢:{user_data['age']} 皮脂:{user_data['oil']} 敏感度:{user_data['sens']} レチノール経験:{user_data['exp']} 予算:{user_data['budget']}
+悩み:{_concerns_ja}
+※悩みを優先してステップ構成する。
+
+【肌スコア(画像分析済)】
+{_score_line}
+
+【改善方針(分析済)】
+優先事項:{_pc}
+主要成分:{_ki}
+ケア方針:{_cd}
+保湿:moisture_level={_ml} need_emulsion={_em} need_cream={_cr}
+
+【カテゴリ固定】
+クレンジング/洗顔/化粧水/美容液/乳液/クリーム/日焼け止め/パック/ピーリング のみ。
+role: main/booster のみ。
+
+【ingredient_focus候補】
+ビタミンC/ナイアシンアミド/レチノール/レチナール/アゼライン酸/トラネキサム酸/PDRN/ペプチド/セラミド/ヒアルロン酸/CICA/ドクダミ/AHA/BHA/PHA/UV防御/低刺激
+
+【use_days】
+night・weekly_careの各stepに必ず設定。毎日OK=[],刺激成分=["月","木"]等,週1=["土"]。
+morning=[]固定。連続使用禁止成分は必ず間隔を空ける。
+weekly_care例: パック→["日"] ピーリング→["土"]
+
+【weekly_care】
+パック・ピーリングのみ。不要なら[]。
+ピーリング条件: texture/pores/dullness低スコアで角質ケア必要時のみ。
+パック条件: 乾燥・バリア低下顕著または刺激成分使用後の回復ケアが必要な時のみ。
+
+【product_candidates】
+各stepに3-4件必須(0-2件禁止)。現行販売中の正式名称確実な商品のみ。stepのcategoryと完全一致必須。
+
+各候補のフィールドルール:
+- confidence: 70未満出力禁止(90+:確実 80+:名称確実 70+:成分不確か)
+- release_status: current のみ
+- active_ingredients: 英語タグ(retinol/retinal/vitamin_c/niacinamide/azelaic_acid/ceramide/hyaluronic等)
+- concerns: pores/acne/redness/oil_control/dryness/barrier/dullness/whitening/aging から選択
+- skin_types: dry/oily/mixed/sensitive/normal(空配列禁止。ニキビ系→oily,mixed必須。セラミド系→dry,sensitive必須)
+- sensitive_ok: yes(低刺激・セラミドCICA主体)/no(レチノール・高濃度AHA/BHA主体)/unknown
+- retinol_level: レチノール系以外=0。低=1 中=2 高=3
+- main_functions: 保湿/バリア強化/鎮静ケア/毛穴改善/ニキビ予防/皮脂抑制/美白ケア/透明感向上/ハリ改善/エイジングケア/紫外線防御/キメ改善 から選択
+- ingredient_strength: {{成分: high/medium/low}}
+- formulation: low_irritation/barrier_formula/light_texture/rich_texture/fragrance_free/alcohol_free/oil_free/non_comedogenic/water_based/oil_based から選択
+- texture: light/watery/gel/medium/essence/cream/rich/oil/balm/foam/powder から選択
+- availability_japan: drugstore/amazon/rakuten/official_jp(必ず1つ以上。不明でもamazon/rakuten含める)
+- uv_level: 日焼け止めのみ{{spf,pa}}、他={{}}
+- reason: このstepに合う短い理由
+禁止: 架空商品/旧名称/廃盤品/カテゴリ違い/自信ない商品/抽象名
+
+【routine_strategy】
+strategy_type: fixed/rotation(攻め成分分散が必要な場合のみrotation)
+overall_policy/morning_policy/night_policy/weekly_policy
+active_care_frequency/recovery_care_frequency
+rotation_targets: ローテーション対象成分配列
+morning_order: 朝の使用順序配列(ブースターは化粧水前)
+night_order: 夜の使用順序配列
+reason: この肌状態に合う理由
+
+avoid_combinations(3件以上必須):
+[{{families:[タグA,タグB], scope:"same_session"/"any", reason:"この肌スコアに言及した理由", severity:"hard"/"soft"}}]
+タグ: retinoid/aha_bha/strong_vitamin_c/vitamin_c/azelaic/niacinamide/ceramide/barrier/peptide/pdrn
+同系統重複["retinoid","retinoid"]=「同種2製品禁止」。敏感度高・バリア低→hard多用。レチノール未経験→retinoidペアはhard。
+
+synergy_combinations(3件以上必須):
+[{{families:[タグA,タグB], reason:"この肌状態に基づく相乗理由", bonus:"high"/"medium"/"low"}}]
+タグはavoidと同じ+uv_protection
+
+JSONのみ返す。説明・Markdown・前置き禁止。JSONキーは英語、値は日本語。"""
+
+
 def build_analysis_prompt(user_data):
     _concerns_ja = ', '.join([_CONCERN_LABELS_JA.get(c, c) for c in (user_data.get('concerns') or [])]) or '未回答'
     return f"""あなたは日本の市販スキンケアと肌分析に詳しい美容アドバイザーです。
@@ -12587,12 +12873,12 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
         right_img
     )
 
-    cache_key = f"ai_candidate_schema_v4:{base_cache_key}"
+    cache_key = f"ai_candidate_schema_v5:{base_cache_key}"
 
     fallback_cache_keys = [
         cache_key,
+        f"ai_candidate_schema_v4:{base_cache_key}",
         f"ai_candidate_schema_v3:{base_cache_key}",
-        f"ai_candidate_schema_v2:{base_cache_key}",
     ]
 
     cached_analysis = get_gemini_cached_analysis(fallback_cache_keys)
@@ -12602,136 +12888,92 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
         return cached_analysis
 
     print("[GEMINI ANALYSIS CACHE MISS]", cache_key, flush=True)
-    schema = get_analysis_schema()
-    prompt = build_analysis_prompt(user_data)
 
+    # ===== Phase 1: 肌スコア・分析・改善方針（画像3枚、小出力） =====
+    _t1 = time.time()
+    print("[GEMINI PHASE1 START] 肌スコア・分析", flush=True)
     try:
-        response = call_gemini_with_retry(
+        response1 = call_gemini_with_retry(
             client,
             ANALYSIS_MODEL,
-            contents=[prompt, front_img, left_img, right_img],
+            contents=[build_analysis_prompt_phase1(user_data), front_img, left_img, right_img],
             config=types.GenerateContentConfig(
                 temperature=0,
                 top_p=0.05,
                 seed=42,
                 response_mime_type="application/json",
-                response_schema=schema
+                response_schema=get_analysis_schema_phase1()
             ),
-            max_retries=1,  # タイムアウト時リトライしない（2回×90s=180sでgunicorn SIGKILL防止）
-            timeout=120     # 出力JSON大のため90s→120sに延長
+            max_retries=1,
+            timeout=60  # 画像3枚+小出力: 60s
         )
-
-        raw_text = response.text.strip()
-
+        _raw1 = response1.text.strip()
+        phase1 = json.loads(_raw1)
+        print(f"[GEMINI PHASE1 DONE] elapsed={time.time()-_t1:.1f}s scores={phase1.get('scores',{})}", flush=True)
     except Exception as e:
         error_text = str(e)
-
         if "503" in error_text or "UNAVAILABLE" in error_text:
             for fallback_key in fallback_cache_keys:
                 if fallback_key in GEMINI_ANALYSIS_CACHE:
-                    print(
-                        "[GEMINI FALLBACK CACHE HIT]",
-                        fallback_key,
-                        flush=True
-                    )
+                    print("[GEMINI FALLBACK CACHE HIT]", fallback_key, flush=True)
                     cached = copy.deepcopy(GEMINI_ANALYSIS_CACHE[fallback_key])
                     cached.setdefault("warnings", [])
-                    cached["warnings"].append(
-                        "現在AI診断が混み合っているため、同じ入力の前回診断結果をもとに表示しています。"
-                    )
+                    cached["warnings"].append("現在AI診断が混み合っているため、同じ入力の前回診断結果をもとに表示しています。")
                     return cached
-
         raise
-    print("=== Gemini raw response ===")
-    print(raw_text)
 
-    if raw_text.startswith("```json"):
-        raw_text = raw_text.replace("```json", "", 1).strip()
-    if raw_text.startswith("```"):
-        raw_text = raw_text.replace("```", "", 1).strip()
-    if raw_text.endswith("```"):
-        raw_text = raw_text[:-3].strip()
-
-    start = raw_text.find("{")
-    end = raw_text.rfind("}")
-
-    if start != -1 and end != -1 and end > start:
-        raw_text = raw_text[start:end + 1]
-
+    # ===== Phase 2: ルーティン・商品候補（テキストのみ、大出力） =====
+    _t2 = time.time()
+    print("[GEMINI PHASE2 START] ルーティン・商品候補", flush=True)
     try:
-        data = json.loads(raw_text)
-
-        print(
-            "[ROUTINE STRATEGY]",
-            json.dumps(
-                data.get("routine_strategy", {}),
-                ensure_ascii=False
+        response2 = call_gemini_with_retry(
+            client,
+            ANALYSIS_MODEL,
+            contents=[build_analysis_prompt_phase2(user_data, phase1)],
+            config=types.GenerateContentConfig(
+                temperature=0,
+                top_p=0.05,
+                seed=42,
+                response_mime_type="application/json",
+                response_schema=get_analysis_schema_phase2()
             ),
-            flush=True
+            max_retries=1,
+            timeout=90  # テキストのみ+大出力: 90s
         )
+        _raw2 = response2.text.strip()
+        phase2 = json.loads(_raw2)
+        print(f"[GEMINI PHASE2 DONE] elapsed={time.time()-_t2:.1f}s", flush=True)
+    except Exception as e:
+        raise
 
-        # ルーティン方針の詳細ログ（ステップ構成と成分指示の確認用）
-        def _fmt_steps(steps):
-            if not isinstance(steps, list):
-                return []
-            return [
-                {
-                    "category":        s.get("category", ""),
-                    "role":            s.get("role", ""),
-                    "ingredient_focus": s.get("ingredient_focus", ""),
-                    "purpose":         s.get("purpose", ""),
-                    "use_days":        s.get("use_days", []),
-                }
-                for s in steps if isinstance(s, dict)
-            ]
+    # ===== マージ =====
+    data = {**phase1, **phase2}
+    data.setdefault("warnings", [])
 
-        print(
-            "[ROUTINE PLAN] morning steps:",
-            json.dumps(_fmt_steps(data.get("morning", {}).get("steps", [])), ensure_ascii=False),
-            flush=True,
-        )
-        print(
-            "[ROUTINE PLAN] night steps:",
-            json.dumps(_fmt_steps(data.get("night", {}).get("steps", [])), ensure_ascii=False),
-            flush=True,
-        )
-        print(
-            "[ROUTINE PLAN] weekly_care:",
-            json.dumps(_fmt_steps(data.get("weekly_care", [])), ensure_ascii=False),
-            flush=True,
-        )
-
-        # レチノール × アゼライン酸 高濃度クリーム 同時指定チェック
-        _night_ingredients = [
-            s.get("ingredient_focus", "")
-            for s in data.get("night", {}).get("steps", [])
-            if isinstance(s, dict)
+    # ルーティンログ
+    def _fmt_steps(steps):
+        if not isinstance(steps, list):
+            return []
+        return [
+            {"category": s.get("category",""), "role": s.get("role",""),
+             "ingredient_focus": s.get("ingredient_focus",""), "use_days": s.get("use_days",[])}
+            for s in steps if isinstance(s, dict)
         ]
-        _has_retinol  = any("retinol" in str(i).lower() or "レチノール" in str(i) for i in _night_ingredients)
-        _has_azelaic  = any("azelaic" in str(i).lower() or "アゼライン" in str(i) for i in _night_ingredients)
-        if _has_retinol and _has_azelaic:
-            print(
-                "[ROUTINE WARN] ⚠ Night routine contains BOTH retinol AND azelaic acid — check use_days separation",
-                flush=True,
-            )
-        else:
-            print(
-                f"[ROUTINE CHECK] retinol={'YES' if _has_retinol else 'no'}  azelaic_acid={'YES' if _has_azelaic else 'no'}",
-                flush=True,
-            )
+    print("[ROUTINE PLAN] morning:", json.dumps(_fmt_steps(data.get("morning",{}).get("steps",[])), ensure_ascii=False), flush=True)
+    print("[ROUTINE PLAN] night:", json.dumps(_fmt_steps(data.get("night",{}).get("steps",[])), ensure_ascii=False), flush=True)
+    print("[ROUTINE PLAN] weekly_care:", json.dumps(_fmt_steps(data.get("weekly_care",[])), ensure_ascii=False), flush=True)
 
-        set_gemini_cached_analysis(cache_key, data)
+    # レチノール × アゼライン酸チェック
+    _night_ingredients = [s.get("ingredient_focus","") for s in data.get("night",{}).get("steps",[]) if isinstance(s, dict)]
+    _has_retinol = any("retinol" in str(i).lower() or "レチノール" in str(i) for i in _night_ingredients)
+    _has_azelaic = any("azelaic" in str(i).lower() or "アゼライン" in str(i) for i in _night_ingredients)
+    if _has_retinol and _has_azelaic:
+        print("[ROUTINE WARN] ⚠ Night routine contains BOTH retinol AND azelaic acid — check use_days separation", flush=True)
+    else:
+        print(f"[ROUTINE CHECK] retinol={'YES' if _has_retinol else 'no'}  azelaic_acid={'YES' if _has_azelaic else 'no'}", flush=True)
 
-        return data
-
-    except json.JSONDecodeError as e:
-        print("===== GEMINI JSON ERROR =====")
-        print(e)
-        print("===== RAW TEXT =====")
-        print(raw_text)
-        print("====================")
-
-        raise ValueError("AIの診断結果JSONが壊れています。もう一度診断してください。")
+    set_gemini_cached_analysis(cache_key, data)
+    return data
 
 def detailed_analysis_with_gemini(client, user_data, result_data):
 
