@@ -46,13 +46,10 @@ VERIFIED_PRODUCTS_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
 GEMINI_EVAL_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
 
 # ===== Gemini Models =====
-ANALYSIS_MODEL = "gemini-2.5-flash"       # 肌分析: 画像理解精度優先（2.0-flash無料枠切れのため移行）
-
-CANDIDATE_MODEL = "gemini-2.0-flash-lite"  # 候補選定: 速度優先
-
-ROUTINE_MODEL = "gemini-2.0-flash-lite"    # ルーティン生成: 速度優先
-
-DETAIL_MODEL = "gemini-2.0-flash-lite"     # 商品評価・名前整形: 速度優先
+ANALYSIS_MODEL = "gemini-2.5-flash"   # 肌分析 Phase1/2
+CANDIDATE_MODEL = "gemini-2.5-flash"  # 候補選定（2.0-flash-lite 429対策で統一）
+ROUTINE_MODEL = "gemini-2.5-flash"    # ルーティン生成（未使用・予備）
+DETAIL_MODEL = "gemini-2.5-flash"     # 商品評価・名前整形（2.0-flash-lite 429対策で統一）
 
 #DB_POOL = SimpleConnectionPool(
 #   minconn=1,
