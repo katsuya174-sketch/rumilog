@@ -1180,10 +1180,13 @@ def clean_rakuten_image_url(url):
 
 _last_rakuten_request_time = 0
 _rakuten_rate_lock = threading.Lock()
+_rakuten_call_count_lock = threading.Lock()
 
 # Gemini評価キャッシュ用ロック（並列Phase B対応）
 import threading as _threading_mod
 _gemini_eval_cache_lock = _threading_mod.Lock()
+
+RAKUTEN_RATE_GAP = 0.8  # 1.2s→0.8s: 12ステップ×1.2s=14.4s→9.6sに短縮
 
 def wait_for_rakuten_rate_limit():
     """スレッドセーフなレートリミッター。
@@ -1193,9 +1196,8 @@ def wait_for_rakuten_rate_limit():
     global _last_rakuten_request_time
     with _rakuten_rate_lock:
         now = time.time()
-        next_allowed = _last_rakuten_request_time + 1.2
+        next_allowed = _last_rakuten_request_time + RAKUTEN_RATE_GAP
         sleep_secs = max(0.0, next_allowed - now)
-        # スロットを予約してから解放（スリープ中に他スレッドが次スロットを予約可能）
         _last_rakuten_request_time = max(now, next_allowed)
     if sleep_secs > 0:
         time.sleep(sleep_secs)
@@ -2914,9 +2916,12 @@ def _rakuten_criteria_search_single(keyword, category):
     if time.time() < RAKUTEN_COOLDOWN_UNTIL:
         return []
 
-    if _rakuten_criteria_call_count >= MAX_RAKUTEN_CRITERIA_CALLS:
-        print("[RAKUTEN CRITERIA] session call limit reached", flush=True)
-        return []
+    with _rakuten_call_count_lock:
+        if _rakuten_criteria_call_count >= MAX_RAKUTEN_CRITERIA_CALLS:
+            print("[RAKUTEN CRITERIA] session call limit reached", flush=True)
+            return []
+        _rakuten_criteria_call_count += 1
+        current_count = _rakuten_criteria_call_count
 
     keyword = clean_rakuten_keyword(keyword)
     if not keyword:
@@ -2927,10 +2932,12 @@ def _rakuten_criteria_search_single(keyword, category):
 
     if cache_key in _rakuten_criteria_cache:
         print(f"[RAKUTEN CRITERIA CACHE HIT] {cache_key}", flush=True)
+        # ロック内でインクリメントしたのでデクリメントして返す
+        with _rakuten_call_count_lock:
+            _rakuten_criteria_call_count -= 1
         return _rakuten_criteria_cache[cache_key]
 
-    print(f"[RAKUTEN CRITERIA SEARCH] keyword={keyword}", flush=True)
-    _rakuten_criteria_call_count += 1
+    print(f"[RAKUTEN CRITERIA SEARCH] keyword={keyword} (call#{current_count})", flush=True)
 
     endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401"
     headers = {
@@ -2939,8 +2946,11 @@ def _rakuten_criteria_search_single(keyword, category):
         "User-Agent": "Mozilla/5.0",
     }
 
+    _t_func_start = time.time()
     try:
+        _t_wait_start = time.time()
         wait_for_rakuten_rate_limit()
+        _wait_elapsed = time.time() - _t_wait_start
 
         params = {
             "applicationId": RAKUTEN_APP_ID,
@@ -2955,13 +2965,18 @@ def _rakuten_criteria_search_single(keyword, category):
         _genre_id = get_rakuten_genre_id(category, parent_only=False)
         if _genre_id:
             params["genreId"] = _genre_id
-            print(f"[RAKUTEN CRITERIA] genreId={_genre_id} for category={category}", flush=True)
 
         if RAKUTEN_AFFILIATE_ID:
             params["affiliateId"] = RAKUTEN_AFFILIATE_ID
 
+        _t_http = time.time()
         res = requests.get(endpoint, params=params, headers=headers, timeout=(2, 4))
-        print(f"[RAKUTEN CRITERIA STATUS] {res.status_code}", flush=True)
+        _http_elapsed = time.time() - _t_http
+        print(
+            f"[RAKUTEN TIMING] keyword={keyword!r} wait={_wait_elapsed:.2f}s http={_http_elapsed:.2f}s "
+            f"status={res.status_code} call#{current_count}",
+            flush=True
+        )
 
         if res.status_code == 429:
             retry_seconds = 10
@@ -2985,10 +3000,15 @@ def _rakuten_criteria_search_single(keyword, category):
         items = payload.get("items") or payload.get("Items") or []
 
         if not items and "genreId" in params:
-            print(f"[RAKUTEN CRITERIA] 0 items with genreId={params['genreId']}, retrying without genreId", flush=True)
+            # genreIdリトライ: レートリミット消費を避けるため最小間隔(0.3s)のみ待機
             params_no_genre = {k: v for k, v in params.items() if k != "genreId"}
-            wait_for_rakuten_rate_limit()
+            time.sleep(0.3)
+            _t_retry = time.time()
             res2 = requests.get(endpoint, params=params_no_genre, headers=headers, timeout=(2, 4))
+            print(
+                f"[RAKUTEN TIMING] genreId-retry keyword={keyword!r} http={time.time()-_t_retry:.2f}s status={res2.status_code}",
+                flush=True
+            )
             if res2.status_code == 200:
                 payload = res2.json()
                 items = payload.get("items") or payload.get("Items") or []
@@ -3048,10 +3068,14 @@ def _rakuten_criteria_search_single(keyword, category):
             flush=True
         )
         _rakuten_criteria_cache[cache_key] = results
+        print(
+            f"[RAKUTEN TIMING] total keyword={keyword!r} {time.time()-_t_func_start:.2f}s → {len(results)}件",
+            flush=True
+        )
         return results
 
     except Exception as e:
-        print(f"[RAKUTEN CRITERIA ERROR] {repr(e)}", flush=True)
+        print(f"[RAKUTEN CRITERIA ERROR] {repr(e)} total={time.time()-_t_func_start:.2f}s", flush=True)
         _rakuten_criteria_cache[cache_key] = []
         return []
 
@@ -3123,19 +3147,23 @@ def search_rakuten_for_step(step, improvement_plan):
                 seen_keys.add(k)
                 all_results.append(r)
 
+    _t_step = time.time()
     q1 = make_q1()
     if q1:
         collect(_rakuten_criteria_search_single(q1, category))
 
-    # Q1が不十分なときだけQ2を実行
-    if len(all_results) < 8:
+    # Q1が5件未満のときだけQ2を実行（8→5に変更してQ2実行頻度を削減）
+    q2_ran = False
+    if len(all_results) < 5:
         q2 = make_q2()
         if q2 and normalize_text(q2) != normalize_text(q1 or ""):
             collect(_rakuten_criteria_search_single(q2, category))
+            q2_ran = True
 
     step_label = str(step.get("step_name") or step.get("category") or "")
     print(
-        f"[RAKUTEN FOR STEP] step={step_label!r} total={len(all_results)}",
+        f"[RAKUTEN FOR STEP] step={step_label!r} q1={bool(q1)} q2={q2_ran} "
+        f"total={len(all_results)} elapsed={time.time()-_t_step:.2f}s",
         flush=True
     )
     # prefetch→Gemini評価の橋渡し用にステップキーで保存
@@ -3309,10 +3337,13 @@ def gemini_evaluate_rakuten_batch(step, rakuten_products):
         ]
 
     if not uncached:
+        step_label2 = str(step.get("step_name") or step.get("category") or "")
+        print(f"[GEMINI EVAL] step={step_label2!r} all cached → skip", flush=True)
         return
 
     step_label = str(step.get("step_name") or step.get("category") or "")
     print(f"[GEMINI EVAL] step={step_label!r} evaluating {len(uncached)} products", flush=True)
+    _t_gemini = time.time()
 
     try:
         prompt = _build_product_eval_prompt(step, uncached)
@@ -3391,6 +3422,11 @@ def gemini_evaluate_rakuten_batch(step, rakuten_products):
 
     except Exception as e:
         print(f"[GEMINI EVAL ERROR] step={step_label!r} {repr(e)}", flush=True)
+    finally:
+        print(
+            f"[GEMINI TIMING] step={step_label!r} items={len(uncached)} elapsed={time.time()-_t_gemini:.2f}s",
+            flush=True
+        )
 
 
 def apply_gemini_product_eval(product):
@@ -8969,12 +9005,22 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
     if not all_steps:
         return
 
-    print(f"[PREFETCH] 全{len(all_steps)}ステップのRakuten検索を並列実行 workers={max_workers}", flush=True)
     t0 = time.time()
+    print(
+        f"[PREFETCH START] steps={len(all_steps)} rate_gap={RAKUTEN_RATE_GAP}s workers={max_workers}",
+        flush=True
+    )
 
     def fetch(step):
+        t_step = time.time()
         try:
-            return search_rakuten_for_step(step, improvement_plan)
+            result = search_rakuten_for_step(step, improvement_plan)
+            label = str(step.get("step_name") or step.get("category") or "")
+            print(
+                f"[PREFETCH STEP] {label!r} done in {time.time()-t_step:.2f}s items={len(result)}",
+                flush=True
+            )
+            return result
         except Exception as e:
             print(f"[PREFETCH ERROR] {repr(e)}", flush=True)
             return []
@@ -8982,9 +9028,10 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(fetch, step): step for step in all_steps}
         for future in concurrent.futures.as_completed(futures):
-            future.result()  # 例外を再スローさせるため
+            future.result()
 
-    print(f"[PREFETCH] Rakuten完了 {time.time() - t0:.1f}s", flush=True)
+    t_phase_a = time.time() - t0
+    print(f"[PREFETCH] Phase-A(Rakuten) {t_phase_a:.1f}s", flush=True)
 
     # Phase B: Gemini バッチ商品評価（並列実行 + ファイルキャッシュ）
     _load_gemini_eval_cache_if_needed()
@@ -9001,6 +9048,10 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
         if products_for_step:
             steps_to_eval.append((step, products_for_step))
 
+    print(
+        f"[PREFETCH] Phase-B start: {len(steps_to_eval)}ステップをGemini評価 workers=3",
+        flush=True
+    )
     if steps_to_eval:
         with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
             futures = [
@@ -9014,7 +9065,12 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
                     print(f"[PREFETCH GEMINI ERROR] {repr(e)}", flush=True)
 
     _save_gemini_eval_cache()
-    print(f"[PREFETCH] Gemini評価完了 {time.time() - t1:.1f}s", flush=True)
+    t_phase_b = time.time() - t1
+    t_total = time.time() - t0
+    print(
+        f"[PREFETCH TIMELINE] Phase-A={t_phase_a:.1f}s Phase-B={t_phase_b:.1f}s Total={t_total:.1f}s",
+        flush=True
+    )
 
 
 def assign_products_to_all_steps(data, products, user_data, budget_value):
