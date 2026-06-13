@@ -3340,18 +3340,34 @@ def _save_gemini_eval_cache():
             print(f"[GEMINI EVAL CACHE SAVE ERROR] {repr(e)}", flush=True)
 
 
+# カテゴリ別Gemini評価上限（メモリ・コスト・レイテンシ削減）
+_GEMINI_EVAL_LIMIT_BY_CATEGORY = {
+    "美容液": 5, "化粧水": 5, "乳液": 5, "クリーム": 5,
+    "洗顔": 3, "クレンジング": 3, "日焼け止め": 3, "パック": 3, "ピーリング": 3,
+}
+_GEMINI_EVAL_LIMIT_DEFAULT = 3
+
+
+def _gemini_eval_limit(step):
+    """ステップのカテゴリに応じたGemini評価上限件数を返す。"""
+    category = str(step.get("category") or "").strip()
+    return _GEMINI_EVAL_LIMIT_BY_CATEGORY.get(category, _GEMINI_EVAL_LIMIT_DEFAULT)
+
+
 def gemini_evaluate_rakuten_batch(step, rakuten_products):
     """
-    楽天商品を最大10件まとめてGeminiで評価し、結果を _gemini_product_eval_cache に保存する。
+    楽天商品をカテゴリ別上限件数まとめてGeminiで評価し、結果を _gemini_product_eval_cache に保存する。
     キャッシュ済みの商品はスキップする。スレッドセーフ（並列Phase B対応）。
     """
     if not rakuten_products:
         return
 
+    limit = _gemini_eval_limit(step)
+
     # 未キャッシュ商品だけを対象にする（ロック内でスナップショット取得）
     with _gemini_eval_cache_lock:
         uncached = [
-            p for p in rakuten_products[:10]
+            p for p in rakuten_products[:limit]
             if normalize_product_name(str(p.get("rakuten_title") or p.get("name") or ""))
             not in _gemini_product_eval_cache
         ]
@@ -3362,7 +3378,7 @@ def gemini_evaluate_rakuten_batch(step, rakuten_products):
         return
 
     step_label = str(step.get("step_name") or step.get("category") or "")
-    print(f"[GEMINI EVAL] step={step_label!r} evaluating {len(uncached)} products", flush=True)
+    print(f"[GEMINI EVAL] step={step_label!r} limit={limit} evaluating {len(uncached)} products", flush=True)
     _t_gemini = time.time()
 
     try:
