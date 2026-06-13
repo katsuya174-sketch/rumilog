@@ -320,7 +320,10 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2, 
             print(f"[GEMINI TIMEOUT] {e} attempt={attempt + 1}/{max_retries}", flush=True)
             if attempt >= max_retries - 1:
                 raise
-            time.sleep(2)
+            # タイムアウト後は少し待ってからリトライ（指数バックオフ）
+            _backoff = 3 * (attempt + 1)
+            print(f"[GEMINI TIMEOUT RETRY] waiting {_backoff}s before retry", flush=True)
+            time.sleep(_backoff)
 
         except (errors.ServerError, errors.APIError) as e:
             last_error = e
@@ -11967,7 +11970,7 @@ def extract_user_data(request):
     }
 
 
-def resize_for_gemini(file, max_size=640):
+def resize_for_gemini(file, max_size=512):
     img = Image.open(io.BytesIO(file.read()))
     img = ImageOps.exif_transpose(img)
     img = img.convert("RGB")
@@ -13033,7 +13036,8 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
                 response_mime_type="application/json",
                 response_schema=schema
             ),
-            max_retries=1
+            max_retries=2,  # タイムアウト時に1回リトライ
+            timeout=90      # 画像3枚+長プロンプトのため60s→90sに延長
         )
 
         raw_text = response.text.strip()
