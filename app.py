@@ -3285,8 +3285,10 @@ def _build_product_eval_prompt(step, products):
     )
 
 
+_GEMINI_EVAL_CACHE_MAX = 500  # メモリ上の最大保持件数（Renderフリープラン対応）
+
 def _load_gemini_eval_cache_if_needed():
-    """gemini_product_eval_cache.json からメモリキャッシュにロード（初回のみ）。"""
+    """gemini_product_eval_cache.json からメモリキャッシュにロード（初回のみ、最新500件）。"""
     global _gemini_product_eval_cache, _gemini_eval_cache_loaded
     if _gemini_eval_cache_loaded:
         return
@@ -3298,18 +3300,22 @@ def _load_gemini_eval_cache_if_needed():
                 data = json.load(f)
             if isinstance(data, dict):
                 now = time.time()
-                loaded = 0
-                for k, v in data.items():
-                    if not isinstance(v, dict):
-                        continue
-                    cached_at = v.get("cached_at", 0)
-                    if now - cached_at > GEMINI_EVAL_CACHE_TTL_SECONDS:
-                        continue
+                # TTL内のものだけ抽出し、新しい順に最大500件をロード
+                valid = [
+                    (k, v) for k, v in data.items()
+                    if isinstance(v, dict)
+                    and now - v.get("cached_at", 0) <= GEMINI_EVAL_CACHE_TTL_SECONDS
+                ]
+                valid.sort(key=lambda x: x[1].get("cached_at", 0), reverse=True)
+                for k, v in valid[:_GEMINI_EVAL_CACHE_MAX]:
                     _gemini_product_eval_cache[k] = {
                         key: val for key, val in v.items() if key != "cached_at"
                     }
-                    loaded += 1
-                print(f"[GEMINI EVAL CACHE] ファイルから{loaded}件ロード", flush=True)
+                print(
+                    f"[GEMINI EVAL CACHE] ファイルから{len(_gemini_product_eval_cache)}件ロード"
+                    f"（全{len(valid)}件中）",
+                    flush=True
+                )
         except FileNotFoundError:
             pass
         except Exception as e:
@@ -9011,6 +9017,7 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
     スコアリングループはキャッシュヒットで瞬時に返すため、
     並列プリフェッチによって総診断時間を大幅短縮できる。
     """
+    global _step_rakuten_results, _rakuten_criteria_cache
     import concurrent.futures
 
     all_steps = []
@@ -9069,20 +9076,16 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
             steps_to_eval.append((step, products_for_step))
 
     print(
-        f"[PREFETCH] Phase-B start: {len(steps_to_eval)}ステップをGemini評価 workers=3",
+        f"[PREFETCH] Phase-B start: {len(steps_to_eval)}ステップをGemini評価 workers=1",
         flush=True
     )
     if steps_to_eval:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-            futures = [
-                executor.submit(gemini_evaluate_rakuten_batch, s, p)
-                for s, p in steps_to_eval
-            ]
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    print(f"[PREFETCH GEMINI ERROR] {repr(e)}", flush=True)
+        # メモリ節約のため直列実行（max_workers=1）
+        for s, p in steps_to_eval:
+            try:
+                gemini_evaluate_rakuten_batch(s, p)
+            except Exception as e:
+                print(f"[PREFETCH GEMINI ERROR] {repr(e)}", flush=True)
 
     _save_gemini_eval_cache()
     t_phase_b = time.time() - t1
@@ -9091,6 +9094,10 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
         f"[PREFETCH TIMELINE] Phase-A={t_phase_a:.1f}s Phase-B={t_phase_b:.1f}s Total={t_total:.1f}s",
         flush=True
     )
+
+    # prefetch完了後にセッションキャッシュを解放（Gemini評価はファイルキャッシュに永続化済み）
+    _step_rakuten_results = {}
+    _rakuten_criteria_cache = {}
 
 
 def assign_products_to_all_steps(data, products, user_data, budget_value):
@@ -13832,10 +13839,11 @@ def lab_test_function():
             # ③ AI分析
             # =========================
 
-            # 診断ごとにcriteria検索キャッシュ/カウンターをリセット
-            global _rakuten_criteria_cache, _rakuten_criteria_call_count
+            # 診断ごとにセッションキャッシュをリセット（メモリリーク防止）
+            global _rakuten_criteria_cache, _rakuten_criteria_call_count, _step_rakuten_results
             _rakuten_criteria_cache = {}
             _rakuten_criteria_call_count = 0
+            _step_rakuten_results = {}
 
             try:
                 print("[LAB CHECK] before Gemini", flush=True)

@@ -4,5 +4,5 @@ import os
 # 環境変数 TIMEOUT が設定されている場合はそちらを優先するが、最低120sを保証する
 timeout = max(120, int(os.environ.get("TIMEOUT", "120")))
 
-workers = int(os.environ.get("WEB_CONCURRENCY", "2"))
+workers = int(os.environ.get("WEB_CONCURRENCY", "1"))  # Renderフリープラン512MB対応
 bind = f"0.0.0.0:{os.environ.get('PORT', '10000')}"
