@@ -12380,525 +12380,88 @@ def get_analysis_schema():
     }
 
 def build_analysis_prompt(user_data):
-    return f"""
-あなたは日本の市販スキンケアと肌分析に詳しい美容アドバイザーです。
-肌画像とユーザー情報から、客観的分析、原因推定、改善計画、商品候補作成を行ってください。
+    _concerns_ja = ', '.join([_CONCERN_LABELS_JA.get(c, c) for c in (user_data.get('concerns') or [])]) or '未回答'
+    return f"""あなたは日本の市販スキンケアと肌分析に詳しい美容アドバイザーです。
+肌画像（1:正面 2:左頬 3:右頬）とユーザー情報を分析し、JSONのみ返す。
 
 【ユーザー情報】
-記録日: {user_data['record_date']}
-年齢: {user_data['age']}
-皮脂: {user_data['oil']}
-敏感度: {user_data['sens']}
-レチノール経験: {user_data['exp']}
-予算: {user_data['budget']}
-肌の悩み（ユーザー申告）: {', '.join([_CONCERN_LABELS_JA.get(c, c) for c in (user_data.get('concerns') or [])]) or '未回答'}
+年齢:{user_data['age']} 皮脂:{user_data['oil']} 敏感度:{user_data['sens']} レチノール経験:{user_data['exp']} 予算:{user_data['budget']}
+悩み:{_concerns_ja}
+※悩みをスコア低項目より優先してステップ構成する。
 
-※「肌の悩み」はユーザーが最も改善したい優先事項です。スコアが低い項目より、ユーザー申告の悩みを優先的にアドレスする商品ステップを構成してください。
+【スコア(0-100)】画像の視覚的事実のみ。同じ画像・情報では必ず同じ値。
+85+:良好 65-84:軽微課題 45-64:改善余地 25-44:要改善 0-24:深刻
+oil_balance:テカリ均一さ redness:赤み面積 pores:毛穴の目立ち hydration:ツヤ水分感
+firmness:ハリたるみ acne:ニキビ炎症 dullness:くすみ barrier:肌表面の荒れ
+texture:キメ tone_evenness:色ムラシミ
+score_reasons:各スコアの画像的根拠を1文(15-30字)で記述。
 
-【画像情報】
-1枚目: 正面
-2枚目: 左頬
-3枚目: 右頬
-
-【左右差分析】
-正面、左頬、右頬の画像から左右差を評価する。
-
-symmetry_analysis:
-score:
-左右差が少ないほど高スコア。
-0〜100の整数。
-
-summary:
-左右差の全体要約。
-
-left_tendency:
-左頬に見られる傾向。
-例: 赤みがやや強い / 毛穴が目立つ / 色ムラが少ない
-
-right_tendency:
-右頬に見られる傾向。
-例: 毛穴がやや目立つ / 赤みが少ない / 色素沈着が目立つ
-
-画像から分からない場合は断定せず、控えめに記載する。
-
-【肌年齢推定】
-skin_age_estimate:
-画像から見た肌状態をもとに、肌年齢を年齢（整数）で推定する。
-実年齢より若く見える肌は低め、老化が進んでいる場合は高めに設定する。
-15〜70の整数で返す。画像から判断が難しい場合は実年齢に近い値とする。
-
-【診断方針】
-・画像から確認できる事実のみを評価する。
-・画像から分からないことは断定しない。
-・同じ画像・同じユーザー情報では、必ず同じスコアを返す。スコアは推測ではなく画像の視覚的事実から導く。
-・採点は上記の基準に厳密に従い、主観的な印象でスコアを調整しない。
-・人気順、売れ筋順、流行順ではなく、悩みと成分適合を優先する。
-
-【評価項目】
-scores は0〜100の整数。画像から見えた事実に基づき、以下の基準で採点する。
-同じ画像・同じ情報では必ず同じスコアを返すこと。
-
-採点基準（全項目共通）:
-85〜100: 非常に良好。問題はほぼ見られない
-65〜84: 良好。軽微な課題はあるが概ね健康的
-45〜64: 標準。改善の余地がある状態
-25〜44: 要改善。明らかな問題が見られる
-0〜24: 深刻。強い症状・問題が複数見られる
-
-各項目の採点ポイント:
-oil_balance: テカリ・皮脂膜の均一さを評価。均一でサラサラ=高, 顕著なテカリまたは極度の乾燥=低
-redness: 赤みの有無・面積を評価。赤みなし=高, 広範囲の赤みやほてり=低
-pores: 毛穴の目立ちを評価。毛穴がほぼ見えない=高, 開き毛穴・黒ずみが目立つ=低
-hydration: 透明感・ツヤを評価。みずみずしいツヤがある=高, くすみ・乾燥感・粉吹き=低
-firmness: ハリ・弾力を評価。肌に張りがある=高, たるみ・シワが目立つ=低
-acne: ニキビ・炎症の有無を評価。なし=高, 炎症性ニキビが多数=低
-dullness: くすみ・肌トーンの明るさを評価。明るく均一=高, 全体的にくすんでいる=低
-barrier: 肌表面の状態を評価。なめらかで健全=高, 荒れ・敏感症状・乾燥ライン=低
-texture: キメの細かさを評価。キメが細かく整っている=高, 粗い・ざらつきが見える=低
-tone_evenness: 色ムラ・シミの有無を評価。均一=高, 色素沈着・シミ・ムラが目立つ=低
-
-以下を必ず出力する。
-
-oil_balance
-redness
-pores
-hydration
-firmness
-acne
-dullness
-barrier
-texture
-tone_evenness
-
-score_reasons:
-各スコア項目について、そのスコアの根拠を1文（15〜30字）で記述する。
-画像から見えた視覚的な事実のみに基づき、簡潔に記述する。
-出力例:
-{{
-  "oil_balance": "Tゾーンに皮脂のテカリが見られる",
-  "redness": "頰に目立った赤みは確認されない",
-  "pores": "鼻周辺に毛穴の開きが見られる",
-  "hydration": "頰にツヤがありみずみずしい印象",
-  "firmness": "フェイスラインにたるみは見られない",
-  "acne": "顎に炎症性ニキビが1〜2個確認される",
-  "dullness": "全体的に明るく透明感がある",
-  "barrier": "肌表面はなめらかで荒れは見られない",
-  "texture": "キメが細かく整っている",
-  "tone_evenness": "一部に色ムラが見られる"
-}}
+【分析】
+symmetry_analysis: score(0-100,左右差少=高)/summary/left_tendency/right_tendency。不明は控えめに。
+skin_age_estimate: 画像から肌年齢を15-70の整数で推定。
 
 【カテゴリ固定】
-category は必ず以下のみ。
-
-クレンジング
-洗顔
-化粧水
-美容液
-乳液
-クリーム
-日焼け止め
-パック
-ピーリング
-
-【role固定】
-role は main または booster のみ。
+クレンジング/洗顔/化粧水/美容液/乳液/クリーム/日焼け止め/パック/ピーリング のみ。
+role: main/booster のみ。
 
 【ingredient_focus候補】
-ビタミンC
-ナイアシンアミド
-レチノール
-レチナール
-アゼライン酸
-トラネキサム酸
-PDRN
-ペプチド
-セラミド
-ヒアルロン酸
-CICA
-ドクダミ
-AHA
-BHA
-PHA
-UV防御
-低刺激
-
-【use_days ルール】
-夜ルーティン（night）の各 step と週ケア（weekly_care）の各 step に use_days を必ず設定する。
-
-use_days:
-この step を使用する曜日のリスト。毎日使用する場合は空配列 [] にする。
-
-設定方針:
-- 成分の刺激性・濃度・ユーザーの肌状態（バリアスコア・赤みスコア・水分スコア等）を総合的に判断して決める。
-- コードは成分名や刺激性を一切判断しない。Gemini がここで全て決める。
-- 毎日使っても問題ない成分（保湿・バリア補修系等）は [] にする。
-- 刺激性が高く頻度制限が必要な成分は ["月", "木"] のように具体的な曜日を指定する。
-- 週1回の成分は ["土"] のように1曜日のみ指定する。
-- 連続使用禁止の成分は必ず1日以上の間隔を空けた曜日を選ぶ。
-- 朝ルーティン（morning）の step は use_days は [] で固定（毎日）。
-
-weekly_care の use_days:
-weekly_care の各 step にも use_days を設定する。
-ピーリングやパックを使う曜日を具体的に指定する。
-例: パック → ["日"]、ピーリング → ["土"]
-
-【週ケアルール】
-パックとピーリングは、肌状態から本当に必要と判断した場合のみ出力する。
-不要と判断した場合は weekly_care を [] にしてよい。
-
-ピーリングを出す条件（いずれかが当てはまる場合のみ）:
-- 毛穴詰まり・ざらつき・くすみ・キメ乱れが明確に目立つ
-- texture / pores / dullness スコアが低く角質ケアの優先度が高い
-
-パックを出す場合のみ:
-- 乾燥・赤み・バリア低下が顕著で集中ケアが必要
-- 刺激の強い成分（レチノール・AHA等）を夜に使っており回復ケアが必要
-
-頻度・使用曜日は以下の観点でAIが判断する:
-- 肌が弱い・赤みスコア低い → 週1回（例: ["日"]）
-- 比較的健康な肌でピーリングが有効 → 週1〜2回（例: ["水", "土"]）
-- パックは週1回が目安
-
-カテゴリは必ず「ピーリング」または「パック」。
-通常の美容液・化粧水・クリームを weekly_care に入れることは禁止。
-
-【週間運用方針】
-
-routine_strategy を出力する。
-
-overall_policy:
-今週の改善方針。
-
-reason:
-なぜその方針にしたか。
-
-rotation_needed:
-毎日同じ構成ではなく、
-使い分けを行うべきなら true。
-
-weekly_focus:
-今週重点的に改善する項目。
-
-例:
-[
- "毛穴",
- "赤み",
- "色素沈着"
-]
-
-【商品候補ルール】
-product_candidates は候補収集のみ。
-最終選定、順位付け、点数付けは行わない。
-
-各 step の product_candidates は object 配列にする。
-各stepのproduct_candidatesは必ず4件以上、最大5件出す。
-1件だけ、2件だけ、3件だけは禁止。
-0件は禁止。
-候補が少ない場合でも、同じcategoryとingredient_focusに合う現行品を6件以上出す。
-ただし、数合わせのためにカテゴリ違い・目的違い・旧品・廃盤品・正式名称に自信がない商品を出すことは禁止。
-必ずその step の category と同じカテゴリの商品だけを出す。
-カテゴリ違いの商品は禁止。
-
-例:
-category が「乳液」のstepに「クリーム」は出力禁止。
-category が「美容液」のstepに「クリーム」「化粧水」「パック」は出力禁止。
-ingredient_focus が「レチノール」のstepに、レチノール系ではない美白美容液だけを出すのは禁止。
-
-各候補は以下を必ず出力する。
-
-{{
-  "brand": "",
-  "name": "",
-  "category": "",
-  "confidence": 0,
-  "release_status": "current",
-  "active_ingredients": [],
-  "support_ingredients": [],
-  "concerns": [],
-  "skin_types": [],
-  "sensitive_ok": "unknown",
-  "retinol_level": 0,
-  "main_functions": [],
-  "ingredient_focus": [],
-  "ingredient_strength": {{}},
-  "formulation": [],
-  "technology": [],
-  "texture": "",
-  "contraindications": [],
-  "availability_japan": [],
-  "uv_level": {{}},
-  "reason": ""
-}}
-
-category:
-必ずstepのcategoryと完全一致させる。
-許可カテゴリ以外は禁止。
-
-active_ingredients:
-stepのingredient_focusに対応する主要成分を英語タグで出す。
-例:
-レチノール -> retinol
-レチナール -> retinal
-ビタミンC -> vitamin_c
-ナイアシンアミド -> niacinamide
-アゼライン酸 -> azelaic_acid
-セラミド -> ceramide
-
-concerns:
-以下から選ぶ。
-pores / acne / redness / oil_control / dryness / barrier / dullness / whitening / aging
-
-skin_types:
-以下から選ぶ。
-dry / oily / mixed / sensitive / normal
-
-sensitive_ok:
-yes: 敏感肌向け処方・低刺激・バリアケア系（セラミド・CICA・ドクダミ・パンテノール主体、ノンコメドジェニック等）
-no: 刺激のある成分が主体（レチノール・レチナール・高濃度AHA/BHA/PHAなど）
-unknown: 上記どちらでもない場合のみ。不明でもできる限り yes / no を判断する。
-
-skin_types:
-以下から1つ以上必ず選ぶ（空配列は禁止）。
-dry / oily / mixed / sensitive / normal
-全肌タイプ向けなら ["normal", "dry", "oily", "mixed"] を出す。
-敏感肌向けなら必ず "sensitive" を含める。
-目安：
-ニキビケア・皮脂抑制系 → oily, mixed を必ず含める
-セラミド・バリアケア系 → dry, sensitive を必ず含める
-乾燥ケア・高保湿系 → dry を必ず含める
-
-retinol_level:
-レチノール・レチナール系でなければ0。
-低刺激なら1、標準なら2、高濃度・強めなら3。
-
-main_functions:
-以下の値のみ使用する（それ以外は禁止）。
-保湿 / バリア強化 / 鎮静ケア / 毛穴改善 / ニキビ予防 / 皮脂抑制 / 美白ケア / 透明感向上 / ハリ改善 / エイジングケア / 紫外線防御 / キメ改善
-成分との対応目安：
-セラミド・CICA → バリア強化, 鎮静ケア
-ビタミンC・トラネキサム酸 → 美白ケア, 透明感向上
-ナイアシンアミド → 美白ケア, 毛穴改善, 皮脂抑制
-レチノール・ペプチド → エイジングケア, ハリ改善
-AHA/BHA/PHA → 毛穴改善, キメ改善
-ヒアルロン酸 → 保湿
-
-ingredient_focus:
-stepのingredient_focusと一致する成分・目的を配列で出す。
-
-ingredient_strength:
-主要成分の強さを high / medium / low で出す。
-目安：高濃度・医薬部外品 → high / 一般的な配合量 → medium / 微量配合・補助的 → low
-不明なら {{}}。
-
-formulation:
-以下の値から選ぶ（複数可）。
-low_irritation / barrier_formula / light_texture / rich_texture /
-fragrance_free / alcohol_free / oil_free / non_comedogenic / water_based / oil_based
-不明なら []。
-目安：セラミド・CICA系 → low_irritation, barrier_formula / ニキビ・毛穴系 → oil_free, non_comedogenic
-
-technology:
-リポソーム、ナノカプセル、安定化ビタミンCなど、分かる範囲で出す。
-不明なら []。
-
-texture:
-light / watery / gel / medium / essence / cream / rich / oil / balm / foam / powder から選ぶ。
-不明なら ""。
-
-contraindications:
-敏感肌注意、朝使用注意、レチノール併用注意などがあれば出す。
-不明なら []。
-
-availability_japan:
-日本で買える販路を分かる範囲で出す。必ず1つ以上含める。
-drugstore: ドラッグストア・スーパーで購入可能（日本大手ブランド・プチプラ系）
-amazon: Amazon.co.jpで販売
-rakuten: 楽天市場で販売
-official_jp: ブランド公式サイト・百貨店専売
-不明な場合でも amazon / rakuten は含める。
-
-uv_level:
-日焼け止めのみspfとpaを出す。
-それ以外は {{}}。
-
-reason:
-そのstepのcategory・ingredient_focus・purposeに合う理由を短く出す。
-
-brand:
-ブランド名のみ。
-
-name:
-商品名のみ。
-ブランド名を含めない。
-
-confidence:
-0〜100の整数。
-90以上: 現行品確実、成分・名称とも高確信
-80以上: 名称は確実、代表成分は分かる
-70以上: 名称は確実だが成分詳細は不確か
-70未満: 出力禁止
-
-release_status:
-current のみ。
-old / unknown は出力禁止。
-
-【現行品ルール】
-現行販売中の商品名のみ出力する。
-リニューアル済み商品の場合は、必ず最新の正式名称を使う。
-旧名称、旧処方名、旧パッケージ名、リニューアル前の商品名は禁止。
-現行品か確信できない商品は出力しない。
-
-【候補選定ルール】
-候補は以下の固定優先順位で選ぶ。
-
-1. 目的成分とカテゴリが一致する
-2. 日本で継続購入しやすい
-3. 正式名称に高い確信がある
-4. 刺激リスクが過剰ではない
-5. 予算帯から大きく外れない
-
-【禁止】
-・架空商品
-・旧名称
-・リニューアル前商品
-・廃盤商品
-・正式名称に自信がない商品
-・カテゴリ名だけ
-・「おすすめ美容液」のような抽象名
-・シリーズ名だけ
-・推測価格
-・ランキングや流行だけを理由にした候補
-
-【改善計画】
-improvement_plan は以下だけを簡潔に出す。
-
-priority_concerns:
-改善優先度の高い悩みを配列で出す。
-
-key_ingredients:
-改善に重要な成分を配列で出す。
-
-care_direction:
-全体のケア方針を短く出す。
-
-
-【ルーティン戦略】
-routine_strategy は必ず出力する。
-
-目的:
-現在の肌状態から、毎日同じ商品を使う固定型が良いのか、成分や商品を日ごとに分けるローテーション型が良いのかを判断する。
-
-肌スコア改善を最優先にする。
-無理にローテーションにしない。
-固定が最適なら strategy_type は fixed。
-攻め成分を分散した方が良い場合のみ strategy_type は rotation。
-
-routine_strategy:
-strategy_type:
-fixed / rotation
-
-overall_policy:
-全体方針。
-
-morning_policy:
-朝の方針。
-
-night_policy:
-夜の方針。
-
-weekly_policy:
-週ケア方針。
-
-active_care_frequency:
-攻めケアの頻度方針。
-例: 週2回 / 週2〜3回 / 2週間に1回 / 今は控える
-
-recovery_care_frequency:
-回復ケアの頻度方針。
-
-rotation_targets:
-ローテーション対象の成分や目的。
-例: ["レチノール", "アゼライン酸", "ビタミンC", "保湿回復"]
-
-avoid_combinations:
-この肌状態・ユーザー経験をもとに、同じルーティン内で組み合わせるべきでない成分ペアを出力する。
-コードは成分ルールを一切持たない。ここで指定した内容のみが商品選定時の除外・警告に使われる。
-
-各エントリの形式:
-- families: 避ける成分ファミリーのタグ配列（2つ以上）
-  使用可能タグ: retinoid / aha_bha / strong_vitamin_c / vitamin_c / azelaic / niacinamide / ceramide / barrier / peptide / pdrn
-  同系統重複（例: ["retinoid","retinoid"]）は「同種を2製品使うな」という意味
-- scope: "same_session"（同じ朝/夜の中で重ねない）または "any"（ルーティン全体で同時使用しない）
-- reason: なぜこの肌・この成分濃度でこの組み合わせが問題になるか（この肌スコアと経験値に具体的に言及すること）
-- severity: "hard"（商品選定から除外）/ "soft"（選定は許容するが警告として表示）
-
-判断基準:
-- 敏感度が高い・バリアスコア低い → 刺激重複に厳しく "hard" を多用
-- レチノール未経験（exp=beginner/none）→ retinoidを含むペアは "hard" にしやすい
-- 肌が健康で経験豊富 → "soft" で許容するケースあり
-- 同系統重複（レチノール×レチノール、酸×酸）は原則 "hard"
-- 必ず3件以上出力すること
-
-例:
-[
-  {{"families": ["retinoid", "aha_bha"], "scope": "same_session", "reason": "レチノールとAHA/BHAを同時使用するとバリア破壊が加速し赤みが悪化する", "severity": "hard"}},
-  {{"families": ["retinoid", "retinoid"], "scope": "any", "reason": "同じルーティンでレチノール系を重複させると刺激過剰になる", "severity": "hard"}},
-  {{"families": ["aha_bha", "aha_bha"], "scope": "any", "reason": "酸系を重ねると角質除去が過剰になりバリアを損傷する", "severity": "hard"}}
-]
-
-synergy_combinations:
-この肌状態で同じルーティン内に組み合わせると相乗効果が生まれる成分ペアを出力する。
-コードは相乗効果ルールを一切持たない。ここで指定した内容のみが商品選定時のスコアボーナスに使われる。
-
-各エントリの形式:
-- families: 相乗効果のある成分ファミリーのタグ配列（2つ以上）
-  使用可能タグ: retinoid / aha_bha / strong_vitamin_c / vitamin_c / azelaic / niacinamide / ceramide / barrier / peptide / pdrn / uv_protection
-- reason: なぜこの肌・この組み合わせが相乗効果を生むか（この肌状態に具体的に言及すること）
-- bonus: "high"（大きな相乗効果）/ "medium"（中程度の相乗効果）/ "low"（軽微な相乗効果）
-
-判断基準:
-- バリアスコアが低い → ceramide + niacinamide / ceramide + peptide などバリア回復の相乗効果を重視
-- 美白・くすみ目的 → vitamin_c + niacinamide / vitamin_c + uv_protection などブライトニング相乗効果
-- ターンオーバー促進目的 → aha_bha + niacinamide（刺激緩和しながら美白）
-- 必ず3件以上出力すること
-
-例:
-[
-  {{"families": ["niacinamide", "ceramide"], "reason": "ナイアシンアミドがバリア機能を高め、セラミドの保湿効果を最大化する", "bonus": "high"}},
-  {{"families": ["vitamin_c", "uv_protection"], "reason": "ビタミンCがUVダメージを軽減し、日焼け止めとの相乗効果で色素沈着を予防する", "bonus": "high"}},
-  {{"families": ["aha_bha", "niacinamide"], "reason": "酸系ピーリング後にナイアシンアミドで炎症を鎮め赤みを最小化する", "bonus": "medium"}}
-]
-
-morning_order:
-朝ルーティンの使用順序を番号付き文字列の配列で返す。
-ブースタータイプの美容液（導入美容液・肌なじみ優先）は化粧水の前に置く。
-例: ["①洗顔", "②ブースター（導入美容液・化粧水前）", "③化粧水", "④日焼け止め"]
-
-night_order:
-夜ルーティンの使用順序を番号付き文字列の配列で返す。
-美容液の中でもブースタータイプは化粧水前、重い油性成分系は化粧水後に置くなど、商品の役割・テクスチャーに基づいた順序を設定する。
-例: ["①クレンジング", "②洗顔", "③ブースター導入美容液（化粧水前）", "④化粧水", "⑤レチノール美容液", "⑥クリーム"]
-
-reason:
-なぜその戦略が今の肌状態に合うか。
-
-【保湿計画】
-moisture_plan は必ず以下を出す。
-
-moisture_level
-need_emulsion
-need_cream
-need_double_moisture
-reason
-
-【最重要】
-JSONのみ返す。
-説明禁止。
-Markdown禁止。
-前置き禁止。
-JSONキーは英語。
-値は日本語。
-"""
+ビタミンC/ナイアシンアミド/レチノール/レチナール/アゼライン酸/トラネキサム酸/PDRN/ペプチド/セラミド/ヒアルロン酸/CICA/ドクダミ/AHA/BHA/PHA/UV防御/低刺激
+
+【use_days】
+night・weekly_careの各stepに必ず設定。毎日OK=[],刺激成分=["月","木"]等,週1=["土"]。
+morning=[]固定。連続使用禁止成分は必ず間隔を空ける。
+weekly_care例: パック→["日"] ピーリング→["土"]
+
+【weekly_care】
+パック・ピーリングのみ。不要なら[]。
+ピーリング条件: texture/pores/dullness低スコアで角質ケア必要時のみ。
+パック条件: 乾燥・バリア低下顕著または刺激成分使用後の回復ケアが必要な時のみ。
+
+【product_candidates】
+各stepに4-5件必須(0-3件禁止)。現行販売中の正式名称確実な商品のみ。stepのcategoryと完全一致必須。
+
+各候補のフィールドルール:
+- confidence: 70未満出力禁止(90+:確実 80+:名称確実 70+:成分不確か)
+- release_status: current のみ
+- active_ingredients: 英語タグ(retinol/retinal/vitamin_c/niacinamide/azelaic_acid/ceramide/hyaluronic等)
+- concerns: pores/acne/redness/oil_control/dryness/barrier/dullness/whitening/aging から選択
+- skin_types: dry/oily/mixed/sensitive/normal(空配列禁止。全肌タイプ→全4種。ニキビ系→oily,mixed必須。セラミド系→dry,sensitive必須)
+- sensitive_ok: yes(低刺激・セラミドCICA主体)/no(レチノール・高濃度AHA/BHA主体)/unknown
+- retinol_level: レチノール系以外=0。低=1 中=2 高=3
+- main_functions: 保湿/バリア強化/鎮静ケア/毛穴改善/ニキビ予防/皮脂抑制/美白ケア/透明感向上/ハリ改善/エイジングケア/紫外線防御/キメ改善 から選択
+- ingredient_strength: {{成分: high/medium/low}}(高濃度・医薬部外品=high 標準=medium 補助=low)
+- formulation: low_irritation/barrier_formula/light_texture/rich_texture/fragrance_free/alcohol_free/oil_free/non_comedogenic/water_based/oil_based から選択
+- texture: light/watery/gel/medium/essence/cream/rich/oil/balm/foam/powder から選択
+- availability_japan: drugstore/amazon/rakuten/official_jp(必ず1つ以上。不明でもamazon/rakuten含める)
+- uv_level: 日焼け止めのみ{{spf,pa}}、他={{}}
+- reason: このstepに合う短い理由
+禁止: 架空商品/旧名称/廃盤品/カテゴリ違い/自信ない商品/抽象名
+
+【improvement_plan】
+priority_concerns(配列)/key_ingredients(配列)/care_direction(短文)
+
+【routine_strategy】
+strategy_type: fixed(固定型)/rotation(ローテーション型、攻め成分分散が必要な場合のみ)
+overall_policy/morning_policy/night_policy/weekly_policy
+active_care_frequency/recovery_care_frequency
+rotation_targets: ローテーション対象成分配列
+morning_order: 朝の使用順序配列(ブースターは化粧水前)
+night_order: 夜の使用順序配列(役割・テクスチャーに基づく順序)
+reason: この肌状態に合う理由
+
+avoid_combinations(3件以上必須):
+[{{families:[タグA,タグB], scope:"same_session"/"any", reason:"この肌スコア・経験値に言及した理由", severity:"hard"/"soft"}}]
+タグ: retinoid/aha_bha/strong_vitamin_c/vitamin_c/azelaic/niacinamide/ceramide/barrier/peptide/pdrn
+同系統重複["retinoid","retinoid"]=「同種2製品禁止」。敏感度高・バリア低→hard多用。レチノール未経験→retinoidペアはhard。
+
+synergy_combinations(3件以上必須):
+[{{families:[タグA,タグB], reason:"この肌状態に基づく相乗理由", bonus:"high"/"medium"/"low"}}]
+タグはavoidと同じ+uv_protection
+
+【moisture_plan】
+moisture_level/need_emulsion/need_cream/need_double_moisture/reason
+
+JSONのみ返す。説明・Markdown・前置き禁止。JSONキーは英語、値は日本語。"""
 
 def extract_image_bytes_for_hash(image):
     if image is None:
