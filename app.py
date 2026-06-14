@@ -3799,17 +3799,36 @@ _rakuten_name_clean_cache: dict = {}
 
 
 def _rule_based_clean_rakuten_title(title: str) -> str:
-    """Gemini失敗時のフォールバック: ルールベースで楽天商品名を簡易クリーニング"""
+    """ルールベースで楽天商品名をクリーニング（Gemini失敗・部分欠損時のフォールバック）"""
     t = title
-    # 【...】《...》『...』を除去（先頭のプロモーション文言対策）
-    t = re.sub(r'[【《『][^】》』]*[】》』]', '', t)
-    # ※以降のコメントを除去
-    t = re.sub(r'※[^\s　]{0,50}', '', t)
-    # 送料無料・ポイント・セール等の後置き文言
-    t = re.sub(r'(送料無料|ポイント\d+倍?|レビュー特典|公式|正規品|限定|タイムセール|クーポン|\d+%OFF|\d+円OFF)', '', t)
-    # 連続スペース・空白を整理
+    # 【...】《...》『...』〔...〕を繰り返し除去（複数ブロック対応）
+    for _ in range(5):
+        t2 = re.sub(r'[【《『〔][^】》』〕]{0,80}[】》』〕]', '', t)
+        if t2 == t:
+            break
+        t = t2
+    # ※ から始まる注釈を除去（行末または次の日本語区切りまで）
+    t = re.sub(r'※[^※\n]{0,120}', '', t)
+    # 先頭の装飾記号
+    t = re.sub(r'^[\s　★☆◆◇▼▽△▲●○■□♪♦♥❤✨💕🌸]+', '', t)
+    # 各種マーケティング文言（順番に除去）
+    _junk = [
+        r'送料無料', r'ポイント\s*\d+\s*[倍%]?', r'レビュー(?:特典|プレゼント|で(?:もらえる|プレ))',
+        r'(?:メーカー|国内)?公式', r'正規(?:品|代理店|輸入品)', r'国内正規',
+        r'(?:期間|数量|在庫)?限定', r'タイムセール', r'スーパーSALE?', r'クーポン(?:使用可)?',
+        r'\d+\s*%\s*OFF', r'\d+\s*円\s*(?:OFF|引き|割引)',
+        r'お買い?得', r'特価', r'激安', r'最安値?',
+        r'あす楽(?:対応)?', r'即日(?:出荷|発送)', r'翌日(?:配送|お届け)', r'最短翌日',
+        r'楽天\d+冠', r'ランキング\s*\d+\s*位', r'売れ筋',
+        r'新品', r'未使用',
+    ]
+    for p in _junk:
+        t = re.sub(p, '', t)
+    # 連続スペース・全角スペースを整理
     t = re.sub(r'[\s　]+', ' ', t).strip()
-    return t or title
+    # 残った先頭・末尾の記号・区切り文字を除去
+    t = t.strip('/ ・|｜,，、。　 ')
+    return t if t.strip() else title
 
 
 def gemini_clean_rakuten_product_names(data):
@@ -3875,17 +3894,16 @@ def gemini_clean_rakuten_product_names(data):
         + "\n".join(lines)
     )
 
-    gemini_succeeded = False
+    gemini_applied_indices = set()
     try:
         config = types.GenerateContentConfig(
             temperature=0.1,
-            max_output_tokens=600,
+            max_output_tokens=1500,  # 600→1500: 10件×長タイトルでも切れないよう拡大
         )
         response = call_gemini_with_retry(client, DETAIL_MODEL, prompt, config=config)
         resp_text = response.text.strip() if response and response.text else ""
-        print(f"[NAME CLEAN GEMINI RESPONSE] {resp_text[:200]}", flush=True)
+        print(f"[NAME CLEAN GEMINI RESPONSE] {resp_text[:300]}", flush=True)
 
-        applied = 0
         for line in resp_text.split("\n"):
             line = line.strip()
             m = re.match(r'^(\d+)[.:）\s]+(.+)$', line)
@@ -3897,22 +3915,25 @@ def gemini_clean_rakuten_product_names(data):
                 original_title = uncached[idx]["title"]
                 _rakuten_name_clean_cache[original_title] = cleaned
                 uncached[idx]["step"]["product"] = cleaned
+                gemini_applied_indices.add(idx)
                 print(f"[NAME CLEAN OK] {original_title[:40]} -> {cleaned}", flush=True)
-                applied += 1
 
-        print(f"[NAME CLEAN] Gemini整形完了 {applied}/{len(uncached)}件適用", flush=True)
-        gemini_succeeded = True
+        print(f"[NAME CLEAN] Gemini整形 {len(gemini_applied_indices)}/{len(uncached)}件適用", flush=True)
 
     except Exception as e:
-        print(f"[NAME CLEAN GEMINI ERROR] {e} → ルールベースフォールバック実行", flush=True)
+        print(f"[NAME CLEAN GEMINI ERROR] {e}", flush=True)
 
-    # Gemini失敗時はルールベースでフォールバック
-    if not gemini_succeeded:
-        for t in uncached:
+    # Geminiが未処理のアイテム（途中切れ・失敗）にルールベースフォールバック適用
+    fallback_count = 0
+    for i, t in enumerate(uncached):
+        if i not in gemini_applied_indices:
             cleaned = _rule_based_clean_rakuten_title(t["title"])
             _rakuten_name_clean_cache[t["title"]] = cleaned
             t["step"]["product"] = cleaned
-            print(f"[NAME CLEAN FALLBACK] {t['title'][:40]} -> {cleaned}", flush=True)
+            fallback_count += 1
+            print(f"[NAME CLEAN FALLBACK] {t['title'][:50]} -> {cleaned}", flush=True)
+    if fallback_count:
+        print(f"[NAME CLEAN] フォールバック適用 {fallback_count}件", flush=True)
 
     return data
 
