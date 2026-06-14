@@ -1620,6 +1620,46 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         if any(word in title for word in ["クリーム", "乳液", "ミルク", "美容液", "セラム", "シートマスク", "フェイスマスク", "パック"]):
             return -9999
 
+    elif category == "ピーリング":
+        # クレンジング・洗顔・保湿系はピーリングカテゴリから除外
+        _peel_wrong = [
+            "クレンジング", "メイク落とし", "クレンジングオイル", "クレンジングミルク",
+            "クレンジングジェル", "クレンジングバーム", "クレンジングクリーム",
+            "クレンジングフォーム", "ダブル洗顔不要",
+            "乳液", "ミルク", "クリーム", "保湿クリーム",
+            "化粧水", "ローション",
+            "シートマスク", "フェイスマスク", "パック",
+        ]
+        if any(word in title for word in _peel_wrong):
+            return -9999
+        # ピーリング固有キーワードが1つもなければ除外
+        _peel_required = [
+            "ピーリング", "peel", "aha", "bha", "pha", "lha",
+            "スクラブ", "scrub", "exfoliant", "exfoliating",
+            "ゴマージュ", "角質ケア", "角質除去", "角質", "酵素洗顔", "酵素",
+            "グリコール酸", "乳酸", "サリチル酸",
+        ]
+        if not any(w in title_norm or w in title for w in _peel_required):
+            return -9999
+
+    elif category == "洗顔":
+        # 洗顔カテゴリ: クレンジング・保湿系メインの商品は除外
+        _sengan_wrong = [
+            "クレンジングオイル", "クレンジングバーム", "クレンジングミルク",
+            "クレンジングクリーム", "メイク落とし専用",
+            "乳液", "化粧水", "美容液", "クリーム", "シートマスク", "パック",
+        ]
+        if any(word in title for word in _sengan_wrong):
+            return -9999
+
+    elif category == "クレンジング":
+        # クレンジングカテゴリ: 洗顔・保湿系のみの商品は除外
+        _cleansing_wrong = [
+            "乳液", "化粧水", "美容液", "シートマスク", "パック",
+        ]
+        if any(word in title for word in _cleansing_wrong):
+            return -9999
+
     else:
         score_category_penalty = 0
 
@@ -2931,6 +2971,28 @@ def _is_rakuten_item_valid_for_category(item_name: str, category: str, strict: b
         if ng in name_lower:
             print(f"[RAKUTEN REJECT non-skincare] '{item_name[:50]}' contains '{ng}'", flush=True)
             return False
+
+    # カテゴリ横断の除外チェック（strictモード問わず適用）
+    _CATEGORY_CROSS_REJECT = {
+        "ピーリング": [
+            "クレンジング", "メイク落とし", "クレンジングオイル", "クレンジングミルク",
+            "クレンジングジェル", "クレンジングバーム", "クレンジングクリーム",
+            "クレンジングフォーム", "ダブル洗顔不要",
+            "乳液", "クリーム", "化粧水", "シートマスク", "フェイスマスク", "パック",
+        ],
+        "パック": ["クレンジング", "メイク落とし", "日焼け止め", "サンスクリーン"],
+        "美容液": ["化粧水", "ローション", "乳液", "クリーム", "シートマスク", "パック"],
+        "化粧水": ["クリーム", "乳液", "美容液", "シートマスク", "パック"],
+        "クリーム": ["化粧水", "ローション", "乳液", "シートマスク", "パック", "クレンジング"],
+        "洗顔": [
+            "クレンジングオイル", "クレンジングバーム", "クレンジングミルク",
+            "メイク落とし専用", "乳液", "化粧水", "美容液", "シートマスク", "パック",
+        ],
+    }
+    cross_reject = _CATEGORY_CROSS_REJECT.get(category, [])
+    if cross_reject and any(w in item_name for w in cross_reject):
+        print(f"[RAKUTEN REJECT cross-category] '{item_name[:50]}' is wrong for category='{category}'", flush=True)
+        return False
 
     if not strict:
         return True  # キーワード検索では拒否チェックのみで十分
