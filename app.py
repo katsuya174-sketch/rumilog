@@ -26,7 +26,7 @@ import threading
 from psycopg2.pool import SimpleConnectionPool
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v3"
+ANALYSIS_CACHE_VERSION = "v4"  # use_timing フィールド追加
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
@@ -11352,6 +11352,24 @@ def finalize_result_data(data, user_data):
         })
 
     data["root_causes"] = cleaned_causes
+
+    # use_timing 注意書きをステップに付与
+    _all_sections = (
+        list(data.get("morning", {}).get("steps", []))
+        + list(data.get("night", {}).get("steps", []))
+        + list(data.get("weekly_care", []))
+    )
+    for _step in _all_sections:
+        if not isinstance(_step, dict):
+            continue
+        _timing = _step.get("use_timing", "standard")
+        _cat = normalize_candidate_category(_step.get("category", ""), fallback=_step.get("category", ""))
+        _default = _CATEGORY_DEFAULT_TIMING.get(_cat, "standard")
+        if _timing not in ("standard", "", None) and _timing != _default:
+            _step["timing_note"] = _TIMING_NOTES.get(_timing, "")
+        else:
+            _step.pop("timing_note", None)
+
     # warnings
     if not isinstance(data.get("warnings"), list):
         data["warnings"] = []
@@ -12221,6 +12239,35 @@ CATEGORY_ORDER = {
 }
 
 
+# use_timing → 並び順オフセット（CATEGORY_ORDERを上書き）
+_TIMING_ORDER_OVERRIDE = {
+    "before_toner": 2.5,   # 洗顔(2)と化粧水(3)の間
+    "after_toner":  3.5,   # 化粧水(3)と美容液(4)の間
+    "after_serum":  4.5,   # 美容液(4)と乳液(5)の間
+    "last":         6.9,   # 日焼け止め(7)の直前
+}
+
+# カテゴリのデフォルトタイミング（注意書き表示判定に使用）
+_CATEGORY_DEFAULT_TIMING = {
+    "クレンジング": "standard",
+    "洗顔":       "standard",
+    "化粧水":     "standard",
+    "美容液":     "after_toner",
+    "乳液":       "standard",
+    "クリーム":   "standard",
+    "日焼け止め": "last",
+    "パック":     "standard",
+    "ピーリング": "standard",
+}
+
+# use_timing → ユーザー向け注意書き
+_TIMING_NOTES = {
+    "before_toner": "💡 この商品は洗顔後・化粧水の前にご使用ください",
+    "after_toner":  "💡 この商品は化粧水の直後にご使用ください",
+    "after_serum":  "💡 この商品は美容液の後・乳液の前にご使用ください",
+    "last":         "💡 この商品はスキンケアの最後にご使用ください",
+}
+
 def step_sort_key(step):
     if not isinstance(step, dict):
         return (99, 999)
@@ -12232,12 +12279,17 @@ def step_sort_key(step):
 
     role = step.get("role")
     priority = step.get("priority", 999)
+    use_timing = step.get("use_timing", "standard")
 
+    # use_timing による明示的な順序上書き
+    if use_timing in _TIMING_ORDER_OVERRIDE:
+        return (_TIMING_ORDER_OVERRIDE[use_timing], priority)
+
+    # 後方互換: role=booster は before_toner 相当
     if role == "booster":
         return (2.5, priority)
 
     base_order = CATEGORY_ORDER.get(category, 99)
-
     return (base_order, priority)
 
 def sort_steps(data):
@@ -12437,10 +12489,11 @@ def get_analysis_schema_phase2():
             "risk_note": {"type": "string"},
             "priority": {"type": "integer"},
             "use_days": {"type": "array", "items": {"type": "string"}},
+            "use_timing": {"type": "string"},
             "product_candidates": {"type": "array", "items": product_candidate_schema},
             "selection_reason": {"type": "string"}
         },
-        "required": ["category","role","purpose","ingredient_focus","risk_note","priority","use_days","product_candidates"]
+        "required": ["category","role","purpose","ingredient_focus","risk_note","priority","use_days","use_timing","product_candidates"]
     }
     routine_strategy_schema = {
         "type": "object",
@@ -12890,6 +12943,15 @@ role: main/booster のみ。
 
 【ingredient_focus候補】
 ビタミンC/ナイアシンアミド/レチノール/レチナール/アゼライン酸/トラネキサム酸/PDRN/ペプチド/セラミド/ヒアルロン酸/CICA/ドクダミ/AHA/BHA/PHA/UV防御/低刺激
+
+【use_timing（重要）】
+各stepに必ず設定。その商品カテゴリの一般的な使用順序と異なる場合に正しいタイミングを指定する。
+- "standard": カテゴリ標準順序（大半のケース）
+- "before_toner": 洗顔後・化粧水前（例: ブースター美容液、ワンバイコーセーセラムヴェール等）
+- "after_toner": 化粧水の直後（標準的な美容液はこれ、または standard でよい）
+- "after_serum": 美容液の後・乳液前（特殊クリーム等）
+- "last": ルーティン最後（日焼け止めは通常これ）
+美容液を化粧水前に使う商品、化粧水後だが乳液より先に使うクリーム等、商品固有の指示がある場合はstandardを選ばず正確なタイミングを指定すること。
 
 【use_days】
 night・weekly_careの各stepに必ず設定。毎日OK=[],刺激成分=["月","木"]等,週1=["土"]。
