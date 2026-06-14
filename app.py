@@ -14178,6 +14178,51 @@ def creator_auth():
     )
     return resp
 
+
+@app.route("/creator-login", methods=["GET", "POST"])
+def creator_login():
+    error = ""
+    if request.method == "POST":
+        key = request.form.get("key", "")
+        if CREATOR_KEY and key == CREATOR_KEY:
+            token = _creator_token()
+            resp = make_response(redirect("/lab"))
+            resp.set_cookie(
+                "creator_token", token,
+                max_age=365 * 24 * 3600,
+                httponly=True,
+                samesite="Lax"
+            )
+            return resp
+        error = "キーが正しくありません"
+    return f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Creator ログイン</title>
+<style>
+  body {{ font-family: sans-serif; background: #fff5f8; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }}
+  .box {{ background: #fff; border-radius: 16px; padding: 32px 24px; box-shadow: 0 4px 20px rgba(199,91,122,0.12); width: 100%; max-width: 360px; text-align: center; }}
+  h2 {{ color: #c75b7a; margin: 0 0 24px; font-size: 18px; }}
+  input {{ width: 100%; box-sizing: border-box; padding: 12px 14px; border: 1.5px solid #e8a5bc; border-radius: 10px; font-size: 15px; margin-bottom: 14px; outline: none; }}
+  input:focus {{ border-color: #c75b7a; }}
+  button {{ width: 100%; padding: 12px; background: linear-gradient(135deg, #e07a9a, #c75b7a); color: #fff; font-size: 15px; font-weight: bold; border: none; border-radius: 10px; cursor: pointer; }}
+  .error {{ color: #c75b7a; font-size: 13px; margin-bottom: 10px; }}
+</style>
+</head>
+<body>
+<div class="box">
+  <h2>✦ Creator ログイン</h2>
+  {'<p class="error">' + error + '</p>' if error else ''}
+  <form method="POST">
+    <input type="password" name="key" placeholder="Creator キーを入力" autofocus>
+    <button type="submit">ログイン</button>
+  </form>
+</div>
+</body>
+</html>"""
+
 def _admin_authorized():
     return request.args.get("key") == os.getenv("ADMIN_KEY", "") and os.getenv("ADMIN_KEY", "")
 
