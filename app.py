@@ -11213,10 +11213,16 @@ def finalize_result_data(data, user_data):
     if not isinstance(data.get("warnings"), list):
         data["warnings"] = []
     data["warnings"] = build_rule_based_warnings(data, user_data)
-    # budget
+    # budget / age
     data["input_budget"] = safe_price(data.get("input_budget", 0))
     data["total_price"] = safe_price(data.get("total_price", 0))
     data["budget_fit_total"] = safe_price(data.get("budget_fit_total", 0))
+    # input_age: フォームの年齢入力を保存（肌年齢との差分表示に使用）
+    if not data.get("input_age"):
+        try:
+            data["input_age"] = int(user_data.get("age") or 0)
+        except (ValueError, TypeError):
+            data["input_age"] = 0
 
     if not isinstance(data.get("budget_fit_plan"), dict):
         data["budget_fit_plan"] = {
