@@ -6,10 +6,7 @@ load_dotenv()
 RAKUTEN_APP_ID = os.environ.get("RAKUTEN_APP_ID", "")
 RAKUTEN_ACCESS_KEY = os.environ.get("RAKUTEN_ACCESS_KEY", "")
 RAKUTEN_AFFILIATE_ID = os.environ.get("RAKUTEN_AFFILIATE_ID", "")
-print("ENV CHECK")
-print("APP_ID:", RAKUTEN_APP_ID)
-print("ACCESS:", RAKUTEN_ACCESS_KEY)
-print("AFF:", RAKUTEN_AFFILIATE_ID)
+print("[ENV CHECK] RAKUTEN_APP_ID set:", bool(RAKUTEN_APP_ID), flush=True)
 # ==========================================
 # rumilog - AI肌診断アプリ
 # Flaskメインサーバー
@@ -11578,6 +11575,11 @@ def get_score_snapshot(result):
         "pores": safe_int(scores.get("pores", 0)),
         "hydration": safe_int(scores.get("hydration", 0)),
         "firmness": safe_int(scores.get("firmness", 0)),
+        "acne": safe_int(scores.get("acne", 0)),
+        "dullness": safe_int(scores.get("dullness", 0)),
+        "barrier": safe_int(scores.get("barrier", 0)),
+        "texture": safe_int(scores.get("texture", 0)),
+        "tone_evenness": safe_int(scores.get("tone_evenness", 0)),
     }
 
 
@@ -14421,7 +14423,8 @@ def admin_revoke_key():
 def db_stats():
     admin_key = request.args.get("key", "")
 
-    if admin_key != os.getenv("ADMIN_KEY", ""):
+    _required_key = os.getenv("ADMIN_KEY", "")
+    if not _required_key or admin_key != _required_key:
         return jsonify({
             "error": "unauthorized"
         }), 403
@@ -14606,7 +14609,8 @@ def customer_portal():
 def admin_product_ranking():
     admin_key = request.args.get("key", "")
 
-    if admin_key != os.getenv("ADMIN_KEY", ""):
+    _required_key = os.getenv("ADMIN_KEY", "")
+    if not _required_key or admin_key != _required_key:
         return jsonify({
             "error": "unauthorized"
         }), 403
@@ -14656,8 +14660,13 @@ def product_click():
         "amzn.to"
     ]
 
-    if not any(domain in url for domain in allowed_domains):
-        return "許可されていないリンクです", 400
+    try:
+        parsed = urllib.parse.urlparse(url)
+        netloc = parsed.netloc.lower().lstrip("www.")
+        if not any(netloc == d or netloc.endswith("." + d) for d in allowed_domains):
+            return "許可されていないリンクです", 400
+    except Exception:
+        return "無効なURLです", 400
 
     return redirect(url)
 @app.route("/pricing")
@@ -15086,10 +15095,13 @@ def history_detail(result_id):
         previous_scores = get_score_snapshot(previous) if previous else None
 
         score_diff = {}
+        comparison = None
         if previous_scores:
             for key, current_value in current_scores.items():
                 prev_value = safe_int(previous_scores.get(key, 0))
                 score_diff[key] = current_value - prev_value
+            # テンプレートが期待する comparison 形式（xxx_diff キー）
+            comparison = {f"{k}_diff": v for k, v in score_diff.items()}
         else:
             for key in current_scores.keys():
                 score_diff[key] = None
@@ -15097,7 +15109,9 @@ def history_detail(result_id):
             "history_detail.html",
             data=current,
             prev_data=previous,
-            score_diff=score_diff
+            previous=previous,       # テンプレートの {{ previous.id }} に対応
+            score_diff=score_diff,
+            comparison=comparison,   # テンプレートの {% if comparison %} に対応
         )
 
     except Exception as e:

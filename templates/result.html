@@ -381,9 +381,11 @@
               </div>
   
               <div class="buy-buttons">
+                  {% if step.get("amazon_link") %}
                   <a href="/click?source=amazon&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.amazon_link|urlencode }}" target="_blank" rel="noopener noreferrer">
                       <button type="button" class="amazon-btn">Amazonで見る</button>
                   </a>
+                  {% endif %}
   
                   {% if step.get("rakuten_link") %}
                   <a href="/click?source=rakuten&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.rakuten_link|urlencode }}" target="_blank" rel="noopener noreferrer">
