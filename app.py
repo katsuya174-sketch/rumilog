@@ -10460,17 +10460,6 @@ def is_rate_limited(ip, limit=3):
 
 
 
-def call_gemini_with_quota_guard(**kwargs):
-    return call_gemini_with_retry(
-        client=client,
-        model=kwargs.get("model"),
-        contents=kwargs.get("contents"),
-        config=kwargs.get("config"),
-        max_retries=2,
-        timeout=60
-    )
-    
-
 def debug_step_summary(section_name, steps):
     print(f"\n===== STEP SUMMARY: {section_name} =====")
     if not isinstance(steps, list):
