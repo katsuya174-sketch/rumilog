@@ -14777,11 +14777,13 @@ def history():
                     safe_int(premium_scores_dict.get(key, 0))
                 )
 
+        # improvement_summary: 最新(values[0]) - 最古(values[-1]) = 正が改善
+        # prepared は DESC 順（新しいほど index が小さい）
         improvement_summary = []
 
         for key, values in score_series.items():
             if len(values) >= 2:
-                diff = values[-1] - values[0]
+                diff = values[0] - values[-1]  # 最新 - 最古
 
                 if diff != 0:
                     improvement_summary.append({
@@ -14796,6 +14798,9 @@ def history():
         )[:5]
 
         # ① 改善ハイライト: 各診断に前回比スコア差分と期間ラベルを付与
+        # prepared は DESC 順: prepared[0]=最新, prepared[1]=その前, ...
+        # → prepared[i-1]=新しい, prepared[i]=古い
+        # → 新しい診断(prepared[i-1])の改善量 = 新 - 旧
         def _parse_date(item):
             date_str = (item.get("record_date") or item.get("saved_at") or "")[:10]
             for fmt in ["%Y/%m/%d", "%Y-%m-%d"]:
@@ -14806,14 +14811,14 @@ def history():
             return None
 
         for i in range(1, len(prepared)):
-            prev_scores = prepared[i - 1].get("scores", {}) or {}
-            curr_scores = prepared[i].get("scores", {}) or {}
+            old_scores = prepared[i].get("scores", {}) or {}      # 古い診断
+            new_scores = prepared[i - 1].get("scores", {}) or {}  # 新しい診断
             diff_map = {}
             for key in score_keys:
-                d = safe_int(curr_scores.get(key, 0)) - safe_int(prev_scores.get(key, 0))
+                d = safe_int(new_scores.get(key, 0)) - safe_int(old_scores.get(key, 0))
                 if d != 0:
                     diff_map[score_labels.get(key, key)] = d
-            prepared[i]["score_diff"] = diff_map
+            prepared[i - 1]["score_diff"] = diff_map  # 新しい診断カードに付与
 
             # 改善ハイライト: 上昇 >= 3点 の項目のみ抽出・ソート
             highlights = sorted(
@@ -14821,14 +14826,14 @@ def history():
                 key=lambda x: x[1],
                 reverse=True
             )[:3]
-            prepared[i]["improvement_highlights"] = highlights
+            prepared[i - 1]["improvement_highlights"] = highlights
 
-            # 前回診断からの日数ラベル
+            # 前回診断からの日数ラベル（新しい日付 - 古い日付 = 正の値）
             try:
-                d_curr = _parse_date(prepared[i])
-                d_prev = _parse_date(prepared[i - 1])
-                if d_curr and d_prev:
-                    days = (d_curr - d_prev).days
+                d_new = _parse_date(prepared[i - 1])
+                d_old = _parse_date(prepared[i])
+                if d_new and d_old:
+                    days = (d_new - d_old).days
                     if days <= 7:
                         period_label = "先週比"
                     elif days <= 14:
@@ -14837,11 +14842,11 @@ def history():
                         period_label = "先月比"
                     else:
                         period_label = "前回比"
-                    prepared[i]["period_label"] = period_label
+                    prepared[i - 1]["period_label"] = period_label
                 else:
-                    prepared[i]["period_label"] = "前回比"
+                    prepared[i - 1]["period_label"] = "前回比"
             except Exception:
-                prepared[i]["period_label"] = "前回比"
+                prepared[i - 1]["period_label"] = "前回比"
 
         # ⑥ 診断ストリーク計算
         streak = 0
