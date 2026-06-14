@@ -4134,6 +4134,154 @@ def gemini_clean_rakuten_product_names(data):
     return data
 
 
+# ===== Gemini 選定理由・比較文生成 =====
+_SELECTION_REASON_SCHEMA = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "step_idx":        {"type": "integer"},
+            "recommend_reason": {"type": "string"},
+            "vs_2nd":          {"type": "string"},
+        },
+        "required": ["step_idx", "recommend_reason", "vs_2nd"],
+    }
+}
+
+_INGREDIENT_LABEL_JA = {
+    "retinol": "レチノール", "retinal": "レチナール", "vitamin_c": "ビタミンC",
+    "niacinamide": "ナイアシンアミド", "azelaic_acid": "アゼライン酸",
+    "tranexamic_acid": "トラネキサム酸", "ceramide": "セラミド",
+    "hyaluronic_acid": "ヒアルロン酸", "peptide": "ペプチド", "pdrn": "PDRN",
+    "aha": "AHA(グリコール酸等)", "bha": "BHA(サリチル酸等)",
+    "pha": "PHA", "cica": "CICA(ツボクサ)", "centella": "センテラ",
+    "glycerin": "グリセリン", "collagen": "コラーゲン",
+}
+
+def _fmt_candidate_for_gemini(c, rank):
+    """top_candidatesの1件をGemini向け短文に整形"""
+    name = c.get("name", "不明")
+    brand = c.get("brand", "")
+    label = f"{brand} {name}".strip() if brand else name
+    ings = [_INGREDIENT_LABEL_JA.get(i, i) for i in (c.get("active_ingredients") or [])[:4]]
+    funcs = (c.get("main_functions") or [])[:2]
+    score_total = c.get("score", 0)
+    score_base = c.get("base_score", 0)
+    score_improve = c.get("improve_score", 0)
+    score_routine = c.get("routine_score", 0)
+    ing_str = "・".join(ings) if ings else "成分情報なし"
+    func_str = "・".join(funcs) if funcs else ""
+    sens = "低刺激" if c.get("sensitive_ok") == "yes" else ("刺激あり" if c.get("sensitive_ok") == "no" else "")
+    parts = [f"{rank}位: {label}", f"成分={ing_str}"]
+    if func_str: parts.append(f"機能={func_str}")
+    if sens: parts.append(sens)
+    parts.append(f"スコア={score_total}(適合={score_base}/改善={score_improve}/相乗={score_routine})")
+    return " / ".join(parts)
+
+def gemini_generate_selection_reasons(data, user_data):
+    """
+    全ステップのTOP3候補をGeminiに渡し、選定理由と1位vs2位比較文を生成する。
+    既存のrecommend_reasonを上書きし、vs_2nd_reasonを追加する。
+    """
+    all_steps = []
+    for section in ["morning", "night"]:
+        for s in data.get(section, {}).get("steps", []):
+            if isinstance(s, dict):
+                all_steps.append(s)
+    for s in data.get("weekly_care", []):
+        if isinstance(s, dict):
+            all_steps.append(s)
+
+    # 商品が選ばれているステップのみ対象
+    target_steps = [
+        (i, s) for i, s in enumerate(all_steps)
+        if s.get("product") and s.get("product_source") not in ("none", "")
+    ]
+
+    if not target_steps:
+        return data
+
+    _concerns_ja = ", ".join([_CONCERN_LABELS_JA.get(c, c) for c in (user_data.get("concerns") or [])]) or "なし"
+    user_info = (
+        f"年齢:{user_data.get('age','')} 皮脂:{user_data.get('oil','')} "
+        f"敏感度:{user_data.get('sens','')} 悩み:{_concerns_ja}"
+    )
+
+    steps_desc = []
+    idx_map = {}  # gemini_idx → (all_steps idx, step dict)
+    for gemini_idx, (orig_idx, step) in enumerate(target_steps):
+        top = step.get("top_candidates", [])
+        candidates_text = []
+        for rank, c in enumerate(top[:3], 1):
+            candidates_text.append(_fmt_candidate_for_gemini(c, rank))
+        if not candidates_text:
+            # top_candidatesがなければ現在の商品を1位として記述
+            candidates_text.append(f"1位: {step.get('product','')} / 候補なし")
+
+        steps_desc.append(
+            f"[step{gemini_idx}] カテゴリ:{step.get('category','')} "
+            f"目的:{step.get('purpose','')} 成分フォーカス:{step.get('ingredient_focus','')}\n"
+            + "\n".join(f"  {t}" for t in candidates_text)
+        )
+        idx_map[gemini_idx] = step
+
+    prompt = f"""日本語で回答してください。スキンケアアプリの商品選定AIです。
+
+ユーザー情報: {user_info}
+
+以下の各ステップ(step0〜)について、商品選定理由と比較文をJSONで生成してください。
+
+{chr(10).join(steps_desc)}
+
+出力ルール:
+- recommend_reason: 1位商品が選ばれた理由。成分名・機能・スコアの高い観点を具体的に。50-80字。
+- vs_2nd: 「なぜ2位でなく1位なのか」を1文で。成分優位性・肌悩み適合・相乗効果の差を明示。候補が1件のみの場合は空文字。25-45字。
+
+JSONのみ返す。形式: [{{"step_idx":0,"recommend_reason":"...","vs_2nd":"..."}}]"""
+
+    try:
+        config = types.GenerateContentConfig(
+            temperature=0,
+            seed=42,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
+            max_output_tokens=1500,
+            response_mime_type="application/json",
+            response_schema=_SELECTION_REASON_SCHEMA,
+        )
+        response = call_gemini_with_retry(
+            client, DETAIL_MODEL, prompt, config=config,
+            max_retries=1, timeout=45
+        )
+        if not response or not response.text:
+            return data
+
+        results = json.loads(response.text.strip())
+        if not isinstance(results, list):
+            return data
+
+        applied = 0
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            idx = int(item.get("step_idx", -1))
+            step = idx_map.get(idx)
+            if step is None:
+                continue
+            reason = str(item.get("recommend_reason", "")).strip()
+            vs2nd = str(item.get("vs_2nd", "")).strip()
+            if reason:
+                step["recommend_reason"] = reason
+                applied += 1
+            if vs2nd:
+                step["vs_2nd_reason"] = vs2nd
+        print(f"[SELECTION REASON] Gemini生成 {applied}/{len(target_steps)}件適用", flush=True)
+
+    except Exception as e:
+        print(f"[SELECTION REASON ERROR] {repr(e)} → ルールベース維持", flush=True)
+
+    return data
+
+
 AI_PRODUCT_IMAGES_FILE = "ai_product_images.json"
 
 def load_ai_product_images():
@@ -8080,6 +8228,12 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             "routine_score": c.get("_routine_score", 0),
             "source": c.get("_source", ""),
             "price_ref": c.get("price_ref", 0),
+            # 比較説明文生成用の成分情報
+            "active_ingredients": c.get("active_ingredients", []),
+            "main_functions": c.get("main_functions", []),
+            "concerns": c.get("concerns", []),
+            "sensitive_ok": c.get("sensitive_ok", "unknown"),
+            "texture": c.get("texture", ""),
         }
         for c in top_candidates
     ]
@@ -14311,6 +14465,9 @@ def lab_test_function():
 
             # 楽天商品名をGeminiで短く整形（rakuten_criteria / ai_rakuten_verified のみ対象）
             data = gemini_clean_rakuten_product_names(data)
+
+            # Geminiによる商品選定理由・1位vs2位比較文を生成
+            data = gemini_generate_selection_reasons(data, user_data)
 
             print("[FLOW AFTER AFFILIATE]", {
                 "night": [

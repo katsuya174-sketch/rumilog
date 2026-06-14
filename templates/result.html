@@ -212,6 +212,16 @@
     color: #7a5c00;
     line-height: 1.6;
 }
+.vs2nd-reason {
+    margin-top: 6px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: #f0f4ff;
+    border-left: 3px solid #6b8cff;
+    font-size: 12px;
+    color: #3a4a8a;
+    line-height: 1.6;
+}
 .product-score {
     margin-top: 8px;
     font-size: 12px;
@@ -360,6 +370,9 @@
               <div class="product-meta">
                   <div class="reason-label">理由</div>
                   <div class="reason-text">{{ step.get("recommend_reason", "") }}</div>
+                  {% if step.get("vs_2nd_reason") %}
+                  <div class="vs2nd-reason">vs 2位 — {{ step.get("vs_2nd_reason") }}</div>
+                  {% endif %}
                   {% if step.get("synergy_note") %}
                   <div class="synergy-note">✨ {{ step.get("synergy_note") }}</div>
                   {% endif %}
