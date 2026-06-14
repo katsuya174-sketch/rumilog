@@ -12107,13 +12107,13 @@ def translate_value(text, mapping):
 CATEGORY_ORDER = {
     "クレンジング": 1,
     "洗顔": 2,
+    "ピーリング": 2.3,   # 洗顔直後・before_toner(2.5)ゾーン前
     "化粧水": 3,
     "美容液": 4,
     "乳液": 5,
     "クリーム": 6,
     "日焼け止め": 7,
     "パック": 8,
-    "ピーリング": 9,
 }
 def normalize_serum_roles(data):
     booster_keywords = [
@@ -12383,19 +12383,22 @@ def validate_and_log_products(products):
 CATEGORY_ORDER = {
     "クレンジング": 1,
     "洗顔": 2,
+    "ピーリング": 2.3,   # 洗顔直後・before_toner(2.5)ゾーン前が自然位置
     "化粧水": 3,
     "美容液": 4,
     "乳液": 5,
     "クリーム": 6,
     "日焼け止め": 7,
     "パック": 8,
-    "ピーリング": 9
 }
 
-
 # use_timing → 並び順オフセット（CATEGORY_ORDERを上書き）
+# 複数の特殊タイミング商品が共存する場合の位置関係:
+#   洗顔(2) → ピーリング標準(2.3) → before_toner(2.5) → 化粧水(3)
+#   → after_toner(3.5) → 美容液(4) → after_serum(4.5) → 乳液(5)
+#   → クリーム(6) → last(6.9) → 日焼け止め(7) → パック(8)
 _TIMING_ORDER_OVERRIDE = {
-    "before_toner": 2.5,   # 洗顔(2)と化粧水(3)の間
+    "before_toner": 2.5,   # 洗顔後ピーリング(2.3)の次・化粧水(3)の前
     "after_toner":  3.5,   # 化粧水(3)と美容液(4)の間
     "after_serum":  4.5,   # 美容液(4)と乳液(5)の間
     "last":         6.9,   # 日焼け止め(7)の直前
