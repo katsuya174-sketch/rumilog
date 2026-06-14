@@ -8737,54 +8737,6 @@ def build_candidate_collection_prompt(user_data, analyzed_data):
 """
     
 
-def collect_market_candidates_with_gemini(user_data, analyzed_data):
-    schema = get_candidate_collection_schema()
-    prompt = build_candidate_collection_prompt(user_data, analyzed_data)
-
-    response = call_gemini_with_quota_guard(
-        model=CANDIDATE_MODEL,
-        contents=[prompt],
-        config=types.GenerateContentConfig(
-            temperature=0,
-            response_mime_type="application/json",
-            response_schema=schema
-        )
-    )
-
-    if response is None:
-        return {"steps": []}
-
-    raw_text = (response.text or "").strip()
-
-    print("===== RAW AI RESPONSE =====")
-    print(raw_text)
-    print("===========================")
-
-    if raw_text.startswith("```json"):
-        raw_text = raw_text.replace("```json", "", 1).strip()
-    if raw_text.startswith("```"):
-        raw_text = raw_text.replace("```", "", 1).strip()
-    if raw_text.endswith("```"):
-        raw_text = raw_text[:-3].strip()
-
-    start = raw_text.find("{")
-    end = raw_text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        raw_text = raw_text[start:end + 1]
-
-    try:
-        parsed = json.loads(raw_text)
-        if not isinstance(parsed, dict):
-            return {"steps": []}
-        if not isinstance(parsed.get("steps"), list):
-            parsed["steps"] = []
-        return parsed
-    except Exception as e:
-        print("JSON ERROR:", e)
-        print("BROKEN JSON ↓")
-        print(raw_text)
-        return {"steps": []}
-
 def normalize_candidate_name_for_merge(name):
     return normalize_product_name(name)
 
@@ -13694,50 +13646,6 @@ propolis, alpha_arbutin, arbutin, adenosine, glutathione, kojic_acid, aha, bha, 
 glycolic_acid, lactic_acid, mandelic_acid, enzyme, clay, tocopherol, uv_filter, probiotic_ferment,
 ferulic_acid, mugwort, lha, zinc_oxide, titanium_dioxide, bifida, galactomyces
 """
-
-def collect_rich_market_candidates_with_gemini(user_data, analyzed_data):
-    schema = get_rich_candidate_collection_schema()
-    prompt = build_rich_candidate_collection_prompt(user_data, analyzed_data)
-
-    response = call_gemini_with_quota_guard(
-        model=DETAIL_MODEL,
-        contents=[prompt],
-        config=types.GenerateContentConfig(
-            temperature=0,
-            response_mime_type="application/json",
-            response_schema=schema
-        )
-    )
-
-    if response is None:
-        return {"steps": []}
-
-    raw_text = (response.text or "").strip()
-
-    if raw_text.startswith("```json"):
-        raw_text = raw_text.replace("```json", "", 1).strip()
-    if raw_text.startswith("```"):
-        raw_text = raw_text.replace("```", "", 1).strip()
-    if raw_text.endswith("```"):
-        raw_text = raw_text[:-3].strip()
-
-    start = raw_text.find("{")
-    end = raw_text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        raw_text = raw_text[start:end + 1]
-
-    try:
-        parsed = json.loads(raw_text)
-        if not isinstance(parsed, dict):
-            return {"steps": []}
-        if not isinstance(parsed.get("steps"), list):
-            parsed["steps"] = []
-        return parsed
-    except Exception as e:
-        print("RICH JSON ERROR:", e)
-        print("BROKEN JSON ↓")
-        print(raw_text)
-        return {"steps": []}
 
 def enrich_steps_with_rich_market_candidates(data, candidate_data):
     extra_steps = candidate_data.get("steps", [])
