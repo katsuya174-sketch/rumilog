@@ -40,7 +40,8 @@ _gemini_eval_cache_loaded = False
 GEMINI_EVAL_CACHE_FILE = "gemini_product_eval_cache.json"
 VERIFIED_PRODUCTS_CACHE_FILE = "verified_products_cache.json"
 VERIFIED_PRODUCTS_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
-GEMINI_EVAL_CACHE_TTL_SECONDS = 60 * 60 * 24 * 45
+GEMINI_EVAL_CACHE_TTL_SECONDS = 60 * 60 * 24 * 7   # 7日（商品評価の一貫性のため短縮）
+RAKUTEN_SEARCH_CACHE_TTL_SECONDS = 60 * 60 * 24 * 7  # 7日
 
 # ===== Gemini Models =====
 ANALYSIS_MODEL = "gemini-2.5-flash"   # 肌分析 Phase1/2
@@ -284,9 +285,75 @@ def save_analysis_cache_to_db(cache_key, data):
     finally:
         if conn: conn.close()
 
+def init_rakuten_search_cache_table():
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS rakuten_search_cache (
+            cache_key TEXT PRIMARY KEY,
+            payload JSONB NOT NULL,
+            saved_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+        conn.commit()
+        print("[RAKUTEN SEARCH CACHE TABLE READY]", flush=True)
+    except Exception as e:
+        if conn: conn.rollback()
+        print("[RAKUTEN SEARCH CACHE TABLE ERROR]", e, flush=True)
+    finally:
+        if conn: conn.close()
+
+def get_rakuten_search_from_db(cache_key):
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT payload, saved_at FROM rakuten_search_cache WHERE cache_key = %s",
+            (cache_key,)
+        )
+        row = cur.fetchone()
+        if row:
+            payload, saved_at = row
+            age = time.time() - saved_at.timestamp()
+            if age <= RAKUTEN_SEARCH_CACHE_TTL_SECONDS:
+                print(f"[RAKUTEN SEARCH DB CACHE HIT] {cache_key} age={age/3600:.1f}h", flush=True)
+                return payload if isinstance(payload, list) else []
+            print(f"[RAKUTEN SEARCH DB CACHE EXPIRED] {cache_key} age={age/3600:.1f}h", flush=True)
+    except Exception as e:
+        print(f"[RAKUTEN SEARCH CACHE GET ERROR] {repr(e)}", flush=True)
+    finally:
+        if conn: conn.close()
+    return None
+
+def save_rakuten_search_to_db(cache_key, results):
+    if not cache_key or not isinstance(results, list):
+        return
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO rakuten_search_cache (cache_key, payload, saved_at)
+            VALUES (%s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (cache_key) DO UPDATE SET
+                payload = EXCLUDED.payload,
+                saved_at = CURRENT_TIMESTAMP
+        """, (cache_key, json.dumps(results, ensure_ascii=False)))
+        conn.commit()
+        print(f"[RAKUTEN SEARCH CACHE SAVED] {cache_key} ({len(results)}件)", flush=True)
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"[RAKUTEN SEARCH CACHE SAVE ERROR] {repr(e)}", flush=True)
+    finally:
+        if conn: conn.close()
+
 init_results_table()
 init_gemini_usage_table()
 init_analysis_cache_table()
+init_rakuten_search_cache_table()
 VERIFY_PRODUCT_CACHE = {}
 DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
 USE_RICH_CANDIDATE = False
@@ -3111,13 +3178,22 @@ def _rakuten_criteria_search_single(keyword, category):
 
     norm_cat = normalize_candidate_category(category, fallback=category)
     cache_key = (norm_cat, keyword)
+    db_cache_key = f"rakuten:{norm_cat}:{keyword}"
 
+    # 1. メモリキャッシュ（最速、セッション内）
     if cache_key in _rakuten_criteria_cache:
         print(f"[RAKUTEN CRITERIA CACHE HIT] {cache_key}", flush=True)
-        # ロック内でインクリメントしたのでデクリメントして返す
         with _rakuten_call_count_lock:
             _rakuten_criteria_call_count -= 1
         return _rakuten_criteria_cache[cache_key]
+
+    # 2. DB永続キャッシュ（7日TTL、デプロイ後も維持）
+    db_result = get_rakuten_search_from_db(db_cache_key)
+    if db_result is not None:
+        _rakuten_criteria_cache[cache_key] = db_result
+        with _rakuten_call_count_lock:
+            _rakuten_criteria_call_count -= 1
+        return db_result
 
     print(f"[RAKUTEN CRITERIA SEARCH] keyword={keyword} (call#{current_count})", flush=True)
 
@@ -3250,6 +3326,9 @@ def _rakuten_criteria_search_single(keyword, category):
             flush=True
         )
         _rakuten_criteria_cache[cache_key] = results
+        # DB永続キャッシュに保存（空でない結果のみ）
+        if results:
+            save_rakuten_search_to_db(db_cache_key, results)
         print(
             f"[RAKUTEN TIMING] total keyword={keyword!r} {time.time()-_t_func_start:.2f}s → {len(results)}件",
             flush=True
@@ -3553,6 +3632,8 @@ def gemini_evaluate_rakuten_batch(step, rakuten_products):
         prompt = _build_product_eval_prompt(step, uncached)
         config = types.GenerateContentConfig(
             temperature=0,
+            seed=42,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),  # 商品評価の一貫性のためthinking無効
             max_output_tokens=1200,
             response_mime_type="application/json",
             response_schema=_PRODUCT_EVAL_SCHEMA,
