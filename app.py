@@ -223,8 +223,73 @@ def get_gemini_usage_status():
         "remaining": remaining,
         "reset_hour_jst": GEMINI_RESET_HOUR_JST
     }
+def init_analysis_cache_table():
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS gemini_analysis_cache (
+            cache_key TEXT PRIMARY KEY,
+            payload JSONB NOT NULL,
+            saved_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+        conn.commit()
+        print("[ANALYSIS CACHE TABLE READY]", flush=True)
+    except Exception as e:
+        if conn: conn.rollback()
+        print("[ANALYSIS CACHE TABLE ERROR]", e, flush=True)
+    finally:
+        if conn: conn.close()
+
+def get_analysis_cache_from_db(cache_keys):
+    if not isinstance(cache_keys, list):
+        return None
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        for key in cache_keys:
+            cur.execute(
+                "SELECT payload FROM gemini_analysis_cache WHERE cache_key = %s",
+                (key,)
+            )
+            row = cur.fetchone()
+            if row:
+                print("[GEMINI DB CACHE HIT]", key, flush=True)
+                return row[0]
+    except Exception as e:
+        print("[ANALYSIS CACHE DB GET ERROR]", e, flush=True)
+    finally:
+        if conn: conn.close()
+    return None
+
+def save_analysis_cache_to_db(cache_key, data):
+    if not cache_key or not isinstance(data, dict):
+        return
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO gemini_analysis_cache (cache_key, payload, saved_at)
+            VALUES (%s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (cache_key) DO UPDATE SET
+                payload = EXCLUDED.payload,
+                saved_at = CURRENT_TIMESTAMP
+        """, (cache_key, json.dumps(data, ensure_ascii=False)))
+        conn.commit()
+        print("[ANALYSIS CACHE SAVED TO DB]", cache_key[:40], flush=True)
+    except Exception as e:
+        if conn: conn.rollback()
+        print("[ANALYSIS CACHE DB SAVE ERROR]", e, flush=True)
+    finally:
+        if conn: conn.close()
+
 init_results_table()
 init_gemini_usage_table()
+init_analysis_cache_table()
 VERIFY_PRODUCT_CACHE = {}
 DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
 USE_RICH_CANDIDATE = False
@@ -12954,16 +13019,22 @@ def get_gemini_cached_analysis(cache_keys):
     if not isinstance(cache_keys, list):
         return None
 
+    # 1. メモリキャッシュ（最速）
     for key in cache_keys:
         if key in GEMINI_ANALYSIS_CACHE:
             print("[GEMINI MEMORY CACHE HIT]", key, flush=True)
             return copy.deepcopy(GEMINI_ANALYSIS_CACHE[key])
 
-    file_cache = load_gemini_analysis_file_cache()
+    # 2. PostgreSQLキャッシュ（デプロイ後も永続）
+    db_result = get_analysis_cache_from_db(cache_keys)
+    if isinstance(db_result, dict):
+        GEMINI_ANALYSIS_CACHE[cache_keys[0]] = copy.deepcopy(db_result)
+        return copy.deepcopy(db_result)
 
+    # 3. ファイルキャッシュ（フォールバック）
+    file_cache = load_gemini_analysis_file_cache()
     for key in cache_keys:
         item = file_cache.get(key)
-
         if isinstance(item, dict):
             print("[GEMINI FILE CACHE HIT]", key, flush=True)
             GEMINI_ANALYSIS_CACHE[key] = copy.deepcopy(item)
@@ -12976,11 +13047,14 @@ def set_gemini_cached_analysis(cache_key, data):
     if not cache_key or not isinstance(data, dict):
         return
 
+    # メモリ・ファイル・DBすべてに保存
     GEMINI_ANALYSIS_CACHE[cache_key] = copy.deepcopy(data)
 
     file_cache = load_gemini_analysis_file_cache()
     file_cache[cache_key] = copy.deepcopy(data)
     save_gemini_analysis_file_cache(file_cache)
+
+    save_analysis_cache_to_db(cache_key, data)
 
 def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
 
@@ -13030,6 +13104,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
                 temperature=0,
                 top_p=0.05,
                 seed=42,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),  # スコアの一貫性のためthinking無効
                 response_mime_type="application/json",
                 response_schema=get_analysis_schema_phase1()
             ),
@@ -13063,6 +13138,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
                 temperature=0,
                 top_p=0.05,
                 seed=42,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),  # スコアの一貫性のためthinking無効
                 response_mime_type="application/json",
                 response_schema=get_analysis_schema_phase2()
             ),
