@@ -894,6 +894,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
             </div>
 
             <button id="submitBtn" type="submit">診断する</button>
+            <div id="qualityHint" style="display:none; margin-top:8px; font-size:0.75rem; color:#c0392b; text-align:center;">写真の品質に問題があります。上の警告を確認して撮り直してください。</div>
 
             {% if error_message %}
               <div style="
@@ -985,7 +986,19 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
       let currentCaptureIndex = 0;
       let currentStream = null;
       let currentFacingMode = "user";
-  
+
+      // 写真品質状態（true=OK, false=問題あり）
+      const photoQualityOK = { front: true, left: true, right: true };
+
+      function updateSubmitButton() {
+          const submitBtn = document.getElementById("submitBtn");
+          if (!submitBtn || submitBtn.innerText === "診断中…") return;
+          const hasIssue = Object.values(photoQualityOK).some(v => !v);
+          submitBtn.disabled = hasIssue;
+          const hint = document.getElementById("qualityHint");
+          if (hint) hint.style.display = hasIssue ? "block" : "none";
+      }
+
       async function handleSubmit(event) {
           event.preventDefault();
 
@@ -1099,6 +1112,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           if (nextIndex === 0) updateGuideText("まずは「正面」を登録してください");
           if (nextIndex === 1) updateGuideText("次は「左頬」を登録してください");
           if (nextIndex === 2) updateGuideText("最後に「右頬」を登録してください");
+          updateSubmitButton();
       }
   
       async function startCameraStream() {
@@ -1259,11 +1273,11 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           input.files = dt.files;
       }
   
-      function checkImageQualityCanvas(file, callback) {
+      function checkImageQualityCanvas(file, key, callback) {
           const reader = new FileReader();
           reader.onload = function(e) {
               const img = new Image();
-              img.onload = function() {
+              img.onload = async function() {
                   try {
                       const SIZE = 150;
                       const canvas = document.createElement("canvas");
@@ -1279,8 +1293,28 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                           gray[i] = v; sumB += v;
                       }
                       const avgB = sumB / total;
+
+                      // 1. 暗さチェック
                       if (avgB < 35) { callback({ ok: false, message: "⚠️ 画像が暗すぎます。明るい場所で撮り直すと精度が上がります。" }); return; }
+                      // 2. 明るすぎチェック
                       if (avgB > 240) { callback({ ok: false, message: "⚠️ 画像が明るすぎます。直射日光を避けて撮り直してください。" }); return; }
+
+                      // 3. 逆光チェック: 中央(内側40%)と周辺の輝度差
+                      const cSize = Math.floor(SIZE * 0.4);
+                      const cOff  = Math.floor((SIZE - cSize) / 2);
+                      let cSum = 0, cCnt = 0, bSum = 0, bCnt = 0;
+                      for (let y = 0; y < SIZE; y++) {
+                          for (let x = 0; x < SIZE; x++) {
+                              const v = gray[y * SIZE + x];
+                              const inC = x >= cOff && x < cOff + cSize && y >= cOff && y < cOff + cSize;
+                              if (inC) { cSum += v; cCnt++; } else { bSum += v; bCnt++; }
+                          }
+                      }
+                      if ((bSum / bCnt) - (cSum / cCnt) > 70) {
+                          callback({ ok: false, message: "⚠️ 逆光になっています。光を正面から当てて撮り直してください。" }); return;
+                      }
+
+                      // 4. ぼやけチェック（ラプラシアン分散）
                       let sumL = 0, sumL2 = 0, cnt = 0;
                       for (let y = 1; y < SIZE - 1; y++) {
                           for (let x = 1; x < SIZE - 1; x++) {
@@ -1292,6 +1326,18 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                       const lapVar = (sumL2 / cnt) - Math.pow(sumL / cnt, 2);
                       const sharpness = Math.sqrt(Math.max(0, lapVar));
                       if (sharpness < 6) { callback({ ok: false, message: "⚠️ 画像がぼやけています。カメラを安定させて撮り直すと精度が上がります。" }); return; }
+
+                      // 5. 顔検出（FaceDetector API 対応ブラウザのみ・非対応はスキップ）
+                      if (typeof FaceDetector !== "undefined") {
+                          try {
+                              const fd = new FaceDetector({ fastMode: true });
+                              const faces = await fd.detect(img);
+                              if (faces.length === 0) {
+                                  callback({ ok: false, message: "⚠️ 顔が検出されませんでした。顔全体が画面に収まるように撮り直してください。" }); return;
+                              }
+                          } catch(e) { /* 非対応または権限なし: スキップ */ }
+                      }
+
                       callback({ ok: true, message: "" });
                   } catch(err) { callback({ ok: true, message: "" }); }
               };
@@ -1320,11 +1366,17 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           if (card) card.classList.add("active");
           if (warning) { warning.style.display = "none"; warning.textContent = ""; }
 
-          checkImageQualityCanvas(file, function(result) {
+          // 楽観的にOKとしてリセット（非同期チェック完了後に更新）
+          if (item.key in photoQualityOK) photoQualityOK[item.key] = true;
+          updateSubmitButton();
+
+          checkImageQualityCanvas(file, item.key, function(result) {
+              if (item.key in photoQualityOK) photoQualityOK[item.key] = result.ok;
               if (!result.ok && warning) {
                   warning.textContent = result.message;
                   warning.style.display = "block";
               }
+              updateSubmitButton();
           });
 
           refreshStepUI();
