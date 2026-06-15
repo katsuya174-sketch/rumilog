@@ -1,0 +1,21 @@
+{
+  "name": "るみろぐ",
+  "short_name": "るみろぐ",
+  "description": "AIスキンケア診断アプリ",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#c75b7a",
+  "icons": [
+    {
+      "src": "/static/apple-touch-icon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/apple-touch-icon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
