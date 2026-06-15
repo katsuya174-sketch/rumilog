@@ -5401,7 +5401,10 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     # -------------------------------------------------
     # 10. availability_japan
     # -------------------------------------------------
-    score += get_availability_score(availability)
+    # ai_virtual は Gemini が生成した架空商品のため availability_japan は実在を保証しない
+    # 加点をゼロにすることで実在商品（rakuten_criteria / verified_cache）との公平性を確保する
+    if product.get("_source_hint") != "ai_virtual":
+        score += get_availability_score(availability)
 
     # -------------------------------------------------
     # 11. 予算適合
