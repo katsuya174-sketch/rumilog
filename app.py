@@ -44,10 +44,10 @@ GEMINI_EVAL_CACHE_TTL_SECONDS = 60 * 60 * 24 * 7   # 7日（商品評価の一�
 RAKUTEN_SEARCH_CACHE_TTL_SECONDS = 60 * 60 * 24 * 7  # 7日
 
 # ===== Gemini Models =====
-ANALYSIS_MODEL = "gemini-2.5-flash"   # 肌分析 Phase1/2
-CANDIDATE_MODEL = "gemini-2.5-flash"  # 候補選定（2.0-flash-lite 429対策で統一）
-ROUTINE_MODEL = "gemini-2.5-flash"    # ルーティン生成（未使用・予備）
-DETAIL_MODEL = "gemini-2.5-flash"     # 商品評価・名前整形（2.0-flash-lite 429対策で統一）
+ANALYSIS_MODEL = "gemini-3.1-flash-lite"   # 肌分析 Phase1/2
+CANDIDATE_MODEL = "gemini-2.5-flash"       # 候補選定（2.0-flash-lite 429対策で統一）
+ROUTINE_MODEL = "gemini-2.5-flash"         # ルーティン生成（未使用・予備）
+DETAIL_MODEL = "gemini-3.1-flash-lite"     # 商品評価・名前整形
 
 #DB_POOL = SimpleConnectionPool(
 #   minconn=1,
