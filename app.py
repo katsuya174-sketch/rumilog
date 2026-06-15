@@ -7875,9 +7875,11 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             #    _RAKUTEN_INGREDIENT_METADATA から自然に補完するため、concerns の強制付与は不要
             if _itag and _itag not in _actives:
                 product["active_ingredients"] = _actives + [_itag]
-            # ② availability_japan: 楽天で見つかった商品には最低限 rakuten を付与
+            # ② availability_japan: 楽天商品は amazon も同時購入可能なケースが大半
+            #    ai_virtual は infer_virtual_product_fields で ["amazon","rakuten"] を取得するため
+            #    rakuten_criteria も同水準に揃えてスコア公平性を確保する
             if not (product.get("availability_japan") or []):
-                product["availability_japan"] = ["rakuten"]
+                product["availability_japan"] = ["amazon", "rakuten"]
             # ③（削除）concerns の強制付与は overcorrection のため廃止
             #    _itag → enrich_product_metadata_from_ingredients → concerns の自然な連鎖で十分
             # ④ contraindications: タイトルから刺激性・使用注意事項を推定
@@ -7892,6 +7894,15 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
         # DB・楽天問わず全商品に同じ基準でメタデータ補完を適用する
         enrich_product_metadata_from_ingredients(product)
+
+        # enrich 後も concerns が空の rakuten_criteria 商品には step の目的から補完する
+        # ai_virtual は build_virtual_product_from_ai_candidate で purpose_to_concern_tags を
+        # フォールバックとして使うため、公平性のため同じ処理を適用する
+        if (
+            product.get("_source_hint") == "rakuten_criteria"
+            and not (product.get("concerns") or [])
+        ):
+            product["concerns"] = purpose_to_concern_tags(step.get("purpose", ""))
 
         # 楽天criteriaのメタデータ確認ログ
         _src_hint = product.get("_source_hint", "")
