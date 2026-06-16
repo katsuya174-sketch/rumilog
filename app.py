@@ -12012,7 +12012,7 @@ def build_product_ranking(results, client_ip=None, limit=20):
     return ranking
 
 
-def group_ranking_by_category(ranking):
+def group_ranking_by_category(ranking, per_category_limit=10):
     """ランキングをカテゴリ別にグループ化して返す"""
     groups: dict[str, list] = {}
     for item in ranking:
@@ -12020,7 +12020,7 @@ def group_ranking_by_category(ranking):
         groups.setdefault(cat, []).append(item)
     result = []
     for cat in sorted(groups.keys(), key=lambda c: CATEGORY_ORDER.get(c, 99)):
-        products = sorted(groups[cat], key=lambda x: -x["count"])
+        products = sorted(groups[cat], key=lambda x: -x["count"])[:per_category_limit]
         result.append({"category": cat, "products": products})
     return result
 
@@ -14955,20 +14955,25 @@ def admin_product_ranking():
 
 @app.route("/my-product-ranking")
 def my_product_ranking():
-    client_ip = flask_session.get("client_ip") or get_client_ip()
+    _is_creator = is_creator()
     results = load_results()
 
-    ranking = build_product_ranking(
-        results,
-        client_ip=client_ip,
-        limit=20
-    )
+    if _is_creator:
+        # 全ユーザー集計・カテゴリ別20件
+        ranking = build_product_ranking(results, client_ip=None, limit=300)
+        ranking_by_category = group_ranking_by_category(ranking, per_category_limit=20)
+        title = "よく提案される商品（全ユーザー集計）"
+    else:
+        client_ip = flask_session.get("client_ip") or get_client_ip()
+        ranking = build_product_ranking(results, client_ip=client_ip, limit=200)
+        ranking_by_category = group_ranking_by_category(ranking, per_category_limit=10)
+        title = "よく提案される商品"
 
     return render_template(
         "product_ranking.html",
-        title="よく提案される商品",
+        title=title,
         ranking=ranking,
-        ranking_by_category=group_ranking_by_category(ranking)
+        ranking_by_category=ranking_by_category
     )
 @app.route("/click")
 def product_click():
