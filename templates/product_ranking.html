@@ -163,7 +163,7 @@
                 <div class="category-section">
                     <div class="category-header">{{ group.category }}</div>
 
-                    {% for item in group.items %}
+                    {% for item in group.products %}
                         <div class="ranking-card">
                             <span class="rank{% if loop.index == 1 %} top1{% elif loop.index == 2 %} top2{% elif loop.index == 3 %} top3{% endif %}">
                                 {{ loop.index }}位

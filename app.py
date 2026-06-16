@@ -12020,8 +12020,8 @@ def group_ranking_by_category(ranking):
         groups.setdefault(cat, []).append(item)
     result = []
     for cat in sorted(groups.keys(), key=lambda c: CATEGORY_ORDER.get(c, 99)):
-        items = sorted(groups[cat], key=lambda x: -x["count"])
-        result.append({"category": cat, "items": items})
+        products = sorted(groups[cat], key=lambda x: -x["count"])
+        result.append({"category": cat, "products": products})
     return result
 
 
