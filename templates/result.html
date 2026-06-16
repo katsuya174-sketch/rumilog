@@ -312,16 +312,6 @@
           </div>
   
           <div class="product-body">
-              <div class="product-source {{ step.get('product_source', '') }}">
-                  {% if step.get("product_source", "") == "db" %}
-                      DB選定
-                  {% elif step.get("product_source", "") == "ai" %}
-                      AI候補
-                  {% else %}
-                      カテゴリ提案
-                  {% endif %}
-              </div>
-  
               <div class="product-name">
                   {{ (step.get("brand", "") ~ " " ~ step.get("product", "")).strip() }}
               </div>
