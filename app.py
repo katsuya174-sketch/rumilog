@@ -13990,10 +13990,10 @@ def build_weekly_usage_plan(data):
 
     days = ["月", "火", "水", "木", "金", "土", "日"]
 
-    # 週間ルーティンに表示するカテゴリ（洗顔・クリームなど日常基礎は省略）
-    DISPLAY_CATEGORIES = {"化粧水", "美容液", "パック", "ピーリング", "ブースター"}
-    # 夜ルーティンで use_days に関わらず毎日表示するカテゴリ（基礎保湿は毎日必須）
-    ALWAYS_DAILY_NIGHT = {"化粧水"}
+    # 朝の週間ルーティンに表示するカテゴリ（特別ケアのみ）
+    MORNING_DISPLAY_CATEGORIES = {"化粧水", "美容液", "パック", "ピーリング", "ブースター"}
+    # 夜の週間ルーティンから除外するカテゴリ（毎日必須なので省略）
+    NIGHT_EXCLUDE_CATEGORIES = {"洗顔", "クレンジング"}
 
     def step_label(step):
         if not isinstance(step, dict):
@@ -14018,30 +14018,32 @@ def build_weekly_usage_plan(data):
         cat = str(step.get("category") or "").strip()
         return _WEEKLY_DEFAULT_DAYS.get(cat, ["日"])
 
-    def is_display(step):
-        return str(step.get("category") or "").strip() in DISPLAY_CATEGORIES if isinstance(step, dict) else False
+    def is_morning_display(step):
+        return str(step.get("category") or "").strip() in MORNING_DISPLAY_CATEGORIES if isinstance(step, dict) else False
+
+    def is_night_display(step):
+        return str(step.get("category") or "").strip() not in NIGHT_EXCLUDE_CATEGORIES if isinstance(step, dict) else False
 
     # 朝は毎日固定（use_daysに関わらず全表示カテゴリを並べる）
     fixed_morning = [
         step_label(s) for s in morning_steps
-        if isinstance(s, dict) and is_display(s) and step_label(s)
+        if isinstance(s, dict) and is_morning_display(s) and step_label(s)
     ]
 
     overall_note = str(routine_strategy.get("overall_policy") or "")
 
     usage_plan = []
     for day in days:
-        # 夜: use_days=[]は「毎日」を意味する。get_use_days()はweekly_care用の
-        # デフォルト曜日ロジックを含むため、夜ステップには直接 use_days を参照する
+        # 夜: 洗顔・クレンジング以外を全て表示
+        # use_days=[]は毎日の意味。get_use_days()のデフォルト曜日ロジックは使わない
         night_items = [
             step_label(s)
             for s in night_steps
             if isinstance(s, dict)
-            and is_display(s)
+            and is_night_display(s)
             and step_label(s)
             and (
-                str(s.get("category") or "").strip() in ALWAYS_DAILY_NIGHT
-                or not s.get("use_days")           # 空リスト/未設定 = 毎日
+                not s.get("use_days")           # 空リスト/未設定 = 毎日
                 or day in (s.get("use_days") or [])
             )
         ]
