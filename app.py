@@ -446,11 +446,30 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2, 
             elapsed = time.time() - _t_start
             current_count = increment_gemini_usage()
             if current_count is not None:
-                _warn = " ⚠️ NEAR LIMIT" if current_count >= GEMINI_DAILY_LIMIT * 0.8 else ""
+                _near = current_count >= GEMINI_DAILY_LIMIT * 0.8
+                _warn = " ⚠️ NEAR LIMIT" if _near else ""
                 print(
                     f"[GEMINI REQUEST COUNT] {current_count} / {GEMINI_DAILY_LIMIT}{_warn}",
                     flush=True
                 )
+                # 80%到達時に管理者へ1日1回通知
+                if _near:
+                    _notify_key = get_gemini_usage_key()
+                    if _notify_key not in _gemini_near_limit_notified_keys:
+                        _gemini_near_limit_notified_keys.add(_notify_key)
+                        import threading
+                        threading.Thread(
+                            target=send_admin_email,
+                            args=(
+                                f"[るみろぐ] Gemini API使用量が80%に到達しました",
+                                f"Gemini API の本日使用量が上限の80%に達しました。\n\n"
+                                f"使用回数: {current_count} / {GEMINI_DAILY_LIMIT}\n"
+                                f"リセット時刻: 毎日16:00 JST\n\n"
+                                f"このまま使用が続くと上限に達し、診断サービスが一時停止されます。\n"
+                                f"GEMINI_DAILY_LIMIT の引き上げをご検討ください。"
+                            ),
+                            daemon=True
+                        ).start()
 
             print(
                 f"[GEMINI CALL SUCCESS] model={model} elapsed={elapsed:.1f}s attempt={attempt + 1}/{max_retries}",
@@ -663,6 +682,7 @@ SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
 SMTP_USER = os.getenv("SMTP_USER", "")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "") or SMTP_USER
 SITE_URL = os.getenv("SITE_URL", "")
 # ==========================================
 # 商品カテゴリ → 画像ファイル
@@ -970,6 +990,33 @@ def send_premium_email(to_email, key):
     except Exception as e:
         print(f"[EMAIL ERROR] {repr(e)}", flush=True)
         return False
+
+def send_admin_email(subject, body):
+    """管理者メールアドレスに通知メールを送信する"""
+    if not SMTP_USER or not SMTP_PASSWORD or not ADMIN_EMAIL:
+        print(f"[ADMIN EMAIL] SMTP未設定のため送信スキップ subject={subject}", flush=True)
+        return False
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = SMTP_USER
+        msg["To"] = ADMIN_EMAIL
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+        context = ssl.create_default_context()
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls(context=context)
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, ADMIN_EMAIL, msg.as_string())
+        print(f"[ADMIN EMAIL] 送信成功: {ADMIN_EMAIL} subject={subject}", flush=True)
+        return True
+    except Exception as e:
+        print(f"[ADMIN EMAIL ERROR] {repr(e)}", flush=True)
+        return False
+
+
+# Gemini 80%通知の送信済みキーを記録（1日1回のみ通知）
+_gemini_near_limit_notified_keys: set = set()
+
 
 def is_premium_user():
     """
@@ -14266,9 +14313,18 @@ def lab_test_function():
 
                 error_text = str(e)
 
+                _quota_keywords = ["RESOURCE_EXHAUSTED", "quota", "RATE_LIMIT_EXCEEDED"]
+                _is_quota_error = (
+                    any(kw.lower() in error_text.lower() for kw in _quota_keywords)
+                    or ("429" in error_text and "RESOURCE_EXHAUSTED" in error_text)
+                )
+
                 message = "診断中にエラーが発生しました。時間をおいて再度お試しください。"
 
-                if "503" in error_text or "UNAVAILABLE" in error_text:
+                if _is_quota_error:
+                    message = "現在、診断サービスを一時停止しています。ご不便をおかけして申し訳ありません。復旧までしばらくお待ちください。"
+
+                elif "503" in error_text or "UNAVAILABLE" in error_text:
                     message = "現在診断が混み合っています。少し時間をおいて再度お試しください。"
 
                 elif "429" in error_text:
