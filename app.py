@@ -10893,7 +10893,7 @@ def pick_product(category, products):
         return None
     return max(candidates, key=lambda x: x.get("score", 0))
 # 履歴読み込み
-def load_results():
+def load_results(client_ip=None):
     conn = None
     cur = None
 
@@ -10901,11 +10901,19 @@ def load_results():
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
 
-        cur.execute("""
-        SELECT payload
-        FROM results
-        ORDER BY saved_at DESC
-        """)
+        if client_ip:
+            cur.execute("""
+            SELECT payload
+            FROM results
+            WHERE payload->>'client_ip' = %s
+            ORDER BY saved_at DESC
+            """, (client_ip,))
+        else:
+            cur.execute("""
+            SELECT payload
+            FROM results
+            ORDER BY saved_at DESC
+            """)
 
         rows = cur.fetchall()
 
@@ -10935,6 +10943,40 @@ def load_results():
         if cur:
             cur.close()
 
+        if conn:
+            conn.close()
+
+
+def trim_results_by_ip(ip, keep=3):
+    """無料ユーザーの診断履歴をkeep件のみ残して古いものを削除する"""
+    if not ip:
+        return
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+        DELETE FROM results
+        WHERE payload->>'client_ip' = %s
+        AND id NOT IN (
+            SELECT id FROM results
+            WHERE payload->>'client_ip' = %s
+            ORDER BY saved_at DESC
+            LIMIT %s
+        )
+        """, (ip, ip, keep))
+        deleted = cur.rowcount
+        conn.commit()
+        if deleted > 0:
+            print(f"[TRIM RESULTS] ip={ip} deleted={deleted} kept={keep}", flush=True)
+    except Exception as e:
+        print(f"[TRIM ERROR] {repr(e)}", flush=True)
+        if conn:
+            conn.rollback()
+    finally:
+        if cur:
+            cur.close()
         if conn:
             conn.close()
 # 履歴保存
@@ -11720,7 +11762,9 @@ def normalize_result(raw_data, image_path=""):
 
 
 # 診断結果を履歴に追加
-def append_result(raw_data, image_path=""):
+FREE_HISTORY_LIMIT = 3  # 無料ユーザーの保存上限件数
+
+def append_result(raw_data, image_path="", is_premium=False):
     history = load_results()
 
     if not isinstance(history, list):
@@ -11751,6 +11795,11 @@ def append_result(raw_data, image_path=""):
     save_results(history)
 
     print("[RESULT SAVED]", record_id, flush=True)
+
+    # 無料ユーザーは直近3件のみ保持
+    if not is_premium:
+        ip = normalized.get("client_ip", "")
+        trim_results_by_ip(ip, keep=FREE_HISTORY_LIMIT)
 
     return record
 
@@ -14520,7 +14569,7 @@ def lab_test_function():
             flask_session["client_ip"] = client_ip
             saved_record = None
             try:
-                saved_record = append_result(lightweight_result_payload(data))
+                saved_record = append_result(lightweight_result_payload(data), is_premium=bool(_is_premium or _is_creator))
                 if isinstance(saved_record, dict) and saved_record.get("id"):
                     data["id"] = saved_record["id"]
             except Exception as e:
@@ -15012,10 +15061,19 @@ def pricing():
 @app.route("/history")
 def history():
     try:
-        history_data = load_results()
+        client_ip = flask_session.get("client_ip") or get_client_ip()
+        _is_premium = is_premium_user()
+        _is_cre = is_creator()
+
+        # 自分のIPの診断結果のみ取得
+        history_data = load_results(client_ip=client_ip)
 
         if not isinstance(history_data, list):
             history_data = []
+
+        # 無料ユーザーは直近3件のみ表示
+        if not _is_premium and not _is_cre:
+            history_data = history_data[:FREE_HISTORY_LIMIT]
 
         prepared = []
 
