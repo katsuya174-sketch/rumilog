@@ -14854,6 +14854,48 @@ def premium_success():
     return render_template("premium_success.html")
 
 
+@app.route("/portal-by-email", methods=["GET", "POST"])
+def portal_by_email():
+    if request.method == "GET":
+        return render_template("portal_by_email.html")
+
+    email = (request.form.get("email") or "").strip().lower()
+    if not email:
+        return render_template("portal_by_email.html", error="メールアドレスを入力してください。")
+
+    # premium_keys からメールで一致するエントリを検索
+    keys = load_premium_keys()
+    customer_id = None
+    matched_key = None
+    for key, entry in keys.items():
+        if (entry.get("email") or "").strip().lower() == email and not entry.get("revoked", False):
+            customer_id = entry.get("stripe_customer_id", "")
+            matched_key = key
+            break
+
+    if not customer_id:
+        return render_template(
+            "portal_by_email.html",
+            submitted_email=email,
+            error="入力されたメールアドレスに紐づくプレミアム会員が見つかりませんでした。ご登録時のアドレスをご確認ください。"
+        )
+
+    if not stripe.api_key:
+        return render_template("error.html", error_message="決済システムへの接続に失敗しました。")
+
+    try:
+        base_url = SITE_URL.rstrip("/") if SITE_URL else request.host_url.rstrip("/")
+        return_url = f"{base_url}/lab?premium_key={matched_key}" if matched_key else f"{base_url}/lab"
+        portal_session = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=return_url
+        )
+        return redirect(portal_session.url)
+    except Exception as e:
+        print(f"[PORTAL BY EMAIL ERROR] {repr(e)}", flush=True)
+        return render_template("error.html", error_message="カスタマーポータルへの接続に失敗しました。しばらく経ってからお試しください。")
+
+
 @app.route("/customer-portal")
 def customer_portal():
     premium_key = request.args.get("premium_key", "")

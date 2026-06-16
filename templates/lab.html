@@ -935,8 +935,18 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                 </div>
             </div>
         </div>
-        
+
     </div>
+
+    {% if is_premium %}
+    <div style="text-align:center; padding: 8px 0 24px;">
+      <a href="{% if premium_key %}/customer-portal?premium_key={{ premium_key }}{% else %}/portal-by-email{% endif %}"
+         style="font-size:12px; color:#b89aa6; text-decoration:underline;">
+        サブスクリプション管理・解約はこちら
+      </a>
+    </div>
+    {% endif %}
+
     <script>
       document.querySelectorAll('.count-bar-fill[data-pct]').forEach(function(el) {
         requestAnimationFrame(function() { el.style.width = (parseFloat(el.dataset.pct) || 0) + '%'; });

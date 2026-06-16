@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="/static/favicon.png?v=3">
+    <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest.json">
+    <title>サブスクリプション管理 | るみろぐ</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
+            margin: 0;
+            padding: 40px 20px;
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at 20% 10%, #fff4f8 0, transparent 28%),
+                radial-gradient(circle at 90% 20%, #eef9ff 0, transparent 26%),
+                linear-gradient(180deg, #fffafd 0%, #f8fbff 100%);
+            color: #3f3a3a;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+        }
+        .card {
+            background: rgba(255, 255, 255, 0.92);
+            border: 1px solid #f4dce6;
+            border-radius: 24px;
+            padding: 36px 32px;
+            width: 100%;
+            max-width: 420px;
+            box-shadow: 0 10px 30px rgba(220, 130, 165, 0.12);
+            text-align: center;
+        }
+        .icon { font-size: 40px; margin-bottom: 14px; }
+        h1 {
+            font-size: 20px;
+            color: #7a2942;
+            margin: 0 0 8px;
+        }
+        p {
+            font-size: 13px;
+            color: #7a6b72;
+            line-height: 1.8;
+            margin: 0 0 24px;
+        }
+        label {
+            display: block;
+            text-align: left;
+            font-size: 13px;
+            color: #5a4a50;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        input[type="email"] {
+            width: 100%;
+            padding: 12px 14px;
+            border: 1.5px solid #f0c5d0;
+            border-radius: 12px;
+            font-size: 15px;
+            color: #3f3a3a;
+            background: #fff;
+            outline: none;
+            transition: border-color 0.2s;
+            margin-bottom: 18px;
+        }
+        input[type="email"]:focus {
+            border-color: #c96a93;
+        }
+        button[type="submit"] {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 999px;
+            background: linear-gradient(135deg, #e07a9a, #c75b7a);
+            color: #fff;
+            font-size: 15px;
+            font-weight: bold;
+            cursor: pointer;
+            box-shadow: 0 4px 14px rgba(199, 91, 122, 0.3);
+            transition: opacity 0.2s;
+        }
+        button[type="submit"]:hover { opacity: 0.88; }
+        .error-msg {
+            margin: 14px 0 0;
+            padding: 12px 14px;
+            border-radius: 12px;
+            background: #fff1f4;
+            border: 1px solid #f0c5d0;
+            color: #c2185b;
+            font-size: 13px;
+            line-height: 1.6;
+            text-align: left;
+        }
+        .back-link {
+            display: inline-block;
+            margin-top: 22px;
+            color: #9b3156;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">✉️</div>
+        <h1>サブスクリプション管理</h1>
+        <p>
+            ご登録時のメールアドレスを入力すると、<br>
+            解約・プラン変更ページに移動します。
+        </p>
+
+        <form method="POST" action="/portal-by-email">
+            <label for="email">メールアドレス</label>
+            <input type="email" id="email" name="email" placeholder="example@email.com"
+                   required autocomplete="email"
+                   value="{{ submitted_email or '' }}">
+            <button type="submit">管理ページへ進む</button>
+        </form>
+
+        {% if error %}
+        <div class="error-msg">{{ error }}</div>
+        {% endif %}
+
+        <a class="back-link" href="/lab">← 診断ページに戻る</a>
+    </div>
+</body>
+</html>
