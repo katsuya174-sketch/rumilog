@@ -718,14 +718,6 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
         {{ error }}
       </p>
     {% endif %}
-    {% if gemini_usage %}
-    <div style="margin:16px 0; padding:12px; border:1px solid #ddd; border-radius:12px; background:#fafafa;">
-        <strong>Gemini使用状況</strong><br>
-        本日枠：{{ gemini_usage.used }} / {{ gemini_usage.limit }} 回<br>
-        推定残り：{{ gemini_usage.remaining }} 回<br>
-        <small>毎日16:00頃に回復</small>
-    </div>
-    {% endif %}
     <form id="diagnosisForm" method="POST" enctype="multipart/form-data" onsubmit="return handleSubmit(event)">
         <div class="form-group">
           <div class="form-group">
