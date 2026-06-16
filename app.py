@@ -8234,7 +8234,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     best["_top_candidates"] = [
         {
             "brand": c.get("brand", ""),
-            "name": c.get("name", ""),
+            "name": clean_display_product_name(c.get("name", "")),
             "score": c.get("_score", 0),
             "base_score": c.get("_base_score", 0),
             "improve_score": c.get("_improve_score", 0),
