@@ -12011,6 +12011,20 @@ def build_product_ranking(results, client_ip=None, limit=20):
 
     return ranking
 
+
+def group_ranking_by_category(ranking):
+    """ランキングをカテゴリ別にグループ化して返す"""
+    groups: dict[str, list] = {}
+    for item in ranking:
+        cat = item["category"] or "その他"
+        groups.setdefault(cat, []).append(item)
+    result = []
+    for cat in sorted(groups.keys(), key=lambda c: CATEGORY_ORDER.get(c, 99)):
+        items = sorted(groups[cat], key=lambda x: -x["count"])
+        result.append({"category": cat, "items": items})
+    return result
+
+
 # トップページ
 @app.route("/", methods=["GET"])
 def home():
@@ -14882,7 +14896,8 @@ def admin_product_ranking():
     return render_template(
         "product_ranking.html",
         title="全ユーザー 商品出力ランキング",
-        ranking=ranking
+        ranking=ranking,
+        ranking_by_category=group_ranking_by_category(ranking)
     )
 
 
@@ -14900,7 +14915,8 @@ def my_product_ranking():
     return render_template(
         "product_ranking.html",
         title="よく提案される商品",
-        ranking=ranking
+        ranking=ranking,
+        ranking_by_category=group_ranking_by_category(ranking)
     )
 @app.route("/click")
 def product_click():

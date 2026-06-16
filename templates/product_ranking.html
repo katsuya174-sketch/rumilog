@@ -30,7 +30,7 @@
             border: 1px solid #f4dce6;
             border-radius: 24px;
             padding: 22px 20px;
-            margin-bottom: 20px;
+            margin-bottom: 24px;
             box-shadow: 0 10px 30px rgba(220, 130, 165, 0.12);
         }
 
@@ -48,24 +48,47 @@
             line-height: 1.8;
         }
 
+        .category-section {
+            margin-bottom: 28px;
+        }
+
+        .category-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 15px;
+            font-weight: bold;
+            color: #7a2942;
+            letter-spacing: 0.05em;
+            margin-bottom: 10px;
+            padding-left: 4px;
+        }
+
+        .category-header::before {
+            content: "";
+            display: inline-block;
+            width: 4px;
+            height: 18px;
+            background: linear-gradient(180deg, #f5a7c0, #c96a93);
+            border-radius: 3px;
+            flex-shrink: 0;
+        }
+
         .ranking-card {
             background: rgba(255, 255, 255, 0.92);
             border: 1px solid #f1e3ea;
-            border-radius: 22px;
-            padding: 16px 18px;
-            margin-bottom: 12px;
-            box-shadow: 0 8px 22px rgba(120, 90, 110, 0.08);
-        }
-
-        .rank-line {
+            border-radius: 18px;
+            padding: 13px 16px;
+            margin-bottom: 8px;
+            box-shadow: 0 4px 14px rgba(120, 90, 110, 0.07);
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
         }
 
         .rank {
-            min-width: 42px;
-            height: 42px;
+            min-width: 38px;
+            height: 38px;
             border-radius: 999px;
             background: #ffe3ee;
             color: #9b3156;
@@ -73,20 +96,32 @@
             align-items: center;
             justify-content: center;
             font-weight: bold;
-            font-size: 14px;
+            font-size: 13px;
+            flex-shrink: 0;
+        }
+
+        .rank.top1 { background: #ffd700; color: #7a5800; }
+        .rank.top2 { background: #e0e0e0; color: #555; }
+        .rank.top3 { background: #f5c48a; color: #7a4b00; }
+
+        .card-body {
+            flex: 1;
+            min-width: 0;
         }
 
         .product {
             font-weight: bold;
-            font-size: 16px;
+            font-size: 15px;
             color: #40373b;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
 
         .meta {
-            margin-left: 52px;
-            margin-top: 4px;
-            font-size: 13px;
-            color: #776b70;
+            margin-top: 2px;
+            font-size: 12px;
+            color: #9b7f88;
         }
 
         .count {
@@ -119,20 +154,26 @@
         <div class="header-card">
             <h1>📦 {{ title }}</h1>
             <p class="lead">
-                過去の診断で提案された回数が多い商品です。
+                過去の診断で提案された回数が多い商品をカテゴリ別に表示しています。
             </p>
         </div>
 
-        {% if ranking %}
-            {% for item in ranking %}
-                <div class="ranking-card">
-                    <div class="rank-line">
-                        <span class="rank">{{ loop.index }}位</span>
-                        <span class="product">{{ item.product }}</span>
-                    </div>
-                    <div class="meta">
-                        {{ item.category }} / <span class="count">{{ item.count }}回</span> 提案
-                    </div>
+        {% if ranking_by_category %}
+            {% for group in ranking_by_category %}
+                <div class="category-section">
+                    <div class="category-header">{{ group.category }}</div>
+
+                    {% for item in group.items %}
+                        <div class="ranking-card">
+                            <span class="rank{% if loop.index == 1 %} top1{% elif loop.index == 2 %} top2{% elif loop.index == 3 %} top3{% endif %}">
+                                {{ loop.index }}位
+                            </span>
+                            <div class="card-body">
+                                <div class="product">{{ item.product }}</div>
+                                <div class="meta"><span class="count">{{ item.count }}回</span> 提案</div>
+                            </div>
+                        </div>
+                    {% endfor %}
                 </div>
             {% endfor %}
         {% else %}
