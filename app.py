@@ -15127,7 +15127,20 @@ def history():
         if not isinstance(history_data, list):
             history_data = []
 
-        # 無料ユーザーは直近3件のみ表示
+        # ストリーク計算用に全件の日付を先に取得（表示制限の影響を受けないよう）
+        all_diag_dates = set()
+        for item in history_data:
+            if not isinstance(item, dict):
+                continue
+            date_str = (item.get("record_date") or item.get("saved_at") or "")[:10]
+            for fmt in ["%Y/%m/%d", "%Y-%m-%d"]:
+                try:
+                    all_diag_dates.add(datetime.strptime(date_str, fmt).date())
+                    break
+                except ValueError:
+                    continue
+
+        # 無料ユーザーは表示を直近5件に制限
         if not _is_premium and not _is_cre:
             history_data = history_data[:FREE_HISTORY_LIMIT]
 
@@ -15305,24 +15318,15 @@ def history():
             except Exception:
                 prepared[i - 1]["period_label"] = "前回比"
 
-        # ⑥ 診断ストリーク計算
+        # ⑥ 診断ストリーク計算（全件日付 all_diag_dates を使用）
         streak = 0
         try:
-            diag_dates = set()
-            for item in prepared:
-                date_str = (item.get("record_date") or item.get("saved_at") or "")[:10]
-                for fmt in ["%Y/%m/%d", "%Y-%m-%d"]:
-                    try:
-                        diag_dates.add(datetime.strptime(date_str, fmt).date())
-                        break
-                    except ValueError:
-                        continue
-            if diag_dates:
+            if all_diag_dates:
                 today = datetime.now().date()
                 check = today
-                if check not in diag_dates:
+                if check not in all_diag_dates:
                     check = today - timedelta(days=1)
-                while check in diag_dates:
+                while check in all_diag_dates:
                     streak += 1
                     check -= timedelta(days=1)
         except Exception:
