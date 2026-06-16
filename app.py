@@ -15127,13 +15127,20 @@ def history():
         if not isinstance(history_data, list):
             history_data = []
 
-        # 表示制限前に全件から日付・スコア系列を収集（ストリーク・改善サマリーに使用）
+        # 表示制限前に全件から日付・スコア系列を収集（ストリーク・改善サマリー・プレミアムグラフに使用）
         _all_score_keys = [
             "oil_balance", "redness", "pores", "hydration", "firmness",
             "acne", "dullness", "barrier", "texture", "tone_evenness"
         ]
+        _all_premium_score_keys = [
+            "acne_marks_red", "pigmentation", "enlarged_pores", "blackhead_pores",
+            "translucency", "tone_uniformity", "skin_balance", "symmetry"
+        ]
         all_diag_dates = set()
+        all_labels = []
+        all_skin_scores = []
         all_score_series = {key: [] for key in _all_score_keys}
+        all_premium_score_series = {key: [] for key in _all_premium_score_keys}
 
         for item in history_data:
             if not isinstance(item, dict):
@@ -15145,9 +15152,14 @@ def history():
                     break
                 except ValueError:
                     continue
+            all_labels.append(item.get("record_date") or item.get("saved_at") or "")
+            all_skin_scores.append(safe_int(item.get("skin_score", 0)))
             scores_dict = item.get("scores", {}) if isinstance(item.get("scores"), dict) else {}
             for key in _all_score_keys:
                 all_score_series[key].append(safe_int(scores_dict.get(key, 0)))
+            premium_scores_dict = item.get("premium_scores", {}) if isinstance(item.get("premium_scores"), dict) else {}
+            for key in _all_premium_score_keys:
+                all_premium_score_series[key].append(safe_int(premium_scores_dict.get(key, 0)))
 
         # 無料ユーザーは表示を直近5件に制限
         if not _is_premium and not _is_cre:
@@ -15255,6 +15267,13 @@ def history():
                 premium_score_series[key].append(
                     safe_int(premium_scores_dict.get(key, 0))
                 )
+
+        # プレミアム・クリエイターは全件データでグラフを構築
+        if _is_premium or _is_cre:
+            labels = all_labels
+            skin_scores = all_skin_scores
+            score_series = all_score_series
+            premium_score_series = all_premium_score_series
 
         # improvement_summary: 全件スコア系列で 最新(values[0]) - 最古(values[-1]) を計算
         improvement_summary = []
