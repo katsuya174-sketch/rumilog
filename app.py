@@ -14031,7 +14031,8 @@ def build_weekly_usage_plan(data):
 
     usage_plan = []
     for day in days:
-        # 夜: 化粧水は毎日固定、その他は use_days が空（毎日）または該当曜日のみ
+        # 夜: use_days=[]は「毎日」を意味する。get_use_days()はweekly_care用の
+        # デフォルト曜日ロジックを含むため、夜ステップには直接 use_days を参照する
         night_items = [
             step_label(s)
             for s in night_steps
@@ -14040,8 +14041,8 @@ def build_weekly_usage_plan(data):
             and step_label(s)
             and (
                 str(s.get("category") or "").strip() in ALWAYS_DAILY_NIGHT
-                or not get_use_days(s)
-                or day in get_use_days(s)
+                or not s.get("use_days")           # 空リスト/未設定 = 毎日
+                or day in (s.get("use_days") or [])
             )
         ]
 
