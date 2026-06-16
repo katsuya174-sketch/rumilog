@@ -15127,8 +15127,14 @@ def history():
         if not isinstance(history_data, list):
             history_data = []
 
-        # ストリーク計算用に全件の日付を先に取得（表示制限の影響を受けないよう）
+        # 表示制限前に全件から日付・スコア系列を収集（ストリーク・改善サマリーに使用）
+        _all_score_keys = [
+            "oil_balance", "redness", "pores", "hydration", "firmness",
+            "acne", "dullness", "barrier", "texture", "tone_evenness"
+        ]
         all_diag_dates = set()
+        all_score_series = {key: [] for key in _all_score_keys}
+
         for item in history_data:
             if not isinstance(item, dict):
                 continue
@@ -15139,6 +15145,9 @@ def history():
                     break
                 except ValueError:
                     continue
+            scores_dict = item.get("scores", {}) if isinstance(item.get("scores"), dict) else {}
+            for key in _all_score_keys:
+                all_score_series[key].append(safe_int(scores_dict.get(key, 0)))
 
         # 無料ユーザーは表示を直近5件に制限
         if not _is_premium and not _is_cre:
@@ -15247,11 +15256,10 @@ def history():
                     safe_int(premium_scores_dict.get(key, 0))
                 )
 
-        # improvement_summary: 最新(values[0]) - 最古(values[-1]) = 正が改善
-        # prepared は DESC 順（新しいほど index が小さい）
+        # improvement_summary: 全件スコア系列で 最新(values[0]) - 最古(values[-1]) を計算
         improvement_summary = []
 
-        for key, values in score_series.items():
+        for key, values in all_score_series.items():
             if len(values) >= 2:
                 diff = values[0] - values[-1]  # 最新 - 最古
 
