@@ -2706,8 +2706,8 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
             scored_items.sort(
                 key=lambda pair: (
                     pair[0],
+                    safe_price(pair[1].get("reviewCount", 0)),   # レビュー数を名前一致の次に優先
                     1 if (pair[1].get("mediumImageUrls") or pair[1].get("smallImageUrls")) else 0,
-                    safe_price(pair[1].get("reviewCount", 0)),
                     safe_price(pair[1].get("reviewAverage", 0)),
                     -safe_price(pair[1].get("itemPrice", 0))
                 ),
@@ -9317,10 +9317,22 @@ def clean_display_product_name(name):
     if not text:
         return ""
 
+    # 内容量表記の除去 (例: 100mL, 50g, 30cc)
+    text = re.sub(r’\s*\d+(\.\d+)?\s*(mL|ml|ｍｌ|ミリリットル|cc|CC|ℓ|リットル)(?=\s|$|[/／・])’, ‘’, text)
+    text = re.sub(r’\s*\d+(\.\d+)?\s*g(?=[^a-zA-Z%]|$)’, ‘’, text)
+    text = re.sub(r’\s*\d+(\.\d+)?\s*(mg|μg|ug)(?=\s|$)’, ‘’, text, flags=re.IGNORECASE)
+    # セット・個数表記の除去 (例: 2本組, 3個セット, 30枚入, お得2個)
+    text = re.sub(r’\s*\d+\s*(本|個|枚|袋|包|箱)(組|セット|入り?|まとめ)?’, ‘’, text)
+    text = re.sub(r’\s*\d+(組|セット)’, ‘’, text)
+    text = re.sub(r’\s*(セット品|まとめ買い|お得セット|お試しセット|2点セット|3点セット)’, ‘’, text)
+    # 括弧内の補足情報の除去 (例: (旧パッケージ), 【限定品】)
+    text = re.sub(r’[\(（【]旧[^)）】]*[\)）】]’, ‘’, text)
+    text = re.sub(r’[\(（【]旧パッケージ[\)）】]’, ‘’, text)
+
     text = text.replace("{", " ")
     text = text.replace("}", " ")
-    text = text.replace('"', " ")
-    text = text.replace("’", "'")
+    text = text.replace(‘"’, " ")
+    text = text.replace("’", "’")
     text = text.replace(":", " ")
     text = text.replace(",", " ")
 
