@@ -9317,10 +9317,11 @@ def clean_display_product_name(name):
     if not text:
         return ""
 
-    # 内容量表記の除去 (例: 100mL, 50g, 30cc)
-    text = re.sub(r’\s*\d+(\.\d+)?\s*(mL|ml|ｍｌ|ミリリットル|cc|CC|ℓ|リットル)(?=\s|$|[/／・])’, ‘’, text)
+    # 内容量表記の除去 (例: 100mL, 50g, 30cc, 150ml×2)
+    # 先読みなし: 数字+単位の組み合わせを後続文字に関わらず除去
+    text = re.sub(r’\s*\d+(\.\d+)?\s*(mL|ml|ｍｌ|ミリリットル|cc|CC|ℓ|リットル)’, ‘’, text, flags=re.IGNORECASE)
     text = re.sub(r’\s*\d+(\.\d+)?\s*g(?=[^a-zA-Z%]|$)’, ‘’, text)
-    text = re.sub(r’\s*\d+(\.\d+)?\s*(mg|μg|ug)(?=\s|$)’, ‘’, text, flags=re.IGNORECASE)
+    text = re.sub(r’\s*\d+(\.\d+)?\s*(mg|μg|ug)’, ‘’, text, flags=re.IGNORECASE)
     # セット・個数表記の除去 (例: 2本組, 3個セット, 30枚入, お得2個)
     text = re.sub(r’\s*\d+\s*(本|個|枚|袋|包|箱)(組|セット|入り?|まとめ)?’, ‘’, text)
     text = re.sub(r’\s*\d+(組|セット)’, ‘’, text)
