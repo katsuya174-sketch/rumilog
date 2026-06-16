@@ -2832,20 +2832,20 @@ _TITLE_CONTRAINDICATION_RULES = [
          "フルーツ酸", "酒石酸", "クエン酸 酸"],
         ["high_irritation_risk", "acid_same_routine", "photosensitivity", "morning_use_caution"]
     ),
-    # BHA系：脂溶性・毛穴向け・敏感肌注意
+    # BHA系：光感受性あり・朝使用NG
     (
         ["bha", "サリチル酸", "salicylic"],
-        ["high_irritation_risk", "acid_same_routine", "sensitive_skin"]
+        ["high_irritation_risk", "acid_same_routine", "photosensitivity", "morning_use_caution", "sensitive_skin"]
     ),
     # PHA系：マイルドだが酸系であることは明記
     (
         ["pha", "グルコノラクトン", "ラクトビオン酸"],
         ["acid_same_routine", "daily_use_caution"]
     ),
-    # ピーリング製品全般
+    # ピーリング製品全般：朝使用NG
     (
         ["ピーリング", "ピール", "スキンピール", "角質除去", "ゴマージュ", "スクラブ"],
-        ["high_irritation_risk", "acid_same_routine", "photosensitivity", "daily_use_caution"]
+        ["high_irritation_risk", "acid_same_routine", "photosensitivity", "morning_use_caution", "daily_use_caution"]
     ),
     # 高濃度表記
     (
@@ -5343,11 +5343,8 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     ]:
         score -= 10
 
-    if "morning_use_caution" in product_contra and step.get("_section") == "morning":
-        score -= 8
-
-    if "photosensitivity" in product_contra and step.get("_section") == "morning":
-        score -= 6
+    # morning_use_caution / photosensitivity は score_product で -9999 除外済みのため
+    # ここでの追加ペナルティは不要
 
     # -------------------------------------------------
     # 8. formulation / technology / texture
@@ -6238,6 +6235,10 @@ def score_product(product, step, user_data, budget_value):
         )
 
         if has_morning_retinoid:
+            return -9999
+
+        # 光感受性物質（AHA/BHA/ピーリング系）も朝NG: ソフトペナルティでは不十分なため除外
+        if "photosensitivity" in product_contra_for_morning:
             return -9999
     # カテゴリ一致は最優先
     if product_category != step_category:
@@ -7133,7 +7134,7 @@ def infer_virtual_product_fields(name, category="", ingredient_focus="", purpose
             "functions": ["角質ケア", "毛穴ケア"],
             "focuses": ["aha_bha"],
             "strength": {"aha_bha": "medium"},
-            "contraindications": ["acid_same_routine"]
+            "contraindications": ["acid_same_routine", "photosensitivity", "morning_use_caution"]
         },
         {
             "keywords": ["uv", "spf", "日焼け止め"],
