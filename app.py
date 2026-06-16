@@ -9333,7 +9333,7 @@ def clean_display_product_name(name):
     text = text.replace("{", " ")
     text = text.replace("}", " ")
     text = text.replace(‘"’, " ")
-    text = text.replace("’", "’")
+    text = text.replace("’", "'")
     text = text.replace(":", " ")
     text = text.replace(",", " ")
 
