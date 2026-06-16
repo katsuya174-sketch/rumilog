@@ -14854,6 +14854,16 @@ def premium_success():
     return render_template("premium_success.html")
 
 
+@app.route("/privacy-policy")
+def privacy_policy():
+    return render_template("privacy_policy.html")
+
+
+@app.route("/terms-of-service")
+def terms_of_service():
+    return render_template("terms_of_service.html")
+
+
 @app.route("/portal-by-email", methods=["GET", "POST"])
 def portal_by_email():
     if request.method == "GET":

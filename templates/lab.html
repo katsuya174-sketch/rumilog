@@ -931,13 +931,19 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
     </div>
 
     {% if is_premium %}
-    <div style="text-align:center; padding: 8px 0 24px;">
+    <div style="text-align:center; padding: 8px 0 16px;">
       <a href="{% if premium_key %}/customer-portal?premium_key={{ premium_key }}{% else %}/portal-by-email{% endif %}"
          style="font-size:12px; color:#b89aa6; text-decoration:underline;">
         サブスクリプション管理・解約はこちら
       </a>
     </div>
     {% endif %}
+
+    <footer style="text-align:center; padding: 16px 0 32px; margin-top: 8px;">
+      <a href="/privacy-policy" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">プライバシーポリシー</a>
+      <span style="color:#d8c0ca; font-size:11px;">|</span>
+      <a href="/terms-of-service" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">利用規約</a>
+    </footer>
 
     <script>
       document.querySelectorAll('.count-bar-fill[data-pct]').forEach(function(el) {
