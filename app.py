@@ -4083,9 +4083,8 @@ def gemini_clean_rakuten_product_names(data):
         "以下の楽天商品タイトルを、ユーザー向けに短く読みやすい商品名に整形してください。\n\n"
         "ルール:\n"
         "- ブランド名 + 商品名 のみ残す\n"
-        "- 容量・個数は残す（例: 100mL、30g、2個セット）\n"
-        "- 除去するもの: 送料無料、ポイント、セール、公式、正規品、【】《》の装飾、レビュー特典、"
-        "倍・円OFFなどの値引き表現、詰め替え用でない場合の「詰め替え」\n"
+        "- 除去するもの: 容量(100mL/30g等)、個数(2個セット/3本組等)、送料無料、ポイント、"
+        "セール、公式、正規品、【】《》の装飾、レビュー特典、倍・円OFFなどの値引き表現\n"
         "- 各行「番号: 整形後の名前」の形式で回答\n\n"
         + "\n".join(lines)
     )
@@ -4109,6 +4108,7 @@ def gemini_clean_rakuten_product_names(data):
             cleaned = m.group(2).strip()
             if 0 <= idx < len(uncached) and cleaned:
                 original_title = uncached[idx]["title"]
+                cleaned = clean_display_product_name(cleaned)
                 _rakuten_name_clean_cache[original_title] = cleaned
                 uncached[idx]["step"]["product"] = cleaned
                 gemini_applied_indices.add(idx)
