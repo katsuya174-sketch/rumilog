@@ -14108,8 +14108,8 @@ def build_weekly_usage_plan(data):
 
     days = ["月", "火", "水", "木", "金", "土", "日"]
 
-    # 朝の週間ルーティンに表示するカテゴリ（特別ケアのみ）
-    MORNING_DISPLAY_CATEGORIES = {"化粧水", "美容液", "パック", "ピーリング", "ブースター"}
+    # 朝の週間ルーティンに表示するカテゴリ
+    MORNING_DISPLAY_CATEGORIES = {"化粧水", "美容液", "パック", "ピーリング", "ブースター", "日焼け止め"}
     # 夜の週間ルーティンから除外するカテゴリ（毎日必須なので省略）
     NIGHT_EXCLUDE_CATEGORIES = {"洗顔", "クレンジング"}
     # 夜: AIがnight_stepsに含めた場合、use_daysに関わらず毎日表示するカテゴリ
