@@ -3960,7 +3960,9 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
             step["rakuten_link"] = step["affiliate_links"].get("rakuten", "")
             existing_rakuten_link = step["rakuten_link"]
 
-            if existing_image:
+            # 画像＋楽天リンクの両方が揃っている場合のみ早期return
+            if existing_image and existing_rakuten_link:
+                step["amazon_link"] = build_amazon_link(product_name)
                 return normalize_step_price_fields(step)
 
         matched_links = find_affiliate_links_for_ai_product(
@@ -3974,7 +3976,9 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
             step["rakuten_link"] = matched_links.get("rakuten", "")
             existing_rakuten_link = step["rakuten_link"]
 
-            if existing_image:
+            # 画像＋楽天リンクの両方が揃っている場合のみ早期return
+            if existing_image and existing_rakuten_link:
+                step["amazon_link"] = build_amazon_link(product_name)
                 return normalize_step_price_fields(step)
 
     rakuten_item = fetch_rakuten_item(
@@ -14108,8 +14112,8 @@ def build_weekly_usage_plan(data):
 
     days = ["月", "火", "水", "木", "金", "土", "日"]
 
-    # 朝の週間ルーティンに表示するカテゴリ
-    MORNING_DISPLAY_CATEGORIES = {"化粧水", "美容液", "パック", "ピーリング", "ブースター", "日焼け止め"}
+    # 朝の週間ルーティンに表示するカテゴリ（特別ケアのみ・日焼け止めは毎日固定なので除外）
+    MORNING_DISPLAY_CATEGORIES = {"化粧水", "美容液", "パック", "ピーリング", "ブースター"}
     # 夜の週間ルーティンから除外するカテゴリ（毎日必須なので省略）
     NIGHT_EXCLUDE_CATEGORIES = {"洗顔", "クレンジング"}
     # 夜: AIがnight_stepsに含めた場合、use_daysに関わらず毎日表示するカテゴリ
