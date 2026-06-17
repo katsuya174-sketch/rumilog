@@ -9373,6 +9373,8 @@ def clean_display_product_name(name):
     text = re.sub(r'\s*\d+\s*(本|個|枚|袋|包|箱)(組|セット|入り?|まとめ)?', '', text)
     text = re.sub(r'\s*\d+(組|セット)', '', text)
     text = re.sub(r'\s*(セット品|まとめ買い|お得セット|お試しセット|2点セット|3点セット)', '', text)
+    # 詰め替え・レフィル・トライアル等の除去（括弧あり・なし両対応）
+    text = re.sub(r'[\(（【]?(詰め?替え?|詰替|つめかえ|レフィル|リフィル|付け?替え?|つけかえ|お試し|サンプル|ミニサイズ|トライアル|限定品|限定版|新パッケージ|旧品)[\)）】]?', '', text)
     # 括弧内の補足情報の除去 (例: (旧パッケージ), 【限定品】)
     text = re.sub(r'[\(（【]旧[^)）】]*[\)）】]', '', text)
     text = re.sub(r'[\(（【]旧パッケージ[\)）】]', '', text)
@@ -12067,6 +12069,7 @@ def iter_selected_products_from_result(result):
                 continue
 
             product = str(step.get("product", "") or "").strip()
+            brand = str(step.get("brand", "") or "").strip()
             category = str(step.get("category", "") or "").strip()
 
             if not product:
@@ -12074,6 +12077,7 @@ def iter_selected_products_from_result(result):
 
             yield {
                 "product": product,
+                "brand": brand,
                 "category": category,
                 "section": section_name
             }
@@ -12091,6 +12095,7 @@ def build_product_ranking(results, client_ip=None, limit=20):
 
         for item in iter_selected_products_from_result(result):
             key = (
+                item["brand"],
                 item["product"],
                 item["category"]
             )
@@ -12098,8 +12103,9 @@ def build_product_ranking(results, client_ip=None, limit=20):
 
     ranking = []
 
-    for (product, category), count in counter.most_common(limit):
+    for (brand, product, category), count in counter.most_common(limit):
         ranking.append({
+            "brand": brand,
             "product": product,
             "category": category,
             "count": count

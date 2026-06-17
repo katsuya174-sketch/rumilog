@@ -109,6 +109,15 @@
             min-width: 0;
         }
 
+        .brand {
+            font-size: 11px;
+            color: #9b7f88;
+            margin-bottom: 1px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
         .product {
             font-weight: bold;
             font-size: 15px;
@@ -169,6 +178,9 @@
                                 {{ loop.index }}位
                             </span>
                             <div class="card-body">
+                                {% if item.brand %}
+                                <div class="brand">{{ item.brand }}</div>
+                                {% endif %}
                                 <div class="product">{{ item.product }}</div>
                                 <div class="meta"><span class="count">{{ item.count }}回</span> 提案</div>
                             </div>
