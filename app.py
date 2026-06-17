@@ -14163,13 +14163,29 @@ def build_weekly_usage_plan(data):
         and not s.get("use_days")
     }
 
+    # NIGHT_ALWAYS_DAILYのうちnight_stepsに存在しないカテゴリをmorning_stepsから補完
+    # （AIが化粧水を朝のみに設定した場合でも夜に表示させる）
+    night_daily_cats_covered = {
+        str(s.get("category") or "").strip()
+        for s in night_steps
+        if isinstance(s, dict) and str(s.get("category") or "").strip() in NIGHT_ALWAYS_DAILY
+    }
+    morning_supplement_night = [
+        step_label(s)
+        for s in morning_steps
+        if isinstance(s, dict)
+        and str(s.get("category") or "").strip() in NIGHT_ALWAYS_DAILY
+        and str(s.get("category") or "").strip() not in night_daily_cats_covered
+        and step_label(s)
+    ]
+
     usage_plan = []
     for day in days:
         # 夜: 洗顔・クレンジング以外を表示
-        # - 化粧水・美容液: AIがnight_stepsに入れた=毎日必要と判断済み → use_days無視で毎日表示
+        # - 化粧水・美容液: use_days無視で毎日表示。night_stepsになければmorning_stepsから補完
         # - 乳液/クリームでuse_days=[]（毎日同じ）のものは除外（冗長なので省略）
         # - その他: use_days=[]は毎日、指定曜日のみその日に表示
-        night_items = [
+        night_items = morning_supplement_night + [
             step_label(s)
             for s in night_steps
             if isinstance(s, dict)
