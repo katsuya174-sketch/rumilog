@@ -13227,10 +13227,8 @@ role: main/booster のみ。
 
 【use_days】
 night・weekly_careの各stepに必ず設定。morning=[]固定。
-- 化粧水・乳液・クリーム → use_days=[]（毎日必須）
-- セラミド/ヒアルロン酸/ナイアシンアミド/ペプチド/PDRN/CICA系美容液 → use_days=[]（毎日OK）
-- レチノール・レチナール含有 → use_days=["月","水","金"]等（必ず1日以上空ける）
-- 高濃度AHA/BHA/アゼライン酸 → use_days=["火","金"]等（連続禁止）
+nightのstepはすべてuse_days=[]（毎日使用）。nightに含めた=毎日必要と判断したことを意味する。
+レチノール・AHA/BHA等の刺激成分で頻度を下げたい場合は、nightに含めずweekly_careに移すか、使用頻度の注意をwarningsに記載すること。
 weekly_care例: パック→["日"] ピーリング→["土"]
 
 【weekly_care】
@@ -13309,10 +13307,8 @@ role: main/booster のみ。
 
 【use_days】
 night・weekly_careの各stepに必ず設定。morning=[]固定。
-- 化粧水・乳液・クリーム → use_days=[]（毎日必須）
-- セラミド/ヒアルロン酸/ナイアシンアミド/ペプチド/PDRN/CICA系美容液 → use_days=[]（毎日OK）
-- レチノール・レチナール含有 → use_days=["月","水","金"]等（必ず1日以上空ける）
-- 高濃度AHA/BHA/アゼライン酸 → use_days=["火","金"]等（連続禁止）
+nightのstepはすべてuse_days=[]（毎日使用）。nightに含めた=毎日必要と判断したことを意味する。
+レチノール・AHA/BHA等の刺激成分で頻度を下げたい場合は、nightに含めずweekly_careに移すか、使用頻度の注意をwarningsに記載すること。
 weekly_care例: パック→["日"] ピーリング→["土"]
 
 【weekly_care】
@@ -14116,8 +14112,9 @@ def build_weekly_usage_plan(data):
     MORNING_DISPLAY_CATEGORIES = {"化粧水", "美容液", "パック", "ピーリング", "ブースター"}
     # 夜の週間ルーティンから除外するカテゴリ（毎日必須なので省略）
     NIGHT_EXCLUDE_CATEGORIES = {"洗顔", "クレンジング"}
-    # 夜: AIがuse_daysを誤設定しても毎日必ず表示するカテゴリ
-    NIGHT_ALWAYS_DAILY = {"化粧水"}
+    # 夜: AIがnight_stepsに含めた場合、use_daysに関わらず毎日表示するカテゴリ
+    # （AIがルーティンに入れた=毎日必要と判断したとみなす。入れていなければそのまま非表示）
+    NIGHT_ALWAYS_DAILY = {"化粧水", "美容液"}
     # 夜: use_days=[]（毎日同じ）なら週間ビューに出さないカテゴリ
     NIGHT_SUPPRESS_IF_DAILY = {"乳液", "クリーム"}
 
@@ -14169,8 +14166,8 @@ def build_weekly_usage_plan(data):
     usage_plan = []
     for day in days:
         # 夜: 洗顔・クレンジング以外を表示
-        # - 化粧水はuse_daysに関わらず毎日表示
-        # - 乳液/クリームでuse_days=[]（毎日同じ）のものは除外
+        # - 化粧水・美容液: AIがnight_stepsに入れた=毎日必要と判断済み → use_days無視で毎日表示
+        # - 乳液/クリームでuse_days=[]（毎日同じ）のものは除外（冗長なので省略）
         # - その他: use_days=[]は毎日、指定曜日のみその日に表示
         night_items = [
             step_label(s)
@@ -14180,7 +14177,7 @@ def build_weekly_usage_plan(data):
             and step_label(s)
             and id(s) not in suppress_daily_ids
             and (
-                str(s.get("category") or "").strip() in NIGHT_ALWAYS_DAILY  # 化粧水は常時
+                str(s.get("category") or "").strip() in NIGHT_ALWAYS_DAILY  # 化粧水・美容液は常時
                 or not s.get("use_days")
                 or day in (s.get("use_days") or [])
             )
