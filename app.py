@@ -13226,8 +13226,11 @@ role: main/booster のみ。
 美容液を化粧水前に使う商品、化粧水後だが乳液より先に使うクリーム等、商品固有の指示がある場合はstandardを選ばず正確なタイミングを指定すること。
 
 【use_days】
-night・weekly_careの各stepに必ず設定。毎日OK=[],刺激成分=["月","木"]等,週1=["土"]。
-morning=[]固定。連続使用禁止成分は必ず間隔を空ける。
+night・weekly_careの各stepに必ず設定。morning=[]固定。
+- 化粧水・乳液・クリーム → use_days=[]（毎日必須）
+- セラミド/ヒアルロン酸/ナイアシンアミド/ペプチド/PDRN/CICA系美容液 → use_days=[]（毎日OK）
+- レチノール・レチナール含有 → use_days=["月","水","金"]等（必ず1日以上空ける）
+- 高濃度AHA/BHA/アゼライン酸 → use_days=["火","金"]等（連続禁止）
 weekly_care例: パック→["日"] ピーリング→["土"]
 
 【weekly_care】
@@ -13305,8 +13308,11 @@ role: main/booster のみ。
 ビタミンC/ナイアシンアミド/レチノール/レチナール/アゼライン酸/トラネキサム酸/PDRN/ペプチド/セラミド/ヒアルロン酸/CICA/ドクダミ/AHA/BHA/PHA/UV防御/低刺激
 
 【use_days】
-night・weekly_careの各stepに必ず設定。毎日OK=[],刺激成分=["月","木"]等,週1=["土"]。
-morning=[]固定。連続使用禁止成分は必ず間隔を空ける。
+night・weekly_careの各stepに必ず設定。morning=[]固定。
+- 化粧水・乳液・クリーム → use_days=[]（毎日必須）
+- セラミド/ヒアルロン酸/ナイアシンアミド/ペプチド/PDRN/CICA系美容液 → use_days=[]（毎日OK）
+- レチノール・レチナール含有 → use_days=["月","水","金"]等（必ず1日以上空ける）
+- 高濃度AHA/BHA/アゼライン酸 → use_days=["火","金"]等（連続禁止）
 weekly_care例: パック→["日"] ピーリング→["土"]
 
 【weekly_care】
@@ -14110,6 +14116,10 @@ def build_weekly_usage_plan(data):
     MORNING_DISPLAY_CATEGORIES = {"化粧水", "美容液", "パック", "ピーリング", "ブースター"}
     # 夜の週間ルーティンから除外するカテゴリ（毎日必須なので省略）
     NIGHT_EXCLUDE_CATEGORIES = {"洗顔", "クレンジング"}
+    # 夜: AIがuse_daysを誤設定しても毎日必ず表示するカテゴリ
+    NIGHT_ALWAYS_DAILY = {"化粧水"}
+    # 夜: use_days=[]（毎日同じ）なら週間ビューに出さないカテゴリ
+    NIGHT_SUPPRESS_IF_DAILY = {"乳液", "クリーム"}
 
     def step_label(step):
         if not isinstance(step, dict):
@@ -14148,18 +14158,30 @@ def build_weekly_usage_plan(data):
 
     overall_note = str(routine_strategy.get("overall_policy") or "")
 
+    # 乳液/クリームで use_days=[]（毎日同じ）のstepは週間ビューから除外
+    suppress_daily_ids = {
+        id(s) for s in night_steps
+        if isinstance(s, dict)
+        and str(s.get("category") or "").strip() in NIGHT_SUPPRESS_IF_DAILY
+        and not s.get("use_days")
+    }
+
     usage_plan = []
     for day in days:
-        # 夜: 洗顔・クレンジング以外を全て表示
-        # use_days=[]は毎日の意味。get_use_days()のデフォルト曜日ロジックは使わない
+        # 夜: 洗顔・クレンジング以外を表示
+        # - 化粧水はuse_daysに関わらず毎日表示
+        # - 乳液/クリームでuse_days=[]（毎日同じ）のものは除外
+        # - その他: use_days=[]は毎日、指定曜日のみその日に表示
         night_items = [
             step_label(s)
             for s in night_steps
             if isinstance(s, dict)
             and is_night_display(s)
             and step_label(s)
+            and id(s) not in suppress_daily_ids
             and (
-                not s.get("use_days")           # 空リスト/未設定 = 毎日
+                str(s.get("category") or "").strip() in NIGHT_ALWAYS_DAILY  # 化粧水は常時
+                or not s.get("use_days")
                 or day in (s.get("use_days") or [])
             )
         ]
