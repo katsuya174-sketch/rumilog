@@ -591,6 +591,7 @@ DEV_PREMIUM_MODE = os.getenv("DEV_PREMIUM_MODE", "false").lower() == "true"
 
 # ===== 作成者認証 =====
 CREATOR_KEY = os.getenv("CREATOR_KEY", "")
+ADMIN_KEY   = os.getenv("ADMIN_KEY", "")
 
 def _creator_token():
     """CREATOR_KEY から一方向トークンを生成する"""
@@ -15310,6 +15311,176 @@ def debug_db():
         return "\n".join(lines)
     except Exception as e:
         return f"<pre>ERROR: {e}</pre>", 500
+
+@app.route("/admin/stats")
+def admin_stats():
+    """管理者向け統計ページ。ADMIN_KEY クエリパラメータで保護。"""
+    if not ADMIN_KEY or request.args.get("key") != ADMIN_KEY:
+        return "403 Forbidden", 403
+
+    jst = ZoneInfo("Asia/Tokyo")
+    now_jst = datetime.now(jst)
+    today_str  = now_jst.strftime("%Y-%m-%d")
+    month_key  = now_jst.strftime("%Y-%m")
+    # DB クエリ用: JST 今日の 00:00 〜 23:59:59 をそのまま文字列比較
+    today_start = today_str + " 00:00:00"
+    today_end   = today_str + " 23:59:59"
+
+    errors = []
+
+    # ① 有料会員数（revoked=False かつ valid_until が未来）
+    premium_count = 0
+    premium_detail = []
+    try:
+        keys = load_premium_keys()
+        for key, entry in keys.items():
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("revoked", False):
+                continue
+            valid_until = entry.get("valid_until", "")
+            if valid_until:
+                try:
+                    expiry = datetime.fromisoformat(valid_until)
+                    if expiry.tzinfo is None:
+                        expiry = expiry.replace(tzinfo=jst)
+                    if expiry > now_jst:
+                        premium_count += 1
+                        premium_detail.append({
+                            "email": entry.get("email", "—"),
+                            "valid_until": valid_until[:10],
+                        })
+                except Exception:
+                    pass
+            else:
+                # valid_until なし = 無期限扱い
+                premium_count += 1
+                premium_detail.append({
+                    "email": entry.get("email", "—"),
+                    "valid_until": "無期限",
+                })
+    except Exception as e:
+        errors.append(f"premium_keys 読み込みエラー: {e}")
+
+    # ② 無料会員数（ユニークな user_id）・本日／今月の診断回数
+    free_user_count  = 0
+    diag_today       = 0
+    diag_month       = 0
+    total_records    = 0
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur  = conn.cursor()
+
+        # ユニーク user_id（空・NULL 除外）
+        cur.execute("""
+            SELECT COUNT(DISTINCT payload->>'user_id')
+            FROM results
+            WHERE payload->>'user_id' IS NOT NULL
+              AND payload->>'user_id' != ''
+        """)
+        free_user_count = cur.fetchone()[0] or 0
+
+        # 本日の診断件数（saved_at は JST 文字列で保存）
+        cur.execute("""
+            SELECT COUNT(*) FROM results
+            WHERE saved_at::text >= %s AND saved_at::text <= %s
+        """, (today_start, today_end))
+        diag_today = cur.fetchone()[0] or 0
+
+        # 今月の診断件数
+        cur.execute("""
+            SELECT COUNT(*) FROM results
+            WHERE to_char(saved_at, 'YYYY-MM') = %s
+        """, (month_key,))
+        diag_month = cur.fetchone()[0] or 0
+
+        # 総レコード数
+        cur.execute("SELECT COUNT(*) FROM results")
+        total_records = cur.fetchone()[0] or 0
+
+        cur.close()
+        conn.close()
+    except Exception as e:
+        errors.append(f"DB クエリエラー: {e}")
+
+    # global_usage.json から今月の累計（参考値）
+    global_month_count = 0
+    try:
+        gdata = load_global_usage()
+        global_month_count = int((gdata.get(month_key) or {}).get("count", 0))
+    except Exception as e:
+        errors.append(f"global_usage 読み込みエラー: {e}")
+
+    html = f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>管理者統計</title>
+  <style>
+    body{{font-family:"Hiragino Sans",sans-serif;background:#f8f4f7;color:#444;margin:0;padding:24px}}
+    h1{{color:#7a2942;font-size:22px;margin-bottom:20px}}
+    h2{{color:#9b3156;font-size:15px;margin:24px 0 8px;border-left:4px solid #e07a9a;padding-left:10px}}
+    .grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:16px;margin-bottom:16px}}
+    .card{{background:#fff;border:1px solid #f0d5df;border-radius:14px;padding:16px 18px;box-shadow:0 2px 8px rgba(180,90,120,.08)}}
+    .card .num{{font-size:32px;font-weight:bold;color:#c75b7a;line-height:1.2}}
+    .card .label{{font-size:12px;color:#9a7080;margin-top:4px}}
+    table{{border-collapse:collapse;width:100%;max-width:540px;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(180,90,120,.06)}}
+    th,td{{padding:8px 14px;font-size:13px;text-align:left;border-bottom:1px solid #f5e0e8}}
+    th{{background:#fdf0f5;color:#7a2942;font-weight:bold}}
+    .err{{background:#fff3f3;border:1px solid #ffbbbb;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#c00}}
+    .note{{font-size:12px;color:#b09098;margin-top:6px}}
+    .ts{{font-size:12px;color:#b09098;margin-top:24px}}
+  </style>
+</head>
+<body>
+  <h1>📊 管理者統計</h1>
+  {''.join(f'<div class="err">⚠ {e}</div>' for e in errors)}
+
+  <h2>会員数</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="num">{premium_count}</div>
+      <div class="label">有料会員（有効期限内）</div>
+    </div>
+    <div class="card">
+      <div class="num">{free_user_count}</div>
+      <div class="label">無料会員（ユニーク UUID）</div>
+    </div>
+  </div>
+
+  <h2>診断実行回数</h2>
+  <div class="grid">
+    <div class="card">
+      <div class="num">{diag_today}</div>
+      <div class="label">本日（{today_str}）</div>
+    </div>
+    <div class="card">
+      <div class="num">{diag_month}</div>
+      <div class="label">今月（{month_key}）</div>
+    </div>
+    <div class="card">
+      <div class="num">{total_records}</div>
+      <div class="label">累計保存件数</div>
+    </div>
+    <div class="card">
+      <div class="num">{global_month_count}</div>
+      <div class="label">今月（global_usage.json）</div>
+    </div>
+  </div>
+
+  <h2>有料会員一覧</h2>
+  {'<p style="color:#999;font-size:13px">有料会員はいません。</p>' if not premium_detail else f"""
+  <table>
+    <tr><th>メールアドレス</th><th>有効期限</th></tr>
+    {''.join(f'<tr><td>{d["email"]}</td><td>{d["valid_until"]}</td></tr>' for d in premium_detail)}
+  </table>"""}
+
+  <div class="ts">生成日時: {now_jst.strftime('%Y-%m-%d %H:%M:%S')} JST</div>
+</body>
+</html>"""
+    return html
+
 
 # 診断履歴ページ
 @app.route("/history")
