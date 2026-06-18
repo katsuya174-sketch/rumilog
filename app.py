@@ -14090,6 +14090,51 @@ def apply_category_fallback_to_step(step, user_data):
 
     return normalize_step_price_fields(step)
 
+def supplement_night_steps_from_morning(data):
+    """
+    化粧水・美容液がnight_stepsにない場合、morning_stepsから複製して補完する。
+    AIが朝のみに設定した場合でも夜のスキンケアセクションに表示されるようにする。
+    attach_affiliate_links_to_all_stepsの後に呼ぶこと（コピー元にリンクが付いている状態）。
+    """
+    ALWAYS_NIGHTLY = {"化粧水", "美容液"}
+    CLEANSER_CATS  = {"洗顔", "クレンジング"}
+    CAT_ORDER      = {"化粧水": 0, "美容液": 1}
+
+    morning_steps = data.get("morning", {}).get("steps", [])
+    night = data.get("night", {})
+    if not isinstance(night, dict):
+        return data
+    night_steps = night.get("steps", [])
+    if not isinstance(night_steps, list):
+        return data
+
+    night_cats = {str(s.get("category") or "").strip() for s in night_steps if isinstance(s, dict)}
+
+    to_add = sorted(
+        [
+            copy.deepcopy(s) for s in morning_steps
+            if isinstance(s, dict)
+            and str(s.get("category") or "").strip() in ALWAYS_NIGHTLY
+            and str(s.get("category") or "").strip() not in night_cats
+        ],
+        key=lambda s: CAT_ORDER.get(str(s.get("category") or "").strip(), 99)
+    )
+
+    if not to_add:
+        return data
+
+    # 挿入位置: 洗顔・クレンジングの直後
+    insert_idx = 0
+    for i, s in enumerate(night_steps):
+        if isinstance(s, dict) and str(s.get("category") or "").strip() in CLEANSER_CATS:
+            insert_idx = i + 1
+
+    for offset, step in enumerate(to_add):
+        night_steps.insert(insert_idx + offset, step)
+
+    return data
+
+
 def build_weekly_usage_plan(data):
     """
     各stepのuse_daysフィールドに従って週間スケジュールを組み立てる。
@@ -14587,6 +14632,9 @@ def lab_test_function():
             }, flush=True)
 
             data = attach_affiliate_links_to_all_steps(data, affiliate_ai_db)
+
+            # 化粧水・美容液がnight_stepsにない場合はmorning_stepsから補完
+            data = supplement_night_steps_from_morning(data)
 
             # 楽天商品名をGeminiで短く整形（rakuten_criteria / ai_rakuten_verified のみ対象）
             data = gemini_clean_rakuten_product_names(data)
