@@ -11861,7 +11861,7 @@ def append_result(raw_data, image_path="", is_premium=False):
 
     print(f"[RESULT SAVED] id={record_id} client_ip={record.get('client_ip')!r}", flush=True)
 
-    # 無料ユーザーは直近3件のみ保持
+    # 無料ユーザーは直近5件のみ保持
     if not is_premium:
         ip = normalized.get("client_ip", "")
         trim_results_by_ip(ip, keep=FREE_HISTORY_LIMIT)
