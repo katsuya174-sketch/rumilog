@@ -553,6 +553,7 @@ import smtplib
 import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+import uuid as _uuid_mod
 from datetime import datetime, date, timedelta
 from zoneinfo import ZoneInfo
 import numpy as np
@@ -565,6 +566,22 @@ from google.genai import types
 # ==========================================
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "rumilog-dev-secret-change-in-prod")
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=365)
+RUMILOG_UID_COOKIE = "rumilog_uid"
+
+@app.after_request
+def attach_user_id_cookie(response):
+    """セッションに user_id があれば永続クッキーとして付与する"""
+    uid = flask_session.get("user_id", "")
+    if uid and not request.cookies.get(RUMILOG_UID_COOKIE):
+        response.set_cookie(
+            RUMILOG_UID_COOKIE,
+            uid,
+            max_age=365 * 24 * 3600,
+            httponly=True,
+            samesite="Lax",
+        )
+    return response
 
 CLICK_LOG_FILE = "product_clicks.json"
 
@@ -725,6 +742,29 @@ def get_client_ip():
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.remote_addr or "unknown"
+
+def get_or_create_user_id():
+    """
+    永続クッキーからユーザー固有IDを取得する。
+    クッキーがない場合はUUIDを生成してFlaskセッション（永続化）に保存し、
+    レスポンス時にクッキーとして付与できるよう flask_session にも記録する。
+    """
+    # まずクッキーを確認
+    uid = request.cookies.get(RUMILOG_UID_COOKIE, "")
+    if uid and len(uid) >= 32:
+        flask_session["user_id"] = uid
+        flask_session.permanent = True
+        return uid
+    # クッキーがない場合はセッションを確認
+    uid = flask_session.get("user_id", "")
+    if uid and len(uid) >= 32:
+        flask_session.permanent = True
+        return uid
+    # 新規生成
+    uid = str(_uuid_mod.uuid4())
+    flask_session["user_id"] = uid
+    flask_session.permanent = True
+    return uid
 
 # ==========================================
 # プレミアムキー管理
@@ -10946,7 +10986,11 @@ def pick_product(category, products):
         return None
     return max(candidates, key=lambda x: x.get("score", 0))
 # 履歴読み込み
-def load_results(client_ip=None):
+def load_results(user_id=None, client_ip=None):
+    """
+    user_id（UUIDクッキー）でフィルタする。
+    user_id がない場合は全件返す（append_result 内の全件ロード用）。
+    """
     conn = None
     cur = None
 
@@ -10954,13 +10998,13 @@ def load_results(client_ip=None):
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
 
-        if client_ip:
+        if user_id:
             cur.execute("""
             SELECT payload
             FROM results
-            WHERE payload->>'client_ip' = %s
+            WHERE payload->>'user_id' = %s
             ORDER BY saved_at DESC
-            """, (client_ip,))
+            """, (user_id,))
         else:
             cur.execute("""
             SELECT payload
@@ -10971,30 +11015,20 @@ def load_results(client_ip=None):
         rows = cur.fetchall()
 
         results = []
-
         for row in rows:
             payload = row[0]
-
             if isinstance(payload, dict):
                 results.append(payload)
-
             elif isinstance(payload, str):
                 try:
                     results.append(json.loads(payload))
                 except Exception:
                     pass
 
-        # IP フィルタ時は総件数も出力して照合確認
-        if client_ip:
+        if user_id:
             cur.execute("SELECT COUNT(*) FROM results")
             total = cur.fetchone()[0]
-            stored_ips = []
-            try:
-                cur.execute("SELECT DISTINCT payload->>'client_ip' FROM results LIMIT 10")
-                stored_ips = [r[0] for r in cur.fetchall()]
-            except Exception:
-                pass
-            print(f"[HISTORY LOAD] query_ip={client_ip!r} matched={len(results)} total_in_db={total} stored_ips={stored_ips}", flush=True)
+            print(f"[HISTORY LOAD] user_id={user_id!r} matched={len(results)} total_in_db={total}", flush=True)
         else:
             print("[RESULTS LOADED FROM DB]", len(results), flush=True)
 
@@ -11007,14 +11041,13 @@ def load_results(client_ip=None):
     finally:
         if cur:
             cur.close()
-
         if conn:
             conn.close()
 
 
-def trim_results_by_ip(ip, keep=3):
+def trim_results_by_user_id(user_id, keep=5):
     """無料ユーザーの診断履歴をkeep件のみ残して古いものを削除する"""
-    if not ip:
+    if not user_id:
         return
     conn = None
     cur = None
@@ -11023,18 +11056,18 @@ def trim_results_by_ip(ip, keep=3):
         cur = conn.cursor()
         cur.execute("""
         DELETE FROM results
-        WHERE payload->>'client_ip' = %s
+        WHERE payload->>'user_id' = %s
         AND id NOT IN (
             SELECT id FROM results
-            WHERE payload->>'client_ip' = %s
+            WHERE payload->>'user_id' = %s
             ORDER BY saved_at DESC
             LIMIT %s
         )
-        """, (ip, ip, keep))
+        """, (user_id, user_id, keep))
         deleted = cur.rowcount
         conn.commit()
         if deleted > 0:
-            print(f"[TRIM RESULTS] ip={ip} deleted={deleted} kept={keep}", flush=True)
+            print(f"[TRIM RESULTS] user_id={user_id} deleted={deleted} kept={keep}", flush=True)
     except Exception as e:
         print(f"[TRIM ERROR] {repr(e)}", flush=True)
         if conn:
@@ -11818,6 +11851,7 @@ def normalize_result(raw_data, image_path=""):
         "premium_scores": raw_data.get("premium_scores", {}),
         "symmetry_analysis": raw_data.get("symmetry_analysis", {}),
         "skin_age_estimate": raw_data.get("skin_age_estimate", 0),
+        "user_id": raw_data.get("user_id", ""),
         "client_ip": raw_data.get("client_ip", ""),
         "image_path": image_path,
         "model": ANALYSIS_MODEL,
@@ -11859,12 +11893,12 @@ def append_result(raw_data, image_path="", is_premium=False):
     history.append(record)
     save_results(history)
 
-    print(f"[RESULT SAVED] id={record_id} client_ip={record.get('client_ip')!r}", flush=True)
+    print(f"[RESULT SAVED] id={record_id} user_id={record.get('user_id')!r} client_ip={record.get('client_ip')!r}", flush=True)
 
     # 無料ユーザーは直近5件のみ保持
     if not is_premium:
-        ip = normalized.get("client_ip", "")
-        trim_results_by_ip(ip, keep=FREE_HISTORY_LIMIT)
+        uid = normalized.get("user_id", "")
+        trim_results_by_user_id(uid, keep=FREE_HISTORY_LIMIT)
 
     return record
 
@@ -12099,14 +12133,14 @@ def iter_selected_products_from_result(result):
             }
 
 
-def build_product_ranking(results, client_ip=None, limit=20):
+def build_product_ranking(results, user_id=None, client_ip=None, limit=20):
     counter = Counter()
 
     for result in results:
         if not isinstance(result, dict):
             continue
 
-        if client_ip and result.get("client_ip") != client_ip:
+        if user_id and result.get("user_id") != user_id:
             continue
 
         for item in iter_selected_products_from_result(result):
@@ -14755,6 +14789,7 @@ def lab_test_function():
                 print(e)
 
             data["client_ip"] = client_ip
+            data["user_id"] = get_or_create_user_id()
             flask_session["client_ip"] = client_ip
             saved_record = None
             try:
@@ -15198,12 +15233,12 @@ def my_product_ranking():
 
     if _is_creator:
         # 全ユーザー集計・カテゴリ別20件
-        ranking = build_product_ranking(results, client_ip=None, limit=300)
+        ranking = build_product_ranking(results, user_id=None, limit=300)
         ranking_by_category = group_ranking_by_category(ranking, per_category_limit=20)
         title = "よく提案される商品（全ユーザー集計）"
     else:
-        client_ip = flask_session.get("client_ip") or get_client_ip()
-        ranking = build_product_ranking(results, client_ip=client_ip, limit=200)
+        uid = get_or_create_user_id()
+        ranking = build_product_ranking(results, user_id=uid, limit=200)
         ranking_by_category = group_ranking_by_category(ranking, per_category_limit=10)
         title = "よく提案される商品"
 
@@ -15257,22 +15292,20 @@ def debug_db():
         cur = conn.cursor()
         cur.execute("SELECT COUNT(*) FROM results")
         total = cur.fetchone()[0]
-        cur.execute("SELECT id, saved_at, payload->>'client_ip' FROM results ORDER BY saved_at DESC LIMIT 20")
+        cur.execute("SELECT id, saved_at, payload->>'user_id', payload->>'client_ip' FROM results ORDER BY saved_at DESC LIMIT 20")
         rows = cur.fetchall()
         cur.close()
         conn.close()
-        current_ip = get_client_ip()
-        session_ip = flask_session.get("client_ip")
+        current_uid = get_or_create_user_id()
         lines = [
-            f"<pre>",
-            f"current request IP : {current_ip}",
-            f"session client_ip  : {session_ip}",
+            "<pre>",
+            f"current user_id    : {current_uid}",
             f"total records in DB: {total}",
-            f"",
-            f"最新20件 (id, saved_at, client_ip):"
+            "",
+            "最新20件 (id, saved_at, user_id, client_ip):"
         ]
         for r in rows:
-            lines.append(f"  {r[0]}  {r[1]}  {r[2]!r}")
+            lines.append(f"  {r[0]}  {r[1]}  {r[2]!r}  {r[3]!r}")
         lines.append("</pre>")
         return "\n".join(lines)
     except Exception as e:
@@ -15282,14 +15315,14 @@ def debug_db():
 @app.route("/history")
 def history():
     try:
-        client_ip = flask_session.get("client_ip") or get_client_ip()
+        user_id = get_or_create_user_id()
         _is_premium = is_premium_user()
         _is_cre = is_creator()
 
-        print(f"[HISTORY ROUTE] session_ip={flask_session.get('client_ip')!r} request_ip={get_client_ip()!r} used_ip={client_ip!r}", flush=True)
+        print(f"[HISTORY ROUTE] user_id={user_id!r}", flush=True)
 
-        # 自分のIPの診断結果のみ取得
-        history_data = load_results(client_ip=client_ip)
+        # 自分のuser_idの診断結果のみ取得
+        history_data = load_results(user_id=user_id)
 
         if not isinstance(history_data, list):
             history_data = []
@@ -15631,7 +15664,8 @@ def history():
 @app.route("/history/<result_id>")
 def result_detail(result_id):
     try:
-        history_data = load_results()
+        uid = get_or_create_user_id()
+        history_data = load_results(user_id=uid)
 
         if not isinstance(history_data, list):
             history_data = []
