@@ -10984,7 +10984,19 @@ def load_results(client_ip=None):
                 except Exception:
                     pass
 
-        print("[RESULTS LOADED FROM DB]", len(results), flush=True)
+        # IP フィルタ時は総件数も出力して照合確認
+        if client_ip:
+            cur.execute("SELECT COUNT(*) FROM results")
+            total = cur.fetchone()[0]
+            stored_ips = []
+            try:
+                cur.execute("SELECT DISTINCT payload->>'client_ip' FROM results LIMIT 10")
+                stored_ips = [r[0] for r in cur.fetchall()]
+            except Exception:
+                pass
+            print(f"[HISTORY LOAD] query_ip={client_ip!r} matched={len(results)} total_in_db={total} stored_ips={stored_ips}", flush=True)
+        else:
+            print("[RESULTS LOADED FROM DB]", len(results), flush=True)
 
         return results
 
@@ -11847,7 +11859,7 @@ def append_result(raw_data, image_path="", is_premium=False):
     history.append(record)
     save_results(history)
 
-    print("[RESULT SAVED]", record_id, flush=True)
+    print(f"[RESULT SAVED] id={record_id} client_ip={record.get('client_ip')!r}", flush=True)
 
     # 無料ユーザーは直近3件のみ保持
     if not is_premium:
@@ -15234,6 +15246,38 @@ def pricing():
     source = request.args.get("source", "unknown")
     log_pricing_view(source)
     return redirect("/premium", code=301)
+
+@app.route("/debug/db")
+def debug_db():
+    """クリエイター限定 DB診断エンドポイント"""
+    if not is_creator():
+        return "Unauthorized", 403
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM results")
+        total = cur.fetchone()[0]
+        cur.execute("SELECT id, saved_at, payload->>'client_ip' FROM results ORDER BY saved_at DESC LIMIT 20")
+        rows = cur.fetchall()
+        cur.close()
+        conn.close()
+        current_ip = get_client_ip()
+        session_ip = flask_session.get("client_ip")
+        lines = [
+            f"<pre>",
+            f"current request IP : {current_ip}",
+            f"session client_ip  : {session_ip}",
+            f"total records in DB: {total}",
+            f"",
+            f"最新20件 (id, saved_at, client_ip):"
+        ]
+        for r in rows:
+            lines.append(f"  {r[0]}  {r[1]}  {r[2]!r}")
+        lines.append("</pre>")
+        return "\n".join(lines)
+    except Exception as e:
+        return f"<pre>ERROR: {e}</pre>", 500
+
 # 診断履歴ページ
 @app.route("/history")
 def history():
@@ -15241,6 +15285,8 @@ def history():
         client_ip = flask_session.get("client_ip") or get_client_ip()
         _is_premium = is_premium_user()
         _is_cre = is_creator()
+
+        print(f"[HISTORY ROUTE] session_ip={flask_session.get('client_ip')!r} request_ip={get_client_ip()!r} used_ip={client_ip!r}", flush=True)
 
         # 自分のIPの診断結果のみ取得
         history_data = load_results(client_ip=client_ip)
