@@ -4142,12 +4142,55 @@ def _rule_based_clean_rakuten_title(title: str) -> str:
     return t if t.strip() else title
 
 
+_GEMINI_NAME_CLEAN_PROMPT_PREFIX = """\
+以下の楽天市場の商品タイトルから、「ブランド名と製品名だけ」を抽出してください。
+
+【抽出ルール】
+▼ 残すもの（これだけ）
+  - ブランド名（メーカー名・ブランド名）
+  - 製品名・シリーズ名（固有の商品名）
+
+▼ 削除するもの（一切残さない）
+  - 容量・内容量・個数（100mL、30g、2個セット、3本組 など）
+  - 価格・割引・クーポン（500円OFF、クーポンで●円、税込●円、●%引き など）
+  - ポイント・特典（ポイント3倍、P10倍、レビュー特典 など）
+  - 送料・配送情報（送料無料、即日発送 など）
+  - 販促ラベル（公式、正規品、楽天1位、ランキング1位、★受賞 など）
+  - 括弧・装飾記号の中身（【】《》『』〔〕の内容ごと除去）
+  - キャッチコピー・効能フレーズ（うるおい、美白、エイジングケア などの説明文）
+  - 記号・装飾（★☆◆◇▼▽●○■□ など単体で意味を持たないもの）
+
+【出力例】
+入力: 資生堂 ベネフィーク ローションI 200mL 【送料無料】ポイント10倍 楽天1位
+出力: 資生堂 ベネフィーク ローションI
+
+入力: ☆クーポンで1980円★ コーセー アルビオン エクサージュ モイスチュア ミルク 200mL 500円OFF
+出力: コーセー アルビオン エクサージュ モイスチュア ミルク
+
+入力: SK-II フェイシャル トリートメント エッセンス 230mL 正規品 母の日ギフト ポイント3倍
+出力: SK-II フェイシャル トリートメント エッセンス
+
+入力: 【公式】オルビス ユードット ウォッシュ 120g 詰め替え 2個セット お得
+出力: ORBIS(オルビス) ユードット ウォッシュ
+
+入力: 【楽天ランキング1位】ドクターシーラボ VC100エッセンスローションEX 120mL 美白 うるおい
+出力: ドクターシーラボ VC100エッセンスローションEX
+
+入力: 無印良品 敏感肌用化粧水 高保湿タイプ 200mL スキンケア セット 送料無料
+出力: 無印良品 敏感肌用化粧水 高保湿タイプ
+
+【回答形式】
+番号: 抽出した「ブランド名 製品名」（1行1件、それ以外の説明は不要）
+
+対象リスト:
+"""
+
+
 def gemini_clean_rakuten_product_names(data):
-    """楽天商品名（長いマーケティング文言入り）をGeminiで短くユーザー向けに整形する。
-    rakuten_criteria / ai_rakuten_verified ソースのステップのみ対象。
-    DETAIL_MODEL を使い1回のバッチ呼び出しで全ステップを処理する。
+    """楽天商品タイトルからブランド名+製品名のみをGeminiで抽出する。
+    1位ステップ（rakuten_criteria / ai_rakuten_verified）と
+    top_candidates の2位・3位候補名を同一バッチで処理する。
     """
-    # 対象ステップを収集
     all_steps = []
     for section in ["morning", "night"]:
         for s in data.get(section, {}).get("steps", []):
@@ -4157,10 +4200,13 @@ def gemini_clean_rakuten_product_names(data):
         if isinstance(s, dict):
             all_steps.append(s)
 
-    # 全ステップのソースをログ出力（デバッグ用）
     print(f"[NAME CLEAN] 全ステップ数={len(all_steps)} sources={[s.get('product_source','') for s in all_steps]}", flush=True)
 
-    targets = []
+    # --- 対象タイトルを収集 ---
+    # items: {"title": str, "apply": callable(cleaned)}
+    items = []
+
+    # 1位ステップの product 名
     for step in all_steps:
         source = step.get("product_source", "")
         if source not in ["ai_rakuten_verified", "rakuten_criteria"]:
@@ -4168,51 +4214,59 @@ def gemini_clean_rakuten_product_names(data):
         raw_title = str(step.get("rakuten_title", "") or step.get("product", "") or "").strip()
         if not raw_title:
             continue
-        targets.append({"step": step, "title": raw_title})
+        _step = step  # closure capture
+        items.append({
+            "title": raw_title,
+            "apply": lambda cleaned, s=_step: s.update({"product": cleaned}),
+        })
 
-    print(f"[NAME CLEAN] 整形対象={len(targets)}件 (rakuten_criteria/ai_rakuten_verified)", flush=True)
+    # 2位・3位候補の name フィールド（top_candidates[1:3]）
+    for step in all_steps:
+        for cand in (step.get("top_candidates") or [])[1:3]:
+            if not isinstance(cand, dict):
+                continue
+            raw_title = str(cand.get("name", "") or "").strip()
+            if not raw_title:
+                continue
+            _cand = cand
+            items.append({
+                "title": raw_title,
+                "apply": lambda cleaned, c=_cand: c.update({"name": cleaned}),
+            })
 
-    if not targets:
+    print(f"[NAME CLEAN] 整形対象={len(items)}件 (1位ステップ+2位3位候補)", flush=True)
+
+    if not items:
         return data
 
-    # キャッシュ済みは即適用、未キャッシュだけをGeminiに送る
+    # キャッシュ済みを即適用
     uncached = []
-    for t in targets:
-        if t["title"] in _rakuten_name_clean_cache:
-            cached_name = _rakuten_name_clean_cache[t["title"]]
-            t["step"]["product"] = cached_name
-            print(f"[NAME CLEAN CACHE HIT] {t['title'][:40]} -> {cached_name}", flush=True)
+    for item in items:
+        if item["title"] in _rakuten_name_clean_cache:
+            cleaned = _rakuten_name_clean_cache[item["title"]]
+            item["apply"](cleaned)
+            print(f"[NAME CLEAN CACHE HIT] {item['title'][:40]} -> {cleaned}", flush=True)
         else:
-            uncached.append(t)
+            uncached.append(item)
 
-    print(f"[NAME CLEAN] キャッシュヒット={len(targets)-len(uncached)}件 Gemini送信={len(uncached)}件", flush=True)
+    print(f"[NAME CLEAN] キャッシュヒット={len(items)-len(uncached)}件 Gemini送信={len(uncached)}件", flush=True)
 
     if not uncached:
         return data
 
-    # バッチプロンプト作成
     lines = [f"{i+1}. {t['title']}" for i, t in enumerate(uncached)]
+    prompt = _GEMINI_NAME_CLEAN_PROMPT_PREFIX + "\n".join(lines)
     print(f"[NAME CLEAN] Gemini送信タイトル: {[t['title'][:30] for t in uncached]}", flush=True)
 
-    prompt = (
-        "以下の楽天商品タイトルを、ユーザー向けに短く読みやすい商品名に整形してください。\n\n"
-        "ルール:\n"
-        "- ブランド名 + 商品名 のみ残す\n"
-        "- 除去するもの: 容量(100mL/30g等)、個数(2個セット/3本組等)、送料無料、ポイント、"
-        "セール、公式、正規品、【】《》の装飾、レビュー特典、倍・円OFFなどの値引き表現\n"
-        "- 各行「番号: 整形後の名前」の形式で回答\n\n"
-        + "\n".join(lines)
-    )
-
-    gemini_applied_indices = set()
+    gemini_applied = set()
     try:
         config = types.GenerateContentConfig(
-            temperature=0.1,
-            max_output_tokens=1500,  # 600→1500: 10件×長タイトルでも切れないよう拡大
+            temperature=0.0,   # 抽出タスクは決定論的に
+            max_output_tokens=2000,
         )
         response = call_gemini_with_retry(client, DETAIL_MODEL, prompt, config=config)
         resp_text = response.text.strip() if response and response.text else ""
-        print(f"[NAME CLEAN GEMINI RESPONSE] {resp_text[:300]}", flush=True)
+        print(f"[NAME CLEAN GEMINI RESPONSE] {resp_text[:400]}", flush=True)
 
         for line in resp_text.split("\n"):
             line = line.strip()
@@ -4223,26 +4277,25 @@ def gemini_clean_rakuten_product_names(data):
             cleaned = m.group(2).strip()
             if 0 <= idx < len(uncached) and cleaned:
                 original_title = uncached[idx]["title"]
-                cleaned = clean_display_product_name(cleaned)
                 _rakuten_name_clean_cache[original_title] = cleaned
-                uncached[idx]["step"]["product"] = cleaned
-                gemini_applied_indices.add(idx)
+                uncached[idx]["apply"](cleaned)
+                gemini_applied.add(idx)
                 print(f"[NAME CLEAN OK] {original_title[:40]} -> {cleaned}", flush=True)
 
-        print(f"[NAME CLEAN] Gemini整形 {len(gemini_applied_indices)}/{len(uncached)}件適用", flush=True)
+        print(f"[NAME CLEAN] Gemini整形 {len(gemini_applied)}/{len(uncached)}件適用", flush=True)
 
     except Exception as e:
         print(f"[NAME CLEAN GEMINI ERROR] {e}", flush=True)
 
-    # Geminiが未処理のアイテム（途中切れ・失敗）にルールベースフォールバック適用
+    # Gemini未処理分にルールベースフォールバック
     fallback_count = 0
-    for i, t in enumerate(uncached):
-        if i not in gemini_applied_indices:
-            cleaned = _rule_based_clean_rakuten_title(t["title"])
-            _rakuten_name_clean_cache[t["title"]] = cleaned
-            t["step"]["product"] = cleaned
+    for i, item in enumerate(uncached):
+        if i not in gemini_applied:
+            cleaned = _rule_based_clean_rakuten_title(item["title"])
+            _rakuten_name_clean_cache[item["title"]] = cleaned
+            item["apply"](cleaned)
             fallback_count += 1
-            print(f"[NAME CLEAN FALLBACK] {t['title'][:50]} -> {cleaned}", flush=True)
+            print(f"[NAME CLEAN FALLBACK] {item['title'][:50]} -> {cleaned}", flush=True)
     if fallback_count:
         print(f"[NAME CLEAN] フォールバック適用 {fallback_count}件", flush=True)
 
