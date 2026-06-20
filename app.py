@@ -4186,6 +4186,85 @@ _GEMINI_NAME_CLEAN_PROMPT_PREFIX = """\
 """
 
 
+_ALL_DAYS = ["月", "火", "水", "木", "金", "土", "日"]
+_IRRITANT_FOCUS_TAGS = {"retinoid", "aha_bha", "pha"}
+
+
+def resolve_weekly_care_day_conflicts(data):
+    """
+    週ケア（ピーリング）と night の刺激成分（レチノイド・AHA/BHA/PHA）が
+    同じ曜日にならないよう use_days を強制修正する。
+
+    - night ステップが毎日（use_days=[]）の場合 → ピーリングは ["土"] 固定
+      かつ warnings に「土曜は夜の刺激成分をお休みしてください」を追記
+    - night ステップが特定曜日の場合 → 重複しない曜日へ移動（土→日→平日の優先順）
+    """
+    irritant_days: set = set()
+    irritant_every_day = False
+
+    for step in data.get("night", {}).get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        focus = set(step.get("ingredient_focus") or [])
+        if not focus & _IRRITANT_FOCUS_TAGS:
+            continue
+        days = step.get("use_days") or []
+        if not days:
+            irritant_every_day = True
+        else:
+            irritant_days.update(days)
+
+    if not irritant_days and not irritant_every_day:
+        return data
+
+    for step in data.get("weekly_care", []):
+        if not isinstance(step, dict):
+            continue
+        if step.get("category") not in ["ピーリング", "パック"]:
+            continue
+
+        use_days = list(step.get("use_days") or [])
+
+        if irritant_every_day:
+            if use_days == ["土"]:
+                continue  # 既に土曜のみなら skip（別途 warning を追加）
+            print(
+                f"[DAY CONFLICT] {step.get('product','週ケア')} {use_days} → ['土'] (irritant every day)",
+                flush=True,
+            )
+            step["use_days"] = ["土"]
+
+        else:
+            conflict = set(use_days) & irritant_days
+            if not conflict:
+                continue
+            safe = [d for d in ["土", "日", "月", "火", "水", "木", "金"]
+                    if d not in irritant_days]
+            new_days = [safe[0]] if safe else ["土"]
+            print(
+                f"[DAY CONFLICT] {step.get('product','週ケア')} {use_days} → {new_days} "
+                f"(irritant_days={sorted(irritant_days)})",
+                flush=True,
+            )
+            step["use_days"] = new_days
+
+        # ユーザー向け注意書きを warnings に追加
+        product_name = step.get("product", "ピーリング")
+        msg = (
+            f"【注意】{product_name}（週ケア）の使用日は、"
+            "夜の刺激成分（レチノール・AHAなど）の使用をお休みしてください。"
+            "同日の重ね使いは肌への負担が大きくなります。"
+        )
+        warnings = data.get("warnings")
+        if isinstance(warnings, list):
+            if msg not in warnings:
+                warnings.append(msg)
+        else:
+            data["warnings"] = [msg]
+
+    return data
+
+
 def gemini_clean_rakuten_product_names(data):
     """楽天商品タイトルからブランド名+製品名のみをGeminiで抽出する。
     1位ステップ（rakuten_criteria / ai_rakuten_verified）と
@@ -14813,6 +14892,9 @@ def lab_test_function():
 
             # 化粧水・美容液がnight_stepsにない場合はmorning_stepsから補完
             data = supplement_night_steps_from_morning(data)
+
+            # 週ケアとnight刺激成分の曜日衝突を強制解消
+            data = resolve_weekly_care_day_conflicts(data)
 
             # 楽天商品名をGeminiで短く整形（rakuten_criteria / ai_rakuten_verified のみ対象）
             data = gemini_clean_rakuten_product_names(data)
