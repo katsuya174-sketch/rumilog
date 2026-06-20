@@ -4186,6 +4186,93 @@ _GEMINI_NAME_CLEAN_PROMPT_PREFIX = """\
 """
 
 
+_ALL_DAYS = ["月", "火", "水", "木", "金", "土", "日"]
+# ピーリング・パックと同日使用を避けるべき刺激成分タグ
+_IRRITANT_FOCUS_TAGS = {"retinoid", "aha_bha", "pha"}
+
+
+def resolve_weekly_care_day_conflicts(data):
+    """
+    週ケア（ピーリング）とnightの刺激成分（レチノイド・AHA/BHA/PHA）が
+    同じ曜日に重ならないよう use_days を自動調整する。
+
+    処理ロジック:
+    1. nightステップの ingredient_focus に刺激タグが含まれる日セットを収集
+    2. weekly_careのピーリングステップの use_days と照合
+    3. 重複があれば、刺激ステップが使われない曜日へピーリングを移動
+    4. 全日が刺激ステップ（毎日使用）の場合は ["土"] に固定し warnings へ注記
+    """
+    # nightステップの刺激成分使用日を収集
+    irritant_days: set = set()
+    irritant_every_day = False
+    for step in data.get("night", {}).get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        focus = set(step.get("ingredient_focus") or [])
+        if not focus & _IRRITANT_FOCUS_TAGS:
+            continue
+        days = step.get("use_days") or []
+        if not days:  # use_days=[] は毎日
+            irritant_every_day = True
+        else:
+            irritant_days.update(days)
+
+    if not irritant_days and not irritant_every_day:
+        return data  # 刺激成分なし → 対処不要
+
+    for step in data.get("weekly_care", []):
+        if not isinstance(step, dict):
+            continue
+        if step.get("category") not in ["ピーリング", "パック"]:
+            continue
+
+        use_days = step.get("use_days") or []
+
+        if irritant_every_day:
+            # 刺激成分が毎日使われる場合 → ピーリングは土曜に固定
+            if use_days != ["土"]:
+                print(
+                    f"[DAY CONFLICT] {step.get('product','週ケア')} use_days={use_days} "
+                    f"→ ['土'] (irritant every day)",
+                    flush=True,
+                )
+                step["use_days"] = ["土"]
+                _append_warning(
+                    data,
+                    f"ピーリング（{step.get('product','')}）使用日（土曜）は、"
+                    "夜の刺激成分（レチノール・AHAなど）の使用をお休みしてください。"
+                )
+        else:
+            # 特定曜日に刺激成分がある場合 → 重複しない曜日を選ぶ
+            conflict = set(use_days) & irritant_days
+            if not conflict:
+                continue  # 重複なし
+
+            # 優先順: 土→日→平日（刺激ステップを使わない曜日から選ぶ）
+            safe_days = [d for d in _ALL_DAYS if d not in irritant_days]
+            preferred = [d for d in ["土", "日", "月", "火", "水", "木", "金"] if d in safe_days]
+            new_days = [preferred[0]] if preferred else ["土"]
+
+            print(
+                f"[DAY CONFLICT] {step.get('product','週ケア')} use_days={use_days} "
+                f"→ {new_days} (conflict with irritant_days={sorted(irritant_days)})",
+                flush=True,
+            )
+            step["use_days"] = new_days
+
+    return data
+
+
+def _append_warning(data: dict, message: str):
+    """data["warnings"] リストに重複なしで警告を追記する。"""
+    warnings = data.get("warnings")
+    if not isinstance(warnings, list):
+        data["warnings"] = [message]
+        return
+    if message not in warnings:
+        warnings.append(message)
+
+
 def gemini_clean_rakuten_product_names(data):
     """楽天商品タイトルからブランド名+製品名のみをGeminiで抽出する。
     1位ステップ（rakuten_criteria / ai_rakuten_verified）と
@@ -13387,6 +13474,12 @@ night・weekly_careの各stepに必ず設定。morning=[]固定。
 
 weekly_care例: パック→["日"] ピーリング→["土"]
 
+【週ケアとnight刺激成分の曜日衝突禁止】
+ピーリング・パックのuse_daysは、nightステップの刺激成分（レチノール・レチナール・AHA・BHA・高濃度ビタミンC等）が使われる曜日と絶対に重ならないよう設定すること。
+- nightステップのuse_days=["月","水","金"]でレチノール使用 → ピーリングは["土"]か["日"]に設定
+- nightステップのuse_days=[]（毎日）でレチノール使用 → ピーリングは["土"]に設定し、nightレチノールのuse_daysから["土"]を除外するか、warningsに「ピーリング使用日はレチノールを省略してください」と記載
+- 同一夜に刺激成分（ピーリング＋レチノール、ピーリング＋AHA/BHA等）を重ねることは肌ダメージのリスクがあるため厳禁
+
 【weekly_care】
 パック・ピーリングのみ。不要なら[]。
 ピーリング条件: texture/pores/dullness低スコアで角質ケア必要時のみ。
@@ -13480,6 +13573,12 @@ night・weekly_careの各stepに必ず設定。morning=[]固定。
 - 化粧水・乳液・クリーム・保湿系美容液 → 原則use_days=[]
 
 weekly_care例: パック→["日"] ピーリング→["土"]
+
+【週ケアとnight刺激成分の曜日衝突禁止】
+ピーリング・パックのuse_daysは、nightステップの刺激成分（レチノール・レチナール・AHA・BHA・高濃度ビタミンC等）が使われる曜日と絶対に重ならないよう設定すること。
+- nightステップのuse_days=["月","水","金"]でレチノール使用 → ピーリングは["土"]か["日"]に設定
+- nightステップのuse_days=[]（毎日）でレチノール使用 → ピーリングは["土"]に設定し、nightレチノールのuse_daysから["土"]を除外するか、warningsに「ピーリング使用日はレチノールを省略してください」と記載
+- 同一夜に刺激成分（ピーリング＋レチノール、ピーリング＋AHA/BHA等）を重ねることは肌ダメージのリスクがあるため厳禁
 
 【weekly_care】
 パック・ピーリングのみ。不要なら[]。
@@ -14801,6 +14900,9 @@ def lab_test_function():
 
             # 化粧水・美容液がnight_stepsにない場合はmorning_stepsから補完
             data = supplement_night_steps_from_morning(data)
+
+            # 週ケアとnight刺激成分の曜日衝突を解消（ピーリング+レチノール等の同日使用を防ぐ）
+            data = resolve_weekly_care_day_conflicts(data)
 
             # 楽天商品名をGeminiで短く整形（rakuten_criteria / ai_rakuten_verified のみ対象）
             data = gemini_clean_rakuten_product_names(data)
