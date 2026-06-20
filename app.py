@@ -7924,27 +7924,33 @@ def score_routine_balance(step, product, routine_context=None):
 
     if routine_context and families:
         existing_families = set(routine_context.get("families", []))
+        # scope:"any" ルール用: 前セクションまでに選ばれた全成分を含む横断コンテキスト
+        global_families = set(routine_context.get("global_families", []))
         avoid_rules = routine_context.get("avoid_rules", [])
 
-        # Gemini-derived compatibility check — no ingredient knowledge in code
         for rule in avoid_rules:
             rule_fams = rule.get("families", [])
             if len(rule_fams) < 2:
                 continue
+            severity = rule.get("severity", "soft")
+            scope = rule.get("scope", "same_session")
+            # scope:"any" → 前セクション含む全成分で衝突判定、それ以外は同セッション内のみ
+            check_against = (global_families | existing_families) if scope == "any" else existing_families
             conflict = False
             for i, fa in enumerate(rule_fams):
                 for j, fb in enumerate(rule_fams):
                     if i == j:
                         continue
-                    if fa in families and fb in existing_families:
+                    if fa in families and fb in check_against:
                         conflict = True
                         break
                 if conflict:
                     break
             if conflict:
-                if rule.get("severity") == "hard":
+                if severity == "hard":
                     return -9999  # hard block: remove from selection entirely
-                # soft: no score penalty — surfaces as warning only
+                else:
+                    score -= 40  # ① soft 衝突ペナルティ（選定を強く抑制するが除外はしない）
 
     # -------------------------------------------------------
     # Non-focus active ingredient overlap penalty
@@ -9993,6 +9999,9 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
         return step
 
+    # ② scope:"any" 衝突を検出するためにセクション間で成分familiesを引き継ぐ
+    global_families: list = []
+
     for section in ["morning", "night"]:
         used_product_names = set()
         routine_context = {
@@ -10002,6 +10011,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             "avoid_rules": avoid_rules,
             "synergy_rules": synergy_rules,
             "assigned_focus_tags": [],
+            "global_families": list(global_families),  # 前セクションまでの確定済み成分
         }
 
         steps = data.get(section, {}).get("steps", [])
@@ -10017,6 +10027,9 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
                 routine_context
             )
 
+        # このセクションで選ばれた成分を次セクションに引き継ぐ
+        global_families.extend(routine_context["families"])
+
     weekly_used_product_names = set()
     weekly_routine_context = {
         "families": [],
@@ -10025,6 +10038,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
         "avoid_rules": avoid_rules,
         "synergy_rules": synergy_rules,
         "assigned_focus_tags": [],
+        "global_families": list(global_families),  # morning + night 全成分
     }
 
     weekly_steps = data.get("weekly_care", [])
@@ -11610,10 +11624,19 @@ def build_rule_based_warnings(data, user_data):
     # Gemini-derived combination warnings (soft severity) and residual violations (hard that slipped through)
     avoid_rules = data.get("routine_strategy", {}).get("avoid_combinations", [])
     if avoid_rules:
-        routine_families = set()
-        for step in all_steps:
-            profile = infer_active_profile(step)
-            routine_families.update(profile.get("families", set()))
+        # ③ scope:"same_session" はセクション単位で判定、"any" は全セクション横断で判定
+        _section_families: dict = {}
+        for _sec, _steps in [
+            ("morning", data.get("morning", {}).get("steps", [])),
+            ("night",   data.get("night",   {}).get("steps", [])),
+            ("weekly_care", data.get("weekly_care", [])),
+        ]:
+            _fams: set = set()
+            for _step in (_steps if isinstance(_steps, list) else []):
+                _fams.update(infer_active_profile(_step).get("families", set()))
+            _section_families[_sec] = _fams
+
+        _all_families = set().union(*_section_families.values())
 
         for rule in avoid_rules:
             if not isinstance(rule, dict):
@@ -11624,8 +11647,14 @@ def build_rule_based_warnings(data, user_data):
             reason = str(rule.get("reason", "")).strip()
             if not reason:
                 continue
-            # Warn if every family in the rule appears somewhere in the assigned routine
-            if rule_fams.issubset(routine_families):
+            scope = rule.get("scope", "any")
+            if scope == "same_session":
+                # 単一セクション内で全familiesが揃っている場合のみ警告
+                conflict = any(rule_fams.issubset(fams) for fams in _section_families.values() if fams)
+            else:
+                # scope:"any" — セクション横断で全familiesが存在すれば警告
+                conflict = rule_fams.issubset(_all_families)
+            if conflict:
                 warnings.append(reason)
 
     # 朝の角質ケア × 日焼け止め注意（成分組み合わせではなくUV対策の注意）
