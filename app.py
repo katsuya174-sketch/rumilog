@@ -4070,14 +4070,37 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
 
    
 def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
+    """
+    全ステップにアフィリエイトリンクを付与する。
+    Rakuten API クールダウン中にスキップされたステップは、
+    クールダウン解消後に最大1回再試行する。
+    """
+    skipped = []  # クールダウンでスキップされたステップを記録
+
+    def _attach(step):
+        if not isinstance(step, dict):
+            return
+        link_before = str(step.get("rakuten_link", "") or "")
+        attach_affiliate_links_to_step(step, affiliate_ai_db)
+        # クールダウンで skipped になったかを rakuten_link の変化で判定
+        if not str(step.get("rakuten_link", "") or "") and not link_before:
+            if time.time() < RAKUTEN_COOLDOWN_UNTIL:
+                skipped.append(step)
+
     for section in ["morning", "night"]:
         for step in data.get(section, {}).get("steps", []):
-            if isinstance(step, dict):
-                attach_affiliate_links_to_step(step, affiliate_ai_db)
+            _attach(step)
 
     for step in data.get("weekly_care", []):
-        if isinstance(step, dict):
-            attach_affiliate_links_to_step(step, affiliate_ai_db)
+        _attach(step)
+
+    # クールダウン中にスキップされたステップを、解消後に再試行（最大30秒待機）
+    if skipped and RAKUTEN_COOLDOWN_UNTIL > time.time():
+        wait_sec = min(RAKUTEN_COOLDOWN_UNTIL - time.time() + 0.5, 30)
+        print(f"[RAKUTEN COOLDOWN] waiting {wait_sec:.1f}s then retrying {len(skipped)} skipped steps", flush=True)
+        time.sleep(wait_sec)
+    for step in skipped:
+        attach_affiliate_links_to_step(step, affiliate_ai_db)
 
     return data
 
@@ -9423,6 +9446,16 @@ def clean_display_product_name(name):
     # 括弧内の補足情報の除去 (例: (旧パッケージ), 【限定品】)
     text = re.sub(r'[\(（【]旧[^)）】]*[\)）】]', '', text)
     text = re.sub(r'[\(（【]旧パッケージ[\)）】]', '', text)
+    # 価格・割引・クーポン表記の除去（楽天商品名に混入するパターン）
+    # 例: "500円off" "☆クーポンで1980円" "【1000円OFF】" "税込2980円"
+    text = re.sub(r'[\(（【]?[^\s（【】）]{0,10}(クーポン|coupon|COUPON)[^\s）】]{0,20}[\)）】]?', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'\d[\d,，]*円\s*(off|OFF|引き?|引)|(?:送料)?無料', '', text)
+    text = re.sub(r'(税込|税抜|定価|参考価格|通常価格|割引|円OFF|%OFF|%引き?)\s*[\d,，]*円?', '', text, flags=re.IGNORECASE)
+    text = re.sub(r'[\d,，]+\s*円', '', text)  # 残った「数字円」をまとめて除去
+    text = re.sub(r'(ポイント\d+倍|\d+倍|pt\d+|P\d+倍)', '', text)
+    # ☆★等の装飾記号（単独または先頭）
+    text = re.sub(r'^[\s　☆★◆◇▼▽△▲●○■□♪♦♥❤✨]+', '', text)
+    text = re.sub(r'[\s　☆★◆◇●○■□]+$', '', text)
 
     text = text.replace("{", " ")
     text = text.replace("}", " ")
@@ -12573,12 +12606,17 @@ def step_sort_key(step):
     use_timing = step.get("use_timing", "standard")
 
     # use_timing による明示的な順序上書き
+    # ただし 美容液カテゴリで before_toner が付いていても化粧水の後に配置する。
+    # （boosterタイプは enforce_booster_night_only で朝から除去済みのため、
+    #   残った 美容液は必ず 化粧水(3)の後で表示するのが正しい。）
     if use_timing in _TIMING_ORDER_OVERRIDE:
+        if category == "美容液" and use_timing == "before_toner":
+            return (_TIMING_ORDER_OVERRIDE["after_toner"], priority)
         return (_TIMING_ORDER_OVERRIDE[use_timing], priority)
 
-    # 後方互換: role=booster は before_toner 相当
+    # 後方互換: role=booster は before_toner 相当（美容液は after_toner にクランプ）
     if role == "booster":
-        return (2.5, priority)
+        return (3.5, priority)
 
     base_order = CATEGORY_ORDER.get(category, 99)
     return (base_order, priority)
