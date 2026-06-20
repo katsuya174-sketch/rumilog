@@ -4193,15 +4193,16 @@ _IRRITANT_FOCUS_TAGS = {"retinoid", "aha_bha", "pha"}
 def resolve_weekly_care_day_conflicts(data):
     """
     週ケア（ピーリング）と night の刺激成分（レチノイド・AHA/BHA/PHA）が
-    同じ曜日にならないよう use_days を強制修正する。
+    同じ「特定曜日」に重なっている場合のみ、ピーリングを安全な曜日へ移動する。
 
-    - night ステップが毎日（use_days=[]）の場合 → ピーリングは ["土"] 固定
-      かつ warnings に「土曜は夜の刺激成分をお休みしてください」を追記
-    - night ステップが特定曜日の場合 → 重複しない曜日へ移動（土→日→平日の優先順）
+    介入条件:
+    - night の刺激ステップが特定曜日（use_days 非空）で設定されている
+    - かつ週ケアも特定曜日（use_days 非空）で設定されている
+    - かつその曜日が重複している
+    どちらかが use_days=[]（毎日）の場合は介入しない（頻度自体の変更に相当するため）。
     """
+    # night 刺激ステップが明示的に指定している曜日を収集
     irritant_days: set = set()
-    irritant_every_day = False
-
     for step in data.get("night", {}).get("steps", []):
         if not isinstance(step, dict):
             continue
@@ -4210,11 +4211,11 @@ def resolve_weekly_care_day_conflicts(data):
             continue
         days = step.get("use_days") or []
         if not days:
-            irritant_every_day = True
-        else:
-            irritant_days.update(days)
+            # 毎日使用 → 頻度変更なしには衝突回避不可なので介入しない
+            continue
+        irritant_days.update(days)
 
-    if not irritant_days and not irritant_every_day:
+    if not irritant_days:
         return data
 
     for step in data.get("weekly_care", []):
@@ -4224,43 +4225,28 @@ def resolve_weekly_care_day_conflicts(data):
             continue
 
         use_days = list(step.get("use_days") or [])
+        if not use_days:
+            # 週ケアが毎日設定（通常ないが）→ 介入しない
+            continue
 
-        if irritant_every_day:
-            if use_days == ["土"]:
-                continue  # 既に土曜のみなら skip（別途 warning を追加）
-            print(
-                f"[DAY CONFLICT] {step.get('product','週ケア')} {use_days} → ['土'] (irritant every day)",
-                flush=True,
-            )
-            step["use_days"] = ["土"]
+        conflict = set(use_days) & irritant_days
+        if not conflict:
+            continue
 
-        else:
-            conflict = set(use_days) & irritant_days
-            if not conflict:
-                continue
-            safe = [d for d in ["土", "日", "月", "火", "水", "木", "金"]
-                    if d not in irritant_days]
-            new_days = [safe[0]] if safe else ["土"]
-            print(
-                f"[DAY CONFLICT] {step.get('product','週ケア')} {use_days} → {new_days} "
-                f"(irritant_days={sorted(irritant_days)})",
-                flush=True,
-            )
-            step["use_days"] = new_days
+        # 刺激ステップが使われない曜日へ移動（土→日→平日の優先順）
+        safe = [d for d in ["土", "日", "月", "火", "水", "木", "金"]
+                if d not in irritant_days]
+        if not safe:
+            # 安全な曜日がない（全曜日が刺激日）→ 介入しない
+            continue
 
-        # ユーザー向け注意書きを warnings に追加
-        product_name = step.get("product", "ピーリング")
-        msg = (
-            f"【注意】{product_name}（週ケア）の使用日は、"
-            "夜の刺激成分（レチノール・AHAなど）の使用をお休みしてください。"
-            "同日の重ね使いは肌への負担が大きくなります。"
+        new_days = [safe[0]]
+        print(
+            f"[DAY CONFLICT] {step.get('product', '週ケア')} {use_days} → {new_days} "
+            f"(irritant_days={sorted(irritant_days)})",
+            flush=True,
         )
-        warnings = data.get("warnings")
-        if isinstance(warnings, list):
-            if msg not in warnings:
-                warnings.append(msg)
-        else:
-            data["warnings"] = [msg]
+        step["use_days"] = new_days
 
     return data
 
