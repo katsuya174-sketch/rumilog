@@ -2717,30 +2717,49 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
                 if res.status_code == 429:
                     retry_seconds = 10
-
                     retry_match = re.search(
                         r"Try again in ([0-9\.]+) seconds?",
                         res.text,
                         re.IGNORECASE
                     )
-
                     if retry_match:
                         try:
                             retry_seconds = max(3, float(retry_match.group(1)) + 2)
                         except Exception:
                             retry_seconds = 10
 
-                    RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
-
+                    # ① 待機してから1回だけリトライ
                     print(
-                        "[RAKUTEN RATE LIMIT COOLDOWN]",
-                        keyword,
-                        retry_seconds,
-                        "seconds",
+                        f"[RAKUTEN 429] {keyword}: sleeping {retry_seconds}s then retrying once",
                         flush=True
                     )
+                    time.sleep(retry_seconds)
 
-                    return None
+                    try:
+                        wait_for_rakuten_rate_limit()
+                        res = requests.get(
+                            endpoint, params=params, headers=headers, timeout=(2, 4)
+                        )
+                        print(f"[RAKUTEN RETRY STATUS] {res.status_code}", flush=True)
+                    except Exception as _retry_e:
+                        print(f"[RAKUTEN RETRY ERROR] {_retry_e}", flush=True)
+                        # ② リトライ自体が例外 → クールダウン設定して諦める
+                        RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
+                        return None
+
+                    if res.status_code == 429:
+                        # ② リトライ後も429 → グローバルクールダウンを設定
+                        RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
+                        print(
+                            f"[RAKUTEN 429 PERSISTENT] cooldown {retry_seconds}s",
+                            flush=True
+                        )
+                        return None
+
+                    if res.status_code != 200:
+                        print(f"[RAKUTEN RETRY NON-200] {res.status_code}", flush=True)
+                        continue
+                    # リトライ成功（res.status_code == 200）→ fall-through してペイロード処理へ
 
                 if res.status_code == 400 and "keyword is not valid" in res.text:
                     print("[RAKUTEN INVALID KEYWORD SKIP]", keyword, flush=True)
@@ -4092,20 +4111,70 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
     return normalize_step_price_fields(step)
 
    
+def _try_rakuten_fallback_candidate(step, affiliate_ai_db):
+    """
+    主商品のRakutenリンク取得が（リトライ後も）失敗した場合、
+    top_candidates の 2位・3位を順に試してリンクを取得する。
+    成功した場合はステップの product / brand / image / price を次点商品に更新する。
+    クールダウン中は呼び出さないこと（呼び出し元で確認する）。
+    """
+    cands = step.get("top_candidates") or []
+    for fallback in cands[1:3]:
+        if not isinstance(fallback, dict):
+            continue
+        fb_name = clean_display_product_name(str(fallback.get("name", "") or "").strip())
+        fb_brand = str(fallback.get("brand", "") or "").strip()
+        if not fb_name:
+            continue
+
+        print(f"[RAKUTEN FALLBACK] trying next candidate: {fb_name}", flush=True)
+        rakuten_item = fetch_rakuten_item(
+            product_name=fb_name,
+            category=step.get("category", ""),
+            brand=fb_brand,
+        )
+
+        if not rakuten_item or not rakuten_item.get("rakuten_link"):
+            continue
+
+        # 次点でリンク取得成功 → ステップを差し替え
+        print(
+            f"[RAKUTEN FALLBACK OK] {step.get('product', '?')} → {fb_name}",
+            flush=True
+        )
+        step["product"] = fb_name
+        if fb_brand:
+            step["brand"] = fb_brand
+        step["rakuten_link"] = rakuten_item["rakuten_link"]
+        step["amazon_link"] = build_amazon_link(fb_name)
+        if rakuten_item.get("image"):
+            step["image"] = rakuten_item["image"]
+        if rakuten_item.get("price"):
+            step["price"] = safe_price(rakuten_item["price"])
+            step["estimated_price"] = safe_price(rakuten_item["price"])
+            step["price_band"] = build_price_band(step["price"])
+        step["product_source"] = "rakuten_fallback"
+        return True
+
+    return False
+
+
 def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
     """
     全ステップにアフィリエイトリンクを付与する。
-    Rakuten API クールダウン中にスキップされたステップは、
-    クールダウン解消後に最大1回再試行する。
+
+    処理順:
+    1. 全ステップを順次処理（fetch_rakuten_item 内で429時は待機+1回リトライ）
+    2. クールダウンでスキップされたステップをクールダウン解消後に再試行
+    3. 再試行後もリンクなし かつ クールダウン解消済み → top_candidates次点へフォールバック
     """
-    skipped = []  # クールダウンでスキップされたステップを記録
+    skipped = []  # クールダウンでスキップされたステップ
 
     def _attach(step):
         if not isinstance(step, dict):
             return
         link_before = str(step.get("rakuten_link", "") or "")
         attach_affiliate_links_to_step(step, affiliate_ai_db)
-        # クールダウンで skipped になったかを rakuten_link の変化で判定
         if not str(step.get("rakuten_link", "") or "") and not link_before:
             if time.time() < RAKUTEN_COOLDOWN_UNTIL:
                 skipped.append(step)
@@ -4117,13 +4186,32 @@ def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
     for step in data.get("weekly_care", []):
         _attach(step)
 
-    # クールダウン中にスキップされたステップを、解消後に再試行（最大30秒待機）
+    # クールダウン解消後に再試行（最大30秒待機）
     if skipped and RAKUTEN_COOLDOWN_UNTIL > time.time():
         wait_sec = min(RAKUTEN_COOLDOWN_UNTIL - time.time() + 0.5, 30)
-        print(f"[RAKUTEN COOLDOWN] waiting {wait_sec:.1f}s then retrying {len(skipped)} skipped steps", flush=True)
+        print(
+            f"[RAKUTEN COOLDOWN] waiting {wait_sec:.1f}s then retrying {len(skipped)} skipped steps",
+            flush=True
+        )
         time.sleep(wait_sec)
+
+    still_no_link = []
     for step in skipped:
         attach_affiliate_links_to_step(step, affiliate_ai_db)
+        if not str(step.get("rakuten_link", "") or ""):
+            still_no_link.append(step)
+
+    # ③ 再試行後もリンクなし かつ クールダウンが解消されている → 次点候補へフォールバック
+    if still_no_link:
+        cooldown_cleared = time.time() >= RAKUTEN_COOLDOWN_UNTIL
+        for step in still_no_link:
+            if cooldown_cleared:
+                _try_rakuten_fallback_candidate(step, affiliate_ai_db)
+            else:
+                print(
+                    f"[RAKUTEN FALLBACK SKIP] cooldown still active for {step.get('product', '?')}",
+                    flush=True
+                )
 
     return data
 
