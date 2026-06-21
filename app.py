@@ -2048,6 +2048,29 @@ def infer_bundle_quantity_from_title(title):
     return 1
 
 
+# セット販売・まとめ買いを示すキーワードパターン
+# （infer_bundle_quantity_from_title で拾えない単体キーワードを補完）
+_SET_PRODUCT_RE = re.compile(
+    r"まとめ買い|まとめ購入|セット品|セット販売|お得セット|詰め合わせ"
+    r"|同梱専用|セット購入専用|まとめ購入専用|単品購入不可",
+    re.IGNORECASE,
+)
+
+
+def _is_set_product_name(name: str) -> bool:
+    """商品名がセット販売・まとめ買い商品と判定できる場合 True を返す。
+    infer_bundle_quantity_from_title（数字+個/本+セット 等）と
+    キーワードパターンの両方でチェックする。
+    """
+    if not name:
+        return False
+    if _SET_PRODUCT_RE.search(name):
+        return True
+    if infer_bundle_quantity_from_title(name) > 1:
+        return True
+    return False
+
+
 def normalize_rakuten_item_price(item):
     if not isinstance(item, dict):
         return item
@@ -9217,6 +9240,11 @@ def normalize_ai_candidates(step):
         if not name:
             continue
 
+        # セット販売・まとめ買い商品を除外（単品のみ選定対象とする）
+        if _is_set_product_name(f"{brand} {name}".strip()):
+            print(f"[CANDIDATE SKIP set-product] {name}", flush=True)
+            continue
+
         confidence_raw = candidate.get("confidence", None)
 
         if confidence_raw is not None:
@@ -13558,7 +13586,7 @@ nightステップのuse_days=["月","水","金"]でレチノール使用 → ピ
 - availability_japan: drugstore/amazon/rakuten/official_jp(必ず1つ以上。不明でもamazon/rakuten含める)
 - uv_level: 日焼け止めのみ{{spf,pa}}、他={{}}
 - reason: このstepに合う短い理由
-禁止: 架空商品/旧名称/廃盤品/カテゴリ違い/自信ない商品/抽象名
+禁止: 架空商品/旧名称/廃盤品/カテゴリ違い/自信ない商品/抽象名/セット販売・まとめ買い商品(「○個セット」「○本セット」「まとめ買い」「詰め合わせ」等は除外、単品のみ提案すること)
 
 【routine_strategy】
 strategy_type: fixed/rotation(攻め成分分散が必要な場合のみrotation)
@@ -13706,7 +13734,7 @@ nightステップのuse_days=["月","水","金"]でレチノール使用 → ピ
 - availability_japan: drugstore/amazon/rakuten/official_jp(必ず1つ以上。不明でもamazon/rakuten含める)
 - uv_level: 日焼け止めのみ{{spf,pa}}、他={{}}
 - reason: このstepに合う短い理由
-禁止: 架空商品/旧名称/廃盤品/カテゴリ違い/自信ない商品/抽象名
+禁止: 架空商品/旧名称/廃盤品/カテゴリ違い/自信ない商品/抽象名/セット販売・まとめ買い商品(「○個セット」「○本セット」「まとめ買い」「詰め合わせ」等は除外、単品のみ提案すること)
 
 【improvement_plan】
 priority_concerns(配列)/key_ingredients(配列)/care_direction(短文)
