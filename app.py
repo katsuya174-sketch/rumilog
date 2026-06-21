@@ -4183,9 +4183,23 @@ _GEMINI_NAME_CLEAN_PROMPT_PREFIX = """\
   - キャッチコピー・効能フレーズ（うるおい、美白、エイジングケア などの説明文）
   - 記号・装飾（★☆◆◇▼▽●○■□ など単体で意味を持たないもの）
 
+【ブランド名の形式について】
+ブランド名は様々な形式があります。以下はすべてブランド名として必ず保持してください:
+  - 小文字英字のみ（o.cos, b.glen, d program, cosrx, some by mi）
+  - ピリオドやハイフンを含む英字（SK-II, by.S, b-ex, t-fal）
+  - 記号含む短い名前（&be, #be, de+in）
+  - 漢字1〜2文字のブランド（雪肌精、澄肌）
+商品タイトルの先頭付近にあるこうした短い文字列はブランド名として残すこと。
+
 【出力例】
 入力: 資生堂 ベネフィーク ローションI 200mL 【送料無料】ポイント10倍 楽天1位
 出力: 資生堂 ベネフィーク ローションI
+
+入力: o.cos アゼライン酸化粧水 100mL 送料無料 楽天ランキング1位 美白 毛穴
+出力: o.cos アゼライン酸化粧水
+
+入力: COSRX AHA 7 ホワイトヘッドパワーリキッド 100mL ポイント3倍 お試し価格
+出力: COSRX AHA 7 ホワイトヘッドパワーリキッド
 
 入力: ☆クーポンで1980円★ コーセー アルビオン エクサージュ モイスチュア ミルク 200mL 500円OFF
 出力: コーセー アルビオン エクサージュ モイスチュア ミルク
@@ -4201,6 +4215,9 @@ _GEMINI_NAME_CLEAN_PROMPT_PREFIX = """\
 
 入力: 無印良品 敏感肌用化粧水 高保湿タイプ 200mL スキンケア セット 送料無料
 出力: 無印良品 敏感肌用化粧水 高保湿タイプ
+
+入力: &be ファンデーション リキッド 30mL 正規品 送料無料 楽天1位
+出力: &be ファンデーション リキッド
 
 【回答形式】
 番号: 抽出した「ブランド名 製品名」（1行1件、それ以外の説明は不要）
@@ -4386,6 +4403,29 @@ def gemini_clean_rakuten_product_names(data):
             print(f"[NAME CLEAN FALLBACK] {item['title'][:50]} -> {cleaned}", flush=True)
     if fallback_count:
         print(f"[NAME CLEAN] フォールバック適用 {fallback_count}件", flush=True)
+
+    # クリーニング後に top_candidates 内の重複を除去する
+    # （クリーニング前は別タイトルでも、クリーニング後に同名になるケースに対処）
+    dedup_removed = 0
+    for step in all_steps:
+        cands = step.get("top_candidates")
+        if not isinstance(cands, list) or len(cands) <= 1:
+            continue
+        seen_cleaned: set = set()
+        deduped = []
+        for cand in cands:
+            key = normalize_candidate_name_for_merge(
+                f"{cand.get('brand', '')} {cand.get('name', '')}".strip()
+            )
+            if not key or key in seen_cleaned:
+                print(f"[TOP_CAND DEDUP] post-clean duplicate removed: {cand.get('name', '')}", flush=True)
+                dedup_removed += 1
+                continue
+            seen_cleaned.add(key)
+            deduped.append(cand)
+        step["top_candidates"] = deduped
+    if dedup_removed:
+        print(f"[NAME CLEAN] クリーニング後重複除去 {dedup_removed}件", flush=True)
 
     return data
 
