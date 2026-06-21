@@ -14685,14 +14685,12 @@ def supplement_night_steps_from_morning(data):
     if not to_add:
         return data
 
-    # 挿入位置: 洗顔・クレンジングの直後
-    insert_idx = 0
-    for i, s in enumerate(night_steps):
-        if isinstance(s, dict) and str(s.get("category") or "").strip() in CLEANSER_CATS:
-            insert_idx = i + 1
+    # 補完ステップを末尾に追加してから再ソート（挿入位置を計算するより確実）
+    for step in to_add:
+        night_steps.append(step)
 
-    for offset, step in enumerate(to_add):
-        night_steps.insert(insert_idx + offset, step)
+    # CATEGORY_ORDER / use_timing に従って正しい順序に並び替え
+    night_steps.sort(key=step_sort_key)
 
     return data
 
