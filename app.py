@@ -12946,6 +12946,11 @@ def step_sort_key(step):
     priority = step.get("priority", 999)
     use_timing = step.get("use_timing", "standard")
 
+    # クレンジング・洗顔は use_timing に関わらず常に先頭順序を維持する
+    # （AIが誤って after_toner 等を付けても化粧水より前に表示されるべき）
+    if category in ("クレンジング", "洗顔"):
+        return (CATEGORY_ORDER.get(category, 99), priority)
+
     # use_timing による明示的な順序上書き
     # ただし 美容液カテゴリで before_toner が付いていても化粧水の後に配置する。
     # （boosterタイプは enforce_booster_night_only で朝から除去済みのため、
