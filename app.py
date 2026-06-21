@@ -4342,17 +4342,18 @@ _IRRITANT_FOCUS_TAGS = {"retinoid", "aha_bha", "pha"}
 
 def resolve_weekly_care_day_conflicts(data):
     """
-    週ケア（ピーリング）と night の刺激成分（レチノイド・AHA/BHA/PHA）が
-    同じ「特定曜日」に重なっている場合のみ、ピーリングを安全な曜日へ移動する。
+    週ケア（ピーリング）と night の刺激成分（レチノイド・AHA/BHA/PHA）の曜日衝突を解消。
 
-    介入条件:
-    - night の刺激ステップが特定曜日（use_days 非空）で設定されている
-    - かつ週ケアも特定曜日（use_days 非空）で設定されている
-    - かつその曜日が重複している
-    どちらかが use_days=[]（毎日）の場合は介入しない（頻度自体の変更に相当するため）。
+    ケースA: 刺激成分が特定曜日 かつ ピーリングも特定曜日 → 重複あればピーリングを安全日へ移動
+    ケースB: 刺激成分が毎日(use_days=[]) かつ ピーリングが特定曜日
+             → 刺激成分のuse_daysからピーリング曜日を除外する（最小変更）
+             → 例: レチノール毎日 + ピーリング["土"] → レチノール["月","火","水","木","金","日"]
     """
-    # night 刺激ステップが明示的に指定している曜日を収集
+    # ---- ケースA: 刺激成分の明示的曜日を収集 ----
     irritant_days: set = set()
+    # ケースB 用: 毎日使用の刺激ステップを別に収集
+    every_day_irritant_steps: list = []
+
     for step in data.get("night", {}).get("steps", []):
         if not isinstance(step, dict):
             continue
@@ -4360,43 +4361,58 @@ def resolve_weekly_care_day_conflicts(data):
         if not focus & _IRRITANT_FOCUS_TAGS:
             continue
         days = step.get("use_days") or []
-        if not days:
-            # 毎日使用 → 頻度変更なしには衝突回避不可なので介入しない
-            continue
-        irritant_days.update(days)
+        if days:
+            irritant_days.update(days)
+        else:
+            every_day_irritant_steps.append(step)
 
-    if not irritant_days:
-        return data
+    # ---- ケースA: ピーリング側を安全な曜日へ移動 ----
+    if irritant_days:
+        for step in data.get("weekly_care", []):
+            if not isinstance(step, dict):
+                continue
+            if step.get("category") not in ["ピーリング", "パック"]:
+                continue
+            use_days = list(step.get("use_days") or [])
+            if not use_days:
+                continue
+            conflict = set(use_days) & irritant_days
+            if not conflict:
+                continue
+            safe = [d for d in ["土", "日", "月", "火", "水", "木", "金"]
+                    if d not in irritant_days]
+            if not safe:
+                continue
+            new_days = [safe[0]]
+            print(
+                f"[DAY CONFLICT A] {step.get('product', '週ケア')} {use_days} → {new_days} "
+                f"(irritant_days={sorted(irritant_days)})",
+                flush=True,
+            )
+            step["use_days"] = new_days
 
-    for step in data.get("weekly_care", []):
-        if not isinstance(step, dict):
-            continue
-        if step.get("category") not in ["ピーリング", "パック"]:
-            continue
+    # ---- ケースB: 刺激成分が毎日 → ピーリング曜日を刺激成分から除外 ----
+    if every_day_irritant_steps:
+        peeling_days: set = set()
+        for step in data.get("weekly_care", []):
+            if not isinstance(step, dict):
+                continue
+            if step.get("category") not in ["ピーリング", "パック"]:
+                continue
+            days = step.get("use_days") or []
+            if days:
+                peeling_days.update(days)
 
-        use_days = list(step.get("use_days") or [])
-        if not use_days:
-            # 週ケアが毎日設定（通常ないが）→ 介入しない
-            continue
-
-        conflict = set(use_days) & irritant_days
-        if not conflict:
-            continue
-
-        # 刺激ステップが使われない曜日へ移動（土→日→平日の優先順）
-        safe = [d for d in ["土", "日", "月", "火", "水", "木", "金"]
-                if d not in irritant_days]
-        if not safe:
-            # 安全な曜日がない（全曜日が刺激日）→ 介入しない
-            continue
-
-        new_days = [safe[0]]
-        print(
-            f"[DAY CONFLICT] {step.get('product', '週ケア')} {use_days} → {new_days} "
-            f"(irritant_days={sorted(irritant_days)})",
-            flush=True,
-        )
-        step["use_days"] = new_days
+        if peeling_days:
+            new_irritant_days = [d for d in _ALL_DAYS if d not in peeling_days]
+            for step in every_day_irritant_steps:
+                print(
+                    f"[DAY CONFLICT B] {step.get('product', '刺激成分')} "
+                    f"use_days=[] → {new_irritant_days} "
+                    f"(excluding peeling_days={sorted(peeling_days)})",
+                    flush=True,
+                )
+                step["use_days"] = new_irritant_days
 
     return data
 
