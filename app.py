@@ -1458,7 +1458,7 @@ def _log_mem(label: str) -> float:
 import threading as _threading_mod
 _gemini_eval_cache_lock = _threading_mod.Lock()
 
-RAKUTEN_RATE_GAP = 0.8  # 1.2s→0.8s: 12ステップ×1.2s=14.4s→9.6sに短縮
+RAKUTEN_RATE_GAP = 1.1  # 429対策で0.8s→1.1sに延長
 
 def wait_for_rakuten_rate_limit():
     """スレッドセーフなレートリミッター。
@@ -3375,10 +3375,29 @@ def _rakuten_criteria_search_single(keyword, category):
                 try:
                     retry_seconds = max(3, float(retry_match.group(1)) + 2)
                 except Exception:
-                    pass
-            RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
-            _rakuten_criteria_cache[cache_key] = []
-            return []
+                    retry_seconds = 10
+            print(
+                f"[RAKUTEN CRITERIA 429] {keyword}: sleeping {retry_seconds}s then retrying once",
+                flush=True
+            )
+            time.sleep(retry_seconds)
+            try:
+                wait_for_rakuten_rate_limit()
+                res = requests.get(endpoint, params=params, headers=headers, timeout=(2, 4))
+                print(f"[RAKUTEN CRITERIA RETRY STATUS] {res.status_code}", flush=True)
+            except Exception as _re:
+                print(f"[RAKUTEN CRITERIA RETRY ERROR] {_re}", flush=True)
+                RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
+                _rakuten_criteria_cache[cache_key] = []
+                return []
+            if res.status_code == 429:
+                RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
+                _rakuten_criteria_cache[cache_key] = []
+                return []
+            if res.status_code != 200:
+                _rakuten_criteria_cache[cache_key] = []
+                return []
+            # リトライ成功 → fall-through してペイロード処理へ
 
         if res.status_code != 200:
             _rakuten_criteria_cache[cache_key] = []
@@ -3388,9 +3407,9 @@ def _rakuten_criteria_search_single(keyword, category):
         items = payload.get("items") or payload.get("Items") or []
 
         if not items and "genreId" in params:
-            # genreIdリトライ: レートリミット消費を避けるため最小間隔(0.3s)のみ待機
+            # genreIdリトライ: レートリミットを正しく経由する
             params_no_genre = {k: v for k, v in params.items() if k != "genreId"}
-            time.sleep(0.3)
+            wait_for_rakuten_rate_limit()
             _t_retry = time.time()
             res2 = requests.get(endpoint, params=params_no_genre, headers=headers, timeout=(2, 4))
             print(
@@ -9925,7 +9944,7 @@ def finalize_step_display_fields(step, best, user_data):
 
     return step
 
-def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=5):
+def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=3):
     """
     全ステップのRakuten検索を並列実行してキャッシュに載せる。
     スコアリングループはキャッシュヒットで瞬時に返すため、
