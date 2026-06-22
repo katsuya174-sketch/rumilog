@@ -11,7 +11,7 @@ print("APP_ID:", RAKUTEN_APP_ID)
 print("ACCESS:", RAKUTEN_ACCESS_KEY)
 print("AFF:", RAKUTEN_AFFILIATE_ID)
 # ==========================================
-# rumilog - AI肌診断アプリ
+# lumilog - AI肌診断アプリ
 # Flaskメインサーバー
 # Gemini APIを使った肌診断 + 履歴管理
 # ==========================================
@@ -1592,8 +1592,8 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
     endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401"
 
     headers = {
-        "Referer": "https://rumilog.onrender.com",
-        "Origin": "https://rumilog.onrender.com",
+        "Referer": "https://lumilog.onrender.com",
+        "Origin": "https://lumilog.onrender.com",
         "User-Agent": "Mozilla/5.0",
     }
 

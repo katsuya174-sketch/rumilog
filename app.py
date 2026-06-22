@@ -9,7 +9,7 @@ RAKUTEN_AFFILIATE_ID = os.environ.get("RAKUTEN_AFFILIATE_ID", "")
 AMAZON_ASSOCIATE_TAG = os.environ.get("AMAZON_ASSOCIATE_TAG", "")
 print("[ENV CHECK] RAKUTEN_APP_ID set:", bool(RAKUTEN_APP_ID), flush=True)
 # ==========================================
-# rumilog - AI肌診断アプリ
+# lumilog - AI肌診断アプリ
 # Flaskメインサーバー
 # Gemini APIを使った肌診断 + 履歴管理
 # ==========================================
@@ -566,9 +566,9 @@ from google.genai import types
 # Flask初期設定
 # ==========================================
 app = Flask(__name__)
-app.secret_key = os.getenv("SECRET_KEY", "rumilog-dev-secret-change-in-prod")
+app.secret_key = os.getenv("SECRET_KEY", "lumilog-dev-secret-change-in-prod")
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=365)
-RUMILOG_UID_COOKIE = "rumilog_uid"
+RUMILOG_UID_COOKIE = "lumilog_uid"
 
 @app.after_request
 def attach_user_id_cookie(response):
@@ -598,7 +598,7 @@ def _creator_token():
     """CREATOR_KEY から一方向トークンを生成する"""
     if not CREATOR_KEY:
         return ""
-    return hmac.new(CREATOR_KEY.encode(), b"rumilog_creator", hashlib.sha256).hexdigest()
+    return hmac.new(CREATOR_KEY.encode(), b"lumilog_creator", hashlib.sha256).hexdigest()
 
 def is_creator():
     """cookieに有効な作成者トークンがあればTrue"""
@@ -2666,8 +2666,8 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
     endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401"
 
     headers = {
-        "Referer": "https://rumilog.onrender.com",
-        "Origin": "https://rumilog.onrender.com",
+        "Referer": "https://lumilog.onrender.com",
+        "Origin": "https://lumilog.onrender.com",
         "User-Agent": "Mozilla/5.0",
     }
 
@@ -3380,8 +3380,8 @@ def _rakuten_criteria_search_single(keyword, category):
 
     endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401"
     headers = {
-        "Referer": "https://rumilog.onrender.com",
-        "Origin": "https://rumilog.onrender.com",
+        "Referer": "https://lumilog.onrender.com",
+        "Origin": "https://lumilog.onrender.com",
         "User-Agent": "Mozilla/5.0",
     }
 
