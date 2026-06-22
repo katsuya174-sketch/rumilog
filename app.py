@@ -4403,7 +4403,9 @@ _GEMINI_NAME_CLEAN_PROMPT_PREFIX = """\
 
 
 _ALL_DAYS = ["月", "火", "水", "木", "金", "土", "日"]
-_IRRITANT_FOCUS_TAGS = {"retinoid", "aha_bha", "pha"}
+# レチノール系は retinol / retinal / retinoid どの表記でも検出できるよう全バリアントを含める
+# AHA/BHA系も aha / bha / aha_bha 全パターン対応
+_IRRITANT_FOCUS_TAGS = {"retinoid", "retinol", "retinal", "aha_bha", "aha", "bha", "pha"}
 
 
 def resolve_weekly_care_day_conflicts(data):
@@ -4423,7 +4425,9 @@ def resolve_weekly_care_day_conflicts(data):
     for step in data.get("night", {}).get("steps", []):
         if not isinstance(step, dict):
             continue
-        focus = set(step.get("ingredient_focus") or [])
+        raw_focus = step.get("ingredient_focus") or []
+        # ingredient_focus が文字列で返ることがあるので必ずリスト化
+        focus = set(as_list(raw_focus))
         if not focus & _IRRITANT_FOCUS_TAGS:
             continue
         days = step.get("use_days") or []
