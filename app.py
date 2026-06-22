@@ -6,6 +6,7 @@ load_dotenv()
 RAKUTEN_APP_ID = os.environ.get("RAKUTEN_APP_ID", "")
 RAKUTEN_ACCESS_KEY = os.environ.get("RAKUTEN_ACCESS_KEY", "")
 RAKUTEN_AFFILIATE_ID = os.environ.get("RAKUTEN_AFFILIATE_ID", "")
+AMAZON_ASSOCIATE_TAG = os.environ.get("AMAZON_ASSOCIATE_TAG", "")
 print("[ENV CHECK] RAKUTEN_APP_ID set:", bool(RAKUTEN_APP_ID), flush=True)
 # ==========================================
 # rumilog - AI肌診断アプリ
@@ -1382,7 +1383,10 @@ def normalize_affiliate_text(text):
 def build_amazon_link(name):
     if not name:
         return "#"
-    return "https://www.amazon.co.jp/s?k=" + urllib.parse.quote(name) + "&tag=あなたのAmazonアソシエイトID"
+    url = "https://www.amazon.co.jp/s?k=" + urllib.parse.quote(name)
+    if AMAZON_ASSOCIATE_TAG:
+        url += "&tag=" + urllib.parse.quote(AMAZON_ASSOCIATE_TAG)
+    return url
 
 def build_rakuten_link(name):
     if not name:
