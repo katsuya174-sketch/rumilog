@@ -2027,6 +2027,9 @@ def infer_bundle_quantity_from_title(title):
         r"(\d+)\s*枚\s*セット",
         r"(\d+)\s*袋\s*セット",
         r"(\d+)\s*箱\s*セット",
+        r"(\d+)\s*点\s*セット",   # 「2点セット」「3点セット」
+        r"(\d+)\s*種\s*セット",   # 「3種セット」
+        r"(\d+)\s*色\s*セット",   # 「2色セット」
         r"(\d+)\s*個組",
         r"(\d+)\s*本組",
         r"(\d+)\s*枚組",
@@ -2067,6 +2070,29 @@ def _is_set_product_name(name: str) -> bool:
     if _SET_PRODUCT_RE.search(name):
         return True
     if infer_bundle_quantity_from_title(name) > 1:
+        return True
+    return False
+
+
+# 楽天アイテムタイトルがセット販売商品かどうかを判定するパターン
+_RAKUTEN_SET_TITLE_RE = re.compile(
+    r"スキンケアセット|化粧品セット|ケアセット|基礎セット|基本セット"
+    r"|スペシャルセット|ギフトセット|トライアルセット|入門セット"
+    r"|まとめセット|セット品|セット商品|スタートセット|始めるセット"
+    r"|お試しセット|初回セット|導入セット",
+    re.IGNORECASE,
+)
+
+def _is_rakuten_set_item(title: str) -> bool:
+    """楽天アイテムタイトルがセット販売かどうか判定。
+    hard_reject_words（score_rakuten_item内）が捕捉できないセットパターンを補完する。
+    """
+    if not title:
+        return False
+    if _RAKUTEN_SET_TITLE_RE.search(title):
+        return True
+    # ○点セット / ○種セット 等（infer_bundle_quantity_from_titleで追加済みだが念のため）
+    if infer_bundle_quantity_from_title(title) > 1:
         return True
     return False
 
@@ -2833,18 +2859,39 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
             if not scored_items:
                 continue
 
-            scored_items.sort(
-                key=lambda pair: (
+            def _sort_key(pair):
+                """単品優先 → スコア → レビュー数 → 画像あり → 評価平均 → 価格(安い順)"""
+                _, it = pair
+                return (
                     pair[0],
-                    safe_price(pair[1].get("reviewCount", 0)),   # レビュー数を名前一致の次に優先
-                    1 if (pair[1].get("mediumImageUrls") or pair[1].get("smallImageUrls")) else 0,
-                    safe_price(pair[1].get("reviewAverage", 0)),
-                    -safe_price(pair[1].get("itemPrice", 0))
-                ),
-                reverse=True
-            )
+                    safe_price(it.get("reviewCount", 0)),
+                    1 if (it.get("mediumImageUrls") or it.get("smallImageUrls")) else 0,
+                    safe_price(it.get("reviewAverage", 0)),
+                    -safe_price(it.get("itemPrice", 0)),
+                )
 
-            best_score, best = scored_items[0]
+            # パス1: 単品のみ（セット商品除外）
+            single_items = [
+                (sc, it) for sc, it in scored_items
+                if not _is_rakuten_set_item(str(it.get("itemName", "") or ""))
+            ]
+            if single_items:
+                single_items.sort(key=_sort_key, reverse=True)
+                best_score, best = single_items[0]
+                print(
+                    f"[RAKUTEN SELECT] single item: {best.get('itemName','')[:50]} "
+                    f"score={best_score} reviews={best.get('reviewCount',0)}",
+                    flush=True
+                )
+            else:
+                # パス2: 単品が見つからない場合はセット商品も許容
+                scored_items.sort(key=_sort_key, reverse=True)
+                best_score, best = scored_items[0]
+                print(
+                    f"[RAKUTEN SELECT] set item fallback: {best.get('itemName','')[:50]} "
+                    f"score={best_score} reviews={best.get('reviewCount',0)}",
+                    flush=True
+                )
 
             
 
