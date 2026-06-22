@@ -8891,6 +8891,17 @@ def ensure_required_routine_steps(data):
             "product_candidates": []
         })
 
+    if not has_category(morning_steps, "化粧水"):
+        morning_steps.append({
+            "category": "化粧水",
+            "role": "main",
+            "purpose": "洗顔後の保湿補給とスキンケアの土台を整える",
+            "ingredient_focus": "保湿",
+            "risk_note": "",
+            "priority": 3,
+            "product_candidates": []
+        })
+
     if not has_category(morning_steps, "クリーム") and not has_category(morning_steps, "乳液"):
         morning_steps.append({
             "category": "クリーム",
@@ -13648,6 +13659,10 @@ def build_analysis_prompt_phase2(user_data, phase1):
 クレンジング/洗顔/化粧水/美容液/乳液/クリーム/日焼け止め/パック/ピーリング のみ。
 role: main/booster のみ。
 
+【morning必須カテゴリ】
+洗顔・化粧水・日焼け止めは必ずmorning stepsに含める（省略禁止）。
+美容液・乳液・クリームは肌状態に応じて追加する。
+
 【ingredient_focus候補】
 ビタミンC/ナイアシンアミド/レチノール/レチナール/アゼライン酸/トラネキサム酸/PDRN/ペプチド/セラミド/ヒアルロン酸/CICA/ドクダミ/AHA/BHA/PHA/UV防御/低刺激
 
@@ -13804,6 +13819,10 @@ skin_age_estimate: 画像から肌年齢を15-70の整数で推定。
 【カテゴリ固定】
 クレンジング/洗顔/化粧水/美容液/乳液/クリーム/日焼け止め/パック/ピーリング のみ。
 role: main/booster のみ。
+
+【morning必須カテゴリ】
+洗顔・化粧水・日焼け止めは必ずmorning stepsに含める（省略禁止）。
+美容液・乳液・クリームは肌状態に応じて追加する。
 
 【ingredient_focus候補】
 ビタミンC/ナイアシンアミド/レチノール/レチナール/アゼライン酸/トラネキサム酸/PDRN/ペプチド/セラミド/ヒアルロン酸/CICA/ドクダミ/AHA/BHA/PHA/UV防御/低刺激
