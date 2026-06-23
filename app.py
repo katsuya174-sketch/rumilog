@@ -4256,6 +4256,12 @@ def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
     for step in data.get("weekly_care", []):
         _attach(step)
 
+    for step in data.get("supplements", []):
+        _attach(step)
+
+    for step in data.get("beauty_devices", []):
+        _attach(step)
+
     # クールダウン解消後に再試行（最大30秒待機）
     if skipped and RAKUTEN_COOLDOWN_UNTIL > time.time():
         wait_sec = min(RAKUTEN_COOLDOWN_UNTIL - time.time() + 0.5, 30)
@@ -4988,6 +4994,8 @@ def normalize_result_sections(data):
     data["morning"]["steps"] = safe_section_steps(data.get("morning"))
     data["night"]["steps"] = safe_section_steps(data.get("night"))
     data["weekly_care"] = safe_step_list(data.get("weekly_care", []))
+    data["supplements"] = [s for s in (data.get("supplements") or []) if isinstance(s, dict)]
+    data["beauty_devices"] = [s for s in (data.get("beauty_devices") or []) if isinstance(s, dict)]
 
     return data
 
@@ -10017,6 +10025,11 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=3):
     if isinstance(weekly, list):
         all_steps.extend(s for s in weekly if isinstance(s, dict))
 
+    for key in ["supplements", "beauty_devices"]:
+        items = data.get(key, [])
+        if isinstance(items, list):
+            all_steps.extend(s for s in items if isinstance(s, dict))
+
     if not all_steps:
         return
 
@@ -12494,6 +12507,11 @@ def lightweight_result_payload(item):
             if isinstance(step, dict):
                 step.pop("product_candidates", None)
 
+    for key in ["supplements", "beauty_devices"]:
+        for step in (data.get(key) or []):
+            if isinstance(step, dict):
+                step.pop("product_candidates", None)
+
     return data
 
 def prepare_step(step):
@@ -13695,6 +13713,32 @@ skin_summary: 肌状態の総合コメント(30-60字)。
 improvement_plan: priority_concerns(配列)/key_ingredients(配列)/care_direction(短文)
 moisture_plan: moisture_level/need_emulsion(bool)/need_cream(bool)/need_double_moisture(bool)/reason
 
+【supplements】
+スキンケアで補えない内側からのアプローチが有効な場合のみ提案。不要なら[]。
+提案条件: ①外用スキンケアだけでは補完困難な悩み(コラーゲン生成・抗酸化・抗糖化等) ②既存ルーティンと成分が重複せず相乗効果が見込める ③肌スコアや悩みに明確な根拠がある
+禁止: スキンケアと全く同じ成分の重複提案・根拠のない漠然とした提案
+- category: "サプリメント" (固定)
+- product: 楽天で検索可能な具体名 (例: "ビタミンC 1000mg", "コラーゲンペプチド", "ナイアシンアミド サプリ", "亜鉛 サプリ", "アスタキサンチン")
+- brand: ブランド名 (不明なら "")
+- purpose: 肌への期待効果 (30字以内)
+- ingredient_focus: 主要成分タグ配列 (例: ["vitamin_c"] ["collagen"] ["niacinamide"] ["zinc"] ["astaxanthin"])
+- reason: 既存スキンケアルーティンとの相性・補完価値を具体的に (50字以内)
+- timing: 摂取タイミング (例: "朝食後", "就寝前")
+- priority: 1=最優先 2=次点
+
+【beauty_devices】
+スキンケアを物理的に増強する機器が有効な場合のみ提案。不要なら[]。
+提案条件: ①使用中の美容液・クリーム等との相性が良く効果を増強できる ②スキンケア単独では得られない改善が見込める ③肌スコアや悩みに明確な根拠がある
+禁止: 根拠のない漠然とした提案・既存ルーティンと相性が悪い機器(例:レチノール使用直後の過剰摩擦系機器)
+- category: "美容機器" (固定)
+- product: 楽天で検索可能な機器タイプ名 (例: "LEDマスク", "超音波美顔器", "EMSフェイスケア", "RF美顔器", "ローラー美顔器")
+- brand: ブランド名 (不明なら "")
+- purpose: 期待される肌効果 (30字以内)
+- device_function: 機能説明 (例: "赤色LED照射", "超音波振動", "EMS微電流", "RF高周波")
+- reason: 使用中スキンケアとの相性・追加効果の根拠を具体的に (50字以内)
+- frequency: 推奨頻度 (例: "週3〜4回・スキンケア後", "毎日・朝スキンケア後")
+- priority: 1=最優先 2=次点
+
 JSONのみ返す。説明・Markdown・前置き禁止。JSONキーは英語、値は日本語。"""
 
 
@@ -13866,6 +13910,32 @@ synergy_combinations(3件以上必須):
 [{{families:[タグA,タグB], reason:"この肌状態に基づく相乗理由", bonus:"high"/"medium"/"low"}}]
 タグはavoidと同じ+uv_protection
 
+【supplements】
+スキンケアで補えない内側からのアプローチが有効な場合のみ提案。不要なら[]。
+提案条件: ①外用スキンケアだけでは補完困難な悩み(コラーゲン生成・抗酸化・抗糖化等) ②既存ルーティンと成分が重複せず相乗効果が見込める ③肌スコアや悩みに明確な根拠がある
+禁止: スキンケアと全く同じ成分の重複提案・根拠のない漠然とした提案
+- category: "サプリメント" (固定)
+- product: 楽天で検索可能な具体名 (例: "ビタミンC 1000mg", "コラーゲンペプチド", "ナイアシンアミド サプリ", "亜鉛 サプリ", "アスタキサンチン")
+- brand: ブランド名 (不明なら "")
+- purpose: 肌への期待効果 (30字以内)
+- ingredient_focus: 主要成分タグ配列 (例: ["vitamin_c"] ["collagen"] ["niacinamide"] ["zinc"] ["astaxanthin"])
+- reason: 既存スキンケアルーティンとの相性・補完価値を具体的に (50字以内)
+- timing: 摂取タイミング (例: "朝食後", "就寝前")
+- priority: 1=最優先 2=次点
+
+【beauty_devices】
+スキンケアを物理的に増強する機器が有効な場合のみ提案。不要なら[]。
+提案条件: ①使用中の美容液・クリーム等との相性が良く効果を増強できる ②スキンケア単独では得られない改善が見込める ③肌スコアや悩みに明確な根拠がある
+禁止: 根拠のない漠然とした提案・既存ルーティンと相性が悪い機器(例:レチノール使用直後の過剰摩擦系機器)
+- category: "美容機器" (固定)
+- product: 楽天で検索可能な機器タイプ名 (例: "LEDマスク", "超音波美顔器", "EMSフェイスケア", "RF美顔器", "ローラー美顔器")
+- brand: ブランド名 (不明なら "")
+- purpose: 期待される肌効果 (30字以内)
+- device_function: 機能説明 (例: "赤色LED照射", "超音波振動", "EMS微電流", "RF高周波")
+- reason: 使用中スキンケアとの相性・追加効果の根拠を具体的に (50字以内)
+- frequency: 推奨頻度 (例: "週3〜4回・スキンケア後", "毎日・朝スキンケア後")
+- priority: 1=最優先 2=次点
+
 JSONのみ返す。説明・Markdown・前置き禁止。JSONキーは英語、値は日本語。"""
 
 
@@ -14023,6 +14093,32 @@ synergy_combinations(3件以上必須):
 
 【moisture_plan】
 moisture_level/need_emulsion/need_cream/need_double_moisture/reason
+
+【supplements】
+スキンケアで補えない内側からのアプローチが有効な場合のみ提案。不要なら[]。
+提案条件: ①外用スキンケアだけでは補完困難な悩み(コラーゲン生成・抗酸化・抗糖化等) ②既存ルーティンと成分が重複せず相乗効果が見込める ③肌スコアや悩みに明確な根拠がある
+禁止: スキンケアと全く同じ成分の重複提案・根拠のない漠然とした提案
+- category: "サプリメント" (固定)
+- product: 楽天で検索可能な具体名 (例: "ビタミンC 1000mg", "コラーゲンペプチド", "ナイアシンアミド サプリ", "亜鉛 サプリ", "アスタキサンチン")
+- brand: ブランド名 (不明なら "")
+- purpose: 肌への期待効果 (30字以内)
+- ingredient_focus: 主要成分タグ配列 (例: ["vitamin_c"] ["collagen"] ["niacinamide"] ["zinc"] ["astaxanthin"])
+- reason: 既存スキンケアルーティンとの相性・補完価値を具体的に (50字以内)
+- timing: 摂取タイミング (例: "朝食後", "就寝前")
+- priority: 1=最優先 2=次点
+
+【beauty_devices】
+スキンケアを物理的に増強する機器が有効な場合のみ提案。不要なら[]。
+提案条件: ①使用中の美容液・クリーム等との相性が良く効果を増強できる ②スキンケア単独では得られない改善が見込める ③肌スコアや悩みに明確な根拠がある
+禁止: 根拠のない漠然とした提案・既存ルーティンと相性が悪い機器(例:レチノール使用直後の過剰摩擦系機器)
+- category: "美容機器" (固定)
+- product: 楽天で検索可能な機器タイプ名 (例: "LEDマスク", "超音波美顔器", "EMSフェイスケア", "RF美顔器", "ローラー美顔器")
+- brand: ブランド名 (不明なら "")
+- purpose: 期待される肌効果 (30字以内)
+- device_function: 機能説明 (例: "赤色LED照射", "超音波振動", "EMS微電流", "RF高周波")
+- reason: 使用中スキンケアとの相性・追加効果の根拠を具体的に (50字以内)
+- frequency: 推奨頻度 (例: "週3〜4回・スキンケア後", "毎日・朝スキンケア後")
+- priority: 1=最優先 2=次点
 
 JSONのみ返す。説明・Markdown・前置き禁止。JSONキーは英語、値は日本語。"""
 

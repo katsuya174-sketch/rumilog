@@ -424,6 +424,87 @@
       {% endfor %}
   </section>
   {% endmacro %}
+
+  {# ---- サプリメント・美容機器 共通カード マクロ ---- #}
+  {% macro render_extra_section(title, chip, items, is_device=False) %}
+  {% if items %}
+  <section class="routine-shell">
+      <div class="routine-header">
+          <h2 class="routine-title">{{ title }}</h2>
+          <div class="routine-chip">{{ chip }}</div>
+      </div>
+      {% for item in items %}
+      <div class="product-card-new"
+           data-product="{{ item.get('product', '') }}"
+           data-category="{{ item.get('category', '') }}">
+
+          <img
+              src="{{ item.get('image', '') }}"
+              alt="{{ item.get('product', '') }}"
+              class="product-img-new {% if not item.get('image') %}is-hidden{% endif %}"
+              loading="lazy"
+              referrerpolicy="no-referrer"
+              onerror="this.classList.add('is-hidden'); this.nextElementSibling.classList.remove('is-hidden');"
+          >
+          <div class="product-img-empty {% if item.get('image') %}is-hidden{% endif %}">
+              {{ item.get('category', '') or '商品' }}
+          </div>
+
+          <div class="product-body">
+              <div class="product-name">
+                  {{ (item.get('brand', '') ~ ' ' ~ item.get('product', '')).strip() }}
+              </div>
+
+              <div class="product-meta">目的: {{ item.get('purpose', '') }}</div>
+
+              {% if is_device and item.get('device_function') %}
+              <div class="product-meta">機能: {{ item.get('device_function', '') }}</div>
+              {% endif %}
+
+              {% if is_device and item.get('frequency') %}
+              <div class="product-meta">頻度: {{ item.get('frequency', '') }}</div>
+              {% endif %}
+
+              {% if not is_device and item.get('timing') %}
+              <div class="product-meta">摂取タイミング: {{ item.get('timing', '') }}</div>
+              {% endif %}
+
+              {% if item.get('reason') %}
+              <div class="product-meta">
+                  <div class="reason-label">ルーティンとの相性</div>
+                  <div class="reason-text">{{ item.get('reason', '') }}</div>
+              </div>
+              {% endif %}
+
+              <div class="product-price">
+                  {% if item.get('rakuten_link') and item.get('price', 0) > 0 %}
+                      参考価格: ¥{{ item.get('price', 0) }}
+                  {% elif item.get('price_band', '') %}
+                      {{ item.get('price_band', '') }}
+                  {% else %}
+                      価格確認中
+                  {% endif %}
+              </div>
+
+              <div class="buy-buttons">
+                  {% if item.get('amazon_link') %}
+                  <a href="/click?source=amazon&product={{ item.get('product', '')|urlencode }}&category={{ item.get('category', '')|urlencode }}&url={{ item.amazon_link|urlencode }}" target="_blank" rel="noopener noreferrer">
+                      <button type="button" class="amazon-btn">Amazonで見る</button>
+                  </a>
+                  {% endif %}
+                  {% if item.get('rakuten_link') %}
+                  <a href="/click?source=rakuten&product={{ item.get('product', '')|urlencode }}&category={{ item.get('category', '')|urlencode }}&url={{ item.rakuten_link|urlencode }}" target="_blank" rel="noopener noreferrer">
+                      <button type="button" class="rakuten-btn">楽天で見る</button>
+                  </a>
+                  {% endif %}
+              </div>
+          </div>
+      </div>
+      {% endfor %}
+  </section>
+  {% endif %}
+  {% endmacro %}
+
     <div class="result-bg" id="bgEffects"></div>
 
     <div class="result-container">
@@ -775,6 +856,10 @@
         {{ render_routine_section("夜のスキンケア", "Night", data.get("night", {}).get("steps", [])) }}
         
         {{ render_routine_section("週ケア", "Weekly", data.get("weekly_care", []), True) }}
+
+        {{ render_extra_section("サプリメント", "Supplement", data.get("supplements", []), False) }}
+
+        {{ render_extra_section("美容機器", "Device", data.get("beauty_devices", []), True) }}
 
         {% if (data.get("is_premium") or data.get("is_dev_mode")) and data.get("weekly_usage_plan", []) %}
         {% set strategy = data.get("routine_strategy") or {} %}
