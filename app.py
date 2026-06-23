@@ -13036,9 +13036,59 @@ _TIMING_NOTES = {
     "last":         "💡 この商品はスキンケアの最後にご使用ください",
 }
 
+# 美容液内サブ並び順で使う成分セット
+_SERUM_IRRITANT_FOCUS  = {"retinoid", "retinol", "retinal", "aha_bha", "aha", "bha", "pha"}
+_SERUM_HYDRATING_FOCUS = {
+    "hyaluronic_acid", "hyaluronic", "ceramide", "centella", "cica",
+    "panthenol", "squalane", "amino_acid", "glycerin", "collagen",
+}
+_SERUM_TEXTURE_LIGHT   = {"watery", "light", "essence"}
+_SERUM_TEXTURE_HEAVY   = {"cream", "rich", "oil", "balm"}
+
+
+def _serum_sub_sort_key(step):
+    """
+    美容液が複数ある場合の同一タイミング内サブ並び順。
+    優先ルール（番号が小さいほど優先度高 = 先に使う）:
+      ① メーカー推奨 → use_timing で上位解決済み（呼び出し元で処理）
+      ② 刺激対策    → irritant_rank: 0=非刺激, 1=刺激系（後回し）
+      ③ 成分特性    → ingredient_rank: 0=保湿/導入, 1=機能系, 2=刺激系
+      ④ テクスチャ  → texture_rank: 0=軽い, 1=中間, 2=重い
+    """
+    focuses = set(as_list(step.get("ingredient_focus") or []))
+
+    # ② 刺激成分フラグ
+    is_irritant = bool(focuses & _SERUM_IRRITANT_FOCUS)
+    irritant_rank = 1 if is_irritant else 0
+
+    # ③ 成分特性
+    if is_irritant:
+        ingredient_rank = 2
+    elif focuses & _SERUM_HYDRATING_FOCUS:
+        ingredient_rank = 0
+    else:
+        ingredient_rank = 1
+
+    # ④ テクスチャ
+    texture = str(step.get("texture", "") or "").lower()
+    if texture in _SERUM_TEXTURE_LIGHT:
+        texture_rank = 0
+    elif texture in _SERUM_TEXTURE_HEAVY:
+        texture_rank = 2
+    else:
+        texture_rank = 1
+
+    return (irritant_rank, ingredient_rank, texture_rank)
+
+
 def step_sort_key(step):
+    """
+    全ステップの並び順キーを返す。
+    タプルは常に 5 要素: (position, irritant_rank, ingredient_rank, texture_rank, priority)
+    美容液のみ ②③④ にサブキーが入り、他カテゴリは (0, 0, 0) で埋める。
+    """
     if not isinstance(step, dict):
-        return (99, 999)
+        return (99, 0, 0, 0, 999)
 
     category = normalize_candidate_category(
         step.get("category", ""),
@@ -13050,25 +13100,32 @@ def step_sort_key(step):
     use_timing = step.get("use_timing", "standard")
 
     # クレンジング・洗顔は use_timing に関わらず常に先頭順序を維持する
-    # （AIが誤って after_toner 等を付けても化粧水より前に表示されるべき）
     if category in ("クレンジング", "洗顔"):
-        return (CATEGORY_ORDER.get(category, 99), priority)
+        return (CATEGORY_ORDER.get(category, 99), 0, 0, 0, priority)
 
     # use_timing による明示的な順序上書き
-    # ただし 美容液カテゴリで before_toner が付いていても化粧水の後に配置する。
-    # （boosterタイプは enforce_booster_night_only で朝から除去済みのため、
-    #   残った 美容液は必ず 化粧水(3)の後で表示するのが正しい。）
     if use_timing in _TIMING_ORDER_OVERRIDE:
-        if category == "美容液" and use_timing == "before_toner":
-            return (_TIMING_ORDER_OVERRIDE["after_toner"], priority)
-        return (_TIMING_ORDER_OVERRIDE[use_timing], priority)
+        # 美容液に before_toner が付いていても化粧水の後（after_toner 相当）に配置
+        pos = (_TIMING_ORDER_OVERRIDE["after_toner"]
+               if (category == "美容液" and use_timing == "before_toner")
+               else _TIMING_ORDER_OVERRIDE[use_timing])
+        if category == "美容液":
+            sub = _serum_sub_sort_key(step)
+            return (pos, *sub, priority)
+        return (pos, 0, 0, 0, priority)
 
-    # 後方互換: role=booster は before_toner 相当（美容液は after_toner にクランプ）
+    # 後方互換: role=booster は after_toner 相当
     if role == "booster":
-        return (3.5, priority)
+        return (3.5, 0, 0, 0, priority)
 
     base_order = CATEGORY_ORDER.get(category, 99)
-    return (base_order, priority)
+
+    # 美容液はサブキーで詳細ソート
+    if category == "美容液":
+        sub = _serum_sub_sort_key(step)
+        return (base_order, *sub, priority)
+
+    return (base_order, 0, 0, 0, priority)
 
 def sort_steps(data):
     if "morning" in data and "steps" in data["morning"]:
@@ -13792,6 +13849,13 @@ role: main/booster のみ。
 - "after_serum": 美容液の後・乳液前（特殊クリーム等）
 - "last": ルーティン最後（日焼け止めは通常これ）
 美容液を化粧水前に使う商品、化粧水後だが乳液より先に使うクリーム等、商品固有の指示がある場合はstandardを選ばず正確なタイミングを指定すること。
+
+【美容液が複数ある場合のuse_timing（重要）】
+同じ朝/夜に美容液が2つ以上ある場合、以下のルールで use_timing を指定して使用順を明確にすること:
+・保湿・導入系（ヒアルロン酸・セラミド・CICA・パンテノール等）→ "after_toner"（化粧水直後）
+・機能・美白系（ビタミンC・ナイアシンアミド・トラネキサム酸・ペプチド等）→ "standard"
+・刺激系（レチノール・レチナール・AHA・BHA・PHA等）→ "after_serum"（他の美容液の後）
+→ 同じ use_timing の美容液は、テクスチャが軽い順（watery < essence < gel < cream）に自動整列される。
 
 【use_days】
 night・weekly_careの各stepに必ず設定。morning=[]固定。
