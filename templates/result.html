@@ -433,6 +433,20 @@
           <h2 class="routine-title">{{ title }}</h2>
           <div class="routine-chip">{{ chip }}</div>
       </div>
+
+      {# サプリメントのみ：一般注意書きボックス #}
+      {% if not is_device %}
+      <div class="supplement-notice">
+          <div class="supplement-notice-title">サプリメントを複数飲む方へ</div>
+          <ul class="supplement-notice-list">
+              <li><strong>成分の重複に注意</strong> — マルチビタミン・美白サプリ等を併用するとビタミンC・B群・亜鉛などが重複しがちです。特にビタミンA・E・亜鉛・セレン・鉄は過剰摂取に注意。</li>
+              <li><strong>脂溶性ビタミン（A・D・E・K）は蓄積リスクあり</strong> — 水溶性のC・B群と異なり体内に蓄積されます。複数サプリの含有量を合算して確認してください。</li>
+              <li><strong>ミネラル同士は吸収を邪魔することがある</strong> — 鉄×亜鉛、鉄×カルシウム、亜鉛×銅は同時摂取で吸収率が低下します。タイミングを分けるのが理想的です（例：亜鉛を朝、鉄を夜）。</li>
+              <li><strong>薬を服用中の方は医師・薬剤師に相談を</strong> — 血液サラサラの薬・高血圧薬・糖尿病薬・甲状腺の薬との相互作用が起きることがあります。特にビタミンKと抗凝固薬、セントジョーンズワートと多くの医薬品は要注意です。</li>
+          </ul>
+      </div>
+      {% endif %}
+
       {% for item in items %}
       <div class="product-card-new"
            data-product="{{ item.get('product', '') }}"
@@ -473,6 +487,13 @@
               <div class="product-meta">
                   <div class="reason-label">ルーティンとの相性</div>
                   <div class="reason-text">{{ item.get('reason', '') }}</div>
+              </div>
+              {% endif %}
+
+              {# サプリのみ：AI生成の個別注意点 #}
+              {% if not is_device and item.get('caution') %}
+              <div class="supplement-caution">
+                  <span class="supplement-caution-icon">⚠</span>{{ item.get('caution', '') }}
               </div>
               {% endif %}
 
