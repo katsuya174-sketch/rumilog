@@ -13385,6 +13385,35 @@ def get_analysis_schema_phase2():
             "avoid_combinations","synergy_combinations","morning_order","night_order","reason"
         ]
     }
+    supplement_schema = {
+        "type": "object",
+        "properties": {
+            "category":         {"type": "string"},
+            "product":          {"type": "string"},
+            "brand":            {"type": "string"},
+            "purpose":          {"type": "string"},
+            "ingredient_focus": {"type": "array", "items": {"type": "string"}},
+            "reason":           {"type": "string"},
+            "timing":           {"type": "string"},
+            "caution":          {"type": "string"},
+            "priority":         {"type": "integer"}
+        },
+        "required": ["category","product","purpose","ingredient_focus","reason","timing","caution","priority"]
+    }
+    device_schema = {
+        "type": "object",
+        "properties": {
+            "category":        {"type": "string"},
+            "product":         {"type": "string"},
+            "brand":           {"type": "string"},
+            "purpose":         {"type": "string"},
+            "device_function": {"type": "string"},
+            "frequency":       {"type": "string"},
+            "reason":          {"type": "string"},
+            "priority":        {"type": "integer"}
+        },
+        "required": ["category","product","purpose","device_function","frequency","reason","priority"]
+    }
     return {
         "type": "object",
         "properties": {
@@ -13398,11 +13427,13 @@ def get_analysis_schema_phase2():
                 "properties": {"steps": {"type": "array", "items": step_schema}},
                 "required": ["steps"]
             },
-            "weekly_care": {"type": "array", "items": step_schema},
-            "warnings": {"type": "array", "items": {"type": "string"}},
-            "routine_strategy": routine_strategy_schema
+            "weekly_care":    {"type": "array", "items": step_schema},
+            "warnings":       {"type": "array", "items": {"type": "string"}},
+            "routine_strategy": routine_strategy_schema,
+            "supplements":    {"type": "array", "items": supplement_schema},
+            "beauty_devices": {"type": "array", "items": device_schema}
         },
-        "required": ["morning","night","weekly_care","warnings","routine_strategy"]
+        "required": ["morning","night","weekly_care","warnings","routine_strategy","supplements","beauty_devices"]
     }
 
 
