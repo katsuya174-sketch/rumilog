@@ -2675,8 +2675,8 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
     endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401"
 
     headers = {
-        "Referer": "https://lumilog.jp",
-        "Origin": "https://lumilog.jp",
+        "Referer": SITE_URL or "https://lumilog.jp",
+        "Origin": SITE_URL or "https://lumilog.jp",
         "User-Agent": "Mozilla/5.0",
     }
 
@@ -3389,8 +3389,8 @@ def _rakuten_criteria_search_single(keyword, category):
 
     endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401"
     headers = {
-        "Referer": "https://lumilog.jp",
-        "Origin": "https://lumilog.jp",
+        "Referer": SITE_URL or "https://lumilog.jp",
+        "Origin": SITE_URL or "https://lumilog.jp",
         "User-Agent": "Mozilla/5.0",
     }
 
