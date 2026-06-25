@@ -421,6 +421,66 @@
         </ul>
     </div>
 
+    {% if data.supplements %}
+    <div style="border:1px solid #ddd; border-radius:16px; padding:20px; margin-bottom:24px; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
+        <h2>サプリメント</h2>
+        <ul style="padding-left:0;">
+            {% for item in data.supplements %}
+            <li style="list-style:none; border:1px solid #eee; border-radius:16px; padding:16px; margin-bottom:16px;">
+                <div style="display:flex; gap:16px; align-items:flex-start;">
+                    {% if item.image %}
+                    <div><img src="{{ item.image }}" alt="{{ item.product }}" width="100" style="border-radius:12px;"></div>
+                    {% endif %}
+                    <div>
+                        <div style="font-size:18px; font-weight:bold;">{{ item.product }}</div>
+                        {% if item.brand %}<div>ブランド: {{ item.brand }}</div>{% endif %}
+                        <div>目的: {{ item.purpose }}</div>
+                        <div>摂取タイミング: {{ item.timing }}</div>
+                        <div>理由: {{ item.reason }}</div>
+                        {% if item.caution %}<div style="color:#a06000;">⚠ {{ item.caution }}</div>{% endif %}
+                        {% if item.price %}<div style="margin-top:8px; font-weight:bold;">参考価格: ¥{{ item.price }}</div>{% endif %}
+                        <div style="margin-top:8px; display:flex; gap:8px;">
+                            {% if item.rakuten_link %}<a href="{{ item.rakuten_link }}" target="_blank" rel="noopener noreferrer" style="background:#bf0000; color:#fff; padding:6px 14px; border-radius:8px; text-decoration:none; font-size:13px;">楽天で見る</a>{% endif %}
+                            {% if item.amazon_link %}<a href="{{ item.amazon_link }}" target="_blank" rel="noopener noreferrer" style="background:#ff9900; color:#000; padding:6px 14px; border-radius:8px; text-decoration:none; font-size:13px;">Amazonで見る</a>{% endif %}
+                        </div>
+                    </div>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
+    {% if data.beauty_devices %}
+    <div style="border:1px solid #ddd; border-radius:16px; padding:20px; margin-bottom:24px; box-shadow:0 4px 12px rgba(0,0,0,0.05);">
+        <h2>美容機器</h2>
+        <ul style="padding-left:0;">
+            {% for item in data.beauty_devices %}
+            <li style="list-style:none; border:1px solid #eee; border-radius:16px; padding:16px; margin-bottom:16px;">
+                <div style="display:flex; gap:16px; align-items:flex-start;">
+                    {% if item.image %}
+                    <div><img src="{{ item.image }}" alt="{{ item.product }}" width="100" style="border-radius:12px;"></div>
+                    {% endif %}
+                    <div>
+                        <div style="font-size:18px; font-weight:bold;">{{ item.product }}</div>
+                        {% if item.brand %}<div>ブランド: {{ item.brand }}</div>{% endif %}
+                        <div>目的: {{ item.purpose }}</div>
+                        {% if item.device_function %}<div>機能: {{ item.device_function }}</div>{% endif %}
+                        {% if item.frequency %}<div>頻度: {{ item.frequency }}</div>{% endif %}
+                        <div>理由: {{ item.reason }}</div>
+                        {% if item.price %}<div style="margin-top:8px; font-weight:bold;">参考価格: ¥{{ item.price }}</div>{% endif %}
+                        <div style="margin-top:8px; display:flex; gap:8px;">
+                            {% if item.rakuten_link %}<a href="{{ item.rakuten_link }}" target="_blank" rel="noopener noreferrer" style="background:#bf0000; color:#fff; padding:6px 14px; border-radius:8px; text-decoration:none; font-size:13px;">楽天で見る</a>{% endif %}
+                            {% if item.amazon_link %}<a href="{{ item.amazon_link }}" target="_blank" rel="noopener noreferrer" style="background:#ff9900; color:#000; padding:6px 14px; border-radius:8px; text-decoration:none; font-size:13px;">Amazonで見る</a>{% endif %}
+                        </div>
+                    </div>
+                </div>
+            </li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% endif %}
+
     <div style="
         border:1px solid #ddd;
         border-radius:16px;
