@@ -1928,7 +1928,11 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     if brand:
         brand_compact = compact_text(brand)
         if brand_compact and brand_compact in title_compact:
-            score += 25
+            # サプリ・美容機器はブランド指定が商品選定の主軸のため加点を強化
+            score += 60 if category in ("サプリメント", "美容機器") else 25
+        elif brand_compact and category in ("サプリメント", "美容機器"):
+            # サプリ・美容機器でブランド不一致は強ペナルティ（レビュー数逆転を防ぐ）
+            score -= 70
 
     if any(word in title for word in CURRENT_PRODUCT_WORDS):
         score += 15
