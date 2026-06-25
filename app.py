@@ -4137,6 +4137,47 @@ def find_affiliate_links_for_ai_product(product_name, category, affiliate_ai_db)
 
     return None
 
+
+def infer_brand_from_image(image_url: str, product_name: str, category: str = "") -> str:
+    """商品画像のURLからGeminiでブランド名を読み取る。
+    画像DL失敗・Gemini失敗時は空文字を返す。タイムアウトは短めに設定してレスポンスを妨げない。"""
+    if not image_url:
+        return ""
+    try:
+        import base64 as _b64
+        _r = requests.get(image_url, timeout=(2, 5))
+        if _r.status_code != 200 or not _r.content:
+            return ""
+        mime_type = (_r.headers.get("Content-Type", "image/jpeg") or "image/jpeg").split(";")[0].strip()
+        img_bytes = _b64.b64decode(_b64.b64encode(_r.content))
+        _prompt = (
+            f"この商品画像に写っているブランド名・メーカー名を日本語または英語で1つだけ答えてください。"
+            f"商品名は「{product_name}」です。"
+            f"ブランド名が読み取れない場合は空文字を返してください。"
+            f"余計な説明は不要です。ブランド名のみ回答してください。"
+        )
+        _response = call_gemini_with_retry(
+            client=client,
+            model=DETAIL_MODEL,
+            contents=[
+                types.Part.from_bytes(data=img_bytes, mime_type=mime_type),
+                _prompt,
+            ],
+            config=types.GenerateContentConfig(temperature=0, max_output_tokens=30),
+            max_retries=1,
+            timeout=10,
+        )
+        _brand = (_response.text or "").strip()
+        _brand = _brand.replace("「", "").replace("」", "").replace('"', "").replace("'", "").strip()
+        if not _brand or len(_brand) > 40:
+            return ""
+        print(f"[BRAND INFER FROM IMAGE] {product_name} → {_brand}", flush=True)
+        return _brand
+    except Exception as _e:
+        print(f"[BRAND INFER FROM IMAGE ERROR] {_e}", flush=True)
+        return ""
+
+
 def attach_affiliate_links_to_step(step, affiliate_ai_db):
     if not isinstance(step, dict):
         return step
@@ -4211,6 +4252,14 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
 
         if rakuten_item.get("image"):
             step["image"] = rakuten_item.get("image", "")
+
+        # 楽天リンク取得後もブランドが不明なら画像から推測して補完
+        if not str(step.get("brand", "") or "").strip() and step.get("image"):
+            _inferred = infer_brand_from_image(
+                step["image"], product_name, category
+            )
+            if _inferred:
+                step["brand"] = _inferred
 
         if safe_price(step.get("price", 0)) <= 0:
             step["price"] = safe_price(rakuten_item.get("price", 0))
