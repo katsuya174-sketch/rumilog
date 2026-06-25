@@ -11759,12 +11759,35 @@ def finalize_step_data(step, user_data):
         if not isinstance(raw_candidates, list):
             raw_candidates = []
 
+        # カテゴリ名のみ・成分名+カテゴリ名のみの汎用名候補を除外
+        _generic_category_names = {
+            "化粧水", "美容液", "乳液", "クリーム", "日焼け止め", "洗顔", "洗顔料",
+            "クレンジング", "パック", "マスク", "ピーリング", "導入美容液", "保湿クリーム",
+            "美顔器", "サプリ", "サプリメント",
+        }
+
+        def _is_generic_name(brand: str, name: str) -> bool:
+            if not brand:
+                name_stripped = name.strip()
+                # カテゴリ名そのまま
+                if name_stripped in _generic_category_names:
+                    return True
+                # 成分名+カテゴリ名（例: "アゼライン酸 化粧水"）で6文字以下
+                for cat in _generic_category_names:
+                    if name_stripped.endswith(cat) and len(name_stripped) <= len(cat) + 8:
+                        return True
+            return False
+
         normalized_candidates = []
         seen_keys = set()
 
         for c in raw_candidates:
             normalized = normalize_candidate(c)
             if not normalized:
+                continue
+
+            # ブランドなし＋汎用名はスキップ
+            if _is_generic_name(normalized.get("brand", ""), normalized.get("name", "")):
                 continue
 
             identity_keys = build_candidate_identity_keys(normalized)
@@ -14042,9 +14065,11 @@ nightステップのuse_days=["月","水","金"]でレチノール使用 → ピ
 パック条件: 乾燥・バリア低下顕著または刺激成分使用後の回復ケアが必要な時のみ。
 
 【product_candidates】
-各stepに3-4件必須(0-2件禁止)。現行販売中の正式名称確実な商品のみ。stepのcategoryと完全一致必須。
-
-各候補のフィールドルール:
+各stepに必ず3件出力(2件以下禁止・4件可)。現行販売中の正式名称が確実な商品のみ。stepのcategoryと完全一致必須。
+- brand: ブランド名（必須・空文字禁止）例: "COSRX" "イニスフリー" "花王" "資生堂"
+- name: 正式製品名（必須）例: "スネイルムチン96エッセンス" "グリーンティーヒアルロン酸セラム"
+  ※「日焼け止め」「化粧水」「保湿クリーム」などカテゴリ名のみ・成分名+カテゴリ名のみは禁止
+  ※必ずブランドと製品名のペアで出力すること
 - confidence: 70未満出力禁止(90+:確実 80+:名称確実 70+:成分不確か)
 - release_status: current のみ
 - active_ingredients: 英語タグ(retinol/retinal/vitamin_c/niacinamide/azelaic_acid/ceramide/hyaluronic等)
@@ -14053,13 +14078,13 @@ nightステップのuse_days=["月","水","金"]でレチノール使用 → ピ
 - sensitive_ok: yes(低刺激・セラミドCICA主体)/no(レチノール・高濃度AHA/BHA主体)/unknown
 - retinol_level: レチノール系以外=0。低=1 中=2 高=3
 - main_functions: 保湿/バリア強化/鎮静ケア/毛穴改善/ニキビ予防/皮脂抑制/美白ケア/透明感向上/ハリ改善/エイジングケア/紫外線防御/キメ改善 から選択
-- ingredient_strength: {{成分: high/medium/low}}
+- ingredient_strength: {{成分: high/medium/low}}(高濃度・医薬部外品=high 標準=medium 補助=low)
 - formulation: low_irritation/barrier_formula/light_texture/rich_texture/fragrance_free/alcohol_free/oil_free/non_comedogenic/water_based/oil_based から選択
 - texture: light/watery/gel/medium/essence/cream/rich/oil/balm/foam/powder から選択
 - availability_japan: drugstore/amazon/rakuten/official_jp(必ず1つ以上。不明でもamazon/rakuten含める)
 - uv_level: 日焼け止めのみ{{spf,pa}}、他={{}}
 - reason: このstepに合う短い理由
-禁止: 架空商品/旧名称/廃盤品/カテゴリ違い/自信ない商品/抽象名/セット販売・まとめ買い商品(「○個セット」「○本セット」「まとめ買い」「詰め合わせ」等は除外、単品のみ提案すること)
+禁止: 架空商品/旧名称/廃盤品/カテゴリ違い/自信ない商品/ブランド空文字/カテゴリ名のみの製品名/セット販売・まとめ買い商品
 
 【routine_strategy】
 strategy_type: fixed/rotation(攻め成分分散が必要な場合のみrotation)
