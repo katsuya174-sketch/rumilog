@@ -1946,21 +1946,30 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         score -= 18
 
     if review_count >= 5000:
-        score += 60
+        review_score = 60
     elif review_count >= 3000:
-        score += 50
+        review_score = 50
     elif review_count >= 1000:
-        score += 40
+        review_score = 40
     elif review_count >= 500:
-        score += 30
+        review_score = 30
     elif review_count >= 300:
-        score += 22
+        review_score = 22
     elif review_count >= 100:
-        score += 14
+        review_score = 14
     elif review_count >= 30:
-        score += 6
+        review_score = 6
     elif review_count > 0:
-        score += 1
+        review_score = 1
+    else:
+        review_score = 0
+
+    # サプリ・美容機器は商品名が汎用的なため名称一致スコアが拮抗しやすい。
+    # レビュー数を主たる優劣基準にするため重みを2倍にする。
+    if category in ("サプリメント", "美容機器"):
+        review_score = int(review_score * 2)
+
+    score += review_score
 
     if any(word in title for word in ["公式", "正規品", "正規販売店", "認定ショップ", "メーカー公式"]):
         score += 12
@@ -2723,9 +2732,9 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 "imageFlag": 1,
             }
 
-            # カテゴリが分かる場合はスキンケア親ジャンル(100944)で絞り込み
-            # → 口腔洗浄機・家電など無関係ジャンルを API レベルで排除
-            if category:
+            # サプリ・美容機器はスキンケア親ジャンル外のためジャンル絞り込みを外す
+            # それ以外はスキンケア親ジャンル(100944)で無関係商品をAPIレベルで排除
+            if category and category not in ("サプリメント", "美容機器"):
                 _gid = get_rakuten_genre_id(category, parent_only=True)
                 if _gid:
                     params["genreId"] = _gid
