@@ -434,17 +434,33 @@
           <div class="routine-chip">{{ chip }}</div>
       </div>
 
-      {# サプリメントのみ：一般注意書きボックス #}
+      {# サプリメントのみ：cautionキーワードに基づく動的注意書き #}
       {% if not is_device %}
+      {% set _caution_all = items | map(attribute='caution') | select('string') | join(' ') | lower %}
+      {% set _show_overlap = ('重複' in _caution_all or 'ビタミンa' in _caution_all or 'ビタミンe' in _caution_all or '亜鉛' in _caution_all or 'セレン' in _caution_all or ('鉄' in _caution_all and '過剰' in _caution_all)) %}
+      {% set _show_fat = ('脂溶性' in _caution_all or ('ビタミンd' in _caution_all) or ('ビタミンk' in _caution_all) or ('蓄積' in _caution_all)) %}
+      {% set _show_mineral = ('ミネラル' in _caution_all or 'カルシウム' in _caution_all or '吸収' in _caution_all or '競合' in _caution_all or 'タイミング' in _caution_all) %}
+      {% set _show_drug = ('薬' in _caution_all or '相互作用' in _caution_all or '医師' in _caution_all or '抗凝固' in _caution_all) %}
+      {% set _any_notice = _show_overlap or _show_fat or _show_mineral or _show_drug %}
+      {% if _any_notice %}
       <div class="supplement-notice">
-          <div class="supplement-notice-title">サプリメントを複数飲む方へ</div>
+          <div class="supplement-notice-title">このサプリを飲む前に確認を</div>
           <ul class="supplement-notice-list">
-              <li><strong>成分の重複に注意</strong> — マルチビタミン・美白サプリ等を併用するとビタミンC・B群・亜鉛などが重複しがちです。特にビタミンA・E・亜鉛・セレン・鉄は過剰摂取に注意。</li>
-              <li><strong>脂溶性ビタミン（A・D・E・K）は蓄積リスクあり</strong> — 水溶性のC・B群と異なり体内に蓄積されます。複数サプリの含有量を合算して確認してください。</li>
-              <li><strong>ミネラル同士は吸収を邪魔することがある</strong> — 鉄×亜鉛、鉄×カルシウム、亜鉛×銅は同時摂取で吸収率が低下します。タイミングを分けるのが理想的です（例：亜鉛を朝、鉄を夜）。</li>
-              <li><strong>薬を服用中の方は医師・薬剤師に相談を</strong> — 血液サラサラの薬・高血圧薬・糖尿病薬・甲状腺の薬との相互作用が起きることがあります。特にビタミンKと抗凝固薬、セントジョーンズワートと多くの医薬品は要注意です。</li>
+              {% if _show_overlap %}
+              <li><strong>成分の重複に注意</strong> — マルチビタミン等の併用でビタミン・ミネラルが重複しがちです。特にビタミンA・E・亜鉛・セレン・鉄は過剰摂取に注意。</li>
+              {% endif %}
+              {% if _show_fat %}
+              <li><strong>脂溶性ビタミン（A・D・E・K）は蓄積リスクあり</strong> — 体内に蓄積されるため複数サプリの含有量を合算して確認してください。</li>
+              {% endif %}
+              {% if _show_mineral %}
+              <li><strong>ミネラル同士は吸収を邪魔することがある</strong> — 鉄×亜鉛、鉄×カルシウム、亜鉛×銅は同時摂取で吸収率が低下します。タイミングを分けるのが理想的です。</li>
+              {% endif %}
+              {% if _show_drug %}
+              <li><strong>薬を服用中の方は医師・薬剤師に相談を</strong> — 抗凝固薬×ビタミンK、多くの医薬品×セントジョーンズワートなど相互作用が起きることがあります。</li>
+              {% endif %}
           </ul>
       </div>
+      {% endif %}
       {% endif %}
 
       {% for item in items %}

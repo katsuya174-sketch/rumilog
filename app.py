@@ -1879,6 +1879,46 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         if any(word in title for word in _cleansing_wrong):
             return -9999
 
+    elif category == "サプリメント":
+        # スキンケア・美容液・化粧品がヒットしないよう除外
+        _supp_skincare_words = [
+            "化粧水", "美容液", "クリーム", "乳液", "セラム", "ローション",
+            "洗顔", "クレンジング", "日焼け止め", "パック", "マスク",
+            "美容機器", "美顔器", "スチーマー",
+        ]
+        if any(word in title for word in _supp_skincare_words):
+            return -9999
+        # サプリらしいキーワードが1つもなければ低スコア
+        _supp_ok_words = [
+            "サプリ", "supplement", "錠", "粒", "カプセル", "mg", "μg", "mcg",
+            "iu", "IU", "栄養", "ビタミン", "ミネラル", "アミノ酸", "コラーゲン",
+            "プロテイン", "酵素", "乳酸菌", "食品", "飲料", "健康",
+        ]
+        if not any(w.lower() in title_norm or w in title for w in _supp_ok_words):
+            score_category_penalty = -40
+        else:
+            score_category_penalty = 0
+
+    elif category == "美容機器":
+        # スキンケア商品・サプリがヒットしないよう除外
+        _dev_skincare_words = [
+            "化粧水", "美容液", "クリーム", "乳液", "セラム", "ローション",
+            "洗顔", "クレンジング", "日焼け止め", "パック", "マスク",
+            "サプリ", "supplement", "錠", "粒", "カプセル",
+        ]
+        if any(word in title for word in _dev_skincare_words):
+            return -9999
+        # 美容機器らしいキーワードがなければ低スコア
+        _dev_ok_words = [
+            "美顔器", "led", "LED", "ems", "EMS", "超音波", "イオン",
+            "マッサージ", "スチーマー", "フェイスケア", "美容器", "美容機器",
+            "器具", "機器", "デバイス", "device", "美容家電",
+        ]
+        if not any(w.lower() in title_norm or w in title for w in _dev_ok_words):
+            score_category_penalty = -40
+        else:
+            score_category_penalty = 0
+
     else:
         score_category_penalty = 0
 
@@ -13896,7 +13936,8 @@ role: main/booster のみ。
 
 【morning必須カテゴリ】
 洗顔・化粧水・日焼け止めは必ずmorning stepsに含める（省略禁止）。
-美容液・乳液・クリームは肌状態に応じて追加する。
+美容液は原則morning stepsに含める（有効成分による日中ケアが基本）。肌悩みが特になく成分が全く不要な場合のみ省略可。
+乳液・クリームは保湿必要度（moisture_plan）に応じて追加する。
 
 【ingredient_focus候補】
 ビタミンC/ナイアシンアミド/レチノール/レチナール/アゼライン酸/トラネキサム酸/PDRN/ペプチド/セラミド/ヒアルロン酸/CICA/ドクダミ/AHA/BHA/PHA/UV防御/低刺激
@@ -14110,7 +14151,8 @@ role: main/booster のみ。
 
 【morning必須カテゴリ】
 洗顔・化粧水・日焼け止めは必ずmorning stepsに含める（省略禁止）。
-美容液・乳液・クリームは肌状態に応じて追加する。
+美容液は原則morning stepsに含める（有効成分による日中ケアが基本）。肌悩みが特になく成分が全く不要な場合のみ省略可。
+乳液・クリームは保湿必要度（moisture_plan）に応じて追加する。
 
 【ingredient_focus候補】
 ビタミンC/ナイアシンアミド/レチノール/レチナール/アゼライン酸/トラネキサム酸/PDRN/ペプチド/セラミド/ヒアルロン酸/CICA/ドクダミ/AHA/BHA/PHA/UV防御/低刺激
