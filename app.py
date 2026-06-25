@@ -2882,10 +2882,20 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 rakuten_title = str(item.get("itemName", "") or "").strip()
 
                 # 非スキンケア商品を即リジェクト（口腔洗浄機・家電等の混入防止）
-                if category and not _is_rakuten_item_valid_for_category(rakuten_title, category, strict=False):
-                    continue
+                # サプリメント・美容機器はスキンケア外カテゴリのためこのチェックをスキップ
+                if category and category not in ("サプリメント", "美容機器"):
+                    if not _is_rakuten_item_valid_for_category(rakuten_title, category, strict=False):
+                        continue
 
-                if not is_same_verified_rakuten_product(
+                # サプリメント・美容機器はGeminiが出すproduct名がカテゴリ説明
+                # （例: 「イオン導入器」）であり各社商品名（「イオンエフェクター」）と
+                # 一致しないため、ブランド指定がある場合はブランド一致のみで判定する。
+                if category in ("サプリメント", "美容機器") and brand:
+                    _bc = "".join(c for c in brand.lower() if c.strip())
+                    _tc = "".join(c for c in rakuten_title.lower() if c.strip())
+                    if _bc and _bc not in _tc:
+                        continue
+                elif not is_same_verified_rakuten_product(
                     product_name=product_name,
                     rakuten_title=rakuten_title,
                     brand=brand
