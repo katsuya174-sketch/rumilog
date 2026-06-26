@@ -1719,9 +1719,13 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             # 美容機器: Geminiが「イオン導入器」等のカテゴリ説明名を出すため名称一致免除
             if category == "美容機器":
                 name_match_score = 10
-            # サプリメント: 成分名（ナイアシンアミド等）は通常タイトルに含まれるが
-            # 品番・ブランド接頭辞で一致しない場合もあるため低スコアで通過させる
+            # サプリメント: 成分名は通常タイトルに含まれるが品番・ブランド接頭辞で
+            # 一致しない場合もあるため低スコアで通過させる
             elif category == "サプリメント":
+                name_match_score = 8
+            # ピーリング・パック: Gemini日本語名 vs Rakuten英語名の乖離が多いため
+            # カテゴリ固有キーワードチェック(_peel_required等)に一致を委ねる
+            elif category in ("ピーリング", "パック"):
                 name_match_score = 8
             else:
                 return -9999
@@ -2932,14 +2936,16 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 # サプリメント: ブランドがローマ字/カタカナ表記ゆれで全件スキップを
                 #   避けるため pre-filter なし。score_rakuten_item の +60/-0 で制御。
                 # 美容機器: ブランド一致のみで判定（製品名が説明語のため）。
+                # ピーリング・パック: Gemini日本語名 vs Rakuten英語名で全件不一致になるため
+                #   is_same_verified_rakuten_product をスキップし score_rakuten_item に委ねる。
                 if category == "美容機器":
                     if brand:
                         _bc = "".join(c for c in brand.lower() if c.strip())
                         _tc = "".join(c for c in rakuten_title.lower() if c.strip())
                         if _bc and _bc not in _tc:
                             continue
-                elif category == "サプリメント":
-                    pass  # pre-filter なし: スコアリングに委ねる
+                elif category in ("サプリメント", "ピーリング", "パック"):
+                    pass  # pre-filter なし: score_rakuten_item のカテゴリ固有チェックに委ねる
                 elif not is_same_verified_rakuten_product(
                     product_name=product_name,
                     rakuten_title=rakuten_title,
@@ -11994,10 +12000,12 @@ def finalize_step_data(step, user_data):
             # カテゴリ名そのまま（ブランドあり/なし問わず）
             if name_stripped in _generic_category_names:
                 return True
-            # 成分名+カテゴリ名（例: "アゼライン酸 化粧水"）は
-            # ブランドがついていても汎用名のため除外
+            # 「成分名 + スペース + カテゴリ名」パターンのみ除外
+            # （例: "アゼライン酸 化粧水", "ナイアシンアミド 乳液"）
+            # スペースなしは実在商品名に含まれるため除外しない
+            # （例: "薬用マイルド洗顔料", "炭酸泡洗顔", "高保湿乳液" は除外しない）
             for cat in _generic_category_names:
-                if name_stripped.endswith(cat) and len(name_stripped) <= len(cat) + 8:
+                if name_stripped.endswith(" " + cat) or name_stripped.endswith("　" + cat):
                     return True
             return False
 
@@ -14160,7 +14168,7 @@ ai_improvement_strategy: 改善優先順位を戦略的に10項目分出力。�
 
 【supplements】
 スキンケアのトータルコーディネートとして、内側からの補完が有効な場合に提案。不要なら[]。
-提案数は肌状態・悩みに応じて柔軟に決める（複数の悩みに対して複数サプリが有効なら複数提案OK・件数制限なし）。
+件数制限なし。スコアや悩みが複数ある場合は積極的に3〜5件提案すること（スキンケアで補えない内側からのアプローチとして有益）。
 提案条件: ①外用スキンケアだけでは補完困難な悩み(コラーゲン生成・抗酸化・抗糖化等) ②既存ルーティンと成分が重複せず相乗効果が見込める ③肌スコアや悩みに明確な根拠がある
 禁止: スキンケアと全く同じ成分の重複提案・根拠のない漠然とした提案
 
@@ -14398,7 +14406,7 @@ synergy_combinations(3件以上必須):
 
 【supplements】
 スキンケアのトータルコーディネートとして、内側からの補完が有効な場合に提案。不要なら[]。
-提案数は肌状態・悩みに応じて柔軟に決める（複数の悩みに対して複数サプリが有効なら複数提案OK・件数制限なし）。
+件数制限なし。スコアや悩みが複数ある場合は積極的に3〜5件提案すること（スキンケアで補えない内側からのアプローチとして有益）。
 提案条件: ①外用スキンケアだけでは補完困難な悩み(コラーゲン生成・抗酸化・抗糖化等) ②既存ルーティンと成分が重複せず相乗効果が見込める ③肌スコアや悩みに明確な根拠がある
 禁止: スキンケアと全く同じ成分の重複提案・根拠のない漠然とした提案
 
@@ -14612,7 +14620,7 @@ moisture_level/need_emulsion/need_cream/need_double_moisture/reason
 
 【supplements】
 スキンケアのトータルコーディネートとして、内側からの補完が有効な場合に提案。不要なら[]。
-提案数は肌状態・悩みに応じて柔軟に決める（複数の悩みに対して複数サプリが有効なら複数提案OK・件数制限なし）。
+件数制限なし。スコアや悩みが複数ある場合は積極的に3〜5件提案すること（スキンケアで補えない内側からのアプローチとして有益）。
 提案条件: ①外用スキンケアだけでは補完困難な悩み(コラーゲン生成・抗酸化・抗糖化等) ②既存ルーティンと成分が重複せず相乗効果が見込める ③肌スコアや悩みに明確な根拠がある
 禁止: スキンケアと全く同じ成分の重複提案・根拠のない漠然とした提案
 
