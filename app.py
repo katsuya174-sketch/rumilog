@@ -1716,11 +1716,13 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         required_matches = 1 if len(important_tokens) <= 2 else 2
 
         if len(matched_tokens) < required_matches:
-            # 美容機器はGeminiが出す商品名がカテゴリ説明（「イオン導入器」等）であり
-            # 各社の実際の商品名（「イオンエフェクター」「イオンブースト」等）と一致しない。
-            # ブランド一致・デバイスキーワードで十分に絞れるため名称一致を免除する。
+            # 美容機器: Geminiが「イオン導入器」等のカテゴリ説明名を出すため名称一致免除
             if category == "美容機器":
                 name_match_score = 10
+            # サプリメント: 成分名（ナイアシンアミド等）は通常タイトルに含まれるが
+            # 品番・ブランド接頭辞で一致しない場合もあるため低スコアで通過させる
+            elif category == "サプリメント":
+                name_match_score = 8
             else:
                 return -9999
         else:
@@ -3438,8 +3440,7 @@ _CANDIDATE_CATEGORY_FORBIDDEN: dict[str, list[str]] = {
     ],
     "化粧水": [
         "洗顔", "ウォッシュ", "フォーム", "クレンジング",
-        "乳液", "ミルク", "エマルジョン",
-        "クリーム", "バーム",
+        # 乳液/ミルク/エマルジョンは日本のローション系商品に含まれることがあるため除外
         "日焼け止め", "sunscreen", "サンスクリーン",
     ],
     "乳液": [
@@ -4978,8 +4979,9 @@ def gemini_generate_selection_reasons(data, user_data):
 {chr(10).join(steps_desc)}
 
 【厳守ルール】
-- recommend_reasonとpurposeは必ず1位商品の「成分」「機能」欄の内容のみに基づいて書く。
-- 記載されていない成分（例: 記載がないのにレチノール・AHA・ビタミンC等）を書くことは絶対禁止。
+- recommend_reasonとpurposeは必ず各stepの1位商品の「成分」「機能」欄の内容のみに基づいて書く。
+- 他stepの商品・成分を参照・言及することは絶対禁止（例: 日焼け止めstepの理由に他stepのレチノール・ビタミンC等を書かない）。
+- 記載されていない成分（例: 成分欄にないのにレチノール・AHA・ビタミンC等）を書くことは絶対禁止。
 - 1位商品がセラミド・ペプチド系なら保湿・バリア観点で書く。ビタミンC系なら美白・抗酸化観点で書く。成分に忠実に。
 
 出力フィールド:

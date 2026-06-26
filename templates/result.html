@@ -423,14 +423,31 @@
           <div class="routine-chip">{{ chip }}</div>
       </div>
 
-      {# サプリメントのみ：cautionキーワードに基づく動的注意書き #}
+      {# サプリメントのみ：ingredient_focusタグに基づく動的注意書き #}
+      {# cautionテキストのキーワードマッチではなく、実際の成分タグで判定する #}
       {% if not is_device %}
-      {% set _caution_all = items | map(attribute='caution') | select('string') | join(' ') | lower %}
-      {% set _show_overlap = ('重複' in _caution_all or 'ビタミンa' in _caution_all or 'ビタミンe' in _caution_all or '亜鉛' in _caution_all or 'セレン' in _caution_all or ('鉄' in _caution_all and '過剰' in _caution_all)) %}
-      {% set _show_fat = ('脂溶性' in _caution_all or ('ビタミンd' in _caution_all) or ('ビタミンk' in _caution_all) or ('蓄積' in _caution_all)) %}
-      {% set _show_mineral = ('ミネラル' in _caution_all or 'カルシウム' in _caution_all or '吸収' in _caution_all or '競合' in _caution_all or 'タイミング' in _caution_all) %}
-      {% set _show_drug = ('薬' in _caution_all or '相互作用' in _caution_all or '医師' in _caution_all or '抗凝固' in _caution_all) %}
-      {% set _any_notice = _show_overlap or _show_fat or _show_mineral or _show_drug %}
+      {% set ns = namespace(fat=false, iron=false, zinc=false, calcium=false, copper=false, overdose_count=0, drug=false) %}
+      {% set _fat_tags    = ['vitamin_a','vitamin_d','vitamin_e','vitamin_k'] %}
+      {% set _overdose_tags = ['vitamin_a','vitamin_e','zinc','selenium','iron'] %}
+      {% for item in items %}
+          {% for tag in (item.ingredient_focus or []) %}
+              {% if tag in _fat_tags %}{% set ns.fat = true %}{% endif %}
+              {% if tag == 'iron'     %}{% set ns.iron     = true %}{% endif %}
+              {% if tag == 'zinc'     %}{% set ns.zinc     = true %}{% endif %}
+              {% if tag == 'calcium'  %}{% set ns.calcium  = true %}{% endif %}
+              {% if tag == 'copper'   %}{% set ns.copper   = true %}{% endif %}
+              {% if tag in _overdose_tags %}{% set ns.overdose_count = ns.overdose_count + 1 %}{% endif %}
+          {% endfor %}
+          {% set _c = item.caution or '' %}
+          {% if '薬' in _c or '相互作用' in _c or '医師' in _c or '抗凝固' in _c %}
+              {% set ns.drug = true %}
+          {% endif %}
+      {% endfor %}
+      {% set _show_fat     = ns.fat %}
+      {% set _show_mineral = (ns.iron and (ns.zinc or ns.calcium)) or (ns.zinc and ns.copper) %}
+      {% set _show_overlap = ns.overdose_count >= 2 %}
+      {% set _show_drug    = ns.drug %}
+      {% set _any_notice   = _show_overlap or _show_fat or _show_mineral or _show_drug %}
       {% if _any_notice %}
       <div class="supplement-notice">
           <div class="supplement-notice-title">このサプリを飲む前に確認を</div>
