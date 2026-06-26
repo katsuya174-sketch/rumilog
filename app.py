@@ -1768,10 +1768,6 @@ def score_current_product_signal(item):
     if "公式" in shop:
         score += 25
 
-    # セット商品は大幅ペナルティ（単品がない場合はセットを選ぶ）
-    if _is_set_product:
-        score -= 300
-
     return score
 OLD_PRODUCT_WORDS = [
     "旧",
@@ -2234,6 +2230,10 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         score += 12
 
     score += score_current_product_signal(item)
+
+    # セット商品は大幅ペナルティ（単品がない場合はセットを選ぶ）
+    if _is_set_product:
+        score -= 300
 
     return score
 
