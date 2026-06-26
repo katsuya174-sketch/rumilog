@@ -1958,8 +1958,9 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         if brand_compact and brand_compact in title_compact:
             # サプリ・美容機器はブランド指定が商品選定の主軸のため加点を強化
             score += 60 if category in ("サプリメント", "美容機器") else 25
-        elif brand_compact and category in ("サプリメント", "美容機器"):
-            # サプリ・美容機器でブランド不一致は強ペナルティ（レビュー数逆転を防ぐ）
+        elif brand_compact and category == "美容機器":
+            # 美容機器のみブランド不一致に強ペナルティ（サプリはローマ字/カタカナ
+            # 表記ゆれで誤ペナルティが起きるため除外、pre-filterも外しスコアに委ねる）
             score -= 70
 
     if any(word in title for word in CURRENT_PRODUCT_WORDS):
@@ -2928,14 +2929,17 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 # サプリメント・美容機器はGeminiが出すproduct名がカテゴリ説明
                 # （例: 「イオン導入器」）であり各社商品名（「イオンエフェクター」）と
                 # 一致しないため title match チェックをスキップ。
-                # ブランド指定がある場合はブランド一致のみで判定。
-                # ブランド未指定の場合は score_rakuten_item のカテゴリフィルタに委ねる。
-                if category in ("サプリメント", "美容機器"):
+                # サプリメント: ブランドがローマ字/カタカナ表記ゆれで全件スキップを
+                #   避けるため pre-filter なし。score_rakuten_item の +60/-0 で制御。
+                # 美容機器: ブランド一致のみで判定（製品名が説明語のため）。
+                if category == "美容機器":
                     if brand:
                         _bc = "".join(c for c in brand.lower() if c.strip())
                         _tc = "".join(c for c in rakuten_title.lower() if c.strip())
                         if _bc and _bc not in _tc:
                             continue
+                elif category == "サプリメント":
+                    pass  # pre-filter なし: スコアリングに委ねる
                 elif not is_same_verified_rakuten_product(
                     product_name=product_name,
                     rakuten_title=rakuten_title,
