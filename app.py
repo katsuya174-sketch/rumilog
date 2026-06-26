@@ -12798,6 +12798,10 @@ def prepare_result_for_view(result):
     result["supplements"] = [s for s in (result.get("supplements") or []) if isinstance(s, dict)]
     result["beauty_devices"] = [s for s in (result.get("beauty_devices") or []) if isinstance(s, dict)]
 
+    # improvement_priority が未設定のレコード（機能追加前の旧データ含む）でもスコアから再計算
+    if not result.get("improvement_priority"):
+        result["improvement_priority"] = build_improvement_priority(result.get("scores", {}))
+
     return result
 
 def lightweight_result_payload(item):
