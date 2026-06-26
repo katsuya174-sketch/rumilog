@@ -2889,12 +2889,15 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
                 # サプリメント・美容機器はGeminiが出すproduct名がカテゴリ説明
                 # （例: 「イオン導入器」）であり各社商品名（「イオンエフェクター」）と
-                # 一致しないため、ブランド指定がある場合はブランド一致のみで判定する。
-                if category in ("サプリメント", "美容機器") and brand:
-                    _bc = "".join(c for c in brand.lower() if c.strip())
-                    _tc = "".join(c for c in rakuten_title.lower() if c.strip())
-                    if _bc and _bc not in _tc:
-                        continue
+                # 一致しないため title match チェックをスキップ。
+                # ブランド指定がある場合はブランド一致のみで判定。
+                # ブランド未指定の場合は score_rakuten_item のカテゴリフィルタに委ねる。
+                if category in ("サプリメント", "美容機器"):
+                    if brand:
+                        _bc = "".join(c for c in brand.lower() if c.strip())
+                        _tc = "".join(c for c in rakuten_title.lower() if c.strip())
+                        if _bc and _bc not in _tc:
+                            continue
                 elif not is_same_verified_rakuten_product(
                     product_name=product_name,
                     rakuten_title=rakuten_title,
@@ -4754,11 +4757,11 @@ _SELECTION_REASON_SCHEMA = {
     "items": {
         "type": "object",
         "properties": {
-            "step_idx":        {"type": "integer"},
+            "step_idx":         {"type": "integer"},
             "recommend_reason": {"type": "string"},
-            "vs_2nd":          {"type": "string"},
+            "purpose":          {"type": "string"},
         },
-        "required": ["step_idx", "recommend_reason", "vs_2nd"],
+        "required": ["step_idx", "recommend_reason", "purpose"],
     }
 }
 
@@ -4849,9 +4852,9 @@ def gemini_generate_selection_reasons(data, user_data):
 
 出力ルール:
 - recommend_reason: 1位商品が選ばれた理由。成分名・機能・スコアの高い観点を具体的に。50-80字。
-- vs_2nd: 「なぜ2位でなく1位なのか」を1文で。成分優位性・肌悩み適合・相乗効果の差を明示。候補が1件のみの場合は空文字。25-45字。
+- purpose: 選定した1位商品の成分・効果に基づく目的説明。商品名は含めず、何のためにこの商品を使うかを30-50字で。
 
-JSONのみ返す。形式: [{{"step_idx":0,"recommend_reason":"...","vs_2nd":"..."}}]"""
+JSONのみ返す。形式: [{{"step_idx":0,"recommend_reason":"...","purpose":"..."}}]"""
 
     try:
         config = types.GenerateContentConfig(
@@ -4882,12 +4885,12 @@ JSONのみ返す。形式: [{{"step_idx":0,"recommend_reason":"...","vs_2nd":"..
             if step is None:
                 continue
             reason = str(item.get("recommend_reason", "")).strip()
-            vs2nd = str(item.get("vs_2nd", "")).strip()
+            purpose = str(item.get("purpose", "")).strip()
             if reason:
                 step["recommend_reason"] = reason
                 applied += 1
-            if vs2nd:
-                step["vs_2nd_reason"] = vs2nd
+            if purpose:
+                step["purpose"] = purpose
         print(f"[SELECTION REASON] Gemini生成 {applied}/{len(target_steps)}件適用", flush=True)
 
     except Exception as e:
@@ -12235,7 +12238,11 @@ def finalize_result_data(data, user_data):
         _cat = normalize_candidate_category(_step.get("category", ""), fallback=_step.get("category", ""))
         _default = _CATEGORY_DEFAULT_TIMING.get(_cat, "standard")
         if _timing not in ("standard", "", None) and _timing != _default:
-            _step["timing_note"] = _TIMING_NOTES.get(_timing, "")
+            # 美容液が after_serum の場合は「他の美容液の後に」と明示
+            if _cat == "美容液" and _timing == "after_serum":
+                _step["timing_note"] = "💡 他の美容液の後にご使用ください"
+            else:
+                _step["timing_note"] = _TIMING_NOTES.get(_timing, "")
         else:
             _step.pop("timing_note", None)
 
