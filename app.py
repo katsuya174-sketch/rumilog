@@ -7433,6 +7433,29 @@ def build_score_based_improvement_plan(scores, existing_plan=None):
         "key_ingredients": key_ingredients[:8],
         "care_direction": "項目別スコアが低い悩みを優先しつつ、刺激を抑えて継続しやすいケアを行う"
     }
+
+
+def build_improvement_priority(scores):
+    """スコア昇順（低い順）で改善優先順位リストを返す。無料ユーザー用。"""
+    _labels = [
+        ("oil_balance",   "皮脂バランス"),
+        ("redness",       "赤み"),
+        ("pores",         "毛穴"),
+        ("hydration",     "保湿"),
+        ("firmness",      "ハリ"),
+        ("acne",          "ニキビ"),
+        ("dullness",      "くすみ"),
+        ("barrier",       "バリア"),
+        ("texture",       "キメ"),
+        ("tone_evenness", "色ムラ"),
+    ]
+    items = sorted(
+        [{"key": k, "label": lbl, "score": int(scores.get(k, 0) or 0)} for k, lbl in _labels],
+        key=lambda x: x["score"]
+    )
+    return [{"rank": i + 1, **item} for i, item in enumerate(items)]
+
+
 def infer_improvement_targets(improvement_plan):
     """
     improvement_plan / step / Gemini出力の文章から、
@@ -13588,9 +13611,22 @@ def get_analysis_schema_phase1():
                     "reason": {"type": "string"}
                 },
                 "required": ["moisture_level","need_emulsion","need_cream","need_double_moisture","reason"]
+            },
+            "ai_improvement_strategy": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "rank":   {"type": "integer"},
+                        "item":   {"type": "string"},
+                        "score":  {"type": "integer"},
+                        "reason": {"type": "string"}
+                    },
+                    "required": ["rank","item","score","reason"]
+                }
             }
         },
-        "required": ["skin_summary","scores","score_reasons","symmetry_analysis","skin_age_estimate","improvement_plan","moisture_plan"]
+        "required": ["skin_summary","scores","score_reasons","symmetry_analysis","skin_age_estimate","improvement_plan","moisture_plan","ai_improvement_strategy"]
     }
 
 
@@ -14115,6 +14151,12 @@ skin_age_estimate: 画像から15-70の整数で推定。
 skin_summary: 肌状態の総合コメント(30-60字)。
 improvement_plan: priority_concerns(配列)/key_ingredients(配列)/care_direction(短文)
 moisture_plan: moisture_level/need_emulsion(bool)/need_cream(bool)/need_double_moisture(bool)/reason
+ai_improvement_strategy: 改善優先順位を戦略的に10項目分出力。スコアの低さだけでなく以下を考慮して順位を決定すること。
+  ・項目間の関係性（例: バリアが低いと他の刺激成分が全て逆効果になる→バリアを最優先）
+  ・刺激リスク（バリア・保湿が低い状態でレチノール・AHA等を使うとリスクが高い）
+  ・相乗効果（例: 保湿改善→化粧水の浸透性向上→後続の美容液の効果増幅）
+  ・ユーザーの悩みとの一致度
+  各itemはスコアラベル名(日本語)、scoreはそのスコア値、reason は「なぜその順番か」を30〜50字で具体的に記述。
 
 【supplements】
 スキンケアのトータルコーディネートとして、内側からの補完が有効な場合に提案。不要なら[]。
@@ -14827,6 +14869,9 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
     # ===== マージ =====
     data = {**phase1, **phase2}
     data.setdefault("warnings", [])
+
+    # 無料ユーザー用: スコア昇順の改善優先順位リストを生成
+    data["improvement_priority"] = build_improvement_priority(data.get("scores", {}))
 
     # ルーティンログ
     def _fmt_steps(steps):

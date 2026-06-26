@@ -205,6 +205,30 @@
     line-height: 1.6;
 }
 
+/* 改善優先順位 */
+.improvement-priority-list { display: flex; flex-direction: column; gap: 8px; }
+.ip-row { display: flex; align-items: flex-start; gap: 10px; }
+.ip-rank {
+    min-width: 28px; height: 28px; border-radius: 50%;
+    background: #f0e0e8; color: #9b3156;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: bold; flex-shrink: 0; margin-top: 2px;
+}
+.ip-rank-1 { background: #ffd700; color: #7a5800; }
+.ip-rank-2 { background: #e0e0e0; color: #555; }
+.ip-rank-3 { background: #f5c48a; color: #7a4b00; }
+.ip-body { flex: 1; min-width: 0; }
+.ip-header-row { display: flex; align-items: center; gap: 8px; }
+.ip-label { font-weight: bold; font-size: 14px; color: #40373b; }
+.ip-score {
+    font-size: 13px; font-weight: bold; padding: 1px 7px;
+    border-radius: 10px;
+}
+.ip-score-low  { background: rgba(220,60,60,0.12);  color: #b83030; }
+.ip-score-mid  { background: rgba(220,160,30,0.15); color: #8a6010; }
+.ip-score-ok   { background: rgba(60,160,80,0.13);  color: #2a7040; }
+.ip-reason { font-size: 12px; color: #7a6b72; margin-top: 3px; line-height: 1.5; }
+
 .premium-link {
     display: inline-block;
     margin-left: 6px;
@@ -634,6 +658,60 @@
                         </div>
                 </div>
             </div>
+        </section>
+
+        {# ===== 改善優先順位 ===== #}
+        <section class="result-card">
+            <div class="routine-header">
+                <h2 class="section-title" style="margin:0;">改善優先順位</h2>
+                {% if data.get("is_premium") or data.get("is_dev_mode") %}
+                <div class="routine-chip">Premium</div>
+                {% endif %}
+            </div>
+
+            {% if (data.get("is_premium") or data.get("is_dev_mode")) and data.get("ai_improvement_strategy") %}
+            {# プレミアム: AIが戦略的に決定した優先順位 #}
+            <p style="font-size:12px;color:#9b7f88;margin:0 0 12px;">スコアだけでなく、項目間の関係・刺激リスク・相乗効果を考慮してAIが順位を決定しています。</p>
+            <div class="improvement-priority-list">
+                {% for item in data.get("ai_improvement_strategy", []) %}
+                <div class="ip-row">
+                    <div class="ip-rank {% if item.rank == 1 %}ip-rank-1{% elif item.rank == 2 %}ip-rank-2{% elif item.rank == 3 %}ip-rank-3{% endif %}">{{ item.rank }}</div>
+                    <div class="ip-body">
+                        <div class="ip-header-row">
+                            <span class="ip-label">{{ item.item }}</span>
+                            <span class="ip-score {% if item.score <= 44 %}ip-score-low{% elif item.score <= 64 %}ip-score-mid{% else %}ip-score-ok{% endif %}">{{ item.score }}</span>
+                        </div>
+                        <div class="ip-reason">{{ item.reason }}</div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            {% else %}
+            {# 無料: スコア昇順 #}
+            {% if not (data.get("is_premium") or data.get("is_dev_mode")) %}
+            <p style="font-size:12px;color:#9b7f88;margin:0 0 12px;">スコアが低い順に表示しています。プレミアムではAIが戦略的に優先順位を決定します。</p>
+            {% endif %}
+            <div class="improvement-priority-list">
+                {% for item in data.get("improvement_priority", []) %}
+                <div class="ip-row">
+                    <div class="ip-rank {% if item.rank == 1 %}ip-rank-1{% elif item.rank == 2 %}ip-rank-2{% elif item.rank == 3 %}ip-rank-3{% endif %}">{{ item.rank }}</div>
+                    <div class="ip-body">
+                        <div class="ip-header-row">
+                            <span class="ip-label">{{ item.label }}</span>
+                            <span class="ip-score {% if item.score <= 44 %}ip-score-low{% elif item.score <= 64 %}ip-score-mid{% else %}ip-score-ok{% endif %}">{{ item.score }}</span>
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% if not (data.get("is_premium") or data.get("is_dev_mode")) %}
+            <div class="premium-lock-box" style="margin-top:12px;">
+                AI戦略分析（項目間の関係・刺激リスク・相乗効果の考慮）はプレミアム機能です。
+                <a href="/pricing?source=result_priority" class="premium-link">詳しく見る</a>
+            </div>
+            {% endif %}
+            {% endif %}
         </section>
 
         {% if data.get("premium_scores") %}
