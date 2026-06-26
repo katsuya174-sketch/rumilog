@@ -2700,6 +2700,16 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
         )
         return None
 
+    # サプリ・美容機器のカテゴリ表記ゆれを正規化
+    _cat_lower = category.lower()
+    if "サプリ" in category or _cat_lower in ("supplement", "サプリ"):
+        category = "サプリメント"
+    elif "美容機器" in category or "美容家電" in category or _cat_lower in ("device", "beauty device"):
+        category = "美容機器"
+
+    if category in ("サプリメント", "美容機器"):
+        print(f"[RAKUTEN EXTRA] category={category} product={product_name} brand={brand}", flush=True)
+
     product_name = clean_display_product_name(product_name)
 
     if not product_name:
@@ -2921,12 +2931,23 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                     category=category
                 )
 
+                if category in ("サプリメント", "美容機器"):
+                    print(
+                        f"[RAKUTEN EXTRA SCORE] score={score} title={rakuten_title[:40]}",
+                        flush=True
+                    )
+
                 if score < 20:
                     continue
 
                 scored_items.append((score, item))
 
             if not scored_items:
+                if category in ("サプリメント", "美容機器"):
+                    print(
+                        f"[RAKUTEN EXTRA NO ITEMS] keyword={keyword} category={category}",
+                        flush=True
+                    )
                 continue
 
             def _sort_key(pair):
@@ -12226,25 +12247,43 @@ def finalize_result_data(data, user_data):
     data["root_causes"] = cleaned_causes
 
     # use_timing 注意書きをステップに付与
-    _all_sections = (
-        list(data.get("morning", {}).get("steps", []))
-        + list(data.get("night", {}).get("steps", []))
-        + list(data.get("weekly_care", []))
+    # 美容液の after_serum は同一セクションに他の美容液がある場合のみ表示する
+    _morning_serum_count = sum(
+        1 for s in data.get("morning", {}).get("steps", [])
+        if isinstance(s, dict)
+        and normalize_candidate_category(s.get("category", ""), fallback=s.get("category", "")) == "美容液"
     )
-    for _step in _all_sections:
-        if not isinstance(_step, dict):
-            continue
-        _timing = _step.get("use_timing", "standard")
-        _cat = normalize_candidate_category(_step.get("category", ""), fallback=_step.get("category", ""))
-        _default = _CATEGORY_DEFAULT_TIMING.get(_cat, "standard")
-        if _timing not in ("standard", "", None) and _timing != _default:
-            # 美容液が after_serum の場合は「他の美容液の後に」と明示
-            if _cat == "美容液" and _timing == "after_serum":
-                _step["timing_note"] = "💡 他の美容液の後にご使用ください"
+    _night_serum_count = sum(
+        1 for s in data.get("night", {}).get("steps", [])
+        if isinstance(s, dict)
+        and normalize_candidate_category(s.get("category", ""), fallback=s.get("category", "")) == "美容液"
+    )
+
+    for _section_name, _section_steps in [
+        ("morning", data.get("morning", {}).get("steps", [])),
+        ("night",   data.get("night",   {}).get("steps", [])),
+        ("weekly",  data.get("weekly_care", [])),
+    ]:
+        _serum_count = _morning_serum_count if _section_name == "morning" else (
+            _night_serum_count if _section_name == "night" else 0
+        )
+        for _step in _section_steps:
+            if not isinstance(_step, dict):
+                continue
+            _timing = _step.get("use_timing", "standard")
+            _cat = normalize_candidate_category(_step.get("category", ""), fallback=_step.get("category", ""))
+            _default = _CATEGORY_DEFAULT_TIMING.get(_cat, "standard")
+            if _timing not in ("standard", "", None) and _timing != _default:
+                if _cat == "美容液" and _timing == "after_serum":
+                    # 同セクションに複数美容液がある場合のみ「他の美容液の後に」を表示
+                    if _serum_count >= 2:
+                        _step["timing_note"] = "💡 他の美容液の後にご使用ください"
+                    else:
+                        _step.pop("timing_note", None)
+                else:
+                    _step["timing_note"] = _TIMING_NOTES.get(_timing, "")
             else:
-                _step["timing_note"] = _TIMING_NOTES.get(_timing, "")
-        else:
-            _step.pop("timing_note", None)
+                _step.pop("timing_note", None)
 
     # warnings
     if not isinstance(data.get("warnings"), list):
