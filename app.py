@@ -2726,8 +2726,11 @@ def is_same_verified_rakuten_product(product_name, rakuten_title, brand=""):
         if token in rakuten_compact
     ]
 
-    # ブランド一致しない場合はトークン一致数の閾値を1つ上げて誤照合を防ぐ
-    if brand_ok:
+    # 意味トークンが1つ（成分名+カテゴリ名 等）の場合は1件一致で十分
+    # Rakuten検索キーワード自体が既に絞り込み済みのため誤照合リスクは低い
+    if len(product_tokens) == 1:
+        required_matches = 1
+    elif brand_ok:
         required_matches = 1 if len(product_tokens) <= 2 else 2
     else:
         required_matches = 2 if len(product_tokens) <= 2 else min(3, len(product_tokens))
@@ -11903,6 +11906,7 @@ def build_budget_fit_plan(data, budget_value):
             result["weekly_care"].append(clean_step)
 
     result["total_price"] = calculate_total_price(result)
+    sort_steps(result)  # 予算選定後もカテゴリ正規順に並べ直す
     return result
 
 

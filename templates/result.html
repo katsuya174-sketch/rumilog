@@ -275,16 +275,19 @@
 }
 
 .product-img-empty {
-    width: 100%;
-    height: 180px;
-    border-radius: 14px;
+    width: 110px;
+    height: 110px;
+    flex-shrink: 0;
+    border-radius: 16px;
     background: linear-gradient(180deg, #fffafd 0%, #fff6f8 100%);
     border: 1px solid #f7dce4;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #999;
-    font-size: 13px;
+    color: #bbb;
+    font-size: 11px;
+    text-align: center;
+    line-height: 1.4;
 }
 </style>
 
@@ -517,6 +520,10 @@
           <div class="product-body">
               <div class="product-name">
                   {{ (item.get('brand', '') ~ ' ' ~ item.get('product', '')).strip() }}
+              </div>
+
+              <div class="product-meta">
+                  カテゴリ: <span class="role-badge">{{ item.get('category', '') }}</span>
               </div>
 
               <div class="product-meta">目的: {{ item.get('purpose', '') }}</div>
