@@ -4911,10 +4911,10 @@ def _fmt_candidate_for_gemini(c, rank):
     score_base = c.get("base_score", 0)
     score_improve = c.get("improve_score", 0)
     score_routine = c.get("routine_score", 0)
-    ing_str = "・".join(ings) if ings else "成分情報なし"
     func_str = "・".join(funcs) if funcs else ""
     sens = "低刺激" if c.get("sensitive_ok") == "yes" else ("刺激あり" if c.get("sensitive_ok") == "no" else "")
-    parts = [f"{rank}位: {label}", f"成分={ing_str}"]
+    parts = [f"{rank}位: {label}"]
+    if ings: parts.append(f"成分={'・'.join(ings)}")
     if func_str: parts.append(f"機能={func_str}")
     if sens: parts.append(sens)
     parts.append(f"スコア={score_total}(適合={score_base}/改善={score_improve}/相乗={score_routine})")
