@@ -3424,6 +3424,84 @@ def _is_rakuten_item_valid_for_category(item_name: str, category: str, strict: b
     return False
 
 
+# ================================================================
+# Gemini候補のカテゴリ整合性バリデーション
+# 楽天の _CATEGORY_CROSS_REJECT と同じ考え方をGemini出力に適用する。
+# ================================================================
+
+# カテゴリ別・商品名に含まれてはいけないキーワード
+_CANDIDATE_CATEGORY_FORBIDDEN: dict[str, list[str]] = {
+    "美容液": [
+        "洗顔", "ウォッシュ", "フォーム", "クレンジング", "石けん", "石鹸",
+        "ジェルウォッシュ", "フェイスウォッシュ", "洗顔フォーム", "洗顔料",
+        "face wash", "cleanser", "cleansing",
+    ],
+    "化粧水": [
+        "洗顔", "ウォッシュ", "フォーム", "クレンジング",
+        "乳液", "ミルク", "エマルジョン",
+        "クリーム", "バーム",
+        "日焼け止め", "sunscreen", "サンスクリーン",
+    ],
+    "乳液": [
+        "洗顔", "ウォッシュ", "クレンジング",
+        "化粧水", "ローション", "トナー",
+        "日焼け止め", "sunscreen",
+    ],
+    "クリーム": [
+        "洗顔", "ウォッシュ", "クレンジング",
+        "化粧水", "ローション", "トナー",
+        "日焼け止め", "sunscreen",
+    ],
+    "洗顔": [
+        "化粧水", "ローション", "トナー",
+        "美容液", "セラム", "エッセンス", "アンプル",
+        "乳液", "ミルク",
+        "クリーム",
+        "日焼け止め", "sunscreen",
+    ],
+    "クレンジング": [
+        "化粧水", "ローション", "トナー",
+        "美容液", "セラム",
+        "乳液", "ミルク",
+        "日焼け止め", "sunscreen",
+    ],
+    "日焼け止め": [
+        "洗顔", "ウォッシュ", "クレンジング",
+        "乳液", "ミルク",
+    ],
+    "ピーリング": [
+        "クレンジング", "メイク落とし",
+        "乳液", "クリーム", "化粧水", "シートマスク", "フェイスマスク",
+    ],
+    "パック": [
+        "クレンジング", "メイク落とし",
+        "日焼け止め", "sunscreen",
+        "洗顔", "ウォッシュ",
+    ],
+}
+
+
+def is_candidate_wrong_for_category(step_category: str, product_name: str) -> bool:
+    """Geminiがstepカテゴリとミスマッチなproductを出力した場合Trueを返す。
+
+    例: step_category="美容液" なのに product_name="クリアリングジェルウォッシュ" → True
+    """
+    forbidden = _CANDIDATE_CATEGORY_FORBIDDEN.get(step_category, [])
+    if not forbidden:
+        return False
+    name_lower = (product_name or "").lower()
+    name_orig = product_name or ""
+    for kw in forbidden:
+        if kw.lower() in name_lower or kw in name_orig:
+            print(
+                f"[CANDIDATE REJECT category_mismatch] "
+                f"step={step_category} product='{product_name[:40]}' contains '{kw}'",
+                flush=True,
+            )
+            return True
+    return False
+
+
 # 肌悩みタグ → 楽天検索キーワード変換マップ
 _CONCERN_TO_RAKUTEN_KEYWORD = {
     "dryness":     "保湿",
@@ -11887,22 +11965,7 @@ def finalize_step_data(step, user_data):
                         return True
             return False
 
-        # カテゴリ横断チェック: 美容液スロットに洗顔料等が入るのを防ぐ
         _step_cat = str(step.get("category", "") or "")
-        _cross_reject_map = {
-            "美容液":   ["ウォッシュ", "洗顔", "クレンジング", "フォーム", "石けん", "石鹸", "ジェルウォッシュ"],
-            "化粧水":   ["ウォッシュ", "洗顔", "クレンジング", "フォーム", "石けん", "石鹸"],
-            "乳液":     ["ウォッシュ", "洗顔", "クレンジング"],
-            "クリーム": ["ウォッシュ", "洗顔", "クレンジング"],
-        }
-        _cross_ng = _cross_reject_map.get(_step_cat, [])
-
-        def _is_wrong_category_product(name: str) -> bool:
-            if not _cross_ng:
-                return False
-            name_lower = name.lower()
-            return any(ng in name_lower or ng in name for ng in _cross_ng)
-
         normalized_candidates = []
         seen_keys = set()
 
@@ -11915,8 +11978,8 @@ def finalize_step_data(step, user_data):
             if _is_generic_name(normalized.get("brand", ""), normalized.get("name", "")):
                 continue
 
-            # カテゴリ横断商品名はスキップ（美容液スロットに洗顔料が入る等を防ぐ）
-            if _is_wrong_category_product(normalized.get("name", "")):
+            # カテゴリ横断バリデーション（モジュールレベル関数で全カテゴリ対応）
+            if is_candidate_wrong_for_category(_step_cat, normalized.get("name", "")):
                 continue
 
             identity_keys = build_candidate_identity_keys(normalized)
@@ -14217,6 +14280,17 @@ nightステップのuse_days=["月","水","金"]でレチノール使用 → ピ
 
 【product_candidates】
 各stepに必ず3件出力(2件以下禁止・4件可)。現行販売中の正式名称が確実な商品のみ。stepのcategoryと完全一致必須。
+
+【カテゴリ別 商品種別ルール（必読・厳守）】
+- 美容液スロット → セラム/美容液/エッセンス/アンプル/ブースター系のみ。洗顔料・ジェルウォッシュ・クレンジング・化粧水は絶対禁止。
+- 化粧水スロット → 化粧水/トナー/ローション系のみ。洗顔料・乳液・クリーム・日焼け止めは絶対禁止。
+- 乳液スロット   → 乳液/ミルク/エマルジョン系のみ。洗顔料・化粧水・日焼け止めは絶対禁止。
+- クリームスロット→ クリーム/バーム/ジェルクリーム系のみ。洗顔料・化粧水・日焼け止めは絶対禁止。
+- 洗顔スロット   → 洗顔料/フォーム/ウォッシュ系のみ。化粧水・美容液・乳液・クリームは絶対禁止。
+- クレンジングスロット→ クレンジング/メイク落とし系のみ。化粧水・美容液は絶対禁止。
+- 日焼け止めスロット→ SPF/PA製品のみ。洗顔料・美容液・乳液・クリーム単体は絶対禁止。
+商品名からカテゴリが判断できない場合は、そのstepをスキップせず「ブランド+カテゴリ名」で検索した確実な商品を選ぶこと。
+
 - brand: ブランド名（必須・空文字禁止）例: "COSRX" "イニスフリー" "花王" "資生堂"
 - name: 正式製品名（必須）例: "スネイルムチン96エッセンス" "グリーンティーヒアルロン酸セラム"
   ※「日焼け止め」「化粧水」「保湿クリーム」などカテゴリ名のみ・成分名+カテゴリ名のみは禁止
@@ -14418,6 +14492,15 @@ nightステップのuse_days=["月","水","金"]でレチノール使用 → ピ
 
 【product_candidates】
 各stepに3-4件必須(0-2件禁止)。現行販売中の正式名称確実な商品のみ。stepのcategoryと完全一致必須。
+
+【カテゴリ別 商品種別ルール（必読・厳守）】
+- 美容液スロット → セラム/美容液/エッセンス/アンプル系のみ。洗顔料・ジェルウォッシュ・クレンジング・化粧水は絶対禁止。
+- 化粧水スロット → 化粧水/トナー/ローション系のみ。洗顔料・乳液・クリーム・日焼け止めは絶対禁止。
+- 乳液スロット   → 乳液/ミルク/エマルジョン系のみ。洗顔料・化粧水・日焼け止めは絶対禁止。
+- クリームスロット→ クリーム/バーム/ジェルクリーム系のみ。洗顔料・化粧水・日焼け止めは絶対禁止。
+- 洗顔スロット   → 洗顔料/フォーム/ウォッシュ系のみ。化粧水・美容液・乳液・クリームは絶対禁止。
+- クレンジングスロット→ クレンジング/メイク落とし系のみ。化粧水・美容液は絶対禁止。
+- 日焼け止めスロット→ SPF/PA製品のみ。洗顔料・乳液・クリーム単体は絶対禁止。
 
 各候補のフィールドルール:
 - confidence: 70未満出力禁止(90+:確実 80+:名称確実 70+:成分不確か)
