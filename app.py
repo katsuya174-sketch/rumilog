@@ -14421,6 +14421,7 @@ def build_analysis_prompt_phase2(user_data, phase1):
     scores = phase1.get("scores", {})
     ip = phase1.get("improvement_plan", {})
     mp = phase1.get("moisture_plan", {})
+    ai_strategy = phase1.get("ai_improvement_strategy") or []
     _sk = ["oil_balance","redness","pores","hydration","firmness","acne","dullness","barrier","texture","tone_evenness"]
     _score_line = " ".join(f"{k}={scores.get(k,'?')}" for k in _sk)
     _pc = "/".join(ip.get("priority_concerns") or []) or "未設定"
@@ -14429,6 +14430,14 @@ def build_analysis_prompt_phase2(user_data, phase1):
     _ml = mp.get("moisture_level","?")
     _em = mp.get("need_emulsion","?")
     _cr = mp.get("need_cream","?")
+    # ai_improvement_strategy を番号付きリストに整形
+    if ai_strategy:
+        _strategy_lines = "\n".join(
+            f"  {s.get('rank','?')}. {s.get('item','?')}(スコア{s.get('score','?')}) — {s.get('reason','')}"
+            for s in ai_strategy[:10]
+        )
+    else:
+        _strategy_lines = "  （データなし）"
     return f"""日本の市販スキンケアと肌分析に詳しい美容アドバイザーです。
 肌分析済みの結果をもとに、ルーティン構成と商品候補のみJSONで返す。画像分析は完了済み。
 
@@ -14439,6 +14448,9 @@ def build_analysis_prompt_phase2(user_data, phase1):
 
 【肌スコア(画像分析済)】
 {_score_line}
+
+【改善優先順位（AI戦略分析・この順に商品・成分を優先して構成すること）】
+{_strategy_lines}
 
 【改善方針(分析済)】
 優先事項:{_pc}
