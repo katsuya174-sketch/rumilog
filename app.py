@@ -2231,10 +2231,6 @@ def score_rakuten_item(item, product_name, brand="", category=""):
 
     score += score_current_product_signal(item)
 
-    # セット商品は大幅ペナルティ（単品がない場合はセットを選ぶ）
-    if _is_set_product:
-        score -= 300
-
     return score
 
 def save_rakuten_cache(cache):
@@ -3157,7 +3153,10 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                         flush=True
                     )
 
-                if score < 20:
+                # ピーリング・美容機器・サプリはname_matchバイパス(8-10点)で
+                # 通常より低スコア出発のため閾値を緩める（-9999リジェクトのみ除外）
+                _min_score = 0 if category in ("ピーリング", "パック", "美容機器", "サプリメント") else 20
+                if score < _min_score:
                     continue
 
                 scored_items.append((score, item))
@@ -12183,16 +12182,20 @@ def finalize_step_data(step, user_data):
             "美顔器", "サプリ", "サプリメント",
         }
 
+        # 洗顔/乳液/ピーリング系は製品名がカテゴリ語で終わるのが自然なため
+        # endswith チェックを適用しない（完全一致のみ汎用名判定）
+        _endswith_skip_cats = {"洗顔", "洗顔料", "乳液", "ピーリング", "パック"}
+
         def _is_generic_name(brand: str, name: str) -> bool:
             name_stripped = name.strip()
             # カテゴリ名そのまま（ブランドあり/なし問わず）
             if name_stripped in _generic_category_names:
                 return True
             # 「成分名 + スペース + カテゴリ名」パターンのみ除外
-            # （例: "アゼライン酸 化粧水", "ナイアシンアミド 乳液"）
-            # スペースなしは実在商品名に含まれるため除外しない
-            # （例: "薬用マイルド洗顔料", "炭酸泡洗顔", "高保湿乳液" は除外しない）
+            # （例: "アゼライン酸 化粧水", "ナイアシンアミド 美容液"）
             for cat in _generic_category_names:
+                if cat in _endswith_skip_cats:
+                    continue
                 if name_stripped.endswith(" " + cat) or name_stripped.endswith("　" + cat):
                     return True
             return False
