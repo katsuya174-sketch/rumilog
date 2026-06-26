@@ -1483,6 +1483,26 @@ def build_rakuten_search_keywords(product_name, brand="", category="", ingredien
     name = clean_rakuten_keyword(product_name)
     brand = clean_rakuten_keyword(brand)
 
+    # サプリメント専用キーワード生成
+    # 「ナイアシンアミド サプリ」+「DHC」→ Rakutenが「DHC サプリフィットマスク」を返す誤ヒットを防ぐ。
+    # 成分名から「サプリ」接尾語を除去し「サプリメント」で検索する。
+    if category == "サプリメント":
+        _supp_name = name
+        for _sfx in ("サプリメント", "サプリ", "supplement"):
+            if _supp_name.lower().endswith(_sfx.lower()):
+                _supp_name = _supp_name[:-len(_sfx)].strip()
+                break
+        _supp_kws = []
+        if brand and _supp_name and not _supp_name.lower().startswith(brand.lower()):
+            _supp_kws.append(clean_rakuten_keyword(f"{brand} {_supp_name} サプリメント"))
+        if _supp_name:
+            _supp_kws.append(clean_rakuten_keyword(f"{_supp_name} サプリメント"))
+        # ブランドなし・成分名のみもフォールバックに追加
+        if _supp_name:
+            _supp_kws.append(clean_rakuten_keyword(_supp_name))
+        print("[RAKUTEN KEYWORDS]", _supp_kws, flush=True)
+        return [k for k in _supp_kws if k]
+
     keywords = []
 
     def add(value):
@@ -1696,9 +1716,15 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         required_matches = 1 if len(important_tokens) <= 2 else 2
 
         if len(matched_tokens) < required_matches:
-            return -9999
-
-        name_match_score = 35 + (len(matched_tokens) * 12)
+            # 美容機器はGeminiが出す商品名がカテゴリ説明（「イオン導入器」等）であり
+            # 各社の実際の商品名（「イオンエフェクター」「イオンブースト」等）と一致しない。
+            # ブランド一致・デバイスキーワードで十分に絞れるため名称一致を免除する。
+            if category == "美容機器":
+                name_match_score = 10
+            else:
+                return -9999
+        else:
+            name_match_score = 35 + (len(matched_tokens) * 12)
 
     hard_reject_words = [
         "詰替",
@@ -11861,6 +11887,22 @@ def finalize_step_data(step, user_data):
                         return True
             return False
 
+        # カテゴリ横断チェック: 美容液スロットに洗顔料等が入るのを防ぐ
+        _step_cat = str(step.get("category", "") or "")
+        _cross_reject_map = {
+            "美容液":   ["ウォッシュ", "洗顔", "クレンジング", "フォーム", "石けん", "石鹸", "ジェルウォッシュ"],
+            "化粧水":   ["ウォッシュ", "洗顔", "クレンジング", "フォーム", "石けん", "石鹸"],
+            "乳液":     ["ウォッシュ", "洗顔", "クレンジング"],
+            "クリーム": ["ウォッシュ", "洗顔", "クレンジング"],
+        }
+        _cross_ng = _cross_reject_map.get(_step_cat, [])
+
+        def _is_wrong_category_product(name: str) -> bool:
+            if not _cross_ng:
+                return False
+            name_lower = name.lower()
+            return any(ng in name_lower or ng in name for ng in _cross_ng)
+
         normalized_candidates = []
         seen_keys = set()
 
@@ -11871,6 +11913,10 @@ def finalize_step_data(step, user_data):
 
             # ブランドなし＋汎用名はスキップ
             if _is_generic_name(normalized.get("brand", ""), normalized.get("name", "")):
+                continue
+
+            # カテゴリ横断商品名はスキップ（美容液スロットに洗顔料が入る等を防ぐ）
+            if _is_wrong_category_product(normalized.get("name", "")):
                 continue
 
             identity_keys = build_candidate_identity_keys(normalized)
