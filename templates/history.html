@@ -214,6 +214,11 @@
           border-color: #e8a0b8;
           font-size: 14px;
       }
+      .improvement-highlight-item.down {
+          background: rgba(180,140,100,0.1);
+          border-color: rgba(180,140,100,0.3);
+          color: #9a7040;
+      }
       .diff-tags {
           display: flex;
           flex-wrap: wrap;
@@ -441,12 +446,18 @@
                     <!-- ① 改善ハイライト -->
                     {% if item.improvement_highlights %}
                     <div class="improvement-highlight-box">
-                        <div class="improvement-highlight-label">✨ {{ item.period_label or "前回比" }} 改善</div>
+                        <div class="improvement-highlight-label">{{ item.period_label or "前回比" }} 変化</div>
                         <div class="improvement-highlight-items">
                             {% for label, diff in item.improvement_highlights %}
+                            {% if diff > 0 %}
                             <span class="improvement-highlight-item{% if diff >= 7 %} big{% endif %}">
-                                {{ label }} +{{ diff }}点UP
+                                {{ label }} +{{ diff }}点
                             </span>
+                            {% else %}
+                            <span class="improvement-highlight-item down">
+                                {{ label }} {{ diff }}点
+                            </span>
+                            {% endif %}
                             {% endfor %}
                         </div>
                     </div>

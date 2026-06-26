@@ -4960,9 +4960,10 @@ def gemini_generate_selection_reasons(data, user_data):
             # top_candidatesがなければ現在の商品を1位として記述
             candidates_text.append(f"1位: {step.get('product','')} / 候補なし")
 
+        # Phase2の初期 purpose/ingredient_focus はここに含めない。
+        # Geminiが既存の目的に引きずられて選定済み商品と無関係なpurposeを出力するため。
         steps_desc.append(
-            f"[step{gemini_idx}] カテゴリ:{step.get('category','')} "
-            f"目的:{step.get('purpose','')} 成分フォーカス:{step.get('ingredient_focus','')}\n"
+            f"[step{gemini_idx}] カテゴリ:{step.get('category','')}\n"
             + "\n".join(f"  {t}" for t in candidates_text)
         )
         idx_map[gemini_idx] = step
@@ -12742,6 +12743,10 @@ def prepare_result_for_view(result):
 
     result["skin_score"] = safe_int(result.get("skin_score", 0))
 
+    # supplements / beauty_devices が欠落している古いレコードでも安全に扱えるよう正規化
+    result["supplements"] = [s for s in (result.get("supplements") or []) if isinstance(s, dict)]
+    result["beauty_devices"] = [s for s in (result.get("beauty_devices") or []) if isinstance(s, dict)]
+
     return result
 
 def lightweight_result_payload(item):
@@ -16835,12 +16840,12 @@ def history():
                     diff_map[score_labels.get(key, key)] = d
             prepared[i - 1]["score_diff"] = diff_map  # 新しい診断カードに付与
 
-            # 改善ハイライト: 上昇 >= 3点 の項目のみ抽出・ソート
+            # 改善ハイライト: ±3点以上の変化を抽出（改善も下落も表示）
             highlights = sorted(
-                [(label, d) for label, d in diff_map.items() if d >= 3],
-                key=lambda x: x[1],
+                [(label, d) for label, d in diff_map.items() if abs(d) >= 3],
+                key=lambda x: abs(x[1]),
                 reverse=True
-            )[:3]
+            )[:5]
             prepared[i - 1]["improvement_highlights"] = highlights
 
             # 前回診断からの日数ラベル（新しい日付 - 古い日付 = 正の値）
