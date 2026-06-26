@@ -11963,27 +11963,28 @@ def finalize_step_data(step, user_data):
         }
 
         def _is_generic_name(brand: str, name: str) -> bool:
-            if not brand:
-                name_stripped = name.strip()
-                # カテゴリ名そのまま
-                if name_stripped in _generic_category_names:
+            name_stripped = name.strip()
+            # カテゴリ名そのまま（ブランドあり/なし問わず）
+            if name_stripped in _generic_category_names:
+                return True
+            # 成分名+カテゴリ名（例: "アゼライン酸 化粧水"）は
+            # ブランドがついていても汎用名のため除外
+            for cat in _generic_category_names:
+                if name_stripped.endswith(cat) and len(name_stripped) <= len(cat) + 8:
                     return True
-                # 成分名+カテゴリ名（例: "アゼライン酸 化粧水"）で6文字以下
-                for cat in _generic_category_names:
-                    if name_stripped.endswith(cat) and len(name_stripped) <= len(cat) + 8:
-                        return True
             return False
 
         _step_cat = str(step.get("category", "") or "")
         normalized_candidates = []
         seen_keys = set()
+        seen_product_names = set()  # 製品名レベルの追加重複チェック
 
         for c in raw_candidates:
             normalized = normalize_candidate(c)
             if not normalized:
                 continue
 
-            # ブランドなし＋汎用名はスキップ
+            # 汎用名はスキップ（ブランドあり/なし問わず）
             if _is_generic_name(normalized.get("brand", ""), normalized.get("name", "")):
                 continue
 
@@ -11999,7 +12000,14 @@ def finalize_step_data(step, user_data):
             if seen_keys.intersection(identity_keys):
                 continue
 
+            # 製品名が同じなら異なるブランドでも重複扱い
+            _name_key = normalize_product_name(normalized.get("name", ""))
+            if _name_key and _name_key in seen_product_names:
+                continue
+
             seen_keys.update(identity_keys)
+            if _name_key:
+                seen_product_names.add(_name_key)
             normalized_candidates.append(normalized)
 
             if len(normalized_candidates) >= 3:
