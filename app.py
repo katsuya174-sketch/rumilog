@@ -1682,6 +1682,11 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     if not title or not name:
         return -9999
 
+    # セット・まとめ買い商品は単品ではないため除外
+    _SET_REJECT_KEYWORDS = ["セット", "まとめ買い", "トライアルセット", "お試しセット"]
+    if any(kw in title for kw in _SET_REJECT_KEYWORDS):
+        return -9999
+
     def compact_text(value):
         return re.sub(
             r"[\s　・_\-ー/／\(\)（）\[\]【】+＋\.。,:：,]",
@@ -3478,7 +3483,9 @@ _CANDIDATE_CATEGORY_FORBIDDEN: dict[str, list[str]] = {
     ],
     "日焼け止め": [
         "洗顔", "ウォッシュ", "クレンジング",
-        "乳液", "ミルク",
+        "乳液",
+        # "ミルク" は日焼け止めのテクスチャ名として多用されるため除外しない
+        # 例: "パーフェクトUV スキンケアミルク", "スキンアクア UVミルク"
     ],
     "ピーリング": [
         "クレンジング", "メイク落とし",
@@ -4965,16 +4972,19 @@ def gemini_generate_selection_reasons(data, user_data):
     for gemini_idx, (orig_idx, step) in enumerate(target_steps):
         top = step.get("top_candidates", [])
         candidates_text = []
+        allowed_ings = set()
         for rank, c in enumerate(top[:3], 1):
             candidates_text.append(_fmt_candidate_for_gemini(c, rank))
+            for ing in (c.get("active_ingredients") or []):
+                allowed_ings.add(_INGREDIENT_LABEL_JA.get(ing, ing))
         if not candidates_text:
-            # top_candidatesがなければ現在の商品を1位として記述
             candidates_text.append(f"1位: {step.get('product','')} / 候補なし")
 
-        # Phase2の初期 purpose/ingredient_focus はここに含めない。
-        # Geminiが既存の目的に引きずられて選定済み商品と無関係なpurposeを出力するため。
+        allowed_str = "・".join(sorted(allowed_ings)) if allowed_ings else "記載なし"
+
         steps_desc.append(
             f"[step{gemini_idx}] カテゴリ:{step.get('category','')}\n"
+            f"  言及可能成分（このstepの1位商品のみ）: {allowed_str}\n"
             + "\n".join(f"  {t}" for t in candidates_text)
         )
         idx_map[gemini_idx] = step
@@ -4984,15 +4994,16 @@ def gemini_generate_selection_reasons(data, user_data):
 ユーザー情報: {user_info}
 
 以下の各ステップ(step0〜)について、1位商品の選定理由と目的をJSONで生成してください。
-各ステップには「1位: 商品名 / 成分=X / 機能=Y」が記載されています。
+各ステップには「1位: 商品名 / 成分=X / 機能=Y」と「言及可能成分」が記載されています。
 
 {chr(10).join(steps_desc)}
 
-【厳守ルール】
-- recommend_reasonとpurposeは必ず各stepの1位商品の「成分」「機能」欄の内容のみに基づいて書く。
-- 他stepの商品・成分を参照・言及することは絶対禁止（例: 日焼け止めstepの理由に他stepのレチノール・ビタミンC等を書かない）。
-- 記載されていない成分（例: 成分欄にないのにレチノール・AHA・ビタミンC等）を書くことは絶対禁止。
-- 1位商品がセラミド・ペプチド系なら保湿・バリア観点で書く。ビタミンC系なら美白・抗酸化観点で書く。成分に忠実に。
+【絶対厳守ルール】
+- recommend_reasonとpurposeは必ず各step固有の「言及可能成分」欄に記載された成分・機能のみに基づいて書く。
+- 「言及可能成分」に記載されていない成分（レチノール・AHA・ビタミンC・ナイアシンアミド等）を書くことは絶対禁止。
+- 他stepの商品・成分（例: 美容液stepのレチノール）を別stepの理由に書くことは絶対禁止。
+- 日焼け止めstepの理由に「レチノール」「AHA」「ビタミンC」等のスキンケア成分を書いてはいけない。UV成分・SPF・PAのみに言及すること。
+- 1位商品がセラミド・ペプチド系なら保湿・バリア観点で書く。UV系なら紫外線防御観点で書く。成分に忠実に。
 
 出力フィールド:
 - recommend_reason: 1位商品が選ばれた理由。成分名・機能を具体的に。50-80字。
@@ -12062,6 +12073,12 @@ def finalize_step_data(step, user_data):
             "price_ref": step.get("price", step.get("price_ref", 0)),
         })
 
+        # fallback候補も汎用名なら捨てる（1位2位に同名表示を防ぐ）
+        if selected_candidate and _is_generic_name(
+            selected_candidate.get("brand", ""), selected_candidate.get("name", "")
+        ):
+            return []
+
         return [selected_candidate] if selected_candidate else []
 
     category = clean_text(step.get("category")) or "美容液"
@@ -14197,12 +14214,12 @@ ai_improvement_strategy: 改善優先順位を戦略的に10項目分出力。�
 - priority: 1=最優先 2=次点以降
 
 【beauty_devices】
-以下の基準をすべて満たす場合のみ提案。不要なら[]。
-【提案基準】
-①現在のスキンケア（特に美容液・クリーム）の効果を物理的・技術的に増強できる
+肌スコアの課題を機器で補完できる場合に積極的に提案する。不要なら[]。
+【提案基準（いずれか1つ以上該当すれば提案）】
+①現在のスキンケアの効果を物理的・技術的に増強できる
   (例: イオン導入器→美容液成分の浸透促進、LED→ターンオーバー促進・コラーゲン生成)
-②スキンケア単独では改善が遅い項目（毛穴の開き・ハリ不足・キメ等）に対して、機器特有のアプローチが必要な場合のみ提案
-③肌スコアの該当項目（pores/firmness/texture等）への改善効果が医学的・技術的に裏付けられた機器のみ
+②スコアが低い項目（pores/firmness/texture/dullness）への具体的な改善効果が見込める
+③美容液・クリームの効果を活かすために機器サポートが有効な場合
 【禁止】
 ・相性の悪い組み合わせ（例: レチノール使用直後の摩擦系機器・EMS等の刺激系）
 ・1つのスコア課題に対して複数の機器を重複提案（1課題=1機器が原則）
@@ -14435,12 +14452,12 @@ synergy_combinations(3件以上必須):
 - priority: 1=最優先 2=次点以降
 
 【beauty_devices】
-以下の基準をすべて満たす場合のみ提案。不要なら[]。
-【提案基準】
-①現在のスキンケア（特に美容液・クリーム）の効果を物理的・技術的に増強できる
+肌スコアの課題を機器で補完できる場合に積極的に提案する。不要なら[]。
+【提案基準（いずれか1つ以上該当すれば提案）】
+①現在のスキンケアの効果を物理的・技術的に増強できる
   (例: イオン導入器→美容液成分の浸透促進、LED→ターンオーバー促進・コラーゲン生成)
-②スキンケア単独では改善が遅い項目（毛穴の開き・ハリ不足・キメ等）に対して、機器特有のアプローチが必要な場合のみ提案
-③肌スコアの該当項目（pores/firmness/texture等）への改善効果が医学的・技術的に裏付けられた機器のみ
+②スコアが低い項目（pores/firmness/texture/dullness）への具体的な改善効果が見込める
+③美容液・クリームの効果を活かすために機器サポートが有効な場合
 【禁止】
 ・相性の悪い組み合わせ（例: レチノール使用直後の摩擦系機器・EMS等の刺激系）
 ・1つのスコア課題に対して複数の機器を重複提案（1課題=1機器が原則）
@@ -14649,12 +14666,12 @@ moisture_level/need_emulsion/need_cream/need_double_moisture/reason
 - priority: 1=最優先 2=次点以降
 
 【beauty_devices】
-以下の基準をすべて満たす場合のみ提案。不要なら[]。
-【提案基準】
-①現在のスキンケア（特に美容液・クリーム）の効果を物理的・技術的に増強できる
+肌スコアの課題を機器で補完できる場合に積極的に提案する。不要なら[]。
+【提案基準（いずれか1つ以上該当すれば提案）】
+①現在のスキンケアの効果を物理的・技術的に増強できる
   (例: イオン導入器→美容液成分の浸透促進、LED→ターンオーバー促進・コラーゲン生成)
-②スキンケア単独では改善が遅い項目（毛穴の開き・ハリ不足・キメ等）に対して、機器特有のアプローチが必要な場合のみ提案
-③肌スコアの該当項目（pores/firmness/texture等）への改善効果が医学的・技術的に裏付けられた機器のみ
+②スコアが低い項目（pores/firmness/texture/dullness）への具体的な改善効果が見込める
+③美容液・クリームの効果を活かすために機器サポートが有効な場合
 【禁止】
 ・相性の悪い組み合わせ（例: レチノール使用直後の摩擦系機器・EMS等の刺激系）
 ・1つのスコア課題に対して複数の機器を重複提案（1課題=1機器が原則）
@@ -14680,6 +14697,15 @@ def extract_image_bytes_for_hash(image):
     if isinstance(image, bytearray):
         return bytes(image)
 
+    # PIL Image → ピクセルをそのままバイト列化（決定論的、メモリアドレス不使用）
+    try:
+        from PIL import Image as _PILImage
+        if isinstance(image, _PILImage.Image):
+            return image.tobytes()
+    except Exception:
+        pass
+
+    # Gemini Part オブジェクト
     inline_data = getattr(image, "inline_data", None)
     if inline_data is not None:
         data = getattr(inline_data, "data", None)
@@ -14690,7 +14716,9 @@ def extract_image_bytes_for_hash(image):
     if data:
         return data
 
-    return str(image).encode("utf-8")
+    # フォールバック: str(image) はメモリアドレスを含むため使用禁止
+    # 到達した場合は空バイトを返してキャッシュ無効化より再現性を優先
+    return b""
 
 
 def make_analysis_cache_key(user_data, front_img, left_img, right_img):
