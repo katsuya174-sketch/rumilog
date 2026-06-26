@@ -332,7 +332,7 @@
           <span style="font-size:12px; color:#9b7f88;">{{ email }}</span>
           <a href="/logout" style="margin-left:10px; font-size:12px; color:#c75b7a; text-decoration:none; border:1px solid #f0c5d0; border-radius:6px; padding:3px 10px;">ログアウト</a>
         </div>
-        {% else %}
+        {% elif is_premium %}
         <div style="text-align:right; margin-bottom:10px;">
           <a href="/login" style="font-size:12px; color:#c75b7a; text-decoration:none; border:1px solid #f0c5d0; border-radius:6px; padding:4px 12px;">🔑 ログインで全デバイスから履歴を見る</a>
         </div>
