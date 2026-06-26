@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" type="image/png" href="/static/favicon.png?v=3">
+  <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ログイン — るみろぐ</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
+      margin: 0;
+      padding: 24px 16px;
+      background: linear-gradient(180deg, #fffafd 0%, #fff6f8 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      background: rgba(255, 248, 252, 0.98);
+      border: 1px solid #f1d5dd;
+      border-radius: 20px;
+      padding: 36px 28px;
+      max-width: 420px;
+      width: 100%;
+      box-shadow: 0 8px 32px rgba(199, 91, 122, 0.10);
+      text-align: center;
+    }
+    .logo { font-size: 32px; margin-bottom: 6px; }
+    h1 { color: #c75b7a; font-size: 20px; margin: 0 0 8px; }
+    .subtitle {
+      color: #9b7f88;
+      font-size: 13px;
+      margin-bottom: 28px;
+      line-height: 1.7;
+    }
+    label {
+      display: block;
+      text-align: left;
+      font-size: 13px;
+      color: #7a5060;
+      margin-bottom: 6px;
+      font-weight: bold;
+    }
+    input[type=email] {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1.5px solid #f0c5d0;
+      border-radius: 10px;
+      font-size: 15px;
+      outline: none;
+      background: #fff;
+      transition: border-color 0.2s;
+    }
+    input[type=email]:focus { border-color: #c75b7a; }
+    button {
+      width: 100%;
+      padding: 13px;
+      background: linear-gradient(135deg, #e88aaa, #c75b7a);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: bold;
+      cursor: pointer;
+      margin-top: 14px;
+      transition: opacity 0.2s;
+    }
+    button:hover { opacity: 0.9; }
+    .error {
+      background: #fff0f3;
+      border: 1px solid #f5b8c4;
+      color: #c0394f;
+      border-radius: 10px;
+      padding: 12px 14px;
+      margin-bottom: 18px;
+      font-size: 13px;
+    }
+    .sent-box {
+      background: #f0fff4;
+      border: 1px solid #b2e0c0;
+      color: #2d7a4f;
+      border-radius: 10px;
+      padding: 20px 16px;
+      font-size: 14px;
+      line-height: 1.8;
+    }
+    .sent-box .check { font-size: 28px; margin-bottom: 8px; }
+    .sent-box .email-addr {
+      font-weight: bold;
+      word-break: break-all;
+    }
+    .sent-box .note {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #5a9a6f;
+    }
+    .back {
+      display: block;
+      margin-top: 24px;
+      color: #c75b7a;
+      font-size: 13px;
+      text-decoration: none;
+    }
+    .page-note {
+      margin-top: 28px;
+      font-size: 11px;
+      color: #c0a8b0;
+      line-height: 1.7;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">🌸</div>
+    <h1>るみろぐ ログイン</h1>
+
+    {% if sent %}
+      <div class="sent-box">
+        <div class="check">✉️</div>
+        メールを送信しました<br>
+        <span class="email-addr">{{ email }}</span> 宛に<br>
+        ログインリンクを送りました。<br>
+        メールのリンクをタップしてください。
+        <div class="note">
+          リンクは15分間有効です。<br>
+          届かない場合はスパムフォルダをご確認ください。
+        </div>
+      </div>
+      <a href="/login" class="back">← 別のメールアドレスで試す</a>
+
+    {% else %}
+      <p class="subtitle">
+        メールアドレスを入力するとログインリンクを送ります。<br>
+        スマホ・PCどちらからでも同じ履歴を確認できます。
+      </p>
+
+      {% if error %}
+        <div class="error">{{ error }}</div>
+      {% endif %}
+
+      <form method="post">
+        <label for="email">メールアドレス</label>
+        <input
+          type="email"
+          id="email"
+          name="email"
+          placeholder="your@email.com"
+          required
+          autocomplete="email"
+        >
+        <button type="submit">ログインリンクを送る</button>
+      </form>
+
+      <p class="page-note">
+        初めての方もこのメールアドレスで自動的に登録されます。<br>
+        パスワードは不要です。
+      </p>
+    {% endif %}
+
+    <a href="/" class="back">← トップに戻る</a>
+  </div>
+</body>
+</html>

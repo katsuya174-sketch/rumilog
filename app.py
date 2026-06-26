@@ -351,10 +351,40 @@ def save_rakuten_search_to_db(cache_key, results):
     finally:
         if conn: conn.close()
 
+def init_auth_tables():
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            email VARCHAR(320) PRIMARY KEY,
+            user_id VARCHAR(36) NOT NULL UNIQUE,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+        CREATE TABLE IF NOT EXISTS magic_tokens (
+            token VARCHAR(128) PRIMARY KEY,
+            email VARCHAR(320) NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            used BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT NOW()
+        );
+        """)
+        conn.commit()
+        print("[DB AUTH TABLES READY]", flush=True)
+    except Exception as e:
+        if conn: conn.rollback()
+        print("[DB AUTH TABLE ERROR]", e, flush=True)
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
 init_results_table()
 init_gemini_usage_table()
 init_analysis_cache_table()
 init_rakuten_search_cache_table()
+init_auth_tables()
 VERIFY_PRODUCT_CACHE = {}
 DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
 USE_RICH_CANDIDATE = False
@@ -767,6 +797,149 @@ def get_or_create_user_id():
     flask_session["user_id"] = uid
     flask_session.permanent = True
     return uid
+
+
+# ==========================================
+# マジックリンク認証ヘルパー
+# ==========================================
+
+def get_or_create_user_for_email(email):
+    """メールアドレスに対応するuser_idを返す（なければ新規作成）"""
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("SELECT user_id FROM users WHERE email = %s", (email,))
+        row = cur.fetchone()
+        if row:
+            return row[0]
+        new_uid = str(_uuid_mod.uuid4())
+        cur.execute("INSERT INTO users (email, user_id) VALUES (%s, %s)", (email, new_uid))
+        conn.commit()
+        return new_uid
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"[AUTH ERROR] get_or_create_user_for_email: {e}", flush=True)
+        return None
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+
+def create_magic_token(email):
+    """マジックトークンを生成してDBに保存し、トークン文字列を返す"""
+    token = secrets.token_urlsafe(32)
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO magic_tokens (token, email, expires_at)
+            VALUES (%s, %s, NOW() + INTERVAL '15 minutes')
+        """, (token, email))
+        conn.commit()
+        return token
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"[AUTH ERROR] create_magic_token: {e}", flush=True)
+        return None
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+
+def verify_magic_token(token):
+    """トークンを検証。有効なら email を返し、使用済みにする。無効なら None。"""
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT email FROM magic_tokens
+            WHERE token = %s AND used = FALSE AND expires_at > NOW()
+        """, (token,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        email = row[0]
+        cur.execute("UPDATE magic_tokens SET used = TRUE WHERE token = %s", (token,))
+        conn.commit()
+        return email
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"[AUTH ERROR] verify_magic_token: {e}", flush=True)
+        return None
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+
+def migrate_results_to_email_user(old_user_id, new_user_id):
+    """旧UUIDの診断結果を新user_idに移行する（デバイス引き継ぎ）"""
+    if not old_user_id or not new_user_id or old_user_id == new_user_id:
+        return 0
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE results
+            SET payload = jsonb_set(payload, '{user_id}', to_jsonb(%s::text))
+            WHERE payload->>'user_id' = %s
+        """, (new_user_id, old_user_id))
+        count = cur.rowcount
+        conn.commit()
+        print(f"[AUTH MIGRATE] {old_user_id} -> {new_user_id}: {count} records", flush=True)
+        return count
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"[AUTH ERROR] migrate_results: {e}", flush=True)
+        return 0
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+
+def send_magic_link_email(to_email, token):
+    """マジックリンクメールを送信する"""
+    if not SMTP_USER or not SMTP_PASSWORD:
+        print(f"[MAGIC LINK EMAIL] SMTP未設定 token={token}", flush=True)
+        return False
+    base_url = SITE_URL.rstrip("/") if SITE_URL else ""
+    link = f"{base_url}/auth/{token}"
+    subject = "るみろぐ ログインリンク"
+    body = f"""るみろぐへのログインリクエストを受け付けました。
+
+以下のリンクをタップしてログインしてください。
+このリンクは15分間有効です。
+
+{link}
+
+━━━━━━━━━━━━━━━━━━━━
+このメールに心当たりがない場合は無視してください。
+るみろぐ
+"""
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = SMTP_USER
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+        context = ssl.create_default_context()
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls(context=context)
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, to_email, msg.as_string())
+        print(f"[MAGIC LINK EMAIL] 送信成功: {to_email}", flush=True)
+        return True
+    except Exception as e:
+        print(f"[MAGIC LINK EMAIL ERROR] {repr(e)}", flush=True)
+        return False
+
 
 # ==========================================
 # プレミアムキー管理
@@ -16739,6 +16912,52 @@ def admin_stats():
     return html
 
 
+# ==========================================
+# マジックリンク ログイン
+# ==========================================
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        email = (request.form.get("email") or "").strip().lower()
+        if not email or "@" not in email or "." not in email.split("@")[-1]:
+            return render_template("login.html", error="メールアドレスを正しく入力してください")
+        token = create_magic_token(email)
+        if not token:
+            return render_template("login.html", error="エラーが発生しました。しばらく後でお試しください")
+        send_magic_link_email(email, token)
+        return render_template("login.html", sent=True, email=email)
+    return render_template("login.html")
+
+
+@app.route("/auth/<token>")
+def auth_verify(token):
+    email = verify_magic_token(token)
+    if not email:
+        return render_template("login.html", error="このリンクは無効または期限切れです。再度ログインしてください")
+    new_user_id = get_or_create_user_for_email(email)
+    if not new_user_id:
+        return render_template("login.html", error="ログインに失敗しました。再度お試しください")
+    # 現在のデバイスに既存の診断結果があれば email アカウントに移行
+    old_user_id = request.cookies.get(RUMILOG_UID_COOKIE, "") or flask_session.get("user_id", "")
+    if old_user_id and old_user_id != new_user_id:
+        migrate_results_to_email_user(old_user_id, new_user_id)
+    flask_session["user_id"] = new_user_id
+    flask_session["email"] = email
+    flask_session.permanent = True
+    resp = make_response(redirect("/history"))
+    resp.set_cookie(RUMILOG_UID_COOKIE, new_user_id, max_age=365 * 24 * 3600, httponly=True, samesite="Lax")
+    return resp
+
+
+@app.route("/logout")
+def logout():
+    flask_session.clear()
+    resp = make_response(redirect("/"))
+    resp.delete_cookie(RUMILOG_UID_COOKIE)
+    return resp
+
+
 # 診断履歴ページ
 @app.route("/history")
 def history():
@@ -17067,7 +17286,8 @@ def history():
             premium_score_series=premium_score_series,
             is_premium=is_premium_user(),
             monthly_report=monthly_report,
-            streak=streak
+            streak=streak,
+            email=flask_session.get("email", "")
         )
 
     except Exception as e:
@@ -17086,7 +17306,8 @@ def history():
             premium_score_series={},
             is_premium=is_premium_user(),
             monthly_report=None,
-            streak=0
+            streak=0,
+            email=flask_session.get("email", "")
         )
 
 @app.route("/history/<result_id>")
