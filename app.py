@@ -2073,6 +2073,16 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         if not any(w in title_norm or w in title for w in _peel_required):
             return -9999
 
+    elif category == "乳液":
+        # 乳液カテゴリ: 乳液/ミルク/エマルジョン系キーワードが必須
+        _emulsion_required = ["乳液", "ミルク", "エマルジョン", "emulsion", "milk", "moisturizer"]
+        _emulsion_wrong = ["化粧水", "ローション", "トナー", "洗顔", "クレンジング",
+                           "日焼け止め", "パック", "シートマスク"]
+        if any(w in title for w in _emulsion_wrong):
+            return -9999
+        if not any(w.lower() in title_norm or w in title for w in _emulsion_required):
+            return -9999
+
     elif category == "洗顔":
         # 洗顔カテゴリ: 明確なクレンジング専用品・パック系のみ除外（クリーム洗顔等は許容）
         _sengan_wrong = [
@@ -3117,15 +3127,16 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 # サプリメント: ブランドがローマ字/カタカナ表記ゆれで全件スキップを
                 #   避けるため pre-filter なし。score_rakuten_item の +60/-0 で制御。
                 # 美容機器: ブランド一致のみで判定（製品名が説明語のため）。
-                # ピーリング・パック: Gemini日本語名 vs Rakuten英語名で全件不一致になるため
-                #   is_same_verified_rakuten_product をスキップし score_rakuten_item に委ねる。
+                # ピーリング・パック・乳液: 成分名+カテゴリ名の製品名(例:「セラミド 乳液」)では
+                #   楽天タイトルに成分名が含まれないケースが多く is_same_verified_rakuten_product が
+                #   全件 False になるため、score_rakuten_item のカテゴリ固有チェックに委ねる。
                 if category == "美容機器":
                     if brand:
                         _bc = "".join(c for c in brand.lower() if c.strip())
                         _tc = "".join(c for c in rakuten_title.lower() if c.strip())
                         if _bc and _bc not in _tc:
                             continue
-                elif category in ("サプリメント", "ピーリング", "パック"):
+                elif category in ("サプリメント", "ピーリング", "パック", "乳液"):
                     pass  # pre-filter なし: score_rakuten_item のカテゴリ固有チェックに委ねる
                 elif not is_same_verified_rakuten_product(
                     product_name=product_name,
@@ -3156,9 +3167,9 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                         flush=True
                     )
 
-                # ピーリング・美容機器・サプリはname_matchバイパス(8-10点)で
+                # ピーリング・美容機器・サプリ・乳液はname_matchバイパス(8-10点)で
                 # 通常より低スコア出発のため閾値を緩める（-9999リジェクトのみ除外）
-                _min_score = 0 if category in ("ピーリング", "パック", "美容機器", "サプリメント") else 20
+                _min_score = 0 if category in ("ピーリング", "パック", "美容機器", "サプリメント", "乳液") else 20
                 if score < _min_score:
                     continue
 
