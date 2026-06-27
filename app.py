@@ -14453,6 +14453,24 @@ def build_analysis_prompt_phase2(user_data, phase1):
         )
     else:
         _strategy_lines = "  （データなし）"
+
+    # スコアレベル判定（サプリ・美容機器の提案入口）
+    def _score_level(v):
+        if v is None: return "不明"
+        v = int(v)
+        if v >= 80: return "原則不要(80以上)"
+        if v >= 60: return "必要性が高い場合のみ検討(60-79)"
+        if v >= 40: return "積極的に検討(40-59)"
+        return "優先的に検討(39以下)"
+
+    _all_score_vals = [scores.get(k) for k in _sk if scores.get(k) is not None]
+    _min_score = min(_all_score_vals) if _all_score_vals else None
+    _device_keys = ["pores", "firmness", "texture", "acne", "tone_evenness", "dullness"]
+    _device_vals = [scores.get(k) for k in _device_keys if scores.get(k) is not None]
+    _min_device_score = min(_device_vals) if _device_vals else None
+
+    _supp_level  = _score_level(_min_score)
+    _device_level = _score_level(_min_device_score)
     return f"""日本の市販スキンケアと肌分析に詳しい美容アドバイザーです。
 肌分析済みの結果をもとに、ルーティン構成と商品候補のみJSONで返す。画像分析は完了済み。
 
@@ -14673,6 +14691,15 @@ synergy_combinations(3件以上必須):
 【supplements】
 スキンケアのトータルコーディネートとして、内側からの補完が有効な場合に提案。不要なら[]。
 提案数は肌状態・悩みに応じて柔軟に決める（件数制限なし）。
+
+【サプリ提案の入口判断（全スコアの最低値: {_min_score} → {_supp_level}）】
+スコアが低いほど提案の必要性は高くなるが、必ず提案する必要はない。
+スキンケアのみで十分改善可能と判断した場合は[]とする。
+・80以上: 原則不要
+・60〜79: 必要性が高い場合のみ検討
+・40〜59: 積極的に検討
+・39以下: 優先的に検討し、改善効果が期待できるなら提案
+
 提案条件: ①外用スキンケアだけでは補完困難な悩み(コラーゲン生成・抗酸化・抗糖化等) ②既存ルーティンと成分が重複せず相乗効果が見込める ③肌スコアや悩みに明確な根拠がある
 禁止: スキンケアと全く同じ成分の重複提案・根拠のない漠然とした提案
 
@@ -14697,7 +14724,16 @@ synergy_combinations(3件以上必須):
 - priority: 1=最優先 2=次点以降
 
 【beauty_devices】
-肌スコアや悩みから判断して本当に必要な場合のみ提案。不要なら[]。
+肌スコアや悩みから判断して提案。不要なら[]。
+
+【美容機器提案の入口判断（毛穴/ハリ/キメ/ニキビ等の最低値: {_min_device_score} → {_device_level}）】
+スコアが低いほど提案の必要性は高くなるが、必ず提案する必要はない。
+スキンケアのみで十分改善可能と判断した場合は[]とする。
+・80以上: 原則不要
+・60〜79: 必要性が高い場合のみ検討
+・40〜59: 積極的に検討
+・39以下: 優先的に検討し、改善効果が期待できるなら提案
+
 【提案基準（すべて考慮して判断）】
 ①スキンケア単独では改善が遅い項目（毛穴・ハリ・キメ等）に機器の物理的効果が明確に有効
 ②現在のルーティン（美容液・クリーム等）の効果を技術的に増強できる根拠がある
