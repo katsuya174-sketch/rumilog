@@ -16408,7 +16408,8 @@ def lab_test_function():
             _log_mem("before-render")
             html = render_template(
                 "result.html",
-                data=data
+                data=data,
+                result_id=data.get("id", "")
             )
             if is_ajax:
                 return jsonify({
@@ -16848,6 +16849,7 @@ def product_click():
     product = request.args.get("product", "")
     category = request.args.get("category", "")
     url = request.args.get("url", "")
+    back_url = request.args.get("back_url", "")
 
     log_product_click(source, product, category)
 
@@ -16869,16 +16871,37 @@ def product_click():
     except Exception:
         return "無効なURLです", 400
 
-    # replace() で履歴を上書きし、戻るボタンで結果ページに戻れるようにする
+    shop_label = "Amazonで見る" if "amazon" in url else "楽天で見る"
     safe_url = url.replace('"', '%22').replace("'", '%27')
+    safe_back = (back_url or "/history").replace('"', '%22').replace("'", '%27')
+    safe_product = product[:40] if product else "商品"
+    safe_category = category or ""
+
     return f"""<!DOCTYPE html>
-<html><head><meta charset="UTF-8">
-<script>window.location.replace("{safe_url}");</script>
-<style>body{{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#fffafd;}}
-a{{color:#9b3156;font-size:15px;}}</style>
-</head><body>
-<a href="{safe_url}">移動中... タップして開く</a>
-</body></html>"""
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>商品リンク</title>
+<style>
+  *{{box-sizing:border-box;margin:0;padding:0;}}
+  body{{font-family:"Hiragino Sans","Yu Gothic",sans-serif;background:#fffafd;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;}}
+  .card{{background:#fff;border:1px solid #f4dce6;border-radius:20px;padding:28px 24px;max-width:360px;width:100%;box-shadow:0 8px 24px rgba(220,130,165,0.12);text-align:center;}}
+  .category{{font-size:12px;color:#b07090;margin-bottom:8px;}}
+  .product-name{{font-size:16px;font-weight:bold;color:#3f3a3a;margin-bottom:24px;line-height:1.5;}}
+  .btn-shop{{display:block;background:linear-gradient(135deg,#e8547a,#c23b6e);color:#fff;text-decoration:none;border-radius:12px;padding:14px 20px;font-size:15px;font-weight:bold;margin-bottom:12px;}}
+  .btn-back{{display:block;background:#f5eff4;color:#9b3156;text-decoration:none;border-radius:12px;padding:13px 20px;font-size:14px;font-weight:bold;}}
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="category">{safe_category}</div>
+  <div class="product-name">{safe_product}</div>
+  <a class="btn-shop" href="{safe_url}" target="_blank" rel="noopener noreferrer">{shop_label}</a>
+  <a class="btn-back" href="{safe_back}">← 診断結果に戻る</a>
+</div>
+</body>
+</html>"""
 
 @app.route("/pricing")
 def pricing():
@@ -17511,7 +17534,7 @@ def result_detail(result_id):
                         "left_tendency": "",
                         "right_tendency": ""
                     }
-                return render_template("result.html", data=data)
+                return render_template("result.html", data=data, result_id=result_id)
 
         return "結果が見つかりません", 404
 

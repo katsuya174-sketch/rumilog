@@ -393,13 +393,13 @@
   
               <div class="buy-buttons">
                   {% if step.get("amazon_link") %}
-                  <a href="/click?source=amazon&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.amazon_link|urlencode }}" target="_blank" rel="noopener noreferrer">
+                  <a href="/click?source=amazon&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.amazon_link|urlencode }}&back_url={{ ('/history/' ~ (result_id or ''))|urlencode }}">
                       <button type="button" class="amazon-btn">Amazonで見る</button>
                   </a>
                   {% endif %}
-  
+
                   {% if step.get("rakuten_link") %}
-                  <a href="/click?source=rakuten&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.rakuten_link|urlencode }}" target="_blank" rel="noopener noreferrer">
+                  <a href="/click?source=rakuten&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.rakuten_link|urlencode }}&back_url={{ ('/history/' ~ (result_id or ''))|urlencode }}">
                       <button type="button" class="rakuten-btn">楽天で見る</button>
                   </a>
                   {% endif %}
@@ -566,12 +566,12 @@
 
               <div class="buy-buttons">
                   {% if item.get('amazon_link') %}
-                  <a href="/click?source=amazon&product={{ item.get('product', '')|urlencode }}&category={{ item.get('category', '')|urlencode }}&url={{ item.amazon_link|urlencode }}" target="_blank" rel="noopener noreferrer">
+                  <a href="/click?source=amazon&product={{ item.get('product', '')|urlencode }}&category={{ item.get('category', '')|urlencode }}&url={{ item.amazon_link|urlencode }}&back_url={{ ('/history/' ~ (result_id or ''))|urlencode }}">
                       <button type="button" class="amazon-btn">Amazonで見る</button>
                   </a>
                   {% endif %}
                   {% if item.get('rakuten_link') %}
-                  <a href="/click?source=rakuten&product={{ item.get('product', '')|urlencode }}&category={{ item.get('category', '')|urlencode }}&url={{ item.rakuten_link|urlencode }}" target="_blank" rel="noopener noreferrer">
+                  <a href="/click?source=rakuten&product={{ item.get('product', '')|urlencode }}&category={{ item.get('category', '')|urlencode }}&url={{ item.rakuten_link|urlencode }}&back_url={{ ('/history/' ~ (result_id or ''))|urlencode }}">
                       <button type="button" class="rakuten-btn">楽天で見る</button>
                   </a>
                   {% endif %}
