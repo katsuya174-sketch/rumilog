@@ -13182,12 +13182,15 @@ def build_product_ranking(results, user_id=None, client_ip=None, limit=20):
             continue
 
         for item in iter_selected_products_from_result(result):
-            if item["category"] not in _RANKING_ALLOWED_CATEGORIES:
+            cat = item["category"]
+            if cat == "導入美容液":
+                cat = "美容液"
+            if cat not in _RANKING_ALLOWED_CATEGORIES:
                 continue
             key = (
                 item["brand"],
                 item["product"],
-                item["category"]
+                cat
             )
             counter[key] += 1
 
