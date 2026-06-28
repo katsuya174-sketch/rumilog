@@ -3154,9 +3154,9 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                     category=category
                 )
 
-                if category in ("サプリメント", "美容機器"):
+                if category in ("サプリメント", "美容機器", "美容液", "乳液"):
                     print(
-                        f"[RAKUTEN EXTRA SCORE] score={score} title={rakuten_title[:40]}",
+                        f"[RAKUTEN BYPASS SCORE] cat={category} score={score} title={rakuten_title[:50]}",
                         flush=True
                     )
 
@@ -3169,9 +3169,9 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                 scored_items.append((score, item))
 
             if not scored_items:
-                if category in ("サプリメント", "美容機器"):
+                if category in ("サプリメント", "美容機器", "美容液", "乳液"):
                     print(
-                        f"[RAKUTEN EXTRA NO ITEMS] keyword={keyword} category={category}",
+                        f"[RAKUTEN BYPASS NO ITEMS] keyword={keyword} category={category}",
                         flush=True
                     )
                 continue
@@ -4934,6 +4934,50 @@ def resolve_weekly_care_day_conflicts(data):
                     flush=True,
                 )
                 step["use_days"] = new_irritant_days
+
+    return data
+
+
+def resolve_night_irritant_conflicts(data):
+    """
+    夜ルーティン内でレチノイド × BHA/SA洗顔料などの刺激成分同士の曜日衝突を解消。
+    レチノイド系を固定し、BHA/SA系ステップを別の曜日に移動する。
+    """
+    _retinoid_tags = {"retinoid", "retinol", "retinal"}
+    _bha_tags = {"aha_bha", "aha", "bha", "pha"}
+    _all_days = ["月", "火", "水", "木", "金", "土", "日"]
+
+    night_steps = [s for s in data.get("night", {}).get("steps", []) if isinstance(s, dict)]
+
+    retinoid_days: set = set()
+    bha_steps_to_fix: list = []
+
+    for step in night_steps:
+        focus = set(as_list(step.get("ingredient_focus") or []))
+        days = step.get("use_days") or []
+        if focus & _retinoid_tags and days:
+            retinoid_days.update(days)
+        if focus & _bha_tags and days:
+            bha_steps_to_fix.append(step)
+
+    if not retinoid_days or not bha_steps_to_fix:
+        return data
+
+    for step in bha_steps_to_fix:
+        use_days = list(step.get("use_days") or [])
+        conflict = set(use_days) & retinoid_days
+        if not conflict:
+            continue
+        safe = [d for d in _all_days if d not in retinoid_days]
+        if not safe:
+            continue
+        new_days = safe[:max(len(use_days), 1)]
+        print(
+            f"[NIGHT CONFLICT] {step.get('product','夜ステップ')} {use_days} → {new_days} "
+            f"(retinoid_days={sorted(retinoid_days)})",
+            flush=True,
+        )
+        step["use_days"] = new_days
 
     return data
 
@@ -12219,11 +12263,14 @@ def finalize_step_data(step, user_data):
                 continue
 
             # 汎用名はスキップ（ブランドあり/なし問わず）
-            if _is_generic_name(normalized.get("brand", ""), normalized.get("name", "")):
+            _cand_name = normalized.get("name", "")
+            if _is_generic_name(normalized.get("brand", ""), _cand_name):
+                print(f"[CANDIDATE FILTER] generic name skipped: cat={_step_cat} name={_cand_name!r}", flush=True)
                 continue
 
             # カテゴリ横断バリデーション（モジュールレベル関数で全カテゴリ対応）
-            if is_candidate_wrong_for_category(_step_cat, normalized.get("name", "")):
+            if is_candidate_wrong_for_category(_step_cat, _cand_name):
+                print(f"[CANDIDATE FILTER] wrong category skipped: cat={_step_cat} name={_cand_name!r}", flush=True)
                 continue
 
             identity_keys = build_candidate_identity_keys(normalized)
@@ -16303,6 +16350,8 @@ def lab_test_function():
 
             # 週ケアとnight刺激成分の曜日衝突を強制解消
             data = resolve_weekly_care_day_conflicts(data)
+            # 夜ルーティン内のレチノイド×BHA/SA洗顔料の曜日衝突を解消
+            data = resolve_night_irritant_conflicts(data)
 
             # 楽天商品名をGeminiで短く整形（rakuten_criteria / ai_rakuten_verified のみ対象）
             data = gemini_clean_rakuten_product_names(data)
