@@ -13166,6 +13166,11 @@ def iter_selected_products_from_result(result):
             }
 
 
+_RANKING_ALLOWED_CATEGORIES = {
+    "クレンジング", "洗顔", "化粧水", "美容液", "乳液", "クリーム",
+    "パック", "ピーリング", "サプリメント", "美容機器",
+}
+
 def build_product_ranking(results, user_id=None, client_ip=None, limit=20):
     counter = Counter()
 
@@ -13177,6 +13182,8 @@ def build_product_ranking(results, user_id=None, client_ip=None, limit=20):
             continue
 
         for item in iter_selected_products_from_result(result):
+            if item["category"] not in _RANKING_ALLOWED_CATEGORIES:
+                continue
             key = (
                 item["brand"],
                 item["product"],
