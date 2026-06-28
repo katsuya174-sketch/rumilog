@@ -393,13 +393,21 @@
   
               <div class="buy-buttons">
                   {% if step.get("amazon_link") %}
-                  <a href="/click?source=amazon&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.amazon_link|urlencode }}&back_url={{ ('/history/' ~ (result_id or ''))|urlencode }}">
+                  <a href="{{ step.amazon_link }}"
+                     class="ext-link"
+                     data-src="amazon"
+                     data-prod="{{ step.get('product', '')|e }}"
+                     data-cat="{{ step.get('category', '')|e }}">
                       <button type="button" class="amazon-btn">Amazonで見る</button>
                   </a>
                   {% endif %}
 
                   {% if step.get("rakuten_link") %}
-                  <a href="/click?source=rakuten&product={{ step.get('product', '')|urlencode }}&category={{ step.get('category', '')|urlencode }}&url={{ step.rakuten_link|urlencode }}&back_url={{ ('/history/' ~ (result_id or ''))|urlencode }}">
+                  <a href="{{ step.rakuten_link }}"
+                     class="ext-link"
+                     data-src="rakuten"
+                     data-prod="{{ step.get('product', '')|e }}"
+                     data-cat="{{ step.get('category', '')|e }}">
                       <button type="button" class="rakuten-btn">楽天で見る</button>
                   </a>
                   {% endif %}
@@ -566,12 +574,20 @@
 
               <div class="buy-buttons">
                   {% if item.get('amazon_link') %}
-                  <a href="/click?source=amazon&product={{ item.get('product', '')|urlencode }}&category={{ item.get('category', '')|urlencode }}&url={{ item.amazon_link|urlencode }}&back_url={{ ('/history/' ~ (result_id or ''))|urlencode }}">
+                  <a href="{{ item.amazon_link }}"
+                     class="ext-link"
+                     data-src="amazon"
+                     data-prod="{{ item.get('product', '')|e }}"
+                     data-cat="{{ item.get('category', '')|e }}">
                       <button type="button" class="amazon-btn">Amazonで見る</button>
                   </a>
                   {% endif %}
                   {% if item.get('rakuten_link') %}
-                  <a href="/click?source=rakuten&product={{ item.get('product', '')|urlencode }}&category={{ item.get('category', '')|urlencode }}&url={{ item.rakuten_link|urlencode }}&back_url={{ ('/history/' ~ (result_id or ''))|urlencode }}">
+                  <a href="{{ item.rakuten_link }}"
+                     class="ext-link"
+                     data-src="rakuten"
+                     data-prod="{{ item.get('product', '')|e }}"
+                     data-cat="{{ item.get('category', '')|e }}">
                       <button type="button" class="rakuten-btn">楽天で見る</button>
                   </a>
                   {% endif %}
@@ -1200,6 +1216,30 @@
             // 商品名・画像・リンクのズレ防止のため、
             // 表示後の商品情報自動上書きは停止。
             // 商品情報はバックエンドで確定したものを表示する。
+        });
+
+        // 外部リンク: スクロール位置を保存してから遷移 + クリックログ送信
+        document.querySelectorAll("a.ext-link").forEach(function(a) {
+            a.addEventListener("click", function() {
+                sessionStorage.setItem("result_scroll", String(window.scrollY));
+                var src  = this.dataset.src  || "";
+                var prod = this.dataset.prod || "";
+                var cat  = this.dataset.cat  || "";
+                navigator.sendBeacon(
+                    "/log-click?source=" + encodeURIComponent(src) +
+                    "&product=" + encodeURIComponent(prod) +
+                    "&category=" + encodeURIComponent(cat)
+                );
+            });
+        });
+
+        // 戻り時にスクロール位置を復元
+        window.addEventListener("pageshow", function() {
+            var y = sessionStorage.getItem("result_scroll");
+            if (y !== null) {
+                sessionStorage.removeItem("result_scroll");
+                setTimeout(function() { window.scrollTo(0, parseInt(y, 10)); }, 30);
+            }
         });
     </script>
 </body>
