@@ -3114,38 +3114,36 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                     if not _is_rakuten_item_valid_for_category(rakuten_title, category, strict=False):
                         continue
 
-                # サプリメント・美容機器はGeminiが出すproduct名がカテゴリ説明
-                # （例: 「イオン導入器」）であり各社商品名（「イオンエフェクター」）と
-                # 一致しないため title match チェックをスキップ。
-                # サプリメント: ブランドがローマ字/カタカナ表記ゆれで全件スキップを
-                #   避けるため pre-filter なし。score_rakuten_item の +60/-0 で制御。
-                # 美容機器: ブランド一致のみで判定（製品名が説明語のため）。
-                # ピーリング・パック・乳液: 成分名+カテゴリ名の製品名(例:「セラミド 乳液」)では
-                #   楽天タイトルに成分名が含まれないケースが多く is_same_verified_rakuten_product が
-                #   全件 False になるため、score_rakuten_item のカテゴリ固有チェックに委ねる。
+                # --- title match チェック ---
+                # 美容機器: 製品名がカテゴリ説明語（「イオン導入器」等）のためブランド一致のみ
+                # 成分名+カテゴリ名パターン（「セラミド 乳液」「ナイアシンアミド 美容液」等）:
+                #   楽天タイトルに成分名が含まれないため is_same_verified_rakuten_product が
+                #   全件 False になる → score_rakuten_item のカテゴリ固有チェックに委ねる
+                # サプリメント: ブランド表記揺れが多く pre-filter なし
+                # 上記以外の具体的な製品名: is_same_verified_rakuten_product で照合
+                _bypass_title_match = (
+                    category == "サプリメント"
+                    or _is_ingredient_category_name(product_name)
+                )
+
                 if category == "美容機器":
                     if brand:
                         _bc = "".join(c for c in brand.lower() if c.strip())
                         _tc = "".join(c for c in rakuten_title.lower() if c.strip())
                         if _bc and _bc not in _tc:
                             continue
-                elif category in ("サプリメント", "ピーリング", "パック", "乳液", "美容液"):
-                    pass  # pre-filter なし: score_rakuten_item のカテゴリ固有チェックに委ねる
-                elif not is_same_verified_rakuten_product(
-                    product_name=product_name,
-                    rakuten_title=rakuten_title,
-                    brand=brand
-                ):
-                    print(
-                        "[RAKUTEN REJECT TITLE MISMATCH]",
-                        {
-                            "product": product_name,
-                            "brand": brand,
-                            "rakuten_title": rakuten_title
-                        },
-                        flush=True
-                    )
-                    continue
+                elif not _bypass_title_match:
+                    if not is_same_verified_rakuten_product(
+                        product_name=product_name,
+                        rakuten_title=rakuten_title,
+                        brand=brand
+                    ):
+                        print(
+                            "[RAKUTEN REJECT TITLE MISMATCH]",
+                            {"product": product_name, "brand": brand, "rakuten_title": rakuten_title},
+                            flush=True
+                        )
+                        continue
 
                 score = score_rakuten_item(
                     item,
@@ -3154,24 +3152,24 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                     category=category
                 )
 
-                if category in ("サプリメント", "美容機器", "美容液", "乳液"):
+                if _bypass_title_match or category == "美容機器":
                     print(
-                        f"[RAKUTEN BYPASS SCORE] cat={category} score={score} title={rakuten_title[:50]}",
+                        f"[RAKUTEN BYPASS SCORE] cat={category} bypass={_bypass_title_match} "
+                        f"score={score} title={rakuten_title[:50]}",
                         flush=True
                     )
 
-                # ピーリング・美容機器・サプリ・乳液・美容液はname_matchバイパス(8-10点)で
-                # 通常より低スコア出発のため閾値を緩める（-9999リジェクトのみ除外）
-                _min_score = 0 if category in ("ピーリング", "パック", "美容機器", "サプリメント", "乳液", "美容液") else 20
+                # バイパス時はスコア閾値を 0 に緩める（-9999 リジェクト以外は通す）
+                _min_score = 0 if (_bypass_title_match or category == "美容機器") else 20
                 if score < _min_score:
                     continue
 
                 scored_items.append((score, item))
 
             if not scored_items:
-                if category in ("サプリメント", "美容機器", "美容液", "乳液"):
+                if _bypass_title_match or category == "美容機器":
                     print(
-                        f"[RAKUTEN BYPASS NO ITEMS] keyword={keyword} category={category}",
+                        f"[RAKUTEN BYPASS NO ITEMS] keyword={keyword} cat={category}",
                         flush=True
                     )
                 continue
@@ -4858,6 +4856,30 @@ _ALL_DAYS = ["月", "火", "水", "木", "金", "土", "日"]
 # AHA/BHA系も aha / bha / aha_bha 全パターン対応
 _IRRITANT_FOCUS_TAGS = {"retinoid", "retinol", "retinal", "aha_bha", "aha", "bha", "pha"}
 
+# 「成分名+カテゴリ名」パターン検出用カテゴリ集合
+# 例: "セラミド 乳液" "ナイアシンアミド 美容液" "ビタミンC 化粧水"
+_SKINCARE_CATEGORY_SUFFIXES = {
+    "洗顔", "洗顔料", "化粧水", "美容液", "乳液", "クリーム", "保湿クリーム",
+    "日焼け止め", "クレンジング", "パック", "マスク", "ピーリング",
+    "導入美容液", "美顔器", "サプリ", "サプリメント",
+}
+
+def _is_ingredient_category_name(product_name: str) -> bool:
+    """
+    製品名が「成分名+カテゴリ名」または「カテゴリ名のみ」パターンかを判定。
+    このパターンは楽天タイトルに成分名が含まれないため is_same_verified_rakuten_product を
+    通ると全件 False になる。score_rakuten_item のカテゴリ固有チェックに委ねる。
+    例: "セラミド 乳液" "ナイアシンアミド 美容液" "ビタミンC 化粧水" → True
+        "キュレル 潤浸保湿乳液" "COSRX スネイルムチン96エッセンス" → False
+    """
+    name = (product_name or "").strip()
+    for cat in _SKINCARE_CATEGORY_SUFFIXES:
+        if name == cat:
+            return True
+        if name.endswith(" " + cat) or name.endswith("　" + cat):
+            return True
+    return False
+
 
 def resolve_weekly_care_day_conflicts(data):
     """
@@ -4940,44 +4962,56 @@ def resolve_weekly_care_day_conflicts(data):
 
 def resolve_night_irritant_conflicts(data):
     """
-    夜ルーティン内でレチノイド × BHA/SA洗顔料などの刺激成分同士の曜日衝突を解消。
-    レチノイド系を固定し、BHA/SA系ステップを別の曜日に移動する。
+    夜ルーティン内の刺激成分同士の曜日衝突を優先順位ベースで汎用的に解消。
+
+    優先順位（高い順に固定し、低い方を別曜日へ移動）:
+      1. レチノイド（retinol/retinal/retinoid）
+      2. 高濃度ビタミンC（vitamin_c/strong_vitamin_c）
+      3. アゼライン酸（azelaic_acid）
+      4. AHA/BHA/PHA（bha/aha/aha_bha/pha）
     """
-    _retinoid_tags = {"retinoid", "retinol", "retinal"}
-    _bha_tags = {"aha_bha", "aha", "bha", "pha"}
-    _all_days = ["月", "火", "水", "木", "金", "土", "日"]
+    _PRIORITY_GROUPS = [
+        ({"retinoid", "retinol", "retinal"},          "レチノイド"),
+        ({"vitamin_c", "strong_vitamin_c"},            "高濃度ビタミンC"),
+        ({"azelaic_acid"},                             "アゼライン酸"),
+        ({"aha_bha", "aha", "bha", "pha"},             "AHA/BHA/PHA"),
+    ]
 
     night_steps = [s for s in data.get("night", {}).get("steps", []) if isinstance(s, dict)]
 
-    retinoid_days: set = set()
-    bha_steps_to_fix: list = []
+    # 優先度の高いグループから順に「確定済み曜日」を積み上げ、
+    # 低いグループが重複していたら安全な曜日へ移動する
+    fixed_days: set = set()
 
-    for step in night_steps:
-        focus = set(as_list(step.get("ingredient_focus") or []))
-        days = step.get("use_days") or []
-        if focus & _retinoid_tags and days:
-            retinoid_days.update(days)
-        if focus & _bha_tags and days:
-            bha_steps_to_fix.append(step)
+    for tags, label in _PRIORITY_GROUPS:
+        conflict_steps = []
+        for step in night_steps:
+            focus = set(as_list(step.get("ingredient_focus") or []))
+            days = step.get("use_days") or []
+            if not (focus & tags) or not days:
+                continue
+            if set(days) & fixed_days:
+                conflict_steps.append(step)
 
-    if not retinoid_days or not bha_steps_to_fix:
-        return data
+        for step in conflict_steps:
+            use_days = list(step.get("use_days") or [])
+            safe = [d for d in _ALL_DAYS if d not in fixed_days]
+            if not safe:
+                continue
+            new_days = safe[:max(len(use_days), 1)]
+            print(
+                f"[NIGHT CONFLICT] {step.get('product','夜ステップ')} ({label}) "
+                f"{use_days} → {new_days} (fixed={sorted(fixed_days)})",
+                flush=True,
+            )
+            step["use_days"] = new_days
 
-    for step in bha_steps_to_fix:
-        use_days = list(step.get("use_days") or [])
-        conflict = set(use_days) & retinoid_days
-        if not conflict:
-            continue
-        safe = [d for d in _all_days if d not in retinoid_days]
-        if not safe:
-            continue
-        new_days = safe[:max(len(use_days), 1)]
-        print(
-            f"[NIGHT CONFLICT] {step.get('product','夜ステップ')} {use_days} → {new_days} "
-            f"(retinoid_days={sorted(retinoid_days)})",
-            flush=True,
-        )
-        step["use_days"] = new_days
+        # このグループの（調整後の）曜日を fixed_days に追加
+        for step in night_steps:
+            focus = set(as_list(step.get("ingredient_focus") or []))
+            days = step.get("use_days") or []
+            if focus & tags and days:
+                fixed_days.update(days)
 
     return data
 
@@ -12227,30 +12261,18 @@ def finalize_step_data(step, user_data):
         if not isinstance(raw_candidates, list):
             raw_candidates = []
 
-        # カテゴリ名のみ・成分名+カテゴリ名のみの汎用名候補を除外
+        # カテゴリ名そのままの候補を除外（「美容液」「乳液」単体）
+        # 「セラミド 乳液」「ナイアシンアミド 美容液」等は正当な候補名のため除外しない
         _generic_category_names = {
             "化粧水", "美容液", "乳液", "クリーム", "日焼け止め", "洗顔", "洗顔料",
             "クレンジング", "パック", "マスク", "ピーリング", "導入美容液", "保湿クリーム",
             "美顔器", "サプリ", "サプリメント",
         }
 
-        # 洗顔/乳液/美容液/ピーリング系は製品名がカテゴリ語で終わるのが自然なため
-        # endswith チェックを適用しない（完全一致のみ汎用名判定）
-        _endswith_skip_cats = {"洗顔", "洗顔料", "乳液", "美容液", "ピーリング", "パック"}
-
         def _is_generic_name(brand: str, name: str) -> bool:
-            name_stripped = name.strip()
-            # カテゴリ名そのまま（ブランドあり/なし問わず）
-            if name_stripped in _generic_category_names:
-                return True
-            # 「成分名 + スペース + カテゴリ名」パターンのみ除外
-            # （例: "アゼライン酸 化粧水", "ナイアシンアミド 美容液"）
-            for cat in _generic_category_names:
-                if cat in _endswith_skip_cats:
-                    continue
-                if name_stripped.endswith(" " + cat) or name_stripped.endswith("　" + cat):
-                    return True
-            return False
+            # カテゴリ名と完全一致する場合のみ汎用名と判定
+            # 成分名+カテゴリ名（「セラミド 乳液」等）は汎用名扱いしない
+            return name.strip() in _generic_category_names
 
         _step_cat = str(step.get("category", "") or "")
         normalized_candidates = []
