@@ -1956,22 +1956,15 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         return -9999
 
     if category == "美容液":
-        if any(word in title for word in [
-            "化粧水",
-            "ローション",
-            "トナー",
-            "toner",
-            "lotion",
-            "乳液",
-            "ミルク",
-            "クリーム",
-            "ジェルクリーム",
-            "オールインワン",
-            "シートマスク",
-            "フェイスマスク",
-            "薬用マスク",
-            "パック"
-        ]):
+        _serum_wrong = [
+            "化粧水", "ローション", "トナー", "toner", "lotion",
+            "乳液", "ミルク", "クリーム", "ジェルクリーム",
+            "オールインワン", "シートマスク", "フェイスマスク", "薬用マスク", "パック"
+        ]
+        if any(word in title for word in _serum_wrong):
+            return -9999
+        _serum_required = ["美容液", "セラム", "エッセンス", "アンプル", "serum", "essence", "ampoule"]
+        if not any(w.lower() in title_norm or w in title for w in _serum_required):
             return -9999
 
     elif category == "クリーム":
@@ -3136,7 +3129,7 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                         _tc = "".join(c for c in rakuten_title.lower() if c.strip())
                         if _bc and _bc not in _tc:
                             continue
-                elif category in ("サプリメント", "ピーリング", "パック", "乳液"):
+                elif category in ("サプリメント", "ピーリング", "パック", "乳液", "美容液"):
                     pass  # pre-filter なし: score_rakuten_item のカテゴリ固有チェックに委ねる
                 elif not is_same_verified_rakuten_product(
                     product_name=product_name,
@@ -3167,9 +3160,9 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                         flush=True
                     )
 
-                # ピーリング・美容機器・サプリ・乳液はname_matchバイパス(8-10点)で
+                # ピーリング・美容機器・サプリ・乳液・美容液はname_matchバイパス(8-10点)で
                 # 通常より低スコア出発のため閾値を緩める（-9999リジェクトのみ除外）
-                _min_score = 0 if category in ("ピーリング", "パック", "美容機器", "サプリメント", "乳液") else 20
+                _min_score = 0 if category in ("ピーリング", "パック", "美容機器", "サプリメント", "乳液", "美容液") else 20
                 if score < _min_score:
                     continue
 
@@ -12197,9 +12190,9 @@ def finalize_step_data(step, user_data):
             "美顔器", "サプリ", "サプリメント",
         }
 
-        # 洗顔/乳液/ピーリング系は製品名がカテゴリ語で終わるのが自然なため
+        # 洗顔/乳液/美容液/ピーリング系は製品名がカテゴリ語で終わるのが自然なため
         # endswith チェックを適用しない（完全一致のみ汎用名判定）
-        _endswith_skip_cats = {"洗顔", "洗顔料", "乳液", "ピーリング", "パック"}
+        _endswith_skip_cats = {"洗顔", "洗顔料", "乳液", "美容液", "ピーリング", "パック"}
 
         def _is_generic_name(brand: str, name: str) -> bool:
             name_stripped = name.strip()
