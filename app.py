@@ -16869,7 +16869,17 @@ def product_click():
     except Exception:
         return "無効なURLです", 400
 
-    return redirect(url)
+    # replace() で履歴を上書きし、戻るボタンで結果ページに戻れるようにする
+    safe_url = url.replace('"', '%22').replace("'", '%27')
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="UTF-8">
+<script>window.location.replace("{safe_url}");</script>
+<style>body{{font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;background:#fffafd;}}
+a{{color:#9b3156;font-size:15px;}}</style>
+</head><body>
+<a href="{safe_url}">移動中... タップして開く</a>
+</body></html>"""
+
 @app.route("/pricing")
 def pricing():
     source = request.args.get("source", "unknown")
