@@ -10419,6 +10419,14 @@ def clean_display_product_name(name):
     # 括弧内の補足情報の除去 (例: (旧パッケージ), 【限定品】)
     text = re.sub(r'[\(（【]旧[^)）】]*[\)）】]', '', text)
     text = re.sub(r'[\(（【]旧パッケージ[\)）】]', '', text)
+    # AIがカテゴリ注記として付与する末尾の括弧書きを除去
+    # 例: "〇〇ドリンク (美容液)" と "〇〇ドリンク" が別候補として重複表示されるのを防ぐ
+    text = re.sub(
+        r'[\(（](化粧水|美容液|乳液|クリーム|洗顔料?|クレンジング|日焼け止め|パック|'
+        r'ピーリング|酵素洗顔|導入美容液|保湿クリーム|サプリメント?|美容機器|[^\)）]{1,10}代わり)[\)）]\s*$',
+        '',
+        text
+    )
     # 価格・割引・クーポン表記の除去（楽天商品名に混入するパターン）
     # 例: "500円off" "☆クーポンで1980円" "【1000円OFF】" "税込2980円"
     text = re.sub(r'[\(（【]?[^\s（【】）]{0,10}(クーポン|coupon|COUPON)[^\s）】]{0,20}[\)）】]?', '', text, flags=re.IGNORECASE)
@@ -17593,7 +17601,7 @@ def result_detail(result_id):
                     data = item
 
                 data["is_premium"] = is_premium_user()
-                data["is_dev_mode"] = True
+                data["is_dev_mode"] = DEV_MODE or DEV_PREMIUM_MODE
 
                 if not isinstance(data.get("symmetry_analysis"), dict):
                     data["symmetry_analysis"] = {
