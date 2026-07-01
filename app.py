@@ -14293,10 +14293,7 @@ def get_analysis_schema_phase2():
             "priority": {"type": "integer"},
             "use_days": {"type": "array", "items": {"type": "string"}},
             "use_timing": {"type": "string"},
-            # minItems=5: 表示は上位3件だが、キーワードベースの検証
-            # (カテゴリ判定・重複排除・NGワード等)で1〜2件落ちても
-            # 3件を維持できるよう、常にバッファを持たせて出力させる。
-            "product_candidates": {"type": "array", "items": product_candidate_schema, "minItems": 5},
+            "product_candidates": {"type": "array", "items": product_candidate_schema},
             "selection_reason": {"type": "string"}
         },
         "required": ["category","role","purpose","ingredient_focus","risk_note","priority","use_days","use_timing","product_candidates"]
@@ -15038,9 +15035,7 @@ nightステップのuse_days=["月","水","金"]で高刺激成分を使用す�
 パック条件: 乾燥・バリア低下顕著または刺激成分使用後の回復ケアが必要な時のみ。
 
 【product_candidates】
-各stepに必ず5件以上出力(4件以下禁止)。現行販売中の正式名称が確実な商品のみ。stepのcategoryと完全一致必須。
-※表示に使うのは上位3件のみだが、後段の検証(カテゴリ判定・重複排除・NGワード等)で
-一部が除外されても3件を維持できるよう、必ず5件以上を候補として出すこと。
+各stepに必ず3件出力(2件以下禁止・4件可)。現行販売中の正式名称が確実な商品のみ。stepのcategoryと完全一致必須。
 
 【カテゴリ別 商品種別ルール（必読・厳守）】
 - 美容液スロット → セラム/美容液/エッセンス/アンプル/ブースター系のみ。洗顔料・ジェルウォッシュ・クレンジング・化粧水は絶対禁止。
