@@ -4663,6 +4663,13 @@ def _try_rakuten_fallback_candidate(step, affiliate_ai_db):
             step["estimated_price"] = safe_price(rakuten_item["price"])
             step["price_band"] = build_price_band(step["price"])
         step["product_source"] = "rakuten_fallback"
+
+        # top_candidates を差し替え後の状態に同期する。
+        # ここを更新しないと、繰り上がった商品が「1位」として表示されつつ、
+        # 古い top_candidates[1:3] にもそのまま残って「2位」等に重複表示されてしまう。
+        step["top_candidates"] = [fallback] + [
+            c for c in cands if c is not fallback
+        ]
         return True
 
     return False
@@ -10430,9 +10437,12 @@ def clean_display_product_name(name):
     text = re.sub(r'[\(（【]旧パッケージ[\)）】]', '', text)
     # AIがカテゴリ注記として付与する末尾の括弧書きを除去
     # 例: "〇〇ドリンク (美容液)" と "〇〇ドリンク" が別候補として重複表示されるのを防ぐ
+    # 注意: "ピーリング"/"酵素洗顔" は score_product() のピーリング強制判定が
+    # 商品名から拾うキーワードでもあるため、ここでは除去対象に含めない
+    # （含めると酵素ピーリング候補が誤って強制除外されてしまう）
     text = re.sub(
         r'[\(（](化粧水|美容液|乳液|クリーム|洗顔料?|クレンジング|日焼け止め|パック|'
-        r'ピーリング|酵素洗顔|導入美容液|保湿クリーム|サプリメント?|美容機器|[^\)）]{1,10}代わり)[\)）]\s*$',
+        r'導入美容液|保湿クリーム|サプリメント?|美容機器|[^\)）]{1,10}代わり)[\)）]\s*$',
         '',
         text
     )
