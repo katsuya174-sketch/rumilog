@@ -7088,14 +7088,23 @@ def infer_active_profile(product):
     strength = "low"
     irritation_risk = "low"
 
-    if any(x in text for x in [
-        "retinol",
-        "retinal",
-        "retinoid",
-        "レチノール",
-        "レチナール",
-        "レチノイド"
-    ]):
+    # レチノイド判定は ingredient_focus/main_functions を含む結合文字列ではなく、
+    # active_ingredients（統制語彙）・商品名・retinol_levelという信頼度の高い
+    # フィールドのみで判定する。ingredient_focus/main_functions はAIが
+    # 「レチノールのような刺激なしに」等の説明的な文言を含めることがあり、
+    # レチノールを含まない商品まで誤ってレチノイド扱いされ、
+    # 実際にはルーティンにレチノールが無いのに「レチノールの刺激を緩和」
+    # という相乗効果ノートが表示されるバグの原因になっていた。
+    _retinoid_keywords = ["retinol", "retinal", "retinoid", "レチノール", "レチナール", "レチノイド"]
+    _active_text = " ".join(str(x).lower() for x in active_ingredients)
+    _product_name_text = str(product.get("name", "") or "").lower()
+    _has_retinol_level = safe_retinol_level(product.get("retinol_level", 0)) > 0
+
+    if (
+        _has_retinol_level
+        or any(x in _active_text for x in _retinoid_keywords)
+        or any(x in _product_name_text for x in _retinoid_keywords)
+    ):
         families.add("retinoid")
         pair_well_with.update([
             "ceramide",
