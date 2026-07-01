@@ -7030,9 +7030,11 @@ def is_wrong_cleanser_candidate(product, step):
     # 以前ここにローカルの重複リストがあり、片方だけ更新されて定義がずれる
     # バグを引き起こしていたため、単一の定義元に統一した。
     if any(k.lower() in name for k in TONER_KEYWORDS):
+        print(f"[CLEANSER REJECT toner-keyword] name={name!r}", flush=True)
         return True
 
     if not any(k.lower() in name for k in CLEANSER_KEYWORDS):
+        print(f"[CLEANSER REJECT no-cleanser-keyword] name={name!r}", flush=True)
         return True
 
     return False
@@ -7380,6 +7382,11 @@ def score_product(product, step, user_data, budget_value):
         product.get("name", ""),
         step.get("category", "")
     ):
+        print(
+            f"[SCORE REJECT generic-name] cat={step.get('category','')!r} "
+            f"brand={product.get('brand','')!r} name={product.get('name','')!r}",
+            flush=True
+        )
         return -9999
 
     # ===== ピーリング強制判定 =====
@@ -10285,6 +10292,11 @@ def normalize_ai_candidates(step):
                 confidence = 0
 
             if confidence < 70:
+                print(
+                    f"[CANDIDATE SKIP low-confidence] cat={step_category} name={name!r} "
+                    f"brand={brand!r} confidence={confidence}",
+                    flush=True
+                )
                 continue
         else:
             confidence = None
@@ -10294,6 +10306,11 @@ def normalize_ai_candidates(step):
         ).lower().strip()
 
         if release_status in rejected_statuses:
+            print(
+                f"[CANDIDATE SKIP release-status] cat={step_category} name={name!r} "
+                f"brand={brand!r} release_status={release_status!r}",
+                flush=True
+            )
             continue
 
         candidate_category = normalize_candidate_category(
@@ -10304,6 +10321,12 @@ def normalize_ai_candidates(step):
         # AI候補は、stepカテゴリと一致するものだけ採用する。
         # 商品名からカテゴリを推測してstepカテゴリを上書きしない。
         if candidate_category != step_category:
+            print(
+                f"[CANDIDATE SKIP category-mismatch] step_cat={step_category!r} "
+                f"candidate_cat_raw={candidate.get('category', '')!r} "
+                f"normalized={candidate_category!r} name={name!r} brand={brand!r}",
+                flush=True
+            )
             continue
 
         active_ingredients = candidate.get("active_ingredients", [])
