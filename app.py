@@ -15505,7 +15505,7 @@ def set_gemini_cached_analysis(cache_key, data):
 
     save_analysis_cache_to_db(cache_key, data)
 
-def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
+def analyze_skin_with_gemini(user_data, front_img, left_img, right_img, force_refresh=False):
 
     if DEV_MODE:
         print("DEV_MODE: analyze_skin_with_gemini ダミー返却")
@@ -15533,10 +15533,19 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
         f"ai_candidate_schema_v3:{base_cache_key}",
     ]
 
-    cached_analysis = get_gemini_cached_analysis(fallback_cache_keys)
+    cached_analysis = None if force_refresh else get_gemini_cached_analysis(fallback_cache_keys)
+
+    if force_refresh:
+        print("[GEMINI ANALYSIS FORCE REFRESH]", cache_key, flush=True)
 
     if cached_analysis:
         cached_analysis.setdefault("warnings", [])
+        # キャッシュヒット時はGeminiに再問い合わせしないため、
+        # product_candidates は前回生成時点のまま。ここでもログを出さないと
+        # 「同じ入力で再診断したのに直したはずの候補が変わらない」原因が
+        # キャッシュなのか絞り込みロジックなのか切り分けられない。
+        print("[GEMINI ANALYSIS CACHE HIT]", cache_key, flush=True)
+        debug_candidate_counts(cached_analysis)
         return cached_analysis
 
     print("[GEMINI ANALYSIS CACHE MISS]", cache_key, flush=True)
@@ -16428,7 +16437,8 @@ def lab_test_function():
                     user_data,
                     front_img,
                     left_img,
-                    right_img
+                    right_img,
+                    force_refresh=(request.args.get("force_refresh") == "1")
                 )
 
                 print("[LAB CHECK] after Gemini", flush=True)
