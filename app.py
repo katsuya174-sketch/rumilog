@@ -6342,23 +6342,12 @@ def score_goal_fit(product, step):
         if focus_norm in purpose or purpose in focus_norm:
             score += 8
 
-    # 目的キーワード補正
-    if "毛穴" in purpose and "pores" in product_concerns:
-        score += 6
-    if "ニキビ" in purpose and "acne" in product_concerns:
-        score += 6
-    if "赤み" in purpose and "redness" in product_concerns:
-        score += 6
-    if ("乾燥" in purpose or "保湿" in purpose) and (
-        "dryness" in product_concerns or "barrier" in product_concerns
-    ):
-        score += 6
-    if ("くすみ" in purpose or "透明感" in purpose or "美白" in purpose) and (
-        "dullness" in product_concerns or "whitening" in product_concerns
-    ):
-        score += 6
-    if ("ハリ" in purpose or "エイジング" in purpose or "しわ" in purpose) and "aging" in product_concerns:
-        score += 6
+    # 「目的キーワード補正」は削除した。
+    # concern_tags は purpose_to_concern_tags(purpose) から生成されており、
+    # 「毛穴」→"pores"、「ニキビ」→"acne" 等を既にタグ化した上で
+    # 上の match_count ループで product_concerns との一致を評価している。
+    # この補正ブロックは全く同じ判定（purposeの単語 × product_concerns）を
+    # 別の書き方で繰り返しており、同じ根拠で二重に加点していた。
 
     return score
 
@@ -6937,9 +6926,6 @@ def apply_sunscreen_score_rules(product, step, user_data, concern_tags):
 
     if "紫外線防御" in functions:
         score += 8
-    if "光ダメージケア" in functions:
-        score += 4
-
     if "光ダメージケア" in functions:
         score += 4
 
@@ -8145,53 +8131,54 @@ def score_improvement(product, improvement_plan=None):
             elif strength in ["low", "mild"]:
                 score += 3
 
-            function_text = " ".join(
-                str(x)
-                for x in main_functions + ingredient_focus
-            ).lower()
+    # function_bonus は商品単位で1回だけ加点する。
+    # 以前は ingredient_strength のループの内側にあったため、
+    # terms に一致する成分が複数あるとその数だけ同じ加点が繰り返され、
+    # さらに "uv"/"UV" が別キーとして両方存在し（lower()後は同一文字列）
+    # 実質同じ条件で二重加点にもなっていた。
+    function_text = " ".join(
+        str(x)
+        for x in main_functions + ingredient_focus
+    ).lower()
 
-            function_bonus_keywords = {
-                "美白": 8,
-                "毛穴": 8,
-                "ニキビ": 8,
-                "ハリ": 8,
-                "バリア": 7,
-                "保湿": 6,
-                "鎮静": 6,
-                "角質": 7,
-                "uv": 8,
-                "UV": 8,
-                "紫外線": 8,
-            }
-
-            for keyword, bonus in function_bonus_keywords.items():
-                if keyword.lower() in function_text:
-                    score += bonus  
-    # 商品名からの補正
-    name_bonus_keywords = {
-        "メラノ": 18,
-        "melano": 18,
-        "ビタミンc": 18,
-        "vitamin c": 18,
-        "レチノール": 22,
-        "retinol": 22,
-        "レチナール": 24,
-        "retinal": 24,
-        "アゼライン": 22,
-        "azelaic": 22,
-        "シカ": 12,
-        "cica": 12,
-        "セラミド": 14,
-        "ceramide": 14,
-        "ピーリング": 18,
-        "peeling": 18,
-        "日焼け止め": 18,
-        "uv": 18,
-        "spf": 18,
+    function_bonus_keywords = {
+        "美白": 8,
+        "毛穴": 8,
+        "ニキビ": 8,
+        "ハリ": 8,
+        "バリア": 7,
+        "保湿": 6,
+        "鎮静": 6,
+        "角質": 7,
+        "uv": 8,
+        "紫外線": 8,
     }
 
-    for keyword, bonus in name_bonus_keywords.items():
-        if keyword in name:
+    for keyword, bonus in function_bonus_keywords.items():
+        if keyword.lower() in function_text:
+            score += bonus
+    # 商品名からの補正
+    # 商品名からの補正。
+    # 同じ成分・概念の日英表記ペア（例:「レチノール」/"retinol"）は
+    # 1グループにつき1回だけ加点する。以前は辞書を無条件にループして
+    # 該当した分だけ全部加算していたため、日英併記の商品名や、
+    # 下の「日焼け止め」「ピーリング」専用ブロックと同じ概念を
+    # 名前キーワードでも二重に加点しており、特に日焼け止め商品は
+    # 「日焼け止め」「uv」「spf」が同一商品名に同時出現しやすく、
+    # 専用ブロックの加点と合わせて大幅な過大評価になっていた。
+    # 「日焼け止め」「ピーリング」は専用ブロックに任せ、ここでは扱わない。
+    name_bonus_groups = [
+        (18, ["メラノ", "melano"]),
+        (18, ["ビタミンc", "vitamin c"]),
+        (22, ["レチノール", "retinol"]),
+        (24, ["レチナール", "retinal"]),
+        (22, ["アゼライン", "azelaic"]),
+        (12, ["シカ", "cica"]),
+        (14, ["セラミド", "ceramide"]),
+    ]
+
+    for bonus, keywords in name_bonus_groups:
+        if any(keyword in name for keyword in keywords):
             score += bonus
 
     # 日焼け止めは色素沈着・赤み予防として改善寄与を持たせる
