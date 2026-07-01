@@ -9472,7 +9472,11 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         }
 
         if brand_key:
-            identity_keys.add(f"{brand_key} {name_without_brand_key}".strip())
+            # normalize_product_identity() と同じ正規化を使う（ブランド+商品名の
+            # 連結時にスペースが残って重複排除に失敗するバグの修正を共有するため）
+            identity_keys.add(
+                normalize_product_identity(c.get("brand", ""), c.get("name", ""))
+            )
 
         identity_keys = {k for k in identity_keys if k}
 
@@ -10108,7 +10112,15 @@ def normalize_product_identity(brand="", name=""):
         name_without_brand_key = name_without_brand_key[len(brand_key):].strip()
 
     if brand_key:
-        return f"{brand_key} {name_without_brand_key}".strip()
+        # brand_key/name_without_brand_key は既に空白除去済みの正規化文字列だが、
+        # f-string で連結すると間に半角スペースが1つ入ってしまう。
+        # ブランドが空で「ブランド名+商品名」が1つの文字列として渡ってきた
+        # 候補（楽天検索由来など）はスペースなしで正規化されるため、
+        # 同一商品なのにキーが一致せず重複排除できないバグになっていた。
+        # 連結後にもう一度正規化してスペースを除去し、両者を一致させる。
+        return normalize_candidate_name_for_merge(
+            f"{brand_key} {name_without_brand_key}".strip()
+        )
 
     return name_without_brand_key
 
