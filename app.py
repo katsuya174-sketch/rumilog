@@ -4511,6 +4511,43 @@ def infer_brand_from_image(image_url: str, product_name: str, category: str = ""
         return ""
 
 
+def infer_brand_from_title(product_name: str, category: str = "") -> str:
+    """商品名（楽天タイトル等）だけからGeminiでブランド名を推測する。
+    画像取得を伴わない軽量版。楽天検索由来の候補はブランド欄が常に空文字のため、
+    商品名は分かっているのにブランドだけ欠落しているケースを補完する目的。
+    Gemini失敗時は空文字を返す。"""
+    product_name = str(product_name or "").strip()
+    if not product_name:
+        return ""
+    try:
+        _prompt = (
+            f"次の日本のスキンケア商品名から、ブランド名・メーカー名を1つだけ答えてください。\n"
+            f"商品名: 「{product_name}」\n"
+            f"カテゴリ: {category or '不明'}\n"
+            f"ブランド名が商品名から確実に読み取れない場合は空文字を返してください。"
+            f"余計な説明は不要です。ブランド名のみ回答してください。"
+        )
+        _response = call_gemini_with_retry(
+            client=client,
+            model=DETAIL_MODEL,
+            contents=[_prompt],
+            config=types.GenerateContentConfig(temperature=0, max_output_tokens=30),
+            max_retries=1,
+            timeout=8,
+        )
+        _brand = (_response.text or "").strip()
+        _brand = _brand.replace("「", "").replace("」", "").replace('"', "").replace("'", "").strip()
+        if not _brand or len(_brand) > 40:
+            return ""
+        if _brand.strip() in _GENERIC_CATEGORY_NAMES:
+            return ""
+        print(f"[BRAND INFER FROM TITLE] {product_name} → {_brand}", flush=True)
+        return _brand
+    except Exception as _e:
+        print(f"[BRAND INFER FROM TITLE ERROR] {_e}", flush=True)
+        return ""
+
+
 def attach_affiliate_links_to_step(step, affiliate_ai_db):
     if not isinstance(step, dict):
         return step
@@ -12401,6 +12438,18 @@ def finalize_step_data(step, user_data):
                 break
 
         if normalized_candidates:
+            # 楽天検索由来の候補は仕様上ブランド欄が常に空文字になる。
+            # 商品名自体は具体的（汎用名チェックを通過済み）なので、除外せず
+            # 商品名からブランド名をGeminiに補完させる（最大3件・診断1回あたり
+            # ステップ数×3件が上限のため呼び出し回数は抑えられている）。
+            for cand in normalized_candidates:
+                if cand.get("brand"):
+                    continue
+                _inferred_brand = infer_brand_from_title(
+                    cand.get("name", ""), _step_cat
+                )
+                if _inferred_brand:
+                    cand["brand"] = _inferred_brand
             return normalized_candidates
 
         selected_candidate = normalize_candidate({
