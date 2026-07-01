@@ -7108,6 +7108,15 @@ def infer_active_profile(product):
         "avoid_with": avoid_with
     }
 
+# カテゴリ名そのまま（ブランド無し・具体的な製品名なし）の候補を弾くための共通リスト。
+# 2位/3位候補の表示フィルタ（preserve_ranked_top_candidates）と
+# score_product() のメイン候補選定の両方から参照し、定義のずれを防ぐ。
+_GENERIC_CATEGORY_NAMES = {
+    "化粧水", "美容液", "乳液", "クリーム", "日焼け止め", "洗顔", "洗顔料",
+    "クレンジング", "パック", "マスク", "ピーリング", "導入美容液", "保湿クリーム",
+    "美顔器", "サプリ", "サプリメント",
+}
+
 def score_product_combination(
     selected_products,
     candidate
@@ -7199,6 +7208,20 @@ def score_product(product, step, user_data, budget_value):
 
     if is_discontinued_or_suspicious_product(product):
         return -9999
+
+    # ===== カテゴリ名そのまま／ブランド除去後に空になる候補は強制除外 =====
+    # 例: 商品名が「日焼け止め」だけ、ブランド無しで具体的な製品名がない候補。
+    # ここで弾かないと、そのまま「1位」として選定・表示され、
+    # さらに verified_products_cache に永続キャッシュされて以後の診断にも
+    # 汚染が広がる。
+    _pname_for_generic_check = str(product.get("name", "") or "").strip()
+    _pbrand_for_generic_check = str(product.get("brand", "") or "").strip()
+    if _pname_for_generic_check:
+        _, _pname_only = clean_brand_and_product_name(
+            _pbrand_for_generic_check, _pname_for_generic_check
+        )
+        if not _pname_only.strip() or _pname_only.strip() in _GENERIC_CATEGORY_NAMES:
+            return -9999
 
     # ===== ピーリング強制判定 =====
     if step.get("category") == "ピーリング":
@@ -12298,16 +12321,12 @@ def finalize_step_data(step, user_data):
 
         # カテゴリ名そのままの候補を除外（「美容液」「乳液」単体）
         # 「セラミド 乳液」「ナイアシンアミド 美容液」等は正当な候補名のため除外しない
-        _generic_category_names = {
-            "化粧水", "美容液", "乳液", "クリーム", "日焼け止め", "洗顔", "洗顔料",
-            "クレンジング", "パック", "マスク", "ピーリング", "導入美容液", "保湿クリーム",
-            "美顔器", "サプリ", "サプリメント",
-        }
-
+        # (score_product() のメイン候補選定と同じ _GENERIC_CATEGORY_NAMES を共有し、
+        #  判定基準がずれないようにする)
         def _is_generic_name(brand: str, name: str) -> bool:
             # カテゴリ名と完全一致する場合のみ汎用名と判定
             # 成分名+カテゴリ名（「セラミド 乳液」等）は汎用名扱いしない
-            return name.strip() in _generic_category_names
+            return name.strip() in _GENERIC_CATEGORY_NAMES
 
         _step_cat = str(step.get("category", "") or "")
         normalized_candidates = []
