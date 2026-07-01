@@ -6897,7 +6897,7 @@ def is_wrong_cleanser_candidate(product, step):
 
     cleanser_keywords = [
         "洗顔", "フォーム", "クレンザー", "ウォッシュ",
-        "ジェルウォッシュ", "泡",
+        "ジェルウォッシュ", "泡", "ホイップ", "石鹸", "せっけん",
         "soap", "cleanser", "cleansing foam",
         "face wash", "facial wash"
     ]
