@@ -2493,11 +2493,10 @@ def load_verified_products_cache():
         if not name or not category:
             continue
 
-        # 過去にキャッシュされた「カテゴリ名そのまま」等の不完全な候補を
-        # 読み込み時点で弾く。TTL(45日)を待たずに汚染データを自己修復するため。
+        # 過去にキャッシュされた「カテゴリ名（またはその同義語）そのまま」等の
+        # 不完全な候補を読み込み時点で弾く。TTL(45日)を待たずに汚染データを自己修復するため。
         brand = str(item.get("brand", "") or "").strip()
-        _, name_only = clean_brand_and_product_name(brand, name)
-        if not name_only.strip() or name_only.strip() in _GENERIC_CATEGORY_NAMES:
+        if _is_generic_candidate_name(brand, name, category):
             continue
 
         valid_items.append(item)
@@ -7116,13 +7115,40 @@ def infer_active_profile(product):
     }
 
 # カテゴリ名そのまま（ブランド無し・具体的な製品名なし）の候補を弾くための共通リスト。
-# 2位/3位候補の表示フィルタ（preserve_ranked_top_candidates）と
-# score_product() のメイン候補選定の両方から参照し、定義のずれを防ぐ。
+# 2位/3位候補の表示フィルタ（preserve_ranked_top_candidates）・
+# score_product() のメイン候補選定・verified_products_cache の読み込みの
+# 3箇所から参照し、定義のずれを防ぐ。
 _GENERIC_CATEGORY_NAMES = {
     "化粧水", "美容液", "乳液", "クリーム", "日焼け止め", "洗顔", "洗顔料",
     "クレンジング", "パック", "マスク", "ピーリング", "導入美容液", "保湿クリーム",
     "美顔器", "サプリ", "サプリメント",
 }
+
+
+def _is_generic_candidate_name(brand, name, category=""):
+    """
+    ブランドなし・具体的な製品名がない候補かどうかを判定する。
+    カテゴリ名そのもの（_GENERIC_CATEGORY_NAMES）だけでなく、
+    「エマルジョン」（乳液の同義語）のような _CATEGORY_REQUIRED_KEYWORDS の
+    同義語単体で名乗っている候補も同様に汎用名として弾く。
+    """
+    _, name_only = clean_brand_and_product_name(str(brand or ""), str(name or ""))
+    name_only = name_only.strip()
+
+    if not name_only:
+        return True
+
+    if name_only in _GENERIC_CATEGORY_NAMES:
+        return True
+
+    category_key = str(category or "").strip()
+    if category_key:
+        synonyms = _CATEGORY_REQUIRED_KEYWORDS.get(category_key, [])
+        name_key = name_only.lower()
+        if any(name_key == str(kw).strip().lower() for kw in synonyms):
+            return True
+
+    return False
 
 def score_product_combination(
     selected_products,
@@ -7216,19 +7242,17 @@ def score_product(product, step, user_data, budget_value):
     if is_discontinued_or_suspicious_product(product):
         return -9999
 
-    # ===== カテゴリ名そのまま／ブランド除去後に空になる候補は強制除外 =====
-    # 例: 商品名が「日焼け止め」だけ、ブランド無しで具体的な製品名がない候補。
+    # ===== カテゴリ名（またはその同義語）そのまま／ブランド除去後に空になる候補は強制除外 =====
+    # 例: 商品名が「日焼け止め」「エマルジョン」だけ、ブランド無しで具体的な製品名がない候補。
     # ここで弾かないと、そのまま「1位」として選定・表示され、
     # さらに verified_products_cache に永続キャッシュされて以後の診断にも
     # 汚染が広がる。
-    _pname_for_generic_check = str(product.get("name", "") or "").strip()
-    _pbrand_for_generic_check = str(product.get("brand", "") or "").strip()
-    if _pname_for_generic_check:
-        _, _pname_only = clean_brand_and_product_name(
-            _pbrand_for_generic_check, _pname_for_generic_check
-        )
-        if not _pname_only.strip() or _pname_only.strip() in _GENERIC_CATEGORY_NAMES:
-            return -9999
+    if _is_generic_candidate_name(
+        product.get("brand", ""),
+        product.get("name", ""),
+        step.get("category", "")
+    ):
+        return -9999
 
     # ===== ピーリング強制判定 =====
     if step.get("category") == "ピーリング":
@@ -12326,16 +12350,15 @@ def finalize_step_data(step, user_data):
         if not isinstance(raw_candidates, list):
             raw_candidates = []
 
-        # カテゴリ名そのままの候補を除外（「美容液」「乳液」単体）
+        # カテゴリ名（またはその同義語、例:「エマルジョン」=乳液）そのままの候補を除外
         # 「セラミド 乳液」「ナイアシンアミド 美容液」等は正当な候補名のため除外しない
-        # (score_product() のメイン候補選定と同じ _GENERIC_CATEGORY_NAMES を共有し、
+        # (score_product() のメイン候補選定と同じ _is_generic_candidate_name を共有し、
         #  判定基準がずれないようにする)
-        def _is_generic_name(brand: str, name: str) -> bool:
-            # カテゴリ名と完全一致する場合のみ汎用名と判定
-            # 成分名+カテゴリ名（「セラミド 乳液」等）は汎用名扱いしない
-            return name.strip() in _GENERIC_CATEGORY_NAMES
-
         _step_cat = str(step.get("category", "") or "")
+
+        def _is_generic_name(brand: str, name: str) -> bool:
+            return _is_generic_candidate_name(brand, name, _step_cat)
+
         normalized_candidates = []
         seen_keys = set()
         seen_product_names = set()  # 製品名レベルの追加重複チェック
