@@ -6992,10 +6992,15 @@ def is_non_cosmetic(product):
 CLEANSER_KEYWORDS = [
     "洗顔",
     "フォーム",
+    "フォーマー",
     "クレンザー",
     "ウォッシュ",
     "ジェルウォッシュ",
     "泡",
+    "ホイップ",
+    "石鹸",
+    "せっけん",
+    "サボン",
     "soap",
     "cleanser",
     "cleansing foam",
@@ -7021,22 +7026,13 @@ def is_wrong_cleanser_candidate(product, step):
 
     name = str(product.get("name", "") or product.get("product", "")).lower()
 
-    toner_keywords = [
-        "化粧水", "トナー", "ローション",
-        "toner", "lotion", "ampoule toner", "アンプルトナー"
-    ]
-
-    cleanser_keywords = [
-        "洗顔", "フォーム", "クレンザー", "ウォッシュ",
-        "ジェルウォッシュ", "泡", "ホイップ", "石鹸", "せっけん",
-        "soap", "cleanser", "cleansing foam",
-        "face wash", "facial wash"
-    ]
-
-    if any(k.lower() in name for k in toner_keywords):
+    # モジュールレベルの TONER_KEYWORDS / CLEANSER_KEYWORDS を直接参照する。
+    # 以前ここにローカルの重複リストがあり、片方だけ更新されて定義がずれる
+    # バグを引き起こしていたため、単一の定義元に統一した。
+    if any(k.lower() in name for k in TONER_KEYWORDS):
         return True
 
-    if not any(k.lower() in name for k in cleanser_keywords):
+    if not any(k.lower() in name for k in CLEANSER_KEYWORDS):
         return True
 
     return False
