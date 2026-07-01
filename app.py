@@ -4790,12 +4790,16 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
 def _try_rakuten_fallback_candidate(step, affiliate_ai_db):
     """
     主商品のRakutenリンク取得が（リトライ後も）失敗した場合、
-    top_candidates の 2位・3位を順に試してリンクを取得する。
+    top_candidates の2位以降を順に試してリンクを取得する。
     成功した場合はステップの product / brand / image / price を次点商品に更新する。
     クールダウン中は呼び出さないこと（呼び出し元で確認する）。
+
+    「リンクがない」問題が繰り返し起きていたため、以前は2位・3位の2件しか
+    試していなかったのを、内部的に保持している予備（最大6件）全てを試すように
+    した（表示自体は変わらず、上位3件のみ表示され続ける）。
     """
     cands = step.get("top_candidates") or []
-    for fallback in cands[1:3]:
+    for fallback in cands[1:]:
         if not isinstance(fallback, dict):
             continue
         fb_name = clean_display_product_name(str(fallback.get("name", "") or "").strip())
@@ -4818,6 +4822,10 @@ def _try_rakuten_fallback_candidate(step, affiliate_ai_db):
             f"[RAKUTEN FALLBACK OK] {step.get('product', '?')} → {fb_name}",
             flush=True
         )
+        # 4件目以降の予備は表示専用の上位3件向けブランド補完を通っていないため、
+        # 繰り上げ時点で改めて補完を試みる
+        if not fb_brand:
+            fb_brand = infer_brand_from_title(fb_name, step.get("category", ""))
         step["product"] = fb_name
         if fb_brand:
             step["brand"] = fb_brand
@@ -9679,7 +9687,13 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     sorted_candidates = deduped_candidates
 
 
-    top_candidates = sorted_candidates[:3]
+    # 表示に使うのは上位3件のみだが、内部的な候補プールは6件保持する。
+    # 「リンクがない」問題（1位商品が実在確認できずrakuten_linkが空になる）は
+    # 選定後の楽天検索・NGワード判定で候補が弾かれることが繰り返し起きており、
+    # 表示用の3件しか保持していないと、2位・3位も弾かれた時点で
+    # フォールバック先が尽きてしまう。3件分の予備を追加で保持することで、
+    # 追加のAI呼び出しコストなしにフォールバックの成功率を上げる。
+    top_candidates = sorted_candidates[:6]
 
     if not top_candidates:
         return None
@@ -12774,15 +12788,21 @@ def finalize_step_data(step, user_data):
                 seen_product_names.add(_name_key)
             normalized_candidates.append(normalized)
 
-            if len(normalized_candidates) >= 3:
+            # 表示に使うのは上位3件のみだが、リンク取得の楽天検索・NGワード判定で
+            # 1位〜3位が弾かれた場合のフォールバック用の予備を追加で保持する
+            # （_try_rakuten_fallback_candidate 参照）。「リンクがない」問題は
+            # フォールバック先が3件しかなく尽きてしまうことが繰り返しの原因
+            # だったため、追加のAI呼び出しなしに予備を確保する。
+            if len(normalized_candidates) >= 6:
                 break
 
         if normalized_candidates:
             # 楽天検索由来の候補は仕様上ブランド欄が常に空文字になる。
             # 商品名自体は具体的（汎用名チェックを通過済み）なので、除外せず
-            # 商品名からブランド名をGeminiに補完させる（最大3件・診断1回あたり
-            # ステップ数×3件が上限のため呼び出し回数は抑えられている）。
-            for cand in normalized_candidates:
+            # 商品名からブランド名をGeminiに補完させる。表示に使う上位3件だけに
+            # 限定し、フォールバック専用の予備（4件目以降）はここでは補完しない
+            # （実際に繰り上がった時点で _try_rakuten_fallback_candidate 側が補完する）。
+            for cand in normalized_candidates[:3]:
                 if cand.get("brand"):
                     continue
                 _inferred_brand = infer_brand_from_title(
