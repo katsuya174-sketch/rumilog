@@ -2493,6 +2493,13 @@ def load_verified_products_cache():
         if not name or not category:
             continue
 
+        # 過去にキャッシュされた「カテゴリ名そのまま」等の不完全な候補を
+        # 読み込み時点で弾く。TTL(45日)を待たずに汚染データを自己修復するため。
+        brand = str(item.get("brand", "") or "").strip()
+        _, name_only = clean_brand_and_product_name(brand, name)
+        if not name_only.strip() or name_only.strip() in _GENERIC_CATEGORY_NAMES:
+            continue
+
         valid_items.append(item)
 
     return valid_items
