@@ -7203,7 +7203,11 @@ def score_product(product, step, user_data, budget_value):
             "glycolic_acid",
             "lactic_acid",
             "salicylic_acid",
-            "mandelic_acid"
+            "mandelic_acid",
+            "papain",
+            "bromelain",
+            "protease",
+            "enzyme"
         ]
 
         PEELING_NAME_KEYWORDS = [
@@ -7214,7 +7218,11 @@ def score_product(product, step, user_data, budget_value):
             "角質",
             "角質ケア",
             "スクラブ",
-            "アクアジェル"
+            "アクアジェル",
+            "酵素",
+            "パパイン",
+            "ブロメライン",
+            "プロテアーゼ"
         ]
 
         product_actives = product.get("active_ingredients", []) or []
@@ -12925,6 +12933,16 @@ def normalize_result(raw_data, image_path=""):
                 "image": step.get("image", "")
             }
             for step in raw_data.get("weekly_care", [])
+        ],
+        "supplements": [
+            {**item, "image": item.get("image", "")}
+            for item in raw_data.get("supplements", [])
+            if isinstance(item, dict)
+        ],
+        "beauty_devices": [
+            {**item, "image": item.get("image", "")}
+            for item in raw_data.get("beauty_devices", [])
+            if isinstance(item, dict)
         ],
         "warnings": raw_data.get("warnings", []),
         "improvement_plan": raw_data.get("improvement_plan", {}),
