@@ -14968,8 +14968,20 @@ def build_analysis_prompt_phase2(user_data, phase1):
     _ml = mp.get("moisture_level","?")
     _em = mp.get("need_emulsion","?")
     _cr = mp.get("need_cream","?")
-    # ai_improvement_strategy を番号付きリストに整形
-    if ai_strategy:
+    # 改善優先順位を番号付きリストに整形。
+    # premium_improvement_priority（基本10項目のAI戦略ランキングに、
+    # 詳細サブスコア=赤ニキビ跡/色素沈着/開き毛穴/黒ずみ毛穴/透明感/
+    # 肌トーン均一性/肌バランス/左右差を合算したもの）が使えるなら
+    # そちらを優先する。商品・成分選定がこの詳細な優先順位に沿うように、
+    # ai_improvement_strategy（基本10項目のみ）ではなくこちらをPhase2に渡す。
+    premium_priority = phase1.get("premium_improvement_priority") or []
+    if premium_priority:
+        _strategy_lines = "\n".join(
+            f"  {s.get('rank','?')}. {s.get('label','?')}(スコア{s.get('score','?')})"
+            + (f" — {s.get('reason','')}" if s.get("reason") else "")
+            for s in premium_priority
+        )
+    elif ai_strategy:
         _strategy_lines = "\n".join(
             f"  {s.get('rank','?')}. {s.get('item','?')}(スコア{s.get('score','?')}) — {s.get('reason','')}"
             for s in ai_strategy[:10]
@@ -15732,6 +15744,22 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img, force_re
         _raw1 = response1.text.strip()
         phase1 = json.loads(_raw1)
         print(f"[GEMINI PHASE1 DONE] elapsed={time.time()-_t1:.1f}s scores={phase1.get('scores',{})}", flush=True)
+
+        # Phase2（ルーティン・商品選定）が実際にこの詳細ランキングを
+        # 参照できるよう、Phase1完了直後・Phase2実行前に計算しておく。
+        # premium_scores は基本10項目(scores)のみから合成できるため、
+        # Phase2を待たずここで確定できる。
+        _phase1_premium_scores = calculate_premium_scores(phase1.get("scores", {}))
+        _phase1_symmetry = phase1.get("symmetry_analysis", {})
+        if not isinstance(_phase1_symmetry, dict):
+            _phase1_symmetry = {}
+        _phase1_premium_scores["symmetry"] = safe_int(_phase1_symmetry.get("score", 0))
+        phase1["premium_scores"] = _phase1_premium_scores
+        phase1["premium_improvement_priority"] = build_premium_improvement_priority(
+            phase1.get("scores", {}),
+            _phase1_premium_scores,
+            phase1.get("ai_improvement_strategy", [])
+        )
     except Exception as e:
         error_text = str(e)
         if "503" in error_text or "UNAVAILABLE" in error_text:
