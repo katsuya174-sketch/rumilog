@@ -8199,10 +8199,33 @@ def term_matches(terms, keywords):
     return False
 
 
-def score_improvement(product, improvement_plan=None):
+# build_premium_improvement_priority() が返す詳細項目キーを、
+# IMPROVEMENT_KEYWORDS の既存ターゲットキーに対応付ける。
+# 1つの基本項目が複数の詳細項目に分解されているもの（例:「毛穴」→
+# enlarged_pores/blackhead_pores）は同じターゲットにまとめる。
+# symmetry（左右差）は成分で改善できる悩みではないため対応なし。
+_PREMIUM_ITEM_TO_IMPROVEMENT_TARGET = {
+    "acne_marks_red":  "acne_marks_red",
+    "pigmentation":    "pigmentation",
+    "enlarged_pores":  "pores",
+    "blackhead_pores":  "pores",
+    "translucency":    "pigmentation",
+    "tone_uniformity": "pigmentation",
+    "skin_balance":    "barrier",
+    "firmness":        "firmness",
+}
+
+
+def score_improvement(product, improvement_plan=None, premium_improvement_priority=None):
     """
     改善寄与スコア。
     美容液だけでなく、化粧水・乳液・クリーム・洗顔・クレンジング・日焼け止め・パック・ピーリングも評価する。
+
+    premium_improvement_priority（基本10項目のAI戦略ランキングに詳細サブスコアを
+    合算したランキング、build_premium_improvement_priority参照）を渡すと、
+    ランクが高い（数値が小さい＝優先度が高い）項目に合う商品ほど大きく加点する。
+    これにより、候補選定の結果画面に表示される「改善優先順位」と、
+    実際に選ばれる商品の傾向を直接連動させる。
     """
     if not isinstance(product, dict):
         return 0
@@ -8322,6 +8345,24 @@ def score_improvement(product, improvement_plan=None):
         score += 8
     elif sensitive_ok == "no":
         score -= 8
+
+    # 合算した改善優先順位（premium_improvement_priority）を候補選定に直接反映する。
+    # ランクが高い（数値が小さい＝優先度が高い）項目に合う商品ほど大きく加点し、
+    # 下位の項目は加点を弱める。結果画面の「改善優先順位」表示と、
+    # 実際に選ばれる商品の傾向を一致させるため。
+    if premium_improvement_priority:
+        for item in premium_improvement_priority:
+            target = _PREMIUM_ITEM_TO_IMPROVEMENT_TARGET.get(item.get("key"))
+            if not target:
+                continue
+            weight = max(0, 10 - int(item.get("rank", 99) or 99))
+            if weight <= 0:
+                continue
+            rule = IMPROVEMENT_KEYWORDS.get(target, {})
+            if term_matches(terms, rule.get("strong", [])):
+                score += weight * 3
+            elif term_matches(terms, rule.get("support", [])):
+                score += weight * 1.5
 
     # 上限を設定して暴走防止
     return max(0, min(score, 100))
@@ -9174,7 +9215,7 @@ def score_routine_balance(step, product, routine_context=None):
 
     return score
 
-def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None, routine_context=None, verified_products=None):
+def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None, routine_context=None, verified_products=None, premium_improvement_priority=None):
     if exclude_names is None:
         exclude_names = set()
 
@@ -9349,7 +9390,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
                 )
             continue
 
-        improve_score = score_improvement(product, improvement_plan or {})
+        improve_score = score_improvement(product, improvement_plan or {}, premium_improvement_priority)
         improvement_reason = build_improvement_reason(product, improvement_plan or {})
 
         base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
@@ -9467,7 +9508,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
             improve_score = score_improvement(
                 product,
-                improvement_plan or {}
+                improvement_plan or {},
+                premium_improvement_priority
             )
 
             base_weight, improve_weight = get_dynamic_score_weights(
@@ -9540,7 +9582,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
 
         improve_score = score_improvement(
             virtual,
-            improvement_plan or {}
+            improvement_plan or {},
+            premium_improvement_priority
         )
 
         base_weight, improve_weight = get_dynamic_score_weights(
@@ -11059,6 +11102,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
     ai_image_db = load_ai_product_images()
     improvement_plan = data.get("improvement_plan", {})
+    premium_improvement_priority = data.get("premium_improvement_priority", [])
     verified_products = load_verified_products_cache()
 
     # 全ステップのRakuten検索を並列プリフェッチ（スコアリングループはキャッシュヒット）
@@ -11095,6 +11139,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
             exclude_names=used_product_names,
             routine_context=routine_context,
             verified_products=verified_products,
+            premium_improvement_priority=premium_improvement_priority,
         )
 
         if not best:
