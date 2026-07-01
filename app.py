@@ -3817,8 +3817,21 @@ def _rakuten_criteria_search_single(keyword, category):
     if not RAKUTEN_APP_ID or not RAKUTEN_ACCESS_KEY:
         return []
 
-    if time.time() < RAKUTEN_COOLDOWN_UNTIL:
-        return []
+    # クールダウンは全ステップ共通のグローバル状態のため、ここで即座に
+    # 諦めると、診断の早い段階で1回429が起きただけで後続の全ステップの
+    # 楽天バックフィルが連鎖的に空になってしまう
+    # （購入リンク取得側 attach_affiliate_links_to_all_steps には
+    # クールダウン解消を待って再試行する仕組みが既にあるが、
+    # 候補プール構築側のこの関数には無かった）。
+    # 残り待機時間が短い（15秒以内）場合は待ってから続行し、
+    # 長い場合のみ従来通り即座に諦める。
+    _remaining_cooldown = RAKUTEN_COOLDOWN_UNTIL - time.time()
+    if _remaining_cooldown > 0:
+        if _remaining_cooldown <= 15:
+            print(f"[RAKUTEN CRITERIA COOLDOWN WAIT] {_remaining_cooldown:.1f}s", flush=True)
+            time.sleep(_remaining_cooldown + 0.5)
+        else:
+            return []
 
     with _rakuten_call_count_lock:
         if _rakuten_criteria_call_count >= MAX_RAKUTEN_CRITERIA_CALLS:
@@ -3911,21 +3924,23 @@ def _rakuten_criteria_search_single(keyword, category):
                 res = requests.get(endpoint, params=params, headers=headers, timeout=(2, 4))
                 print(f"[RAKUTEN CRITERIA RETRY STATUS] {res.status_code}", flush=True)
             except Exception as _re:
+                # 一時的なAPIエラー(429/例外)は「該当商品なし」ではないため、
+                # ここでは cache_key に空配列を保存しない。
+                # 保存すると、同じ診断内で同じキーワードが後で使われた場合
+                # （429がすぐ解消していても）永久に空扱いになり、
+                # そのステップの楽天バックフィル候補が失われ続けてしまう。
                 print(f"[RAKUTEN CRITERIA RETRY ERROR] {_re}", flush=True)
                 RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
-                _rakuten_criteria_cache[cache_key] = []
                 return []
             if res.status_code == 429:
                 RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
-                _rakuten_criteria_cache[cache_key] = []
                 return []
             if res.status_code != 200:
-                _rakuten_criteria_cache[cache_key] = []
                 return []
             # リトライ成功 → fall-through してペイロード処理へ
 
         if res.status_code != 200:
-            _rakuten_criteria_cache[cache_key] = []
+            # 一時的なAPIエラーのため cache_key への空配列保存はしない（理由は上記コメント参照）
             return []
 
         payload = res.json()
