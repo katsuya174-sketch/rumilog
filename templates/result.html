@@ -744,44 +744,20 @@
         {% if data.get("premium_scores") %}
         <section class="result-card">
             <div class="routine-header">
-                <h2 class="section-title" style="margin:0;">詳細スコア</h2>
+                <h2 class="section-title" style="margin:0;">詳細スコア（改善優先順位つき）</h2>
                 <div class="routine-chip">Premium</div>
             </div>
 
             {% if data.get("is_premium") or data.get("is_dev_mode") %}
+            <p style="font-size:12px;color:#9b7f88;margin:0 0 12px;">スコアが低い項目ほど優先度が高いものとして番号を振っています。</p>
             <div class="score-mini-grid">
+                {% for item in data.get("premium_improvement_priority", []) %}
                 <div class="score-mini">
-                    <div class="score-mini-name">赤ニキビ跡</div>
-                    <div class="score-mini-value">{{ data.premium_scores.get("acne_marks_red", 0) }}</div>
+                    <div class="score-mini-rank {% if item.rank == 1 %}rank-1{% elif item.rank == 2 %}rank-2{% elif item.rank == 3 %}rank-3{% endif %}">{{ item.rank }}</div>
+                    <div class="score-mini-name">{{ item.label }}</div>
+                    <div class="score-mini-value">{{ item.score }}</div>
                 </div>
-                <div class="score-mini">
-                    <div class="score-mini-name">色素沈着</div>
-                    <div class="score-mini-value">{{ data.premium_scores.get("pigmentation", 0) }}</div>
-                </div>
-                <div class="score-mini">
-                    <div class="score-mini-name">開き毛穴</div>
-                    <div class="score-mini-value">{{ data.premium_scores.get("enlarged_pores", 0) }}</div>
-                </div>
-                <div class="score-mini">
-                    <div class="score-mini-name">黒ずみ毛穴</div>
-                    <div class="score-mini-value">{{ data.premium_scores.get("blackhead_pores", 0) }}</div>
-                </div>
-                <div class="score-mini">
-                    <div class="score-mini-name">透明感</div>
-                    <div class="score-mini-value">{{ data.premium_scores.get("translucency", 0) }}</div>
-                </div>
-                <div class="score-mini">
-                    <div class="score-mini-name">肌トーン均一性</div>
-                    <div class="score-mini-value">{{ data.premium_scores.get("tone_uniformity", 0) }}</div>
-                </div>
-                <div class="score-mini">
-                    <div class="score-mini-name">肌バランス</div>
-                    <div class="score-mini-value">{{ data.premium_scores.get("skin_balance", 0) }}</div>
-                </div>
-                <div class="score-mini">
-                    <div class="score-mini-name">左右差</div>
-                    <div class="score-mini-value">{{ data.premium_scores.get("symmetry", 0) }}</div>
-                </div>
+                {% endfor %}
             </div>
             {% else %}
             <div class="premium-lock-box">

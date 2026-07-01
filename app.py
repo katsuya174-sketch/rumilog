@@ -7973,6 +7973,37 @@ def build_improvement_priority(scores):
     return [{"rank": i + 1, **item} for i, item in enumerate(items)]
 
 
+def build_premium_improvement_priority(premium_scores):
+    """
+    premium_scores（10項目の基本スコアを組み合わせた詳細サブスコア）を
+    スコア昇順（低い順）で改善優先順位化する。プレミアムユーザー用。
+    基本スコアだけの build_improvement_priority より粒度が細かい
+    （例:「毛穴」→「開き毛穴」「黒ずみ毛穴」に分解）。
+    """
+    if not isinstance(premium_scores, dict):
+        premium_scores = {}
+
+    _labels = [
+        ("acne_marks_red",  "赤ニキビ跡"),
+        ("pigmentation",    "色素沈着"),
+        ("enlarged_pores",  "開き毛穴"),
+        ("blackhead_pores", "黒ずみ毛穴"),
+        ("translucency",    "透明感"),
+        ("tone_uniformity", "肌トーン均一性"),
+        ("skin_balance",    "肌バランス"),
+        ("symmetry",        "左右差"),
+    ]
+    items = sorted(
+        [
+            {"key": k, "label": lbl, "score": int(premium_scores.get(k, 0) or 0)}
+            for k, lbl in _labels
+            if k in premium_scores
+        ],
+        key=lambda x: x["score"]
+    )
+    return [{"rank": i + 1, **item} for i, item in enumerate(items)]
+
+
 def infer_improvement_targets(improvement_plan):
     """
     improvement_plan / step / Gemini出力の文章から、
@@ -13410,6 +13441,12 @@ def prepare_result_for_view(result):
     if not result.get("improvement_priority"):
         result["improvement_priority"] = build_improvement_priority(result.get("scores", {}))
 
+    # premium_improvement_priority も同様に、未設定なら premium_scores から再計算する
+    if not result.get("premium_improvement_priority"):
+        result["premium_improvement_priority"] = build_premium_improvement_priority(
+            result.get("premium_scores", {})
+        )
+
     return result
 
 def lightweight_result_payload(item):
@@ -16552,6 +16589,9 @@ def lab_test_function():
                 "left_tendency": str(symmetry_analysis.get("left_tendency", "") or ""),
                 "right_tendency": str(symmetry_analysis.get("right_tendency", "") or "")
             }
+            data["premium_improvement_priority"] = build_premium_improvement_priority(
+                data["premium_scores"]
+            )
             debug_log("AFTER ANALYZE", {
                 "skin_score": data.get("skin_score"),
                 "summary": data.get("skin_summary"),
