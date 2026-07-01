@@ -278,46 +278,105 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 }
 
 .loading-text-sub {
-    min-height: 12px;
-    margin-bottom: 18px;
+    min-height: 20px;
+    margin-top: 14px;
+    margin-bottom: 4px;
+    font-family: 'Kosugi Maru', 'Hiragino Maru Gothic ProN', sans-serif;
+    font-size: 0.86rem;
+    font-weight: 500;
+    color: #c07c8f;
+    letter-spacing: 0.02em;
 }
 
-.loading-phase-row {
+/* =========================
+   ③ るみろぐリング（新アニメーション）
+========================= */
+.loading-ring-wrap {
+    position: relative;
+    width: 128px;
+    height: 128px;
+    margin: 6px auto 4px;
+}
+
+.loading-ring-glow {
+    position: absolute;
+    inset: 8px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,170,205,0.55) 0%, rgba(255,170,205,0) 70%);
+    animation: loadingGlowPulse 2.4s ease-in-out infinite;
+}
+
+.loading-ring-track {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 7px solid #ffe6ec;
+}
+
+.loading-ring-spin {
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 7px solid transparent;
+    border-top-color: #ff85a2;
+    border-right-color: #ffb3c6;
+    animation: loadingRingSpin 1.4s linear infinite;
+}
+
+.loading-ring-icon {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40px;
+    animation: loadingIconFloat 2.2s ease-in-out infinite;
+}
+
+@keyframes loadingRingSpin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes loadingGlowPulse {
+    0%, 100% { opacity: 0.55; transform: scale(0.94); }
+    50% { opacity: 0.95; transform: scale(1.06); }
+}
+
+@keyframes loadingIconFloat {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-5px) scale(1.08); }
+}
+
+.loading-dots {
     display: flex;
     justify-content: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin-top: 16px;
+    align-items: center;
+    gap: 9px;
+    margin-top: 12px;
 }
 
-.loading-phase-chip {
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: #fff;
-    border: 2px solid #ffe0e5;
-    color: #b88b96;
-    font-size: 0.72rem;
-    font-weight: 700;
-    transition: all 0.3s ease;
+.loading-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ffe0e5;
+    transition: all 0.35s ease;
 }
 
-.loading-phase-chip.active {
-    background: #ffedf3;
-    border-color: #ff9fba;
-    color: #d95a82;
-    box-shadow: 0 0 10px rgba(255, 150, 180, 0.25);
-    animation: loadingChipPulse 1.6s infinite ease-in-out;
+.loading-dot.active {
+    background: #ff85a2;
+    transform: scale(1.5);
+    box-shadow: 0 0 8px rgba(255, 133, 162, 0.55);
+    animation: loadingDotPulse 1.2s ease-in-out infinite;
 }
 
-.loading-phase-chip.done {
-    background: linear-gradient(135deg, #ff85a2, #ff5f8f);
-    border-color: #ff85a2;
-    color: #fff;
+.loading-dot.done {
+    background: #ffb3c6;
 }
 
-@keyframes loadingChipPulse {
-    0%, 100% { transform: scale(1); }
-    50% { transform: scale(1.06); }
+@keyframes loadingDotPulse {
+    0%, 100% { transform: scale(1.5); }
+    50% { transform: scale(1.9); }
 }
 
 .loader {
@@ -950,21 +1009,18 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                 <div class="loading-text-sub" id="loadingTextSub"></div>
 
                 <div id="loadingAnimation">
-                    <!-- ② バブル -->
-                    <div class="loader loader-bubbles">
-                        <div class="loader-bubble-item bubble1"></div>
-                        <div class="loader-bubble-item bubble2"></div>
-                        <div class="loader-bubble-item bubble3"></div>
-                        <div class="loader-bubble-item bubble4"></div>
-                        <div class="loader-bubble-item bubble5"></div>
-                        <div class="loader-bubble-item bubble6"></div>
+                    <div class="loading-ring-wrap">
+                        <div class="loading-ring-glow"></div>
+                        <div class="loading-ring-track"></div>
+                        <div class="loading-ring-spin"></div>
+                        <div class="loading-ring-icon" id="loadingRingIcon">📷</div>
                     </div>
 
-                    <div class="loading-phase-row" id="loadingPhaseRow">
-                        <div class="loading-phase-chip" data-phase="0">写真を解析中</div>
-                        <div class="loading-phase-chip" data-phase="1">肌データを分析中</div>
-                        <div class="loading-phase-chip" data-phase="2">ケアプランを作成中</div>
-                        <div class="loading-phase-chip" data-phase="3">仕上げ中</div>
+                    <div class="loading-dots" id="loadingDots">
+                        <div class="loading-dot" data-phase="0"></div>
+                        <div class="loading-dot" data-phase="1"></div>
+                        <div class="loading-dot" data-phase="2"></div>
+                        <div class="loading-dot" data-phase="3"></div>
                     </div>
                 </div>
             </div>
@@ -1561,31 +1617,15 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           container.appendChild(sparkle);
       }
   
-      function applyBubbleColors() {
-          const bubbleColors = [
-              ["#ffd1dc", "rgba(255,150,190,0.3)"],
-              ["#d6eaff", "rgba(120,180,255,0.3)"],
-              ["#e5d6ff", "rgba(170,140,255,0.3)"],
-              ["#ffe9c9", "rgba(255,200,120,0.3)"],
-              ["#d6ffe5", "rgba(120,255,180,0.3)"],
-              ["#ffd6f5", "rgba(255,120,220,0.3)"]
-          ];
-  
-          document.querySelectorAll(".loader-bubble-item").forEach(b => {
-              const c = bubbleColors[Math.floor(Math.random() * bubbleColors.length)];
-              b.style.background = `radial-gradient(circle at 30% 25%, #fff, ${c[0]} 40%, ${c[1]} 70%)`;
-          });
-      }
-  
       // 経過秒数のしきい値ごとにフェーズを切り替える。
       // 実際のバックエンド処理（画像分析→ルーティン作成→商品選定→仕上げ）の
       // 目安時間に合わせているが、サーバー側の進捗と厳密に同期はしていない
       // （フォーム送信後は完了までレスポンスが返らないため）。
       const LOADING_PHASES = [
-          { until: 15,        sub: "お預かりした写真を確認しています…" },
-          { until: 45,        sub: "うるおい・皮脂・毛穴などをスコア化しています…" },
-          { until: 80,        sub: "スコアに合わせて成分とアイテムを選んでいます…" },
-          { until: Infinity,  sub: "結果をまとめています。もうすぐ完成です…" },
+          { until: 15,        icon: "📷", sub: "お預かりした写真を確認しています…" },
+          { until: 45,        icon: "💧", sub: "うるおい・皮脂・毛穴などをスコア化しています…" },
+          { until: 80,        icon: "🧴", sub: "スコアに合わせて成分とアイテムを選んでいます…" },
+          { until: Infinity,  icon: "✨", sub: "結果をまとめています。もうすぐ完成です…" },
       ];
 
       function updateLoadingPhase() {
@@ -1603,37 +1643,40 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           const subText = document.getElementById("loadingTextSub");
           if (subText) subText.textContent = LOADING_PHASES[phaseIndex].sub;
 
-          document.querySelectorAll(".loading-phase-chip").forEach(chip => {
-              const idx = Number(chip.dataset.phase);
-              chip.classList.remove("active", "done");
+          const icon = document.getElementById("loadingRingIcon");
+          if (icon && icon.textContent !== LOADING_PHASES[phaseIndex].icon) {
+              icon.textContent = LOADING_PHASES[phaseIndex].icon;
+          }
+
+          document.querySelectorAll(".loading-dot").forEach(dot => {
+              const idx = Number(dot.dataset.phase);
+              dot.classList.remove("active", "done");
               if (idx < phaseIndex) {
-                  chip.classList.add("done");
+                  dot.classList.add("done");
               } else if (idx === phaseIndex) {
-                  chip.classList.add("active");
+                  dot.classList.add("active");
               }
           });
       }
 
       function showLoading() {
           const overlay = document.getElementById("loadingOverlay");
-          const bubbles = document.querySelector(".loader-bubbles");
           const submitBtn = document.getElementById("submitBtn");
           const bg = document.getElementById("bgEffects");
           const mainText = document.getElementById("loadingTextMain");
+          const icon = document.getElementById("loadingRingIcon");
 
-          if (!overlay || !bubbles) return;
+          if (!overlay) return;
 
           if (bg) bg.style.opacity = "0.25";
 
-          applyBubbleColors();
-
-          bubbles.style.display = "block";
           overlay.style.display = "flex";
 
           if (mainText) mainText.textContent = "診断中です…";
+          if (icon) icon.textContent = LOADING_PHASES[0].icon;
 
-          document.querySelectorAll(".loading-phase-chip").forEach(chip => {
-              chip.classList.remove("active", "done");
+          document.querySelectorAll(".loading-dot").forEach(dot => {
+              dot.classList.remove("active", "done");
           });
 
           loadingStartTime = Date.now();
@@ -1713,19 +1756,17 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 
           if (animation) {
               animation.innerHTML = `
-                  <div class="loader loader-bubbles">
-                      <div class="loader-bubble-item bubble1"></div>
-                      <div class="loader-bubble-item bubble2"></div>
-                      <div class="loader-bubble-item bubble3"></div>
-                      <div class="loader-bubble-item bubble4"></div>
-                      <div class="loader-bubble-item bubble5"></div>
-                      <div class="loader-bubble-item bubble6"></div>
+                  <div class="loading-ring-wrap">
+                      <div class="loading-ring-glow"></div>
+                      <div class="loading-ring-track"></div>
+                      <div class="loading-ring-spin"></div>
+                      <div class="loading-ring-icon" id="loadingRingIcon">📷</div>
                   </div>
-                  <div class="loading-phase-row" id="loadingPhaseRow">
-                      <div class="loading-phase-chip" data-phase="0">写真を解析中</div>
-                      <div class="loading-phase-chip" data-phase="1">肌データを分析中</div>
-                      <div class="loading-phase-chip" data-phase="2">ケアプランを作成中</div>
-                      <div class="loading-phase-chip" data-phase="3">仕上げ中</div>
+                  <div class="loading-dots" id="loadingDots">
+                      <div class="loading-dot" data-phase="0"></div>
+                      <div class="loading-dot" data-phase="1"></div>
+                      <div class="loading-dot" data-phase="2"></div>
+                      <div class="loading-dot" data-phase="3"></div>
                   </div>
               `;
           }
