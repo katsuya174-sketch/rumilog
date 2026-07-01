@@ -11587,6 +11587,30 @@ def build_ai_reason(step, user_data):
         skin_sentence
     ])
 
+# 同一の実成分に対して複数のタグ（一般名/カテゴリ名/特定化合物名）が
+# 独立に付与されることがあり、calculate_step_impact() でそれぞれ別々に
+# スコア加算されると同じ成分が二重・三重にカウントされてしまう。
+# 例: "サリチル酸(BHA)配合" のような商品名だと active_ingredients に
+# "salicylic_acid" と "bha" の両方が入り、毛穴スコアが両方分加算される。
+_INGREDIENT_SYNONYM_GROUPS = [
+    {"bha", "salicylic_acid"},
+    {"cica", "madecassoside", "centella_extract"},
+    {"ceramide", "multi_ceramide_complex", "ceramide_complex_ex"},
+]
+
+
+def _dedupe_synonym_ingredient_tags(ingredient_set):
+    result = set(ingredient_set)
+    for group in _INGREDIENT_SYNONYM_GROUPS:
+        present = result & group
+        if len(present) > 1:
+            keep = sorted(present)[0]
+            for tag in present:
+                if tag != keep:
+                    result.discard(tag)
+    return result
+
+
 def calculate_step_impact(step, product):
     impact = {
         "oil_balance": 0,
@@ -11606,6 +11630,7 @@ def calculate_step_impact(step, product):
     category = step.get("category", "")
 
     all_ingredients = set(active_ingredients + support_ingredients)
+    all_ingredients = _dedupe_synonym_ingredient_tags(all_ingredients)
 
     # =========================
     # purposeベース
