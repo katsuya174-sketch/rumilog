@@ -282,6 +282,44 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
     margin-bottom: 18px;
 }
 
+.loading-phase-row {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+}
+
+.loading-phase-chip {
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: #fff;
+    border: 2px solid #ffe0e5;
+    color: #b88b96;
+    font-size: 0.72rem;
+    font-weight: 700;
+    transition: all 0.3s ease;
+}
+
+.loading-phase-chip.active {
+    background: #ffedf3;
+    border-color: #ff9fba;
+    color: #d95a82;
+    box-shadow: 0 0 10px rgba(255, 150, 180, 0.25);
+    animation: loadingChipPulse 1.6s infinite ease-in-out;
+}
+
+.loading-phase-chip.done {
+    background: linear-gradient(135deg, #ff85a2, #ff5f8f);
+    border-color: #ff85a2;
+    color: #fff;
+}
+
+@keyframes loadingChipPulse {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.06); }
+}
+
 .loader {
     display: none;
     width: 150px;
@@ -909,8 +947,8 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
             <div id="loadingOverlay" class="loading-overlay" style="display:none;">
             <div class="loading-inner">
                 <div class="loading-text-main" id="loadingTextMain">診断中です…</div>
-                
-        
+                <div class="loading-text-sub" id="loadingTextSub"></div>
+
                 <div id="loadingAnimation">
                     <!-- ② バブル -->
                     <div class="loader loader-bubbles">
@@ -921,9 +959,13 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                         <div class="loader-bubble-item bubble5"></div>
                         <div class="loader-bubble-item bubble6"></div>
                     </div>
-        
-                    
-                    
+
+                    <div class="loading-phase-row" id="loadingPhaseRow">
+                        <div class="loading-phase-chip" data-phase="0">写真を解析中</div>
+                        <div class="loading-phase-chip" data-phase="1">肌データを分析中</div>
+                        <div class="loading-phase-chip" data-phase="2">ケアプランを作成中</div>
+                        <div class="loading-phase-chip" data-phase="3">仕上げ中</div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -1535,13 +1577,49 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           });
       }
   
+      // 経過秒数のしきい値ごとにフェーズを切り替える。
+      // 実際のバックエンド処理（画像分析→ルーティン作成→商品選定→仕上げ）の
+      // 目安時間に合わせているが、サーバー側の進捗と厳密に同期はしていない
+      // （フォーム送信後は完了までレスポンスが返らないため）。
+      const LOADING_PHASES = [
+          { until: 15,        sub: "お預かりした写真を確認しています…" },
+          { until: 45,        sub: "うるおい・皮脂・毛穴などをスコア化しています…" },
+          { until: 80,        sub: "スコアに合わせて成分とアイテムを選んでいます…" },
+          { until: Infinity,  sub: "結果をまとめています。もうすぐ完成です…" },
+      ];
+
+      function updateLoadingPhase() {
+          if (!loadingStartTime) return;
+          const elapsed = (Date.now() - loadingStartTime) / 1000;
+
+          let phaseIndex = LOADING_PHASES.length - 1;
+          for (let i = 0; i < LOADING_PHASES.length; i++) {
+              if (elapsed < LOADING_PHASES[i].until) {
+                  phaseIndex = i;
+                  break;
+              }
+          }
+
+          const subText = document.getElementById("loadingTextSub");
+          if (subText) subText.textContent = LOADING_PHASES[phaseIndex].sub;
+
+          document.querySelectorAll(".loading-phase-chip").forEach(chip => {
+              const idx = Number(chip.dataset.phase);
+              chip.classList.remove("active", "done");
+              if (idx < phaseIndex) {
+                  chip.classList.add("done");
+              } else if (idx === phaseIndex) {
+                  chip.classList.add("active");
+              }
+          });
+      }
+
       function showLoading() {
           const overlay = document.getElementById("loadingOverlay");
           const bubbles = document.querySelector(".loader-bubbles");
           const submitBtn = document.getElementById("submitBtn");
           const bg = document.getElementById("bgEffects");
           const mainText = document.getElementById("loadingTextMain");
-          const subText = document.getElementById("loadingTextSub");
 
           if (!overlay || !bubbles) return;
 
@@ -1553,13 +1631,18 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           overlay.style.display = "flex";
 
           if (mainText) mainText.textContent = "診断中です…";
-          if (subText) subText.textContent = "経過 0秒";
+
+          document.querySelectorAll(".loading-phase-chip").forEach(chip => {
+              chip.classList.remove("active", "done");
+          });
 
           loadingStartTime = Date.now();
+          updateLoadingPhase();
 
           if (loadingTimer) {
               clearInterval(loadingTimer);
           }
+          loadingTimer = setInterval(updateLoadingPhase, 1000);
 
           if (submitBtn) {
               submitBtn.disabled = true;
@@ -1571,6 +1654,11 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           const mainText = document.getElementById("loadingTextMain");
           const animation = document.getElementById("loadingAnimation");
           const submitBtn = document.getElementById("submitBtn");
+
+          if (loadingTimer) {
+              clearInterval(loadingTimer);
+              loadingTimer = null;
+          }
 
           if (overlay) {
               overlay.style.display = "flex";
@@ -1632,6 +1720,12 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                       <div class="loader-bubble-item bubble4"></div>
                       <div class="loader-bubble-item bubble5"></div>
                       <div class="loader-bubble-item bubble6"></div>
+                  </div>
+                  <div class="loading-phase-row" id="loadingPhaseRow">
+                      <div class="loading-phase-chip" data-phase="0">写真を解析中</div>
+                      <div class="loading-phase-chip" data-phase="1">肌データを分析中</div>
+                      <div class="loading-phase-chip" data-phase="2">ケアプランを作成中</div>
+                      <div class="loading-phase-chip" data-phase="3">仕上げ中</div>
                   </div>
               `;
           }
