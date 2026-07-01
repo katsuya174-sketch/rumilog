@@ -3973,7 +3973,11 @@ def _rakuten_criteria_search_single(keyword, category):
             inferred = infer_ingredients_from_rakuten_title(item_name)
 
             results.append({
-                "name": clean_display_product_name(item_name[:50]),
+                # 先にクリーニング(宣伝文句・装飾記号の除去)してから短くする。
+                # クリーニング前に50文字で切ると、"ウォッシングフォーム"が
+                # "ウォッシン"のように途中で切れてキーワード判定に
+                # 使われるべき語が失われることがあった。
+                "name": clean_display_product_name(item_name)[:60],
                 "brand": "",
                 "category": category,
                 "active_ingredients": inferred,
@@ -7011,6 +7015,7 @@ CLEANSER_KEYWORDS = [
     "石鹸",
     "せっけん",
     "サボン",
+    "ソープ",
     "soap",
     "cleanser",
     "cleansing foam",
@@ -10690,6 +10695,10 @@ def clean_display_product_name(name):
     text = re.sub(r'(税込|税抜|定価|参考価格|通常価格|割引|円OFF|%OFF|%引き?)\s*[\d,，]*円?', '', text, flags=re.IGNORECASE)
     text = re.sub(r'[\d,，]+\s*円', '', text)  # 残った「数字円」をまとめて除去
     text = re.sub(r'(ポイント\d+倍|\d+倍|pt\d+|P\d+倍)', '', text)
+    # 楽天商品名によくある「＼〇〇／」形式の煽り文句を除去
+    # 例: "＼UVクリーム贈呈／インテカ..." のように、この中に含まれる
+    # 単語（クリーム等）が別カテゴリの禁止ワード判定を誤って発火させることがあった
+    text = re.sub(r'＼[^／＼]{0,20}／', '', text)
     # ☆★等の装飾記号（単独または先頭）
     text = re.sub(r'^[\s　☆★◆◇▼▽△▲●○■□♪♦♥❤✨]+', '', text)
     text = re.sub(r'[\s　☆★◆◇●○■□]+$', '', text)
