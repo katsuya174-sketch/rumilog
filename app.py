@@ -351,6 +351,83 @@ def save_rakuten_search_to_db(cache_key, results):
     finally:
         if conn: conn.close()
 
+BRAND_CACHE_TTL_SECONDS = 60 * 60 * 24 * 180  # 180日（ブランド名はほぼ不変のため長め）
+_BRAND_NAME_CACHE = {}  # メモリキャッシュ（同一プロセス内での再検索を避ける）
+
+def init_brand_cache_table():
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS brand_name_cache (
+            cache_key TEXT PRIMARY KEY,
+            brand TEXT NOT NULL,
+            saved_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+        conn.commit()
+        print("[BRAND CACHE TABLE READY]", flush=True)
+    except Exception as e:
+        if conn: conn.rollback()
+        print("[BRAND CACHE TABLE ERROR]", e, flush=True)
+    finally:
+        if conn: conn.close()
+
+def get_cached_brand(cache_key):
+    if not cache_key:
+        return None
+
+    if cache_key in _BRAND_NAME_CACHE:
+        return _BRAND_NAME_CACHE[cache_key]
+
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT brand, saved_at FROM brand_name_cache WHERE cache_key = %s",
+            (cache_key,)
+        )
+        row = cur.fetchone()
+        if row:
+            brand, saved_at = row
+            age = time.time() - saved_at.timestamp()
+            if age <= BRAND_CACHE_TTL_SECONDS:
+                print(f"[BRAND CACHE HIT] {cache_key} -> {brand}", flush=True)
+                _BRAND_NAME_CACHE[cache_key] = brand
+                return brand
+    except Exception as e:
+        print(f"[BRAND CACHE GET ERROR] {repr(e)}", flush=True)
+    finally:
+        if conn: conn.close()
+    return None
+
+def save_brand_to_cache(cache_key, brand):
+    if not cache_key or not brand:
+        return
+
+    _BRAND_NAME_CACHE[cache_key] = brand
+
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO brand_name_cache (cache_key, brand, saved_at)
+            VALUES (%s, %s, CURRENT_TIMESTAMP)
+            ON CONFLICT (cache_key) DO UPDATE SET
+                brand = EXCLUDED.brand,
+                saved_at = CURRENT_TIMESTAMP
+        """, (cache_key, brand))
+        conn.commit()
+        print(f"[BRAND CACHE SAVED] {cache_key} -> {brand}", flush=True)
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"[BRAND CACHE SAVE ERROR] {repr(e)}", flush=True)
+    finally:
+        if conn: conn.close()
+
 def init_auth_tables():
     conn = None
     cur = None
@@ -384,6 +461,7 @@ init_results_table()
 init_gemini_usage_table()
 init_analysis_cache_table()
 init_rakuten_search_cache_table()
+init_brand_cache_table()
 init_auth_tables()
 VERIFY_PRODUCT_CACHE = {}
 DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
@@ -4473,9 +4551,18 @@ def find_affiliate_links_for_ai_product(product_name, category, affiliate_ai_db)
 
 def infer_brand_from_image(image_url: str, product_name: str, category: str = "") -> str:
     """商品画像のURLからGeminiでブランド名を読み取る。
-    画像DL失敗・Gemini失敗時は空文字を返す。タイムアウトは短めに設定してレスポンスを妨げない。"""
+    画像DL失敗・Gemini失敗時は空文字を返す。タイムアウトは短めに設定してレスポンスを妨げない。
+    infer_brand_from_title() とキャッシュを共有する（同じ商品名なら再検索しない）。"""
     if not image_url:
         return ""
+
+    _normalized_name = normalize_product_name(product_name)
+    cache_key = f"brand_v1:{_normalized_name}" if _normalized_name else ""
+    if cache_key:
+        cached = get_cached_brand(cache_key)
+        if cached is not None:
+            return cached
+
     try:
         import base64 as _b64
         _r = requests.get(image_url, timeout=(2, 5))
@@ -4505,6 +4592,7 @@ def infer_brand_from_image(image_url: str, product_name: str, category: str = ""
         if not _brand or len(_brand) > 40:
             return ""
         print(f"[BRAND INFER FROM IMAGE] {product_name} → {_brand}", flush=True)
+        save_brand_to_cache(cache_key, _brand)
         return _brand
     except Exception as _e:
         print(f"[BRAND INFER FROM IMAGE ERROR] {_e}", flush=True)
@@ -4519,6 +4607,12 @@ def infer_brand_from_title(product_name: str, category: str = "") -> str:
     product_name = str(product_name or "").strip()
     if not product_name:
         return ""
+
+    cache_key = f"brand_v1:{normalize_product_name(product_name)}"
+    cached = get_cached_brand(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         _prompt = (
             f"次の日本のスキンケア商品名から、ブランド名・メーカー名を1つだけ答えてください。\n"
@@ -4542,6 +4636,7 @@ def infer_brand_from_title(product_name: str, category: str = "") -> str:
         if _brand.strip() in _GENERIC_CATEGORY_NAMES:
             return ""
         print(f"[BRAND INFER FROM TITLE] {product_name} → {_brand}", flush=True)
+        save_brand_to_cache(cache_key, _brand)
         return _brand
     except Exception as _e:
         print(f"[BRAND INFER FROM TITLE ERROR] {_e}", flush=True)
