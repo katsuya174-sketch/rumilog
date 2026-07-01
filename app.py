@@ -7377,9 +7377,19 @@ def score_product(product, step, user_data, budget_value):
     score = 0
 
     if is_non_cosmetic(product):
+        print(
+            f"[SCORE REJECT non-cosmetic] cat={step.get('category','')!r} "
+            f"brand={product.get('brand','')!r} name={product.get('name','')!r}",
+            flush=True
+        )
         return -9999
 
     if is_discontinued_or_suspicious_product(product):
+        print(
+            f"[SCORE REJECT discontinued-or-suspicious] cat={step.get('category','')!r} "
+            f"brand={product.get('brand','')!r} name={product.get('name','')!r}",
+            flush=True
+        )
         return -9999
 
     # ===== カテゴリ名（またはその同義語）そのまま／ブランド除去後に空になる候補は強制除外 =====
@@ -15610,6 +15620,12 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img):
     print("[ROUTINE PLAN] night:", json.dumps(_fmt_steps(data.get("night",{}).get("steps",[])), ensure_ascii=False), flush=True)
     print("[ROUTINE PLAN] weekly_care:", json.dumps(_fmt_steps(data.get("weekly_care",[])), ensure_ascii=False), flush=True)
 
+    # Geminiが実際に返した生の product_candidates 件数をログ出力する
+    # (以前は定義されているだけで一度も呼ばれておらず、
+    #  候補が絞り込みで消えているのか元々Geminiが3件未満しか
+    #  返していないのか切り分けられなかった)
+    debug_candidate_counts(data)
+
     # レチノール × アゼライン酸チェック
     _night_ingredients = [s.get("ingredient_focus","") for s in data.get("night",{}).get("steps",[]) if isinstance(s, dict)]
     _has_retinol = any("retinol" in str(i).lower() or "レチノール" in str(i) for i in _night_ingredients)
@@ -16303,13 +16319,23 @@ def finalize_budget_info(data, budget_value):
 
 
 def debug_candidate_counts(data):
-    print("===== CANDIDATE COUNTS =====")
+    print("===== CANDIDATE COUNTS (raw, Gemini出力そのまま) =====", flush=True)
     for section in ["morning", "night"]:
         for step in data.get(section, {}).get("steps", []):
-            print(section, step.get("category"), step.get("ingredient_focus"), len(step.get("product_candidates", [])))
+            print(
+                f"[RAW CANDIDATE COUNT] {section} cat={step.get('category')!r} "
+                f"focus={step.get('ingredient_focus')!r} "
+                f"n={len(step.get('product_candidates', []) or [])}",
+                flush=True
+            )
     for step in data.get("weekly_care", []):
-        print("weekly_care", step.get("category"), step.get("ingredient_focus"), len(step.get("product_candidates", [])))
-    print("============================")
+        print(
+            f"[RAW CANDIDATE COUNT] weekly_care cat={step.get('category')!r} "
+            f"focus={step.get('ingredient_focus')!r} "
+            f"n={len(step.get('product_candidates', []) or [])}",
+            flush=True
+        )
+    print("======================================================", flush=True)
 # # AI肌診断ページ
 @app.route("/lab", methods=["GET", "POST"])
 def lab_test_function():
