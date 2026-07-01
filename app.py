@@ -9851,28 +9851,37 @@ def clean_brand_and_product_name(brand, name):
     if not brand_key:
         return brand_text, name_text
 
-    words = name_text.split()
-    cleaned_words = []
+    cleaned_name = name_text
 
-    for word in words:
-        word_key = normalize_candidate_name_for_merge(word)
-
-        if word_key and word_key == brand_key:
-            continue
-
-        cleaned_words.append(word)
-
-    cleaned_name = " ".join(cleaned_words).strip()
-
-    name_key = normalize_candidate_name_for_merge(cleaned_name)
-
-    while name_key.startswith(f"{brand_key} {brand_key}"):
-        cleaned_name = cleaned_name[len(brand_text):].strip()
+    # ブランド名がフレーズとして商品名の先頭に重複している場合はまるごと除去する。
+    # 単語単位の除去を先にやると、"The Ordinary" のように構成語の一部
+    # （"The" 等）が正規化で空文字になるブランド名で除去が半端になり、
+    # "The Ordinary The AHA..." のような壊れた表示になるため、
+    # まずフレーズ単位の先頭一致を優先して剥がす。
+    while True:
         name_key = normalize_candidate_name_for_merge(cleaned_name)
 
-    if normalize_candidate_name_for_merge(cleaned_name).startswith(brand_key):
-        if cleaned_name.startswith(brand_text):
+        if name_key == brand_key:
+            cleaned_name = ""
+            break
+
+        if name_key.startswith(brand_key) and cleaned_name.startswith(brand_text):
             cleaned_name = cleaned_name[len(brand_text):].strip()
+            continue
+
+        break
+
+    # フレーズ単位で剥がしきれなかった場合の保険として、
+    # ブランド名と完全一致する単語が紛れ込んでいれば個別に除去する。
+    if normalize_candidate_name_for_merge(cleaned_name) and brand_key in normalize_candidate_name_for_merge(cleaned_name):
+        words = cleaned_name.split()
+        cleaned_words = [
+            word for word in words
+            if normalize_candidate_name_for_merge(word) != brand_key
+        ]
+        candidate_cleaned = " ".join(cleaned_words).strip()
+        if candidate_cleaned:
+            cleaned_name = candidate_cleaned
 
     return brand_text, cleaned_name.strip()
 
