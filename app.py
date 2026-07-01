@@ -4665,6 +4665,16 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
         step["rakuten_link"] = ""
         return step
 
+    # ブランドがまだ空なら商品名からテキストベースで補完を試みる。
+    # この下には「既に画像+リンクが揃っている」場合の早期returnが複数あり、
+    # 画像ベースの補完（fetch_rakuten_item成功時のみ実行）はそれらのケースで
+    # 一度も呼ばれないため、ここで先にブランドを埋めておく。
+    if not brand:
+        _inferred_brand = infer_brand_from_title(product_name, category)
+        if _inferred_brand:
+            brand = _inferred_brand
+            step["brand"] = _inferred_brand
+
     existing_rakuten_link = str(step.get("rakuten_link", "") or "").strip()
 
     existing_image = str(step.get("image", "") or "").strip()
