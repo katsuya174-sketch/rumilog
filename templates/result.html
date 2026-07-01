@@ -696,19 +696,21 @@
                 {% endif %}
             </div>
 
-            {% if (data.get("is_premium") or data.get("is_dev_mode")) and data.get("ai_improvement_strategy") %}
-            {# プレミアム: AIが戦略的に決定した優先順位 #}
-            <p style="font-size:12px;color:#9b7f88;margin:0 0 12px;">スコアだけでなく、項目間の関係・刺激リスク・相乗効果を考慮してAIが順位を決定しています。</p>
+            {% if (data.get("is_premium") or data.get("is_dev_mode")) and data.get("premium_improvement_priority") %}
+            {# プレミアム: AIの戦略的な優先順位づけ(相乗効果・刺激リスク考慮)と、
+               詳細サブスコア(赤ニキビ跡/色素沈着/開き毛穴/黒ずみ毛穴/透明感/
+               肌トーン均一性/肌バランス/左右差)を1つのランキングに合算 #}
+            <p style="font-size:12px;color:#9b7f88;margin:0 0 12px;">項目間の関係・刺激リスク・相乗効果を考慮したAIの分析に、詳細スコアを合わせてより細かい単位で優先順位を決定しています。</p>
             <div class="improvement-priority-list">
-                {% for item in data.get("ai_improvement_strategy", []) %}
+                {% for item in data.get("premium_improvement_priority", []) %}
                 <div class="ip-row">
                     <div class="ip-rank {% if item.rank == 1 %}ip-rank-1{% elif item.rank == 2 %}ip-rank-2{% elif item.rank == 3 %}ip-rank-3{% endif %}">{{ item.rank }}</div>
                     <div class="ip-body">
                         <div class="ip-header-row">
-                            <span class="ip-label">{{ item.item }}</span>
+                            <span class="ip-label">{{ item.label }}</span>
                             <span class="ip-score {% if item.score <= 44 %}ip-score-low{% elif item.score <= 64 %}ip-score-mid{% else %}ip-score-ok{% endif %}">{{ item.score }}</span>
                         </div>
-                        <div class="ip-reason">{{ item.reason }}</div>
+                        {% if item.reason %}<div class="ip-reason">{{ item.reason }}</div>{% endif %}
                     </div>
                 </div>
                 {% endfor %}
@@ -734,39 +736,12 @@
             </div>
             {% if not (data.get("is_premium") or data.get("is_dev_mode")) %}
             <div class="premium-lock-box" style="margin-top:12px;">
-                AI戦略分析（項目間の関係・刺激リスク・相乗効果の考慮）はプレミアム機能です。
+                AI戦略分析（項目間の関係・刺激リスク・相乗効果の考慮）と、より細かい詳細スコアを合わせた優先順位はプレミアム機能です。
                 <a href="/pricing?source=result_priority" class="premium-link">詳しく見る</a>
             </div>
             {% endif %}
             {% endif %}
         </section>
-
-        {% if data.get("premium_scores") %}
-        <section class="result-card">
-            <div class="routine-header">
-                <h2 class="section-title" style="margin:0;">詳細スコア（改善優先順位つき）</h2>
-                <div class="routine-chip">Premium</div>
-            </div>
-
-            {% if data.get("is_premium") or data.get("is_dev_mode") %}
-            <p style="font-size:12px;color:#9b7f88;margin:0 0 12px;">スコアが低い項目ほど優先度が高いものとして番号を振っています。</p>
-            <div class="score-mini-grid">
-                {% for item in data.get("premium_improvement_priority", []) %}
-                <div class="score-mini">
-                    <div class="score-mini-rank {% if item.rank == 1 %}rank-1{% elif item.rank == 2 %}rank-2{% elif item.rank == 3 %}rank-3{% endif %}">{{ item.rank }}</div>
-                    <div class="score-mini-name">{{ item.label }}</div>
-                    <div class="score-mini-value">{{ item.score }}</div>
-                </div>
-                {% endfor %}
-            </div>
-            {% else %}
-            <div class="premium-lock-box">
-                詳細スコアはプレミアム機能です。
-                <a href="/premium" class="premium-link">詳しく見る</a>
-            </div>
-            {% endif %}
-        </section>
-        {% endif %}
 
         {% if data.get("is_premium") or data.get("is_dev_mode") %}
         {% set sym = data.get("symmetry_analysis") or {} %}

@@ -7973,17 +7973,70 @@ def build_improvement_priority(scores):
     return [{"rank": i + 1, **item} for i, item in enumerate(items)]
 
 
-def build_premium_improvement_priority(premium_scores):
+# premium_scores の各項目が、どの基本スコア(build_improvement_priority の
+# キー)から最も強い重みで合成されているか（calculate_premium_scores の
+# 重み付けに対応）。AIの改善優先順位(ai_improvement_strategy)が持つ
+# reason(相乗効果・刺激リスクを考慮した理由文)を、対応する詳細項目にも
+# 引き継いで表示するために使う。
+_PREMIUM_SCORE_PRIMARY_BASE = {
+    "acne_marks_red":  "redness",
+    "pigmentation":    "tone_evenness",
+    "enlarged_pores":  "pores",
+    "blackhead_pores": "pores",
+    "translucency":    "dullness",
+    "tone_uniformity": "tone_evenness",
+    "skin_balance":    "hydration",
+}
+
+_BASE_SCORE_LABELS = {
+    "oil_balance":   "皮脂バランス",
+    "redness":       "赤み",
+    "pores":         "毛穴",
+    "hydration":     "保湿",
+    "firmness":      "ハリ",
+    "acne":          "ニキビ",
+    "dullness":      "くすみ",
+    "barrier":       "バリア",
+    "texture":       "キメ",
+    "tone_evenness": "色ムラ",
+}
+
+# calculate_premium_scores() の重み付け式で実際に使われている基本スコアの
+# キー（重みの大小を問わず全て）。ここに含まれる基本項目は、詳細サブスコア
+# 側で既に表現されているため、合算リストでは別枠として重複表示しない。
+# _PREMIUM_SCORE_PRIMARY_BASE（最大重みの1項目のみ）だけを基準にすると、
+# 二次的な重みでしか使われていない項目（皮脂バランス・バリア・キメ・ニキビ等）
+# が漏れて別枠に重複表示されてしまうため、こちらは全構成要素を明示する。
+_PREMIUM_SCORE_COVERED_BASE_KEYS = {
+    "redness", "acne", "tone_evenness", "dullness",
+    "pores", "oil_balance", "hydration", "barrier", "texture",
+}
+
+
+def build_premium_improvement_priority(scores, premium_scores, ai_improvement_strategy=None):
     """
-    premium_scores（10項目の基本スコアを組み合わせた詳細サブスコア）を
-    スコア昇順（低い順）で改善優先順位化する。プレミアムユーザー用。
-    基本スコアだけの build_improvement_priority より粒度が細かい
-    （例:「毛穴」→「開き毛穴」「黒ずみ毛穴」に分解）。
+    基本10項目の改善優先順位(ai_improvement_strategy)と、詳細サブスコア
+    (premium_scores)を1つのランキングに合算する。プレミアムユーザー用。
+
+    premium_scores は基本スコアの重み付き合成のため、対応する基本項目
+    （例:「毛穴」→「開き毛穴」「黒ずみ毛穴」）は重複表示を避けるため
+    詳細項目側に置き換える。詳細サブスコアに分解されていない基本項目
+    （例:「ハリ」）はそのまま残す。
     """
+    if not isinstance(scores, dict):
+        scores = {}
     if not isinstance(premium_scores, dict):
         premium_scores = {}
+    if not isinstance(ai_improvement_strategy, list):
+        ai_improvement_strategy = []
 
-    _labels = [
+    # AIの理由文を基本項目ラベルで引けるようにする
+    _reason_by_label = {}
+    for entry in ai_improvement_strategy:
+        if isinstance(entry, dict) and entry.get("item"):
+            _reason_by_label[str(entry["item"]).strip()] = str(entry.get("reason", "") or "")
+
+    _detail_labels = [
         ("acne_marks_red",  "赤ニキビ跡"),
         ("pigmentation",    "色素沈着"),
         ("enlarged_pores",  "開き毛穴"),
@@ -7993,14 +8046,34 @@ def build_premium_improvement_priority(premium_scores):
         ("skin_balance",    "肌バランス"),
         ("symmetry",        "左右差"),
     ]
-    items = sorted(
-        [
-            {"key": k, "label": lbl, "score": int(premium_scores.get(k, 0) or 0)}
-            for k, lbl in _labels
-            if k in premium_scores
-        ],
-        key=lambda x: x["score"]
-    )
+
+    items = []
+
+    for key, label in _detail_labels:
+        if key not in premium_scores:
+            continue
+        primary_base_key = _PREMIUM_SCORE_PRIMARY_BASE.get(key)
+        primary_base_label = _BASE_SCORE_LABELS.get(primary_base_key, "")
+        reason = _reason_by_label.get(primary_base_label, "")
+        items.append({
+            "key": key,
+            "label": label,
+            "score": int(premium_scores.get(key, 0) or 0),
+            "reason": reason,
+        })
+
+    # premium_scores に分解されていない基本項目（現状は「ハリ」のみ）を残す
+    for base_key, base_label in _BASE_SCORE_LABELS.items():
+        if base_key in _PREMIUM_SCORE_COVERED_BASE_KEYS:
+            continue
+        items.append({
+            "key": base_key,
+            "label": base_label,
+            "score": int(scores.get(base_key, 0) or 0),
+            "reason": _reason_by_label.get(base_label, ""),
+        })
+
+    items.sort(key=lambda x: x["score"])
     return [{"rank": i + 1, **item} for i, item in enumerate(items)]
 
 
@@ -13444,7 +13517,9 @@ def prepare_result_for_view(result):
     # premium_improvement_priority も同様に、未設定なら premium_scores から再計算する
     if not result.get("premium_improvement_priority"):
         result["premium_improvement_priority"] = build_premium_improvement_priority(
-            result.get("premium_scores", {})
+            result.get("scores", {}),
+            result.get("premium_scores", {}),
+            result.get("ai_improvement_strategy", [])
         )
 
     return result
@@ -16590,7 +16665,9 @@ def lab_test_function():
                 "right_tendency": str(symmetry_analysis.get("right_tendency", "") or "")
             }
             data["premium_improvement_priority"] = build_premium_improvement_priority(
-                data["premium_scores"]
+                data.get("scores", {}),
+                data["premium_scores"],
+                data.get("ai_improvement_strategy", [])
             )
             debug_log("AFTER ANALYZE", {
                 "skin_score": data.get("skin_score"),
