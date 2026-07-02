@@ -27,7 +27,7 @@ import threading
 from psycopg2.pool import SimpleConnectionPool
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v7"  # supplementsのsupplement_schema/選定ルールを刷新、reasonは必要性判断の理由に統一
+ANALYSIS_CACHE_VERSION = "v8"  # 美容機器は最大1つに制限、reason文言を美容機器/サプリ両方で統一
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
@@ -2264,12 +2264,27 @@ def score_rakuten_item(item, product_name, brand="", category=""):
 
     elif category == "美容機器":
         # スキンケア商品・サプリがヒットしないよう除外
+        # 「マスク」は単独では除外しない（LEDマスク等の機器名にも使われるため）。
+        # スキンケアのシート・パック系と明確にわかる語のみ除外する。
         _dev_skincare_words = [
             "化粧水", "美容液", "クリーム", "乳液", "セラム", "ローション",
-            "洗顔", "クレンジング", "日焼け止め", "パック", "マスク",
+            "洗顔", "クレンジング", "日焼け止め",
+            "シートマスク", "フェイスパック", "泥パック", "クレイマスク", "泥マスク",
             "サプリ", "supplement", "錠", "粒", "カプセル",
         ]
         if any(word in title for word in _dev_skincare_words):
+            return -9999
+        # 「超音波洗浄機」「イオン」等は顔用美容機器以外の同名商品
+        # （メガネ・アクセサリー・入れ歯洗浄機、空気清浄機のイオン機能等）にも
+        # ヒットするため、明確に用途違いと分かる語を含む商品を除外する
+        _dev_wrong_use_words = [
+            "メガネ", "眼鏡", "サングラス", "ゴーグル", "コンタクトレンズ",
+            "ジュエリー", "アクセサリー", "指輪", "ネックレス", "腕時計", "時計",
+            "入れ歯", "義歯", "デンチャー", "マウスピース",
+            "食器", "調理器具", "包丁", "まな板",
+            "空気清浄機", "加湿器", "イオンドライヤー",
+        ]
+        if any(word in title for word in _dev_wrong_use_words):
             return -9999
         # 美容機器らしいキーワードがなければ低スコア
         _dev_ok_words = [
@@ -2281,6 +2296,11 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             score_category_penalty = -40
         else:
             score_category_penalty = 0
+        # 「顔」「フェイス」等が全く含まれない場合は追加ペナルティ
+        # （超音波洗浄機のような汎用名は顔用以外でも一致してしまうため）
+        _dev_face_words = ["顔", "フェイス", "face", "美顔", "毛穴"]
+        if not any(w.lower() in title_norm or w in title for w in _dev_face_words):
+            score_category_penalty -= 20
 
     else:
         score_category_penalty = 0
@@ -5327,6 +5347,20 @@ def resolve_beauty_device_day_conflicts(data):
     return data
 
 
+def _apply_cleaned_product(target, cleaned, brand_field="brand", name_field="product"):
+    """
+    Geminiはプロンプト上「ブランド名+製品名」を1つの文字列として返す設計だが、
+    表示側(result.html)は item.brand と item.product を別々に連結して表示する
+    ({{ brand ~ ' ' ~ product }})。ここでそのままname_fieldへ代入すると、
+    既にfinalize_step_display_fields等で正しく分離済みのbrandと合わさって
+    「ブランド名 ブランド名 商品名」のように重複表示される。
+    clean_brand_and_product_name で再度ブランド名を剥がしてから代入する。
+    """
+    existing_brand = str(target.get(brand_field, "") or "").strip()
+    _, deduped = clean_brand_and_product_name(existing_brand, cleaned)
+    target[name_field] = deduped or cleaned
+
+
 def gemini_clean_rakuten_product_names(data):
     """楽天商品タイトルからブランド名+製品名のみをGeminiで抽出する。
     1位ステップ（rakuten_criteria / ai_rakuten_verified）と
@@ -5358,7 +5392,7 @@ def gemini_clean_rakuten_product_names(data):
         _step = step  # closure capture
         items.append({
             "title": raw_title,
-            "apply": lambda cleaned, s=_step: s.update({"product": cleaned}),
+            "apply": lambda cleaned, s=_step: _apply_cleaned_product(s, cleaned, "brand", "product"),
         })
 
     # 2位・3位候補の name フィールド（top_candidates[1:3]）
@@ -5372,7 +5406,7 @@ def gemini_clean_rakuten_product_names(data):
             _cand = cand
             items.append({
                 "title": raw_title,
-                "apply": lambda cleaned, c=_cand: c.update({"name": cleaned}),
+                "apply": lambda cleaned, c=_cand: _apply_cleaned_product(c, cleaned, "brand", "name"),
             })
 
     print(f"[NAME CLEAN] 整形対象={len(items)}件 (1位ステップ+2位3位候補)", flush=True)
@@ -11516,7 +11550,9 @@ _DEVICE_DEFAULTS = {
         "frequency": "週2〜3回・美容液の前後",
     },
     "超音波洗浄": {
-        "product": "超音波洗浄機",
+        # 「超音波洗浄機」単独だと眼鏡・アクセサリー用の同名商品がヒットするため
+        # 顔用であることが明確な検索語にする
+        "product": "超音波洗浄機 毛穴 美顔器",
         "device_function": "超音波振動",
         "priority": 2,
         "frequency": "週1回",
@@ -11543,18 +11579,13 @@ def enrich_beauty_devices(data, user_data):
     """
     Geminiが選んだdevice_type(+reason)のみのbeauty_devicesエントリに、
     検索用商品名・機能説明・使用頻度・優先度を固定ルールで補完する。
+    美容機器は多くても1つ（ユーザー指定）。プロンプトでも1つまでと指示しているが、
+    Geminiが誤って複数返した場合に備え、優先度が最も高い1件のみをコード側で強制する。
     """
     raw_items = data.get("beauty_devices") or []
     if not isinstance(raw_items, list):
         data["beauty_devices"] = []
         return data
-
-    selected_types = set()
-    for item in raw_items:
-        if isinstance(item, dict):
-            dtype = str(item.get("device_type", "") or "").strip()
-            if dtype in _DEVICE_DEFAULTS:
-                selected_types.add(dtype)
 
     cleaned = []
     for item in raw_items:
@@ -11566,10 +11597,6 @@ def enrich_beauty_devices(data, user_data):
             print(f"[DEVICE SKIP unknown device_type] {dtype!r}", flush=True)
             continue
 
-        priority = defaults["priority"]
-        if dtype == "EMS" and "RF" in selected_types:
-            priority = max(priority, 3)
-
         cleaned.append({
             "category": "美容機器",
             "device_type": dtype,
@@ -11579,10 +11606,13 @@ def enrich_beauty_devices(data, user_data):
             "device_function": defaults["device_function"],
             "frequency": defaults["frequency"],
             "reason": str(item.get("reason", "") or "").strip(),
-            "priority": priority,
+            "priority": defaults["priority"],
         })
 
     cleaned.sort(key=lambda d: d.get("priority", 9))
+    if len(cleaned) > 1:
+        print(f"[DEVICE CAP] Geminiが{len(cleaned)}件返したため優先度最上位の1件のみ採用: {[c['device_type'] for c in cleaned]}", flush=True)
+        cleaned = cleaned[:1]
     data["beauty_devices"] = cleaned
     return data
 
@@ -15633,20 +15663,24 @@ supplement_type は以下の10カテゴリから、条件に合うものだけ�
 あなたの役割は「美容機器が必要か」「どのカテゴリが合うか」「なぜ必要と判断したか」の3点の判断のみ。
 具体的な商品名・ブランド・使用頻度・優先度はこちらで別途決定するので出力不要（device_type と reason のみ返す）。
 
-device_type は以下の6カテゴリから、条件に合うものだけを選ぶ（複数選択可、条件に合うものがなければ[]）。
+美容機器は多くても1つまで。最も優先度が高い悩みに対応するカテゴリを1つだけ選ぶこと（0個=不要も可）。
+
+device_type は以下の6カテゴリから、最も当てはまるものを1つだけ選ぶ（条件に合うものがなければ[]）。
 
 ■ RF（高周波）— 条件: firmness(ハリ・たるみ)が低い
 ■ LED — 条件: redness(赤み)、acne(ニキビ・炎症)、または改善優先順位にニキビ跡・炎症性の悩みがある
-■ EMS — 条件: firmness(ハリ)が低い、またはフェイスラインのたるみが悩みにある。※RFも同時に選ぶ場合はEMSは補助的な位置づけとする（1つのルーティンでRFとEMSを両方提案してよいが、優先度はRFを上にする）
+■ EMS — 条件: firmness(ハリ)が低い、またはフェイスラインのたるみが悩みにある
 ■ エレクトロポレーション — 条件: hydration(乾燥・保湿不足)が低い、または美容液の浸透を高めたい場合
 ■ 超音波洗浄 — 条件: pores(毛穴)、oil_balance(皮脂)が低い、または改善優先順位に毛穴の黒ずみ等がある
-■ マイクロカレント — 条件: firmnessがやや低い程度（RFを選ぶほど深刻ではない軽度のハリ不足）。RFとマイクロカレントは同時に選ばない（重度ならRF、軽度ならマイクロカレントのどちらか一方のみ）
+■ マイクロカレント — 条件: firmnessがやや低い程度（RFを選ぶほど深刻ではない軽度のハリ不足）
+
+複数のカテゴリの条件に当てはまる場合は、改善優先順位で最も上位の悩みに対応するカテゴリを1つ選ぶこと（例: ハリ低下が最優先ならRF、毛穴が最優先なら超音波洗浄）。
 
 【提案しない判断】
-肌状態が全体的に良好で、改善優先順位の上位項目も軽微と判断できる場合は[]とする（無理にどれか1つ選ばない）。その場合は理由を無理に作らず空配列を返せばよい。
+肌状態が全体的に良好で、改善優先順位の上位項目も軽微と判断できる場合は[]とする（無理に選ばない）。その場合は理由を無理に作らず空配列を返せばよい。
 
 【禁止】
-・1つの悩みに対して複数カテゴリを重複提案しない（RF×EMSの組み合わせのみ例外）
+・美容機器を2つ以上提案しない（必ず1つまで）
 ・敏感度(sens)が高いユーザーには、刺激を伴うRF・EMS・超音波洗浄の提案を特に慎重に判断する（必要性が明確な場合のみ）
 ・根拠のない漠然とした提案
 
