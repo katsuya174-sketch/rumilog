@@ -27,7 +27,7 @@ import threading
 from psycopg2.pool import SimpleConnectionPool
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v4"  # use_timing フィールド追加
+ANALYSIS_CACHE_VERSION = "v5"  # premium_improvement_priorityをPhase2プロンプトに反映
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
