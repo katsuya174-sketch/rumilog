@@ -27,7 +27,7 @@ import threading
 from psycopg2.pool import SimpleConnectionPool
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v9"  # キャッシュキーからrecord_dateを除外（同じ写真なら日をまたいでも同一スコアを返す）
+ANALYSIS_CACHE_VERSION = "v10"  # Phase1を3回平均するアンサンブル方式に変更（スコアのブレを軽減）
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
@@ -4280,43 +4280,6 @@ def _get_step_rakuten_key(step):
     return (cat, ing)
 
 
-def _build_product_eval_prompt(step, products):
-    category        = str(step.get("category", "") or "")
-    purpose         = str(step.get("purpose", "") or "")
-    ingredient_focus= str(step.get("ingredient_focus", "") or "")
-
-    lines = []
-    for i, p in enumerate(products, start=1):
-        title = str(p.get("rakuten_title") or p.get("name") or "")[:80]
-        price = int(safe_price(p.get("price_ref", 0)))
-        lines.append(f"{i}. {title} (¥{price:,})")
-
-    return (
-        "あなたはスキンケア成分の専門家です。楽天市場の商品タイトルを評価し、"
-        "各商品の成分・効果を推定してください。\n\n"
-        f"【ステップ情報】カテゴリ: {category} / 目的: {purpose} / 注目成分: {ingredient_focus}\n\n"
-        "【成分IDリスト】\n"
-        + ", ".join(sorted(_PRODUCT_EVAL_VALID_INGREDIENTS)) + "\n\n"
-        "【肌悩みタグ】\n"
-        + ", ".join(sorted(_PRODUCT_EVAL_VALID_CONCERNS)) + "\n\n"
-        "【機能タグ（main_functions）】\n"
-        "保湿, バリア強化, 鎮静, 美白, くすみ改善, エイジングケア, ハリ補給, "
-        "毛穴改善, ニキビ改善, 角質ケア, ターンオーバー促進, 皮脂コントロール, 抗酸化, 修復\n\n"
-        "【処方タグ（formulation）】\n"
-        "low_irritation, barrier_formula, oil_control, tone_up, mild_formula\n\n"
-        "【評価対象商品】\n"
-        + "\n".join(lines) + "\n\n"
-        "各商品の idx（1始まり）に対して以下を推定してください:\n"
-        "- active_ingredients: タイトルや成分名から推測できる有効成分IDリスト\n"
-        "- ingredient_strength: 濃度表記がある成分のみ [{ingredient, level}] 形式で\n"
-        "- concerns: 対応する肌悩みタグリスト\n"
-        "- skin_types: 適した肌タイプ (dry/oily/combination/sensitive/normal)\n"
-        "- sensitive_ok: 敏感肌向け表記や低刺激成分中心なら yes、刺激性成分多ければ no、不明なら unknown\n"
-        "- main_functions: 機能タグリスト\n"
-        "- formulation: 処方特性タグリスト\n"
-    )
-
-
 _GEMINI_EVAL_CACHE_MAX = 500  # メモリ上の最大保持件数（Renderフリープラン対応）
 
 def _load_gemini_eval_cache_if_needed():
@@ -4386,46 +4349,89 @@ def _gemini_eval_limit(step):
     return _GEMINI_EVAL_LIMIT_BY_CATEGORY.get(category, _GEMINI_EVAL_LIMIT_DEFAULT)
 
 
-def gemini_evaluate_rakuten_batch(step, rakuten_products):
+def gemini_evaluate_rakuten_batch_multi(steps_to_eval):
     """
-    楽天商品をカテゴリ別上限件数まとめてGeminiで評価し、結果を _gemini_product_eval_cache に保存する。
-    キャッシュ済みの商品はスキップする。スレッドセーフ（並列Phase B対応）。
+    全ステップ分の商品評価を1回のGeminiリクエストにまとめて行う（コスト削減）。
+    以前はステップごとに1回呼んでおり診断1回あたり最大ステップ数分の呼び出しが
+    発生していたが、gemini_clean_rakuten_product_names / gemini_generate_selection_reasons
+    と同じ「全ステップ分をまとめて1回」の方式に統一した。
+    steps_to_eval: [(step, rakuten_products), ...]
     """
-    if not rakuten_products:
+    flat_items = []  # 提出順（=レスポンスのidxと対応）の product 参照
+    lines = []
+
+    for step, rakuten_products in steps_to_eval:
+        if not rakuten_products:
+            continue
+        limit = _gemini_eval_limit(step)
+        category = str(step.get("category", "") or "")
+        purpose = str(step.get("purpose", "") or "")
+        ingredient_focus = str(step.get("ingredient_focus", "") or "")
+        step_label = str(step.get("step_name") or category)
+
+        with _gemini_eval_cache_lock:
+            uncached = [
+                p for p in rakuten_products[:limit]
+                if normalize_product_name(str(p.get("rakuten_title") or p.get("name") or ""))
+                not in _gemini_product_eval_cache
+            ]
+
+        for p in uncached:
+            title = str(p.get("rakuten_title") or p.get("name") or "")[:80]
+            price = int(safe_price(p.get("price_ref", 0)))
+            flat_items.append(p)
+            lines.append(
+                f"{len(flat_items)}. [{step_label}/目的:{purpose}/注目成分:{ingredient_focus}] "
+                f"{title} (¥{price:,})"
+            )
+
+    if not flat_items:
+        print("[GEMINI EVAL MULTI] 評価対象なし（全ステップキャッシュ済み）", flush=True)
         return
 
-    limit = _gemini_eval_limit(step)
-
-    # 未キャッシュ商品だけを対象にする（ロック内でスナップショット取得）
-    with _gemini_eval_cache_lock:
-        uncached = [
-            p for p in rakuten_products[:limit]
-            if normalize_product_name(str(p.get("rakuten_title") or p.get("name") or ""))
-            not in _gemini_product_eval_cache
-        ]
-
-    if not uncached:
-        step_label2 = str(step.get("step_name") or step.get("category") or "")
-        print(f"[GEMINI EVAL] step={step_label2!r} all cached → skip", flush=True)
-        return
-
-    step_label = str(step.get("step_name") or step.get("category") or "")
-    print(f"[GEMINI EVAL] step={step_label!r} limit={limit} evaluating {len(uncached)} products", flush=True)
+    print(
+        f"[GEMINI EVAL MULTI] {len(steps_to_eval)}ステップ・{len(flat_items)}商品を1回のGemini呼び出しで評価",
+        flush=True
+    )
     _t_gemini = time.time()
 
+    prompt = (
+        "あなたはスキンケア成分の専門家です。楽天市場の商品タイトルを評価し、"
+        "各商品の成分・効果を推定してください。各商品には、その商品が属するステップの"
+        "文脈（[ステップ名/目的/注目成分]）が付いています。文脈を踏まえて評価すること。\n\n"
+        "【成分IDリスト】\n"
+        + ", ".join(sorted(_PRODUCT_EVAL_VALID_INGREDIENTS)) + "\n\n"
+        "【肌悩みタグ】\n"
+        + ", ".join(sorted(_PRODUCT_EVAL_VALID_CONCERNS)) + "\n\n"
+        "【機能タグ（main_functions）】\n"
+        "保湿, バリア強化, 鎮静, 美白, くすみ改善, エイジングケア, ハリ補給, "
+        "毛穴改善, ニキビ改善, 角質ケア, ターンオーバー促進, 皮脂コントロール, 抗酸化, 修復\n\n"
+        "【処方タグ（formulation）】\n"
+        "low_irritation, barrier_formula, oil_control, tone_up, mild_formula\n\n"
+        "【評価対象商品】\n"
+        + "\n".join(lines) + "\n\n"
+        "各商品の idx（1始まり）に対して以下を推定してください:\n"
+        "- active_ingredients: タイトルや成分名から推測できる有効成分IDリスト\n"
+        "- ingredient_strength: 濃度表記がある成分のみ [{ingredient, level}] 形式で\n"
+        "- concerns: 対応する肌悩みタグリスト\n"
+        "- skin_types: 適した肌タイプ (dry/oily/combination/sensitive/normal)\n"
+        "- sensitive_ok: 敏感肌向け表記や低刺激成分中心なら yes、刺激性成分多ければ no、不明なら unknown\n"
+        "- main_functions: 機能タグリスト\n"
+        "- formulation: 処方特性タグリスト\n"
+    )
+
     try:
-        prompt = _build_product_eval_prompt(step, uncached)
         config = types.GenerateContentConfig(
             temperature=0,
             seed=42,
             thinking_config=types.ThinkingConfig(thinking_budget=0),  # 商品評価の一貫性のためthinking無効
-            max_output_tokens=1200,
+            max_output_tokens=min(8000, 300 + 220 * len(flat_items)),
             response_mime_type="application/json",
             response_schema=_PRODUCT_EVAL_SCHEMA,
         )
         response = call_gemini_with_retry(
             client, DETAIL_MODEL, prompt, config=config,
-            max_retries=1, timeout=30  # 商品評価はスキップ可能なため短めのタイムアウト
+            max_retries=1, timeout=45  # 全ステップ分まとめるため単発より長めに確保
         )
         if response is None or not response.text:
             return
@@ -4438,14 +4444,15 @@ def gemini_evaluate_rakuten_batch(step, rakuten_products):
         if not isinstance(results, list):
             return
 
+        applied = 0
         for item in results:
             if not isinstance(item, dict):
                 continue
             idx = int(item.get("idx", 0)) - 1  # 1始まり→0始まり
-            if idx < 0 or idx >= len(uncached):
+            if idx < 0 or idx >= len(flat_items):
                 continue
 
-            product = uncached[idx]
+            product = flat_items[idx]
             title = str(product.get("rakuten_title") or product.get("name") or "")
             norm_title = normalize_product_name(title)
             if not norm_title:
@@ -4487,20 +4494,19 @@ def gemini_evaluate_rakuten_batch(step, rakuten_products):
                     "main_functions":     main_functions,
                     "formulation":        formulation,
                 }
-            print(
-                f"[GEMINI EVAL] cached title={title[:40]!r} "
-                f"actives={actives} sens={sensitive_ok} concerns={len(concerns)}",
-                flush=True
-            )
+            applied += 1
+
+        print(f"[GEMINI EVAL MULTI] {applied}/{len(flat_items)}件の評価結果を適用", flush=True)
 
     except TimeoutError as e:
         # 商品評価タイムアウト: 診断全体は継続（Gemini評価なしで楽天商品をスコアリング）
-        print(f"[GEMINI EVAL TIMEOUT] step={step_label!r} {e} → skip eval", flush=True)
+        print(f"[GEMINI EVAL MULTI TIMEOUT] {e} → skip eval", flush=True)
     except Exception as e:
-        print(f"[GEMINI EVAL ERROR] step={step_label!r} {repr(e)}", flush=True)
+        print(f"[GEMINI EVAL MULTI ERROR] {repr(e)}", flush=True)
     finally:
         print(
-            f"[GEMINI TIMING] step={step_label!r} items={len(uncached)} elapsed={time.time()-_t_gemini:.2f}s",
+            f"[GEMINI EVAL MULTI TIMING] steps={len(steps_to_eval)} items={len(flat_items)} "
+            f"elapsed={time.time()-_t_gemini:.2f}s",
             flush=True
         )
 
@@ -11249,16 +11255,15 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=3):
             steps_to_eval.append((step, products_for_step))
 
     print(
-        f"[PREFETCH] Phase-B start: {len(steps_to_eval)}ステップをGemini評価 workers=1",
+        f"[PREFETCH] Phase-B start: {len(steps_to_eval)}ステップをGemini評価 "
+        f"（全ステップ分を1回のGemini呼び出しにまとめて評価）",
         flush=True
     )
     if steps_to_eval:
-        # メモリ節約のため直列実行（max_workers=1）
-        for s, p in steps_to_eval:
-            try:
-                gemini_evaluate_rakuten_batch(s, p)
-            except Exception as e:
-                print(f"[PREFETCH GEMINI ERROR] {repr(e)}", flush=True)
+        try:
+            gemini_evaluate_rakuten_batch_multi(steps_to_eval)
+        except Exception as e:
+            print(f"[PREFETCH GEMINI ERROR] {repr(e)}", flush=True)
 
     _save_gemini_eval_cache()
     t_phase_b = time.time() - t1
@@ -16085,6 +16090,101 @@ def set_gemini_cached_analysis(cache_key, data):
 
     save_analysis_cache_to_db(cache_key, data)
 
+PHASE1_ENSEMBLE_SIZE = 3
+_PHASE1_SCORE_KEYS = [
+    "oil_balance", "redness", "pores", "hydration", "firmness",
+    "acne", "dullness", "barrier", "texture", "tone_evenness",
+]
+
+
+def _run_phase1_once(user_data, front_img, left_img, right_img):
+    response1 = call_gemini_with_retry(
+        client,
+        ANALYSIS_MODEL,
+        contents=[build_analysis_prompt_phase1(user_data), front_img, left_img, right_img],
+        config=types.GenerateContentConfig(
+            temperature=0,
+            top_p=0.05,
+            seed=42,
+            thinking_config=types.ThinkingConfig(thinking_budget=0),  # スコアの一貫性のためthinking無効
+            response_mime_type="application/json",
+            response_schema=get_analysis_schema_phase1()
+        ),
+        max_retries=1,
+        timeout=60  # 画像3枚+小出力: 60s
+    )
+    return json.loads(response1.text.strip())
+
+
+def run_phase1_ensemble(user_data, front_img, left_img, right_img, n=PHASE1_ENSEMBLE_SIZE):
+    """
+    Phase1（肌スコア分析）をN回並列実行し、数値スコアを平均することで
+    「同じ写真・同じ入力でも判定のたびにスコアが変動する」問題を緩和する。
+    temperature=0/seed固定にしていても、Gemini側の実際の挙動は完全な
+    再現性を保証しないため、複数サンプルの平均で1回あたりのノイズの影響を減らす。
+
+    - scores（10項目）・symmetry_analysis.score: N件の平均値を採用
+    - skin_summary・score_reasons等の文章系フィールド: 平均スコアに最も近い
+      1件（メドイド）をそのまま採用する（複数の文章を混ぜ合わせることはできないため）
+    """
+    import concurrent.futures
+
+    results = []
+    last_error = None
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n) as executor:
+        futures = [
+            executor.submit(_run_phase1_once, user_data, front_img, left_img, right_img)
+            for _ in range(n)
+        ]
+        for i, future in enumerate(futures):
+            try:
+                results.append(future.result())
+            except Exception as e:
+                print(f"[PHASE1 ENSEMBLE] sample {i+1}/{n} failed: {repr(e)}", flush=True)
+                last_error = e
+
+    if not results:
+        # 呼び出し元(analyze_skin_with_gemini)は例外文字列に"503"/"UNAVAILABLE"が
+        # 含まれるかで既存キャッシュへのフォールバックを判断しているため、
+        # 新規メッセージで握り潰さず元の例外をそのまま再送出する。
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("Phase1 ensemble: すべてのサンプルが失敗しました")
+
+    avg_scores = {}
+    for key in _PHASE1_SCORE_KEYS:
+        vals = [
+            safe_int(r.get("scores", {}).get(key, 0))
+            for r in results if isinstance(r.get("scores"), dict)
+        ]
+        avg_scores[key] = round(sum(vals) / len(vals)) if vals else 0
+
+    sym_vals = [
+        safe_int(r.get("symmetry_analysis", {}).get("score", 0))
+        for r in results if isinstance(r.get("symmetry_analysis"), dict)
+    ]
+    avg_symmetry_score = round(sum(sym_vals) / len(sym_vals)) if sym_vals else None
+
+    def _distance(r):
+        s = r.get("scores", {}) if isinstance(r.get("scores"), dict) else {}
+        return sum((safe_int(s.get(k, 0)) - avg_scores[k]) ** 2 for k in _PHASE1_SCORE_KEYS)
+
+    medoid = min(results, key=_distance)
+    final = copy.deepcopy(medoid)
+    final["scores"] = avg_scores
+    if avg_symmetry_score is not None and isinstance(final.get("symmetry_analysis"), dict):
+        final["symmetry_analysis"]["score"] = avg_symmetry_score
+
+    print(
+        f"[PHASE1 ENSEMBLE] {len(results)}/{n}件成功 "
+        f"individual_scores={[r.get('scores', {}) for r in results]} "
+        f"averaged={avg_scores}",
+        flush=True
+    )
+
+    return final
+
+
 def analyze_skin_with_gemini(user_data, front_img, left_img, right_img, force_refresh=False):
 
     if DEV_MODE:
@@ -16130,27 +16230,11 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img, force_re
 
     print("[GEMINI ANALYSIS CACHE MISS]", cache_key, flush=True)
 
-    # ===== Phase 1: 肌スコア・分析・改善方針（画像3枚、小出力） =====
+    # ===== Phase 1: 肌スコア・分析・改善方針（画像3枚、小出力、N回平均でスコアのブレを軽減） =====
     _t1 = time.time()
-    print("[GEMINI PHASE1 START] 肌スコア・分析", flush=True)
+    print(f"[GEMINI PHASE1 START] 肌スコア・分析 (ensemble x{PHASE1_ENSEMBLE_SIZE})", flush=True)
     try:
-        response1 = call_gemini_with_retry(
-            client,
-            ANALYSIS_MODEL,
-            contents=[build_analysis_prompt_phase1(user_data), front_img, left_img, right_img],
-            config=types.GenerateContentConfig(
-                temperature=0,
-                top_p=0.05,
-                seed=42,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),  # スコアの一貫性のためthinking無効
-                response_mime_type="application/json",
-                response_schema=get_analysis_schema_phase1()
-            ),
-            max_retries=1,
-            timeout=60  # 画像3枚+小出力: 60s
-        )
-        _raw1 = response1.text.strip()
-        phase1 = json.loads(_raw1)
+        phase1 = run_phase1_ensemble(user_data, front_img, left_img, right_img)
         print(f"[GEMINI PHASE1 DONE] elapsed={time.time()-_t1:.1f}s scores={phase1.get('scores',{})}", flush=True)
 
         # Phase2（ルーティン・商品選定）が実際にこの詳細ランキングを
