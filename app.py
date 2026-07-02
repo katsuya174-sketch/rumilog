@@ -5270,6 +5270,63 @@ def resolve_night_irritant_conflicts(data):
     return data
 
 
+_RETINOID_ONLY_TAGS = {"retinoid", "retinol", "retinal"}
+# ピーリング日に使用不可（超音波洗浄・RFは物理刺激/摩擦を伴うため）
+_DEVICE_PEELING_INCOMPATIBLE = {"RF", "超音波洗浄"}
+# レチノール使用日に使用不可（超音波洗浄は摩擦でレチノール塗布直後の肌に負担）
+_DEVICE_RETINOL_INCOMPATIBLE = {"超音波洗浄"}
+
+
+def resolve_beauty_device_day_conflicts(data):
+    """
+    美容機器とレチノール・ピーリングの併用可否をルールベースで判定し、
+    該当する場合はreasonに注意書きを付与する。
+    （resolve_weekly_care_day_conflicts / resolve_night_irritant_conflicts で
+    レチノール・ピーリングのuse_daysが確定した後に呼ぶこと）
+
+    併用ルール（ユーザー指定）:
+      レチノール使用日: LED可・RF可・EMS可・超音波洗浄不可
+      ピーリング使用日: RF不可・超音波洗浄不可・LED可（EMS/エレクトロポレーション/マイクロカレントは可）
+    """
+    devices = data.get("beauty_devices") or []
+    if not isinstance(devices, list) or not devices:
+        return data
+
+    has_retinol = False
+    for step in data.get("night", {}).get("steps", []):
+        if not isinstance(step, dict):
+            continue
+        focus = set(as_list(step.get("ingredient_focus") or []))
+        if focus & _RETINOID_ONLY_TAGS:
+            has_retinol = True
+            break
+
+    has_peeling = False
+    for step in data.get("weekly_care", []):
+        if not isinstance(step, dict):
+            continue
+        if step.get("category") == "ピーリング":
+            has_peeling = True
+            break
+
+    for item in devices:
+        if not isinstance(item, dict):
+            continue
+        dtype = str(item.get("device_type", "") or "").strip()
+        notes = []
+        if has_peeling and dtype in _DEVICE_PEELING_INCOMPATIBLE:
+            notes.append("ピーリングを行う日は使用を避けてください")
+        if has_retinol and dtype in _DEVICE_RETINOL_INCOMPATIBLE:
+            notes.append("レチノールを使用する日は使用を避けてください")
+        if notes:
+            existing = str(item.get("reason", "") or "").strip()
+            note_text = "。".join(notes) + "。"
+            item["reason"] = f"{existing}（{note_text}）" if existing else note_text
+            print(f"[DEVICE DAY CONFLICT] {dtype}: {notes}", flush=True)
+
+    return data
+
+
 def gemini_clean_rakuten_product_names(data):
     """楽天商品タイトルからブランド名+製品名のみをGeminiで抽出する。
     1位ステップ（rakuten_criteria / ai_rakuten_verified）と
@@ -11427,6 +11484,109 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
     return data
 
+
+# 美容機器カテゴリ選定ルール（2026-07-02導入）:
+# Geminiは「必要か」「どのカテゴリか」「なぜか」の3点のみ判断し(device_type/reasonのみ出力)、
+# 具体的な検索用商品名・機能説明・使用頻度・優先度はここで固定値から決定する。
+# 商品名はカテゴリ汎用のRakuten検索キーワードとして使う（fetch_rakuten_itemの
+# category=="美容機器"分岐が緩めのマッチングを行うため、category自体は"美容機器"固定のまま維持する）。
+_DEVICE_DEFAULTS = {
+    "RF": {
+        "product": "RF美顔器",
+        "device_function": "RF高周波",
+        "priority": 1,
+        "frequency": "週2〜3回・スキンケア後",
+    },
+    "LED": {
+        "product": "LED美顔器",
+        "device_function": "LED光照射",
+        "priority": 1,
+        "frequency": "毎日〜週4〜5回・スキンケア後",
+    },
+    "EMS": {
+        "product": "EMS美顔器",
+        "device_function": "EMS微電流",
+        "priority": 2,
+        "frequency": "週2〜3回・スキンケア後",
+    },
+    "エレクトロポレーション": {
+        "product": "イオン導入器",
+        "device_function": "イオン導入(エレクトロポレーション)",
+        "priority": 2,
+        "frequency": "週2〜3回・美容液の前後",
+    },
+    "超音波洗浄": {
+        "product": "超音波洗浄機",
+        "device_function": "超音波振動",
+        "priority": 2,
+        "frequency": "週1回",
+    },
+    "マイクロカレント": {
+        "product": "マイクロカレント美顔器",
+        "device_function": "微弱電流(マイクロカレント)",
+        "priority": 3,
+        "frequency": "週2〜3回・スキンケア後",
+    },
+}
+
+_DEVICE_PURPOSE_LABELS = {
+    "RF": "ハリ・たるみの引き締めケア",
+    "LED": "赤み・炎症の鎮静、ニキビ跡ケア",
+    "EMS": "フェイスラインの引き締め",
+    "エレクトロポレーション": "美容液成分の浸透サポート、乾燥ケア",
+    "超音波洗浄": "毛穴汚れ・皮脂の毛穴ケア",
+    "マイクロカレント": "軽度のハリ不足のケア",
+}
+
+
+def enrich_beauty_devices(data, user_data):
+    """
+    Geminiが選んだdevice_type(+reason)のみのbeauty_devicesエントリに、
+    検索用商品名・機能説明・使用頻度・優先度を固定ルールで補完する。
+    """
+    raw_items = data.get("beauty_devices") or []
+    if not isinstance(raw_items, list):
+        data["beauty_devices"] = []
+        return data
+
+    selected_types = set()
+    for item in raw_items:
+        if isinstance(item, dict):
+            dtype = str(item.get("device_type", "") or "").strip()
+            if dtype in _DEVICE_DEFAULTS:
+                selected_types.add(dtype)
+
+    cleaned = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        dtype = str(item.get("device_type", "") or "").strip()
+        defaults = _DEVICE_DEFAULTS.get(dtype)
+        if not defaults:
+            print(f"[DEVICE SKIP unknown device_type] {dtype!r}", flush=True)
+            continue
+
+        priority = defaults["priority"]
+        if dtype == "EMS" and "RF" in selected_types:
+            priority = max(priority, 3)
+
+        cleaned.append({
+            "category": "美容機器",
+            "device_type": dtype,
+            "product": defaults["product"],
+            "brand": "",
+            "purpose": _DEVICE_PURPOSE_LABELS.get(dtype, ""),
+            "device_function": defaults["device_function"],
+            "frequency": defaults["frequency"],
+            "reason": str(item.get("reason", "") or "").strip(),
+            "priority": priority,
+        })
+
+    cleaned.sort(key=lambda d: d.get("priority", 9))
+    data["beauty_devices"] = cleaned
+    return data
+
+
 _SYNERGY_FAMILY_LABELS = {
     "retinoid": "レチノイド",
     "aha_bha": "AHA/BHA",
@@ -14629,16 +14789,10 @@ def get_analysis_schema_phase2():
     device_schema = {
         "type": "object",
         "properties": {
-            "category":        {"type": "string"},
-            "product":         {"type": "string"},
-            "brand":           {"type": "string"},
-            "purpose":         {"type": "string"},
-            "device_function": {"type": "string"},
-            "frequency":       {"type": "string"},
-            "reason":          {"type": "string"},
-            "priority":        {"type": "integer"}
+            "device_type": {"type": "string"},
+            "reason":      {"type": "string"}
         },
-        "required": ["category","product","purpose","device_function","frequency","reason","priority"]
+        "required": ["device_type","reason"]
     }
     return {
         "type": "object",
@@ -15042,51 +15196,6 @@ ai_improvement_strategy: 改善優先順位を戦略的に10項目分出力。�
   ・ユーザーの悩みとの一致度
   各itemはスコアラベル名(日本語)、scoreはそのスコア値、reason は「なぜその順番か」を30〜50字で具体的に記述。
 
-【supplements】
-スキンケアのトータルコーディネートとして、内側からの補完が有効な場合に提案。不要なら[]。
-提案数は肌状態・悩みに応じて柔軟に決める（件数制限なし）。
-提案条件: ①外用スキンケアだけでは補完困難な悩み(コラーゲン生成・抗酸化・抗糖化等) ②既存ルーティンと成分が重複せず相乗効果が見込める ③肌スコアや悩みに明確な根拠がある
-禁止: スキンケアと全く同じ成分の重複提案・根拠のない漠然とした提案
-
-【サプリメント安全基準（複数提案時は必ず全項目確認）】
-①成分重複チェック: 複数サプリにビタミンC/B群/亜鉛/ビタミンA/Eが重複しないか確認。
-  過剰摂取リスクが特に高い成分（ビタミンA・E・亜鉛・セレン・鉄）はサプリ間で重複提案禁止。
-②脂溶性ビタミン注意: ビタミンA・D・E・Kは体内蓄積リスクあり。
-  複数サプリからの重複摂取になる場合は提案を絞ること。
-③ミネラル吸収干渉: 鉄×亜鉛、鉄×カルシウム、亜鉛×銅は同時摂取で吸収率が低下。
-  これらを同時提案する場合は必ずtimingを分ける（例: 亜鉛→朝食後、鉄→就寝前）。
-④薬との相互作用: 代表的な禁忌（抗凝固薬×ビタミンK、多くの医薬品×セントジョーンズワート等）を
-  cautionフィールドに明記。一般ユーザーへの注意喚起として、該当する場合は医師への相談を促す文を含める。
-
-- category: "サプリメント" (固定)
-- product: 楽天で検索可能な具体名 (例: "ビタミンC 1000mg", "コラーゲンペプチド", "ナイアシンアミド サプリ", "亜鉛 サプリ", "アスタキサンチン")
-- brand: ブランド名 (不明なら "")
-- purpose: 肌への期待効果 (30字以内)
-- ingredient_focus: 主要成分タグ配列 (例: ["vitamin_c"] ["collagen"] ["niacinamide"] ["zinc"] ["astaxanthin"])
-- reason: 既存スキンケアルーティンとの相性・補完価値を具体的に (50字以内)
-- timing: 摂取タイミング (例: "朝食後", "就寝前") ※ミネラル干渉がある場合は必ず分ける
-- caution: このサプリ固有の注意点（過剰摂取リスク・吸収干渉・薬との相互作用等、なければ ""）(40字以内)
-- priority: 1=最優先 2=次点以降
-
-【beauty_devices】
-肌スコアや悩みから判断して本当に必要な場合のみ提案。不要なら[]。
-【提案基準（すべて考慮して判断）】
-①スキンケア単独では改善が遅い項目（毛穴・ハリ・キメ等）に機器の物理的効果が明確に有効
-②現在のルーティン（美容液・クリーム等）の効果を技術的に増強できる根拠がある
-③肌スコアの該当項目への改善効果が裏付けられた機器のみ
-【禁止】
-・相性の悪い組み合わせ（例: レチノール使用直後の摩擦系機器・EMS等の刺激系）
-・1つのスコア課題に対して複数の機器を重複提案（1課題=1機器が原則）
-・根拠のない漠然とした提案
-- category: "美容機器" (固定)
-- product: 楽天で検索可能な機器タイプ名 (例: "LEDマスク", "超音波美顔器", "EMSフェイスケア", "RF美顔器", "イオン導入器", "ローラー美顔器")
-- brand: ブランド名 (不明なら "")
-- purpose: 期待される肌効果 (30字以内)
-- device_function: 機能説明 (例: "赤色LED照射", "超音波振動", "EMS微電流", "RF高周波", "イオン導入")
-- reason: 使用中スキンケアとの相性・増強効果の根拠を具体的に (50字以内)
-- frequency: 推奨頻度 (例: "週3〜4回・スキンケア後", "毎日・朝スキンケア後")
-- priority: 1=最優先 2=次点以降
-
 JSONのみ返す。説明・Markdown・前置き禁止。JSONキーは英語、値は日本語。"""
 
 
@@ -15137,12 +15246,8 @@ def build_analysis_prompt_phase2(user_data, phase1):
 
     _all_score_vals = [scores.get(k) for k in _sk if scores.get(k) is not None]
     _min_score = min(_all_score_vals) if _all_score_vals else None
-    _device_keys = ["pores", "firmness", "texture", "acne", "tone_evenness", "dullness"]
-    _device_vals = [scores.get(k) for k in _device_keys if scores.get(k) is not None]
-    _min_device_score = min(_device_vals) if _device_vals else None
 
     _supp_level  = _score_level(_min_score)
-    _device_level = _score_level(_min_device_score)
     return f"""日本の市販スキンケアと肌分析に詳しい美容アドバイザーです。
 肌分析済みの結果をもとに、ルーティン構成と商品候補のみJSONで返す。画像分析は完了済み。
 
@@ -15405,32 +15510,34 @@ synergy_combinations(3件以上必須):
 - priority: 1=最優先 2=次点以降
 
 【beauty_devices】
-肌スコアや悩みから判断して提案。不要なら[]。
+あなたの役割は「美容機器が必要か」「どのカテゴリが合うか」「なぜそのカテゴリか」の3点の判断のみ。
+具体的な商品名・ブランド・使用頻度・優先度はこちらで別途決定するので出力不要（device_type と reason のみ返す）。
 
-【美容機器提案の入口判断（毛穴/ハリ/キメ/ニキビ等の最低値: {_min_device_score} → {_device_level}）】
-スコアが低いほど提案の必要性は高くなるが、必ず提案する必要はない。
-スキンケアのみで十分改善可能と判断した場合は[]とする。
-・80以上: 原則不要
-・60〜79: 必要性が高い場合のみ検討
-・40〜59: 積極的に検討
-・39以下: 優先的に検討し、改善効果が期待できるなら提案
+device_type は以下の6カテゴリから、条件に合うものだけを選ぶ（複数選択可、条件に合うものがなければ[]）。
 
-【提案基準（すべて考慮して判断）】
-①スキンケア単独では改善が遅い項目（毛穴・ハリ・キメ等）に機器の物理的効果が明確に有効
-②現在のルーティン（美容液・クリーム等）の効果を技術的に増強できる根拠がある
-③肌スコアの該当項目への改善効果が裏付けられた機器のみ
+■ RF（高周波）— 条件: firmness(ハリ・たるみ)が低い
+■ LED — 条件: redness(赤み)、acne(ニキビ・炎症)、または改善優先順位にニキビ跡・炎症性の悩みがある
+■ EMS — 条件: firmness(ハリ)が低い、またはフェイスラインのたるみが悩みにある。※RFも同時に選ぶ場合はEMSは補助的な位置づけとする（1つのルーティンでRFとEMSを両方提案してよいが、優先度はRFを上にする）
+■ エレクトロポレーション — 条件: hydration(乾燥・保湿不足)が低い、または美容液の浸透を高めたい場合
+■ 超音波洗浄 — 条件: pores(毛穴)、oil_balance(皮脂)が低い、または改善優先順位に毛穴の黒ずみ等がある
+■ マイクロカレント — 条件: firmnessがやや低い程度（RFを選ぶほど深刻ではない軽度のハリ不足）。RFとマイクロカレントは同時に選ばない（重度ならRF、軽度ならマイクロカレントのどちらか一方のみ）
+
+【提案しない判断】
+肌状態が全体的に良好で、改善優先順位の上位項目も軽微と判断できる場合は[]とする（無理にどれか1つ選ばない）。その場合は理由を無理に作らず空配列を返せばよい。
+
 【禁止】
-・相性の悪い組み合わせ（例: レチノール使用直後の摩擦系機器・EMS等の刺激系）
-・1つのスコア課題に対して複数の機器を重複提案（1課題=1機器が原則）
+・1つの悩みに対して複数カテゴリを重複提案しない（RF×EMSの組み合わせのみ例外）
+・敏感度(sens)が高いユーザーには、刺激を伴うRF・EMS・超音波洗浄の提案を特に慎重に判断する（必要性が明確な場合のみ）
 ・根拠のない漠然とした提案
-- category: "美容機器" (固定)
-- product: 楽天で検索可能な機器タイプ名 (例: "LEDマスク", "超音波美顔器", "EMSフェイスケア", "RF美顔器", "イオン導入器", "ローラー美顔器")
-- brand: ブランド名 (不明なら "")
-- purpose: 期待される肌効果 (30字以内)
-- device_function: 機能説明 (例: "赤色LED照射", "超音波振動", "EMS微電流", "RF高周波", "イオン導入")
-- reason: 使用中スキンケアとの相性・増強効果の根拠を具体的に (50字以内)
-- frequency: 推奨頻度 (例: "週3〜4回・スキンケア後", "毎日・朝スキンケア後")
-- priority: 1=最優先 2=次点以降
+
+- device_type: 上記6カテゴリ名のいずれか ("RF" / "LED" / "EMS" / "エレクトロポレーション" / "超音波洗浄" / "マイクロカレント")
+- reason: スコア・改善優先順位との対応を踏まえ、なぜこのカテゴリを選んだか具体的に (50字以内)
+
+【美容機器提案時のスキンケア連携】
+beauty_devicesでカテゴリを選んだ場合、対応する美容液・クリームのingredient_focusを以下のように優先すること:
+・RF → 保湿・ハリケア系（セラミド/ペプチド/ヒアルロン酸等）
+・LED → 鎮静系（CICA/アゼライン酸/パンテノール等）
+・超音波洗浄 → 保湿を十分に（洗浄後の乾燥を防ぐ処方を優先）
 
 JSONのみ返す。説明・Markdown・前置き禁止。JSONキーは英語、値は日本語。"""
 
@@ -16943,6 +17050,9 @@ def lab_test_function():
             data = assign_products_to_all_steps(data, products, user_data, budget_value)
             _log_mem("after-assign-products")
 
+            # 美容機器: Geminiが選んだdevice_type(+reason)に検索用商品名・機能・頻度・優先度を補完
+            data = enrich_beauty_devices(data, user_data)
+
             print("[FLOW AFTER ASSIGN]", {
                 "night": [
                     {
@@ -17019,6 +17129,8 @@ def lab_test_function():
             data = resolve_weekly_care_day_conflicts(data)
             # 夜ルーティン内のレチノイド×BHA/SA洗顔料の曜日衝突を解消
             data = resolve_night_irritant_conflicts(data)
+            # 美容機器×レチノール/ピーリングの併用可否を判定（use_days確定後に実行）
+            data = resolve_beauty_device_day_conflicts(data)
 
             # 楽天商品名をGeminiで短く整形（rakuten_criteria / ai_rakuten_verified のみ対象）
             data = gemini_clean_rakuten_product_names(data)
