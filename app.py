@@ -16097,7 +16097,11 @@ _PHASE1_SCORE_KEYS = [
 ]
 
 
-def _run_phase1_once(user_data, front_img, left_img, right_img):
+def _run_phase1_once(user_data, front_img, left_img, right_img, stagger_seconds=0):
+    if stagger_seconds:
+        # N件を完全同時に投げると瞬間的なリクエストバーストになり429を誘発しやすいため、
+        # 各サンプルの発火タイミングを少しずらす。
+        time.sleep(stagger_seconds)
     response1 = call_gemini_with_retry(
         client,
         ANALYSIS_MODEL,
@@ -16110,7 +16114,10 @@ def _run_phase1_once(user_data, front_img, left_img, right_img):
             response_mime_type="application/json",
             response_schema=get_analysis_schema_phase1()
         ),
-        max_retries=1,
+        # 並列化前は1回勝負(max_retries=1)だったが、複数サンプルを同時に投げる
+        # ことで429（レート制限）に当たりやすくなった分、1回だけ再試行の余地を持たせる。
+        # リトライはバックオフ後に発生するため、初回バーストの瞬間的なレートには寄与しない。
+        max_retries=2,
         timeout=60  # 画像3枚+小出力: 60s
     )
     return json.loads(response1.text.strip())
@@ -16126,15 +16133,24 @@ def run_phase1_ensemble(user_data, front_img, left_img, right_img, n=PHASE1_ENSE
     - scores（10項目）・symmetry_analysis.score: N件の平均値を採用
     - skin_summary・score_reasons等の文章系フィールド: 平均スコアに最も近い
       1件（メドイド）をそのまま採用する（複数の文章を混ぜ合わせることはできないため）
+
+    N件を完全に同時発火すると瞬間的なリクエストバーストで429を誘発しやすいため、
+    各サンプルの開始を少しずつ(0.4秒間隔)ずらす。並列自体は維持するため
+    体感時間への影響は小さい。
     """
     import concurrent.futures
+
+    _STAGGER_INTERVAL_SECONDS = 0.4
 
     results = []
     last_error = None
     with concurrent.futures.ThreadPoolExecutor(max_workers=n) as executor:
         futures = [
-            executor.submit(_run_phase1_once, user_data, front_img, left_img, right_img)
-            for _ in range(n)
+            executor.submit(
+                _run_phase1_once, user_data, front_img, left_img, right_img,
+                stagger_seconds=i * _STAGGER_INTERVAL_SECONDS
+            )
+            for i in range(n)
         ]
         for i, future in enumerate(futures):
             try:
