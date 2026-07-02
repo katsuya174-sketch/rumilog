@@ -27,7 +27,7 @@ import threading
 from psycopg2.pool import SimpleConnectionPool
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v8"  # 美容機器は最大1つに制限、reason文言を美容機器/サプリ両方で統一
+ANALYSIS_CACHE_VERSION = "v9"  # キャッシュキーからrecord_dateを除外（同じ写真なら日をまたいでも同一スコアを返す）
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
@@ -15990,8 +15990,18 @@ def make_analysis_cache_key(user_data, front_img, left_img, right_img):
 
     h.update(ANALYSIS_CACHE_VERSION.encode("utf-8"))
 
+    # record_date（診断を実行した「今日の日付」、extract_user_dataが毎回自動設定）は
+    # キャッシュキーから除外する。含めてしまうと、同じ写真・同じ回答内容でも
+    # 診断を実行した日が違うだけで別キーになり毎回Geminiへ再問い合わせが発生する。
+    # Gemini Phase1はtemperature=0/seed固定で決定論的にしているつもりでも実際には
+    # 完全な再現性は保証されないため、「同じ写真なのに日によってスコアが変わる」
+    # 症状の原因になっていた。record_date自体はuser_data内の他の箇所では
+    # 参照されておらず（履歴保存時のrecord_dateは別途保存時に独立して決定される）、
+    # キャッシュキーの一貫性を損なうだけの副作用しかなかった。
+    user_data_for_key = {k: v for k, v in user_data.items() if k != "record_date"}
+
     user_key = json.dumps(
-        user_data,
+        user_data_for_key,
         ensure_ascii=False,
         sort_keys=True,
         default=str
