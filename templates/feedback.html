@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="/static/favicon.png?v=3">
+    <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest.json">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>お問い合わせ・ご意見</title>
+
+    <style>
+      body {
+          font-family: "Hiragino Sans", "Yu Gothic", "Kosugi Maru", sans-serif;
+          margin: 0;
+          padding: 16px;
+          background: linear-gradient(180deg, #fffafd 0%, #fff6f8 100%);
+          color: #555;
+          line-height: 1.8;
+      }
+
+      .page {
+          max-width: 560px;
+          margin: 0 auto;
+      }
+
+      h1 {
+          color: #c75b7a;
+          font-family: "Kosugi Maru", sans-serif;
+          font-size: 20px;
+          margin-bottom: 6px;
+      }
+
+      .lead {
+          font-size: 13px;
+          color: #8a7a80;
+          margin-bottom: 18px;
+          line-height: 1.7;
+      }
+
+      .card {
+          background: rgba(255, 248, 252, 0.95);
+          border: 1px solid #f1d5dd;
+          border-radius: 16px;
+          padding: 20px 18px;
+          margin-bottom: 16px;
+          box-shadow: 0 4px 12px rgba(199, 91, 122, 0.08);
+      }
+
+      label {
+          display: block;
+          font-size: 13px;
+          font-weight: bold;
+          color: #c75b7a;
+          margin: 14px 0 6px;
+          font-family: "Kosugi Maru", sans-serif;
+      }
+
+      label:first-of-type { margin-top: 0; }
+
+      select, textarea, input[type="email"], input[type="text"] {
+          width: 100%;
+          box-sizing: border-box;
+          border: 1px solid #f3c9d2;
+          border-radius: 10px;
+          padding: 10px 12px;
+          font-size: 14px;
+          font-family: inherit;
+          color: #555;
+          background: #fff;
+      }
+
+      textarea {
+          min-height: 130px;
+          resize: vertical;
+      }
+
+      .hint {
+          font-size: 11px;
+          color: #b89aa6;
+          margin-top: 4px;
+      }
+
+      .submit-btn {
+          display: block;
+          width: 100%;
+          margin-top: 20px;
+          padding: 13px;
+          border: none;
+          border-radius: 999px;
+          background: linear-gradient(135deg, #ffd6e8, #ffb8d4);
+          color: #a83f5f;
+          font-size: 15px;
+          font-weight: bold;
+          font-family: "Kosugi Maru", sans-serif;
+          cursor: pointer;
+      }
+
+      .error-box {
+          background: #fff0f0;
+          border: 1px solid #f3b9b9;
+          color: #b23c3c;
+          border-radius: 10px;
+          padding: 10px 12px;
+          font-size: 13px;
+          margin-bottom: 14px;
+      }
+
+      .sent-box {
+          text-align: center;
+          padding: 24px 10px;
+      }
+
+      .sent-title {
+          font-size: 18px;
+          font-weight: bold;
+          color: #c75b7a;
+          font-family: "Kosugi Maru", sans-serif;
+          margin-bottom: 10px;
+      }
+
+      .sent-text {
+          font-size: 13px;
+          color: #8a7a80;
+          margin-bottom: 20px;
+      }
+
+      .back-link {
+          display: inline-block;
+          margin-top: 6px;
+          color: #c75b7a;
+          text-decoration: underline;
+          font-weight: bold;
+          font-size: 13px;
+      }
+
+      footer {
+          text-align: center;
+          padding: 20px 0 32px;
+      }
+    </style>
+</head>
+<body>
+    <div class="page">
+        {% if sent %}
+        <div class="card sent-box">
+            <div class="sent-title">送信しました</div>
+            <div class="sent-text">
+                ご報告・ご意見ありがとうございます。<br>
+                内容を確認し、改善に役立てさせていただきます。
+            </div>
+            <a href="/history" class="back-link">← 履歴に戻る</a>
+        </div>
+        {% else %}
+        <h1>お問い合わせ・ご意見</h1>
+        <div class="lead">
+            不具合報告や「もっとこうしてほしい」というご意見をお寄せください。<br>
+            診断結果ページからお越しの場合は、該当の診断内容も一緒に確認します。
+        </div>
+        <div class="card">
+            {% if error %}
+            <div class="error-box">{{ error }}</div>
+            {% endif %}
+            <form method="POST" action="/feedback">
+                <label>種別</label>
+                <select name="category">
+                    <option value="bug" {% if category == "bug" %}selected{% endif %}>不具合報告（例: リンクが開けない、候補が出ない など）</option>
+                    <option value="suggestion" {% if category == "suggestion" %}selected{% endif %}>改善要望（もっとこうしてほしい）</option>
+                    <option value="other" {% if not category or category == "other" %}selected{% endif %}>その他</option>
+                </select>
+
+                <label>内容</label>
+                <textarea name="message" placeholder="できるだけ詳しく教えてください（例: どの画面で・何が起きたか）" required>{{ message or "" }}</textarea>
+
+                <label>返信先メールアドレス（任意）</label>
+                <input type="email" name="email" value="{{ email or '' }}" placeholder="返信が必要な場合のみご入力ください">
+
+                <input type="hidden" name="result_id" value="{{ result_id or '' }}">
+                <input type="hidden" name="page" value="{{ page or '' }}">
+
+                <button type="submit" class="submit-btn">送信する</button>
+            </form>
+        </div>
+        {% endif %}
+
+        <footer>
+            <a href="/privacy-policy" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">プライバシーポリシー</a>
+            <span style="color:#d8c0ca; font-size:11px;">|</span>
+            <a href="/terms-of-service" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">利用規約</a>
+        </footer>
+    </div>
+</body>
+</html>

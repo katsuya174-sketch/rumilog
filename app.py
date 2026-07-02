@@ -457,12 +457,40 @@ def init_auth_tables():
         if cur: cur.close()
         if conn: conn.close()
 
+def init_feedback_table():
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS user_feedback (
+            id TEXT PRIMARY KEY,
+            category TEXT NOT NULL,
+            message TEXT NOT NULL,
+            email TEXT,
+            result_id TEXT,
+            user_id TEXT,
+            page TEXT,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+        conn.commit()
+        print("[FEEDBACK TABLE READY]", flush=True)
+    except Exception as e:
+        if conn: conn.rollback()
+        print("[FEEDBACK TABLE ERROR]", e, flush=True)
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
 init_results_table()
 init_gemini_usage_table()
 init_analysis_cache_table()
 init_rakuten_search_cache_table()
 init_brand_cache_table()
 init_auth_tables()
+init_feedback_table()
 VERIFY_PRODUCT_CACHE = {}
 DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
 USE_RICH_CANDIDATE = False
@@ -1305,6 +1333,50 @@ def send_admin_email(subject, body):
     except Exception as e:
         print(f"[ADMIN EMAIL ERROR] {repr(e)}", flush=True)
         return False
+
+
+FEEDBACK_CATEGORY_LABELS = {
+    "bug": "不具合報告",
+    "suggestion": "改善要望",
+    "other": "その他",
+}
+
+
+def save_user_feedback(category, message, email, result_id, user_id, page):
+    """お問い合わせ・不具合報告・改善要望をDBに保存する"""
+    conn = None
+    cur = None
+    feedback_id = str(_uuid_mod.uuid4())
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO user_feedback (id, category, message, email, result_id, user_id, page, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+        """, (feedback_id, category, message, email or None, result_id or None, user_id or None, page or None))
+        conn.commit()
+        print(f"[FEEDBACK SAVED] id={feedback_id} category={category}", flush=True)
+        return feedback_id
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"[FEEDBACK SAVE ERROR] {repr(e)}", flush=True)
+        return None
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+
+def notify_admin_of_feedback(category, message, email, result_id, page):
+    label = FEEDBACK_CATEGORY_LABELS.get(category, category)
+    subject = f"[るみろぐ お問い合わせ] {label}"
+    body = (
+        f"種別: {label}\n"
+        f"診断ID: {result_id or '(未指定)'}\n"
+        f"送信元ページ: {page or '(不明)'}\n"
+        f"返信先メール: {email or '(未入力)'}\n"
+        f"\n----- メッセージ -----\n{message}\n"
+    )
+    send_admin_email(subject, body)
 
 
 # Gemini 80%通知の送信済みキーを記録（1日1回のみ通知）
@@ -17376,6 +17448,35 @@ def terms_of_service():
     return render_template("terms_of_service.html")
 
 
+@app.route("/feedback", methods=["GET", "POST"])
+def feedback():
+    if request.method == "POST":
+        category = request.form.get("category", "other").strip()
+        if category not in FEEDBACK_CATEGORY_LABELS:
+            category = "other"
+        message = request.form.get("message", "").strip()
+        email = request.form.get("email", "").strip()
+        result_id = request.form.get("result_id", "").strip()
+        page = request.form.get("page", "").strip()
+
+        if not message:
+            return render_template(
+                "feedback.html",
+                error="内容を入力してください。",
+                category=category, email=email, result_id=result_id, message=message
+            )
+
+        user_id = flask_session.get("user_id", "")
+        save_user_feedback(category, message, email, result_id, user_id, page)
+        notify_admin_of_feedback(category, message, email, result_id, page)
+
+        return render_template("feedback.html", sent=True)
+
+    result_id = request.args.get("result_id", "")
+    page = request.args.get("page", "")
+    return render_template("feedback.html", result_id=result_id, page=page)
+
+
 @app.route("/portal-by-email", methods=["GET", "POST"])
 def portal_by_email():
     if request.method == "GET":
@@ -17725,6 +17826,86 @@ def admin_stats():
   </table>"""}
 
   <div class="ts">生成日時: {now_jst.strftime('%Y-%m-%d %H:%M:%S')} JST</div>
+</body>
+</html>"""
+    return html
+
+
+@app.route("/admin/feedback")
+def admin_feedback():
+    """お問い合わせ・不具合報告一覧。ADMIN_KEY クエリパラメータで保護。"""
+    if not ADMIN_KEY or request.args.get("key") != ADMIN_KEY:
+        return "403 Forbidden", 403
+
+    rows = []
+    errors = []
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, category, message, email, result_id, page, created_at
+            FROM user_feedback
+            ORDER BY created_at DESC
+            LIMIT 200
+        """)
+        rows = cur.fetchall()
+    except Exception as e:
+        errors.append(f"読み込みエラー: {e}")
+    finally:
+        if conn: conn.close()
+
+    admin_key = request.args.get("key", "")
+
+    def esc(v):
+        return (v or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def row_html(r):
+        fid, category, message, email, result_id, page, created_at = r
+        label = FEEDBACK_CATEGORY_LABELS.get(category, category)
+        result_link = (
+            f'<a href="/history/{esc(result_id)}?key={admin_key}" target="_blank">{esc(result_id)}</a>'
+            if result_id else "—"
+        )
+        return f"""
+        <tr>
+          <td>{created_at.strftime('%Y-%m-%d %H:%M')}</td>
+          <td><span class="tag tag-{category}">{label}</span></td>
+          <td>{esc(message)}</td>
+          <td>{esc(email) or '—'}</td>
+          <td>{result_link}</td>
+          <td>{esc(page) or '—'}</td>
+        </tr>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>お問い合わせ一覧</title>
+  <style>
+    body{{font-family:"Hiragino Sans",sans-serif;background:#f8f4f7;color:#444;margin:0;padding:24px}}
+    h1{{color:#7a2942;font-size:22px;margin-bottom:20px}}
+    table{{border-collapse:collapse;width:100%;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 2px 8px rgba(180,90,120,.06)}}
+    th,td{{padding:8px 12px;font-size:13px;text-align:left;border-bottom:1px solid #f5e0e8;vertical-align:top}}
+    th{{background:#fdf0f5;color:#7a2942;font-weight:bold}}
+    td:nth-child(3){{max-width:360px;white-space:pre-wrap;word-break:break-word}}
+    .tag{{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:bold}}
+    .tag-bug{{background:#ffe3e3;color:#c0392b}}
+    .tag-suggestion{{background:#e3f0ff;color:#2b6dc0}}
+    .tag-other{{background:#f0e8ea;color:#8a7a80}}
+    .err{{background:#fff3f3;border:1px solid #ffbbbb;border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:13px;color:#c00}}
+    .empty{{color:#999;font-size:13px}}
+  </style>
+</head>
+<body>
+  <h1>📮 お問い合わせ一覧（直近200件）</h1>
+  {''.join(f'<div class="err">⚠ {e}</div>' for e in errors)}
+  {'<p class="empty">まだお問い合わせはありません。</p>' if not rows else f"""
+  <table>
+    <tr><th>日時</th><th>種別</th><th>内容</th><th>返信先</th><th>診断ID</th><th>ページ</th></tr>
+    {''.join(row_html(r) for r in rows)}
+  </table>"""}
 </body>
 </html>"""
     return html
