@@ -14692,7 +14692,7 @@ def extract_user_data(request):
     }
 
 
-def resize_for_gemini(file, max_size=512):
+def resize_for_gemini(file, max_size=1024):
     img = Image.open(io.BytesIO(file.read()))
     img = ImageOps.exif_transpose(img)
     img = img.convert("RGB")
