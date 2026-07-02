@@ -27,7 +27,7 @@ import threading
 from psycopg2.pool import SimpleConnectionPool
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v5"  # premium_improvement_priorityをPhase2プロンプトに反映
+ANALYSIS_CACHE_VERSION = "v6"  # beauty_devicesのdevice_schema/選定ルールを刷新
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
