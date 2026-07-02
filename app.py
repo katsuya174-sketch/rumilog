@@ -27,7 +27,7 @@ import threading
 from psycopg2.pool import SimpleConnectionPool
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v6"  # beauty_devicesのdevice_schema/選定ルールを刷新
+ANALYSIS_CACHE_VERSION = "v7"  # supplementsのsupplement_schema/選定ルールを刷新、reasonは必要性判断の理由に統一
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
@@ -11587,6 +11587,134 @@ def enrich_beauty_devices(data, user_data):
     return data
 
 
+# サプリメントカテゴリ選定ルール（2026-07-02導入、beauty_devicesと同じ役割分担）:
+# Geminiは「必要か」「どのカテゴリか」「なぜか」の3点のみ判断し(supplement_type/reasonのみ出力)、
+# 検索用商品名・成分タグ・目的・摂取タイミング・注意点・優先度はここで固定値から決定する。
+# ingredient_focusタグはresult.htmlの安全性バナー（過剰摂取・脂溶性ビタミン・薬相互作用等の
+# 自動判定、render_extra_sectionマクロ内）が既にこのタグとcautionテキストを参照する設計のため、
+# 既存のバナーロジックをそのまま流用できるよう定義している（テンプレート側の変更は不要）。
+_SUPPLEMENT_DEFAULTS = {
+    "ビタミンC": {
+        "product": "ビタミンC サプリメント",
+        "ingredient_focus": ["vitamin_c"],
+        "purpose": "シミ・くすみ・ニキビ跡(色素沈着)・透明感ケア",
+        "timing": "朝食後",
+        "caution": "",
+        "priority": 1,
+    },
+    "Lシステイン": {
+        "product": "Lシステイン サプリメント",
+        "ingredient_focus": ["l_cysteine"],
+        "purpose": "シミ・色素沈着・くすみケア",
+        "timing": "朝食後",
+        "caution": "",
+        "priority": 2,
+    },
+    "ビタミンB群": {
+        "product": "ビタミンB群 サプリメント",
+        "ingredient_focus": ["vitamin_b"],
+        "purpose": "ニキビ・皮脂・肌荒れケア",
+        "timing": "朝食後",
+        "caution": "",
+        "priority": 1,
+    },
+    "ビタミンD": {
+        "product": "ビタミンD サプリメント",
+        "ingredient_focus": ["vitamin_d"],
+        "purpose": "ニキビ・炎症・肌バリア低下ケア",
+        "timing": "朝食後（脂質と一緒に摂ると吸収されやすい）",
+        "caution": "脂溶性ビタミンのため過剰摂取・体内蓄積に注意してください。",
+        "priority": 2,
+    },
+    "オメガ3": {
+        "product": "オメガ3 サプリメント(EPA・DHA)",
+        "ingredient_focus": ["omega3"],
+        "purpose": "赤み・炎症・ニキビ・バリア機能ケア",
+        "timing": "食後",
+        "caution": "抗凝固薬（ワーファリン等）を服用中の方は医師に相談してください。",
+        "priority": 2,
+    },
+    "コラーゲンペプチド": {
+        "product": "コラーゲンペプチド サプリメント",
+        "ingredient_focus": ["collagen"],
+        "purpose": "ハリ・弾力ケア",
+        "timing": "就寝前",
+        "caution": "",
+        "priority": 3,
+    },
+    "セラミド": {
+        "product": "セラミド サプリメント",
+        "ingredient_focus": ["ceramide"],
+        "purpose": "乾燥・バリア機能ケア",
+        "timing": "朝食後",
+        "caution": "",
+        "priority": 2,
+    },
+    "ヒアルロン酸": {
+        "product": "ヒアルロン酸 サプリメント",
+        "ingredient_focus": ["hyaluronic_acid"],
+        "purpose": "乾燥ケア",
+        "timing": "朝食後",
+        "caution": "",
+        "priority": 3,
+    },
+    "乳酸菌": {
+        "product": "乳酸菌サプリメント",
+        "ingredient_focus": ["probiotics"],
+        "purpose": "肌荒れ・炎症・ニキビケア（腸内環境サポート）",
+        "timing": "食後",
+        "caution": "免疫抑制剤を服用中の方は医師に相談してください。",
+        "priority": 2,
+    },
+    "亜鉛": {
+        "product": "亜鉛 サプリメント",
+        "ingredient_focus": ["zinc"],
+        "purpose": "ニキビ・肌荒れ・皮脂ケア",
+        "timing": "食後",
+        "caution": "",
+        "priority": 2,
+    },
+}
+
+
+def enrich_supplements(data, user_data):
+    """
+    Geminiが選んだsupplement_type(+reason)のみのsupplementsエントリに、
+    検索用商品名・成分タグ・目的・摂取タイミング・注意点・優先度を固定ルールで補完する。
+    """
+    raw_items = data.get("supplements") or []
+    if not isinstance(raw_items, list):
+        data["supplements"] = []
+        return data
+
+    cleaned = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        stype = str(item.get("supplement_type", "") or "").strip()
+        defaults = _SUPPLEMENT_DEFAULTS.get(stype)
+        if not defaults:
+            print(f"[SUPPLEMENT SKIP unknown supplement_type] {stype!r}", flush=True)
+            continue
+
+        cleaned.append({
+            "category": "サプリメント",
+            "supplement_type": stype,
+            "product": defaults["product"],
+            "brand": "",
+            "purpose": defaults["purpose"],
+            "ingredient_focus": list(defaults["ingredient_focus"]),
+            "reason": str(item.get("reason", "") or "").strip(),
+            "timing": defaults["timing"],
+            "caution": defaults["caution"],
+            "priority": defaults["priority"],
+        })
+
+    cleaned.sort(key=lambda d: d.get("priority", 9))
+    data["supplements"] = cleaned
+    return data
+
+
 _SYNERGY_FAMILY_LABELS = {
     "retinoid": "レチノイド",
     "aha_bha": "AHA/BHA",
@@ -14774,17 +14902,10 @@ def get_analysis_schema_phase2():
     supplement_schema = {
         "type": "object",
         "properties": {
-            "category":         {"type": "string"},
-            "product":          {"type": "string"},
-            "brand":            {"type": "string"},
-            "purpose":          {"type": "string"},
-            "ingredient_focus": {"type": "array", "items": {"type": "string"}},
-            "reason":           {"type": "string"},
-            "timing":           {"type": "string"},
-            "caution":          {"type": "string"},
-            "priority":         {"type": "integer"}
+            "supplement_type": {"type": "string"},
+            "reason":          {"type": "string"}
         },
-        "required": ["category","product","purpose","ingredient_focus","reason","timing","caution","priority"]
+        "required": ["supplement_type","reason"]
     }
     device_schema = {
         "type": "object",
@@ -15475,42 +15596,41 @@ synergy_combinations(3件以上必須):
 タグはavoidと同じ+uv_protection
 
 【supplements】
-スキンケアのトータルコーディネートとして、内側からの補完が有効な場合に提案。不要なら[]。
-提案数は肌状態・悩みに応じて柔軟に決める（件数制限なし）。
+あなたの役割は「サプリメントが必要か」「どのカテゴリが合うか」「なぜ必要と判断したか」の3点の判断のみ。
+具体的な商品名・ブランド・成分タグ・摂取タイミング・注意点・優先度はこちらで別途決定するので出力不要（supplement_type と reason のみ返す）。
 
-【サプリ提案の入口判断（全スコアの最低値: {_min_score} → {_supp_level}）】
-スコアが低いほど提案の必要性は高くなるが、必ず提案する必要はない。
-スキンケアのみで十分改善可能と判断した場合は[]とする。
-・80以上: 原則不要
-・60〜79: 必要性が高い場合のみ検討
-・40〜59: 積極的に検討
-・39以下: 優先的に検討し、改善効果が期待できるなら提案
+supplement_type は以下の10カテゴリから、条件に合うものだけを選ぶ（複数選択可、条件に合うものがなければ[]）。
 
-提案条件: ①外用スキンケアだけでは補完困難な悩み(コラーゲン生成・抗酸化・抗糖化等) ②既存ルーティンと成分が重複せず相乗効果が見込める ③肌スコアや悩みに明確な根拠がある
-禁止: スキンケアと全く同じ成分の重複提案・根拠のない漠然とした提案
+■ ビタミンC — 条件: シミ、くすみ、ニキビ跡(色素沈着)、透明感不足
+■ Lシステイン — 条件: シミ、色素沈着、くすみ。ビタミンCとの併用も可
+■ ビタミンB群 — 条件: ニキビ、皮脂、肌荒れ
+■ ビタミンD — 条件: ニキビ、炎症、肌バリア低下
+■ オメガ3(EPA・DHA) — 条件: 赤み、炎症、ニキビ、バリア機能低下
+■ コラーゲンペプチド — 条件: ハリ、弾力不足。※他の項目より補助的な位置づけ
+■ セラミド — 条件: 乾燥、バリア機能低下
+■ ヒアルロン酸 — 条件: 乾燥。※セラミドより優先度は下とする
+■ 乳酸菌・腸内環境サポート — 条件: 肌荒れを繰り返す、炎症傾向、ニキビ。肌と腸内環境の関連を考慮
+■ 亜鉛 — 条件: ニキビ、肌荒れ、皮脂。ビタミンB群との併用も可
 
-【サプリメント安全基準（複数提案時は必ず全項目確認）】
-①成分重複チェック: 複数サプリにビタミンC/B群/亜鉛/ビタミンA/Eが重複しないか確認。
-  過剰摂取リスクが特に高い成分（ビタミンA・E・亜鉛・セレン・鉄）はサプリ間で重複提案禁止。
-②脂溶性ビタミン注意: ビタミンA・D・E・Kは体内蓄積リスクあり。
-  複数サプリからの重複摂取になる場合は提案を絞ること。
-③ミネラル吸収干渉: 鉄×亜鉛、鉄×カルシウム、亜鉛×銅は同時摂取で吸収率が低下。
-  これらを同時提案する場合は必ずtimingを分ける（例: 亜鉛→朝食後、鉄→就寝前）。
-④薬との相互作用: 代表的な禁忌（抗凝固薬×ビタミンK、多くの医薬品×セントジョーンズワート等）を
-  cautionフィールドに明記。一般ユーザーへの注意喚起として、該当する場合は医師への相談を促す文を含める。
+【提案しない判断（全スコアの最低値: {_min_score} → {_supp_level}）】
+以下のいずれかに該当する場合は[]とする。無理にどれか1つ選ばない。
+・肌状態が全体的に高スコア
+・スキンケアのみで十分な改善が期待できる
+・サプリメントによる追加メリットが小さい
 
-- category: "サプリメント" (固定)
-- product: 楽天で検索可能な具体名 (例: "ビタミンC 1000mg", "コラーゲンペプチド", "ナイアシンアミド サプリ", "亜鉛 サプリ", "アスタキサンチン")
-- brand: ブランド名 (不明なら "")
-- purpose: 肌への期待効果 (30字以内)
-- ingredient_focus: 主要成分タグ配列 (例: ["vitamin_c"] ["collagen"] ["niacinamide"] ["zinc"] ["astaxanthin"])
-- reason: 既存スキンケアルーティンとの相性・補完価値を具体的に (50字以内)
-- timing: 摂取タイミング (例: "朝食後", "就寝前") ※ミネラル干渉がある場合は必ず分ける
-- caution: このサプリ固有の注意点（過剰摂取リスク・吸収干渉・薬との相互作用等、なければ ""）(40字以内)
-- priority: 1=最優先 2=次点以降
+【スキンケアとの組み合わせ】
+現在提案しているスキンケアと役割が重複するだけの提案はしない。ただし内外から同じ悩みを補強する組み合わせは相乗効果が期待できるため積極的に提案してよい。
+例: ビタミンC美容液＋ビタミンCサプリ（相乗効果）／ レチノール＋コラーゲンペプチド（ハリ改善を内外サポート）／ アゼライン酸＋ビタミンB群（ニキビ・皮脂対策を内外サポート）
+
+【禁止】
+・根拠のない漠然とした提案
+・条件に合わないカテゴリの提案
+
+- supplement_type: 上記10カテゴリ名のいずれか ("ビタミンC" / "Lシステイン" / "ビタミンB群" / "ビタミンD" / "オメガ3" / "コラーゲンペプチド" / "セラミド" / "ヒアルロン酸" / "乳酸菌" / "亜鉛")
+- reason: このサプリメントが必要だと判断した理由を、スコア・改善優先順位・既存スキンケアとの相性と対応づけて具体的に (50字以内)
 
 【beauty_devices】
-あなたの役割は「美容機器が必要か」「どのカテゴリが合うか」「なぜそのカテゴリか」の3点の判断のみ。
+あなたの役割は「美容機器が必要か」「どのカテゴリが合うか」「なぜ必要と判断したか」の3点の判断のみ。
 具体的な商品名・ブランド・使用頻度・優先度はこちらで別途決定するので出力不要（device_type と reason のみ返す）。
 
 device_type は以下の6カテゴリから、条件に合うものだけを選ぶ（複数選択可、条件に合うものがなければ[]）。
@@ -15531,7 +15651,7 @@ device_type は以下の6カテゴリから、条件に合うものだけを選�
 ・根拠のない漠然とした提案
 
 - device_type: 上記6カテゴリ名のいずれか ("RF" / "LED" / "EMS" / "エレクトロポレーション" / "超音波洗浄" / "マイクロカレント")
-- reason: スコア・改善優先順位との対応を踏まえ、なぜこのカテゴリを選んだか具体的に (50字以内)
+- reason: この機器が必要だと判断した理由を、スコア・改善優先順位と対応づけて具体的に (50字以内)
 
 【美容機器提案時のスキンケア連携】
 beauty_devicesでカテゴリを選んだ場合、対応する美容液・クリームのingredient_focusを以下のように優先すること:
@@ -17052,6 +17172,9 @@ def lab_test_function():
 
             # 美容機器: Geminiが選んだdevice_type(+reason)に検索用商品名・機能・頻度・優先度を補完
             data = enrich_beauty_devices(data, user_data)
+
+            # サプリメント: Geminiが選んだsupplement_type(+reason)に検索用商品名・成分タグ・タイミング・注意点・優先度を補完
+            data = enrich_supplements(data, user_data)
 
             print("[FLOW AFTER ASSIGN]", {
                 "night": [
