@@ -228,6 +228,17 @@
 .ip-score-mid  { background: rgba(220,160,30,0.15); color: #8a6010; }
 .ip-score-ok   { background: rgba(60,160,80,0.13);  color: #2a7040; }
 .ip-reason { font-size: 12px; color: #7a6b72; margin-top: 3px; line-height: 1.5; }
+.ip-details {
+    display: flex; flex-direction: column; gap: 4px;
+    margin-top: 6px; padding-left: 12px;
+    border-left: 2px solid #f0e0e8;
+}
+.ip-detail-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ip-detail-label { font-size: 12px; color: #7a6b72; }
+.ip-detail-score {
+    font-size: 12px; font-weight: bold; color: #9b7f88;
+    padding: 0 6px;
+}
 
 .premium-link {
     display: inline-block;
@@ -697,10 +708,11 @@
             </div>
 
             {% if (data.get("is_premium") or data.get("is_dev_mode")) and data.get("premium_improvement_priority") %}
-            {# プレミアム: AIの戦略的な優先順位づけ(相乗効果・刺激リスク考慮)と、
-               詳細サブスコア(赤ニキビ跡/色素沈着/開き毛穴/黒ずみ毛穴/透明感/
-               肌トーン均一性/肌バランス/左右差)を1つのランキングに合算 #}
-            <p style="font-size:12px;color:#9b7f88;margin:0 0 12px;">項目間の関係・刺激リスク・相乗効果を考慮したAIの分析に、詳細スコアを合わせてより細かい単位で優先順位を決定しています。</p>
+            {# プレミアム: AIの戦略的な優先順位づけ(相乗効果・刺激リスク考慮)を基本項目の
+               優先順位とし、対応する詳細サブスコア(赤ニキビ跡/色素沈着/開き毛穴/黒ずみ毛穴/
+               透明感/肌トーン均一性/肌バランス)がある項目には内訳として子要素で表示。
+               左右差(左右差)は基本項目から独立した指標のため末尾に表示 #}
+            <p style="font-size:12px;color:#9b7f88;margin:0 0 12px;">項目間の関係・刺激リスク・相乗効果を考慮したAIの分析で優先順位を決定し、該当する項目には詳細スコアの内訳を表示しています。</p>
             <div class="improvement-priority-list">
                 {% for item in data.get("premium_improvement_priority", []) %}
                 <div class="ip-row">
@@ -711,6 +723,16 @@
                             <span class="ip-score {% if item.score <= 44 %}ip-score-low{% elif item.score <= 64 %}ip-score-mid{% else %}ip-score-ok{% endif %}">{{ item.score }}</span>
                         </div>
                         {% if item.reason %}<div class="ip-reason">{{ item.reason }}</div>{% endif %}
+                        {% if item.get("details") %}
+                        <div class="ip-details">
+                            {% for d in item.details %}
+                            <div class="ip-detail-row">
+                                <span class="ip-detail-label">{{ d.label }}</span>
+                                <span class="ip-detail-score">{{ d.score }}</span>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
                     </div>
                 </div>
                 {% endfor %}

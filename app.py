@@ -27,7 +27,7 @@ import threading
 from psycopg2.pool import SimpleConnectionPool
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v11"  # ピーリングスロットのカテゴリ判定ルールをプロンプトに追加
+ANALYSIS_CACHE_VERSION = "v12"  # 改善優先順位を項目別スコア主軸+詳細スコアのネスト表示に変更、Phase2プロンプトの優先順位テキストも詳細内訳を追加
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
@@ -8238,15 +8238,32 @@ _PREMIUM_SCORE_COVERED_BASE_KEYS = {
 }
 
 
+_PREMIUM_DETAIL_LABELS = {
+    "acne_marks_red":  "赤ニキビ跡",
+    "pigmentation":    "色素沈着",
+    "enlarged_pores":  "開き毛穴",
+    "blackhead_pores": "黒ずみ毛穴",
+    "translucency":    "透明感",
+    "tone_uniformity": "肌トーン均一性",
+    "skin_balance":    "肌バランス",
+}
+
+# 基本項目キー → その項目を主要な親として持つ詳細サブスコアキーのリスト
+# （_PREMIUM_SCORE_PRIMARY_BASE の向きを逆にしたもの）
+_BASE_TO_PREMIUM_DETAIL_KEYS: dict[str, list[str]] = {}
+for _detail_key, _base_key in _PREMIUM_SCORE_PRIMARY_BASE.items():
+    _BASE_TO_PREMIUM_DETAIL_KEYS.setdefault(_base_key, []).append(_detail_key)
+
+
 def build_premium_improvement_priority(scores, premium_scores, ai_improvement_strategy=None):
     """
-    基本10項目の改善優先順位(ai_improvement_strategy)と、詳細サブスコア
-    (premium_scores)を1つのランキングに合算する。プレミアムユーザー用。
+    基本10項目（項目別スコア）を主軸に改善優先順位を決め、対応する詳細サブスコア
+    （premium_scores）がある項目には、その内訳として詳細スコアを子要素にネストする。
+    例: 毛穴(親)55点 → 開き毛穴(子)55点・黒ずみ毛穴(子)55点
 
-    premium_scores は基本スコアの重み付き合成のため、対応する基本項目
-    （例:「毛穴」→「開き毛穴」「黒ずみ毛穴」）は重複表示を避けるため
-    詳細項目側に置き換える。詳細サブスコアに分解されていない基本項目
-    （例:「ハリ」）はそのまま残す。
+    詳細サブスコアに分解されない基本項目（例:「ハリ」）は子無しでそのまま表示する。
+    左右差(symmetry)は基本10項目から計算されない独立指標のため、親を持たない
+    末尾項目として追加する。
     """
     if not isinstance(scores, dict):
         scores = {}
@@ -8255,51 +8272,75 @@ def build_premium_improvement_priority(scores, premium_scores, ai_improvement_st
     if not isinstance(ai_improvement_strategy, list):
         ai_improvement_strategy = []
 
-    # AIの理由文を基本項目ラベルで引けるようにする
     _reason_by_label = {}
+    _rank_by_label = {}
     for entry in ai_improvement_strategy:
         if isinstance(entry, dict) and entry.get("item"):
-            _reason_by_label[str(entry["item"]).strip()] = str(entry.get("reason", "") or "")
+            label = str(entry["item"]).strip()
+            _reason_by_label[label] = str(entry.get("reason", "") or "")
+            _rank_by_label[label] = entry.get("rank")
 
-    _detail_labels = [
-        ("acne_marks_red",  "赤ニキビ跡"),
-        ("pigmentation",    "色素沈着"),
-        ("enlarged_pores",  "開き毛穴"),
-        ("blackhead_pores", "黒ずみ毛穴"),
-        ("translucency",    "透明感"),
-        ("tone_uniformity", "肌トーン均一性"),
-        ("skin_balance",    "肌バランス"),
-        ("symmetry",        "左右差"),
+    def _details_for(base_key):
+        return [
+            {
+                "key": detail_key,
+                "label": _PREMIUM_DETAIL_LABELS.get(detail_key, detail_key),
+                "score": int(premium_scores.get(detail_key, 0) or 0),
+            }
+            for detail_key in _BASE_TO_PREMIUM_DETAIL_KEYS.get(base_key, [])
+            if detail_key in premium_scores
+        ]
+
+    _label_to_base_key = {label: key for key, label in _BASE_SCORE_LABELS.items()}
+
+    # ai_improvement_strategy の item 表記はGeminiの言い回しでブレることがある
+    # （例:「保湿」ではなく「水分感」等）。基本項目そのものの存在は必ず
+    # _BASE_SCORE_LABELS（コード側の固定10項目）を正とし、ai_strategyは
+    # rank/reasonを引けた場合だけ補完する。ラベル不一致で項目ごと消える
+    # ことが無いようにする。
+    _matched_rank_reason = {}
+    for label, rank in _rank_by_label.items():
+        base_key = _label_to_base_key.get(label)
+        if base_key:
+            _matched_rank_reason[base_key] = (rank, _reason_by_label.get(label, ""))
+
+    matched_keys = [
+        base_key for base_key in _BASE_SCORE_LABELS
+        if base_key in _matched_rank_reason
+    ]
+    unmatched_keys = [
+        base_key for base_key in _BASE_SCORE_LABELS
+        if base_key not in _matched_rank_reason
     ]
 
+    # rankが判明した項目はAI戦略順、不明な項目はスコア昇順で末尾に回す
+    matched_keys.sort(key=lambda k: _matched_rank_reason[k][0])
+    unmatched_keys.sort(key=lambda k: int(scores.get(k, 0) or 0))
+
     items = []
-
-    for key, label in _detail_labels:
-        if key not in premium_scores:
-            continue
-        primary_base_key = _PREMIUM_SCORE_PRIMARY_BASE.get(key)
-        primary_base_label = _BASE_SCORE_LABELS.get(primary_base_key, "")
-        reason = _reason_by_label.get(primary_base_label, "")
-        items.append({
-            "key": key,
-            "label": label,
-            "score": int(premium_scores.get(key, 0) or 0),
-            "reason": reason,
-        })
-
-    # premium_scores に分解されていない基本項目（現状は「ハリ」のみ）を残す
-    for base_key, base_label in _BASE_SCORE_LABELS.items():
-        if base_key in _PREMIUM_SCORE_COVERED_BASE_KEYS:
-            continue
+    for base_key in matched_keys + unmatched_keys:
+        rank, reason = _matched_rank_reason.get(base_key, (None, ""))
         items.append({
             "key": base_key,
-            "label": base_label,
+            "label": _BASE_SCORE_LABELS[base_key],
             "score": int(scores.get(base_key, 0) or 0),
-            "reason": _reason_by_label.get(base_label, ""),
+            "reason": reason,
+            "details": _details_for(base_key),
         })
 
-    items.sort(key=lambda x: x["score"])
-    return [{"rank": i + 1, **item} for i, item in enumerate(items)]
+    result = [{"rank": i + 1, **item} for i, item in enumerate(items)]
+
+    if "symmetry" in premium_scores:
+        result.append({
+            "rank": len(result) + 1,
+            "key": "symmetry",
+            "label": "左右差",
+            "score": int(premium_scores.get("symmetry", 0) or 0),
+            "reason": "",
+            "details": [],
+        })
+
+    return result
 
 
 def infer_improvement_targets(improvement_plan):
@@ -8577,17 +8618,20 @@ def score_improvement(product, improvement_plan=None, premium_improvement_priori
     # 実際に選ばれる商品の傾向を一致させるため。
     if premium_improvement_priority:
         for item in premium_improvement_priority:
-            target = _PREMIUM_ITEM_TO_IMPROVEMENT_TARGET.get(item.get("key"))
-            if not target:
-                continue
+            # 詳細サブスコアは親項目の子要素としてネストされているため、
+            # 親自身に加えて子（details）も同じ優先度（親のrank）で評価する。
             weight = max(0, 10 - int(item.get("rank", 99) or 99))
             if weight <= 0:
                 continue
-            rule = IMPROVEMENT_KEYWORDS.get(target, {})
-            if term_matches(terms, rule.get("strong", [])):
-                score += weight * 3
-            elif term_matches(terms, rule.get("support", [])):
-                score += weight * 1.5
+            for candidate in [item] + list(item.get("details", []) or []):
+                target = _PREMIUM_ITEM_TO_IMPROVEMENT_TARGET.get(candidate.get("key"))
+                if not target:
+                    continue
+                rule = IMPROVEMENT_KEYWORDS.get(target, {})
+                if term_matches(terms, rule.get("strong", [])):
+                    score += weight * 3
+                elif term_matches(terms, rule.get("support", [])):
+                    score += weight * 1.5
 
     # 上限を設定して暴走防止
     return max(0, min(score, 100))
@@ -11342,6 +11386,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
     ai_image_db = load_ai_product_images()
     improvement_plan = data.get("improvement_plan", {})
     premium_improvement_priority = data.get("premium_improvement_priority", [])
+    impact_priority_ranks = build_impact_priority_ranks(premium_improvement_priority)
     verified_products = load_verified_products_cache()
 
     # 全ステップのRakuten検索を並列プリフェッチ（スコアリングループはキャッシュヒット）
@@ -11432,7 +11477,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
         source = best.get("_source", "")
 
         if source in ["db", "ai+db", "fallback_db"]:
-            apply_db_product_to_step(step, best, user_data)
+            apply_db_product_to_step(step, best, user_data, premium_improvement_priority)
             step["product_source"] = source or "db"
 
         elif source in ["ai", "ai_virtual", "ai_rakuten_verified", "rakuten_criteria"]:
@@ -11496,10 +11541,10 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
             impact = calculate_step_impact(step, best)
             step["impact_scores"] = impact
-            step["top_impacts"] = format_top_impacts(impact)
+            step["top_impacts"] = format_top_impacts(impact, priority_ranks=impact_priority_ranks)
 
         else:
-            apply_db_product_to_step(step, best, user_data)
+            apply_db_product_to_step(step, best, user_data, premium_improvement_priority)
             step["product_source"] = source or "db"
 
         invalid_reason = "現在確認できる商品候補が見つかりませんでした。"
@@ -12463,17 +12508,46 @@ def calculate_step_impact(step, product):
 
     return impact
 
-def format_top_impacts(impact, top_n=2):
+def build_impact_priority_ranks(premium_improvement_priority):
+    """
+    premium_improvement_priority（改善優先順位、build_premium_improvement_priority参照）
+    の各項目のrankを、そのkeyで引けるようにした辞書を返す。
+    calculate_step_impact()が使うキー(oil_balance/redness/pores/hydration/
+    firmness/dullness)は改善優先順位のトップレベル項目のkeyと一致するため、
+    そのまま照合できる。
+    """
+    ranks = {}
+    if not isinstance(premium_improvement_priority, list):
+        return ranks
+    for item in premium_improvement_priority:
+        if isinstance(item, dict) and item.get("key"):
+            ranks[item["key"]] = item.get("rank", 999)
+    return ranks
+
+
+def format_top_impacts(impact, top_n=2, priority_ranks=None):
+    """
+    商品の改善期待(impact)から表示する上位項目を選ぶ。
+
+    priority_ranks（build_impact_priority_ranksで作成、改善優先順位のkey→rank）を
+    渡すと、単純な効果値の大小ではなく「改善優先順位で優先度が高い項目」を
+    優先して表示する。これにより、AIが改善優先順位に基づいて選んだ商品の
+    「改善期待」表示が、実際の優先順位と食い違わないようにする。
+    優先順位情報が無い項目・渡されなかった場合は従来通り効果値順。
+    """
     label_map = {
         "oil_balance": "皮脂",
         "redness": "赤み",
         "pores": "毛穴",
         "hydration": "保湿",
-        "firmness": "ハリ"
+        "firmness": "ハリ",
+        "dullness": "くすみ",
     }
+    priority_ranks = priority_ranks or {}
 
-    pairs = sorted(impact.items(), key=lambda x: x[1], reverse=True)
-    pairs = [p for p in pairs if p[1] > 0][:top_n]
+    pairs = [p for p in impact.items() if p[1] > 0]
+    pairs.sort(key=lambda p: (priority_ranks.get(p[0], 999), -p[1]))
+    pairs = pairs[:top_n]
 
     return [
         {
@@ -13110,7 +13184,7 @@ def get_step_display_role(step):
 
     return "美容液"
 
-def finalize_step_data(step, user_data):
+def finalize_step_data(step, user_data, premium_improvement_priority=None):
     if not isinstance(step, dict):
         step = {}
 
@@ -13417,13 +13491,17 @@ def finalize_step_data(step, user_data):
     step["routine_score"] = routine
     step["match_score"] = final
 
+    _impact_priority_ranks = build_impact_priority_ranks(premium_improvement_priority)
+
     if not isinstance(step.get("impact_scores"), dict):
         impact = calculate_step_impact(step, None)
         step["impact_scores"] = impact
-        step["top_impacts"] = format_top_impacts(impact)
+        step["top_impacts"] = format_top_impacts(impact, priority_ranks=_impact_priority_ranks)
     else:
         if not isinstance(step.get("top_impacts"), list):
-            step["top_impacts"] = format_top_impacts(step["impact_scores"])
+            step["top_impacts"] = format_top_impacts(
+                step["impact_scores"], priority_ranks=_impact_priority_ranks
+            )
 
     step["display_role"] = get_step_display_role(step)
 
@@ -13540,18 +13618,20 @@ def finalize_result_data(data, user_data):
     if not isinstance(data["night"].get("steps"), list):
         data["night"]["steps"] = []
 
+    _premium_improvement_priority = data.get("premium_improvement_priority", [])
+
     data["morning"]["steps"] = [
-        finalize_step_data(step, user_data)
+        finalize_step_data(step, user_data, _premium_improvement_priority)
         for step in data["morning"]["steps"]
     ]
 
     data["night"]["steps"] = [
-        finalize_step_data(step, user_data)
+        finalize_step_data(step, user_data, _premium_improvement_priority)
         for step in data["night"]["steps"]
     ]
 
     data["weekly_care"] = [
-        finalize_step_data(step, user_data)
+        finalize_step_data(step, user_data, _premium_improvement_priority)
         for step in data["weekly_care"]
     ]
 
@@ -15446,11 +15526,15 @@ def build_analysis_prompt_phase2(user_data, phase1):
     # ai_improvement_strategy（基本10項目のみ）ではなくこちらをPhase2に渡す。
     premium_priority = phase1.get("premium_improvement_priority") or []
     if premium_priority:
-        _strategy_lines = "\n".join(
-            f"  {s.get('rank','?')}. {s.get('label','?')}(スコア{s.get('score','?')})"
-            + (f" — {s.get('reason','')}" if s.get("reason") else "")
-            for s in premium_priority
-        )
+        _lines = []
+        for s in premium_priority:
+            _lines.append(
+                f"  {s.get('rank','?')}. {s.get('label','?')}(スコア{s.get('score','?')})"
+                + (f" — {s.get('reason','')}" if s.get("reason") else "")
+            )
+            for d in s.get("details", []) or []:
+                _lines.append(f"      - {d.get('label','?')}(スコア{d.get('score','?')})")
+        _strategy_lines = "\n".join(_lines)
     elif ai_strategy:
         _strategy_lines = "\n".join(
             f"  {s.get('rank','?')}. {s.get('item','?')}(スコア{s.get('score','?')}) — {s.get('reason','')}"
@@ -16691,9 +16775,9 @@ def build_buy_lead(step):
 
     return f"{label} +{value} → {ingredient}中心ケア"
 
-def apply_db_product_to_step(step, product, user_data):
+def apply_db_product_to_step(step, product, user_data, premium_improvement_priority=None):
     if product is None:
-        apply_category_fallback_to_step(step, user_data)
+        apply_category_fallback_to_step(step, user_data, premium_improvement_priority)
         return
 
     category = step.get("category", "")
@@ -16800,7 +16884,10 @@ def apply_db_product_to_step(step, product, user_data):
 
     impact = calculate_step_impact(step, product)
     step["impact_scores"] = impact
-    step["top_impacts"] = format_top_impacts(impact)
+    step["top_impacts"] = format_top_impacts(
+        impact,
+        priority_ranks=build_impact_priority_ranks(premium_improvement_priority)
+    )
 
     step["buy_lead"] = build_buy_lead(step)
 
@@ -16858,7 +16945,7 @@ def get_first_concrete_candidate(step):
     return ""
 
 
-def apply_category_fallback_to_step(step, user_data):
+def apply_category_fallback_to_step(step, user_data, premium_improvement_priority=None):
     category = str(step.get("category", "") or "美容液").strip()
     purpose = str(step.get("purpose", "") or "肌状態に合わせた基本ケア").strip()
     ingredient_focus = str(step.get("ingredient_focus", "") or "").strip()
@@ -16893,7 +16980,10 @@ def apply_category_fallback_to_step(step, user_data):
 
     impact = calculate_step_impact(step, None)
     step["impact_scores"] = impact
-    step["top_impacts"] = format_top_impacts(impact)
+    step["top_impacts"] = format_top_impacts(
+        impact,
+        priority_ranks=build_impact_priority_ranks(premium_improvement_priority)
+    )
 
     if not isinstance(step.get("top_candidates"), list):
         step["top_candidates"] = []
