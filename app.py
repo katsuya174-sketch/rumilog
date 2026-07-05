@@ -5144,6 +5144,11 @@ _SKINCARE_CATEGORY_SUFFIXES = {
     "導入美容液", "美顔器", "サプリ", "サプリメント",
 }
 
+# カテゴリ語の直前が実在の成分名かどうかの判定に使う（_TITLE_INGREDIENT_KEYWORDS を流用）。
+# ブランド名+製品ライン名がたまたまカテゴリ語で終わる場合（例: "d プログラム ピーリング"）を
+# 「成分名+カテゴリ名」パターンと誤判定しないようにするため。
+_INGREDIENT_PREFIX_NAMES = {k.lower() for k in _TITLE_INGREDIENT_KEYWORDS.keys()}
+
 def _is_ingredient_category_name(product_name: str) -> bool:
     """
     製品名が「成分名+カテゴリ名」または「カテゴリ名のみ」パターンかを判定。
@@ -5151,13 +5156,17 @@ def _is_ingredient_category_name(product_name: str) -> bool:
     通ると全件 False になる。score_rakuten_item のカテゴリ固有チェックに委ねる。
     例: "セラミド 乳液" "ナイアシンアミド 美容液" "ビタミンC 化粧水" → True
         "キュレル 潤浸保湿乳液" "COSRX スネイルムチン96エッセンス" → False
+        "d プログラム ピーリング"（ブランドの製品ライン名がカテゴリ語で終わるだけ）→ False
     """
     name = (product_name or "").strip()
     for cat in _SKINCARE_CATEGORY_SUFFIXES:
         if name == cat:
             return True
+        prefix = None
         if name.endswith(" " + cat) or name.endswith("　" + cat):
-            return True
+            prefix = name[: -(len(cat) + 1)]
+        if prefix is not None:
+            return prefix.strip().lower() in _INGREDIENT_PREFIX_NAMES
     return False
 
 
