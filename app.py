@@ -5387,16 +5387,19 @@ def resolve_beauty_device_day_conflicts(data):
         if not isinstance(item, dict):
             continue
         dtype = str(item.get("device_type", "") or "").strip()
-        notes = []
+        # ピーリング・レチノールの両方に非対応な機器（例:超音波洗浄）は
+        # 「〜は避けてください」を2文連続で出すと同じ言い回しの繰り返しで
+        # 冗長に見えるため、避けるべき日を1文にまとめる。
+        avoid_days = []
         if has_peeling and dtype in _DEVICE_PEELING_INCOMPATIBLE:
-            notes.append("ピーリングを行う日は使用を避けてください")
+            avoid_days.append("ピーリングを行う日")
         if has_retinol and dtype in _DEVICE_RETINOL_INCOMPATIBLE:
-            notes.append("レチノールを使用する日は使用を避けてください")
-        if notes:
+            avoid_days.append("レチノールを使用する日")
+        if avoid_days:
             existing = str(item.get("reason", "") or "").strip()
-            note_text = "。".join(notes) + "。"
+            note_text = "・".join(avoid_days) + "は使用を避けてください。"
             item["reason"] = f"{existing}（{note_text}）" if existing else note_text
-            print(f"[DEVICE DAY CONFLICT] {dtype}: {notes}", flush=True)
+            print(f"[DEVICE DAY CONFLICT] {dtype}: {avoid_days}", flush=True)
 
     return data
 
@@ -9065,9 +9068,13 @@ def build_virtual_product_from_ai_candidate(step, candidate):
         if x and x not in active_ingredients:
             active_ingredients.append(x)
 
-    ingredient_tag = normalize_ingredient_tag(ingredient_focus)
-    if ingredient_tag and ingredient_tag not in active_ingredients:
-        active_ingredients.append(ingredient_tag)
+    # step（スロット）のingredient_focusは「このスロットが本来意図していた成分」であり、
+    # 実際に選ばれたこのcandidateが本当にその成分を含む保証にはならない
+    # （candidate名から検出できなかった場合、無関係な商品にレチノール等を
+    # 誤って持たせてしまい、infer_active_profile()のレチノイド判定等が
+    # 誤発火してレチノールの入っていない商品にレチノイド相乗効果ノートが
+    # 表示されるバグの原因になっていた）。active_ingredients/ingredient_strengthへは
+    # 追加せず、ingredient_focusとして別フィールドに残すのみにする。
 
     support_ingredients = [
         normalize_ingredient_tag(x)
@@ -9218,8 +9225,8 @@ def build_virtual_product_from_ai_candidate(step, candidate):
     if not isinstance(ingredient_strength, dict):
         ingredient_strength = {}
 
-    if ingredient_tag and ingredient_tag not in ingredient_strength:
-        ingredient_strength[ingredient_tag] = "medium"
+    # ingredient_tagをここでも強度"medium"として無条件付与しない
+    # （active_ingredients同様、スロットの意図であって実商品の保証ではないため）
 
     for key, value in inferred_fields.get("ingredient_strength", {}).items():
         key = normalize_ingredient_tag(key)
