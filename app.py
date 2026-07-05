@@ -4955,13 +4955,24 @@ def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
     処理順:
     1. 全ステップを順次処理（fetch_rakuten_item 内で429時は待機+1回リトライ）
     2. クールダウンでスキップされたステップをクールダウン解消後に再試行
-    3. 再試行後もリンクなし かつ クールダウン解消済み → top_candidates次点へフォールバック
+    3. リンクが無いステップ（②のクールダウン由来・単純に一致商品が
+       見つからなかった分の両方）はクールダウン解消済みであれば
+       top_candidates次点へフォールバック
+
+    注意: 「一致商品が見つからなかった」失敗は「クールダウンで弾かれた」
+    失敗よりもはるかに頻度が高い（AI提案商品が楽天に実在しない・厳格な
+    商品名照合で弾かれた等）。フォールバックを②のクールダウン経由ステップ
+    だけに限定すると、この頻度の高いケースで2位以降の予備候補
+    （最大6件保持）が一度も試されずリンク無しのまま確定してしまうため、
+    リンクが無い全ステップを対象にする。
     """
     skipped = []  # クールダウンでスキップされたステップ
+    all_steps = []
 
     def _attach(step):
         if not isinstance(step, dict):
             return
+        all_steps.append(step)
         link_before = str(step.get("rakuten_link", "") or "")
         attach_affiliate_links_to_step(step, affiliate_ai_db)
         if not str(step.get("rakuten_link", "") or "") and not link_before:
@@ -4990,13 +5001,15 @@ def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
         )
         time.sleep(wait_sec)
 
-    still_no_link = []
     for step in skipped:
         attach_affiliate_links_to_step(step, affiliate_ai_db)
-        if not str(step.get("rakuten_link", "") or ""):
-            still_no_link.append(step)
 
-    # ③ 再試行後もリンクなし かつ クールダウンが解消されている → 次点候補へフォールバック
+    # ③ リンクが無い全ステップ（クールダウン由来か否かを問わない）を対象に
+    # クールダウンが解消されていれば次点候補へフォールバック
+    still_no_link = [
+        step for step in all_steps
+        if not str(step.get("rakuten_link", "") or "")
+    ]
     if still_no_link:
         cooldown_cleared = time.time() >= RAKUTEN_COOLDOWN_UNTIL
         for step in still_no_link:
@@ -5136,6 +5149,23 @@ _ALL_DAYS = ["月", "火", "水", "木", "金", "土", "日"]
 # AHA/BHA系も aha / bha / aha_bha 全パターン対応
 _IRRITANT_FOCUS_TAGS = {"retinoid", "retinol", "retinal", "aha_bha", "aha", "bha", "pha"}
 
+
+def _resolve_focus_tags(raw_focus):
+    """
+    ingredient_focus の各要素を英語タグに正規化した集合を返す。
+    Geminiの生出力は「レチノール」のような日本語と、既に英語化された
+    タグ（bha等）が混在しており、そのまま _IRRITANT_FOCUS_TAGS 等の
+    英語タグ集合と照合すると日本語表記が一致せず判定漏れになる。
+    normalize_ingredient_tag() で日英表記を統一してから比較する。
+    """
+    tags = set()
+    for item in as_list(raw_focus):
+        item_text = str(item or "").strip()
+        if not item_text:
+            continue
+        tags.add(normalize_ingredient_tag(item_text) or item_text.lower())
+    return tags
+
 # 「成分名+カテゴリ名」パターン検出用カテゴリ集合
 # 例: "セラミド 乳液" "ナイアシンアミド 美容液" "ビタミンC 化粧水"
 _SKINCARE_CATEGORY_SUFFIXES = {
@@ -5188,8 +5218,7 @@ def resolve_weekly_care_day_conflicts(data):
         if not isinstance(step, dict):
             continue
         raw_focus = step.get("ingredient_focus") or []
-        # ingredient_focus が文字列で返ることがあるので必ずリスト化
-        focus = set(as_list(raw_focus))
+        focus = _resolve_focus_tags(raw_focus)
         if not focus & _IRRITANT_FOCUS_TAGS:
             continue
         days = step.get("use_days") or []
@@ -5275,7 +5304,7 @@ def resolve_night_irritant_conflicts(data):
     for tags, label in _PRIORITY_GROUPS:
         conflict_steps = []
         for step in night_steps:
-            focus = set(as_list(step.get("ingredient_focus") or []))
+            focus = _resolve_focus_tags(step.get("ingredient_focus"))
             days = step.get("use_days") or []
             if not (focus & tags) or not days:
                 continue
@@ -5297,7 +5326,7 @@ def resolve_night_irritant_conflicts(data):
 
         # このグループの（調整後の）曜日を fixed_days に追加
         for step in night_steps:
-            focus = set(as_list(step.get("ingredient_focus") or []))
+            focus = _resolve_focus_tags(step.get("ingredient_focus"))
             days = step.get("use_days") or []
             if focus & tags and days:
                 fixed_days.update(days)
@@ -5331,7 +5360,7 @@ def resolve_beauty_device_day_conflicts(data):
     for step in data.get("night", {}).get("steps", []):
         if not isinstance(step, dict):
             continue
-        focus = set(as_list(step.get("ingredient_focus") or []))
+        focus = _resolve_focus_tags(step.get("ingredient_focus"))
         if focus & _RETINOID_ONLY_TAGS:
             has_retinol = True
             break
@@ -13236,7 +13265,18 @@ def finalize_step_data(step, user_data):
         return [selected_candidate] if selected_candidate else []
 
     category = clean_text(step.get("category")) or "美容液"
-    ingredient_focus = clean_text(step.get("ingredient_focus"))
+    # ingredient_focus は normalize_ai_labels() でタグのリストに正規化済みのため、
+    # clean_text（str()化）を通すと "['retinol']" のような文字列に壊れ、
+    # resolve_weekly_care_day_conflicts 等のタグ照合（set型の積集合）が
+    # 常に不一致になってしまう。リストはリストのまま保持する。
+    raw_ingredient_focus = step.get("ingredient_focus")
+    if raw_ingredient_focus is None:
+        ingredient_focus = []
+    elif isinstance(raw_ingredient_focus, list):
+        ingredient_focus = raw_ingredient_focus
+    else:
+        text = clean_text(raw_ingredient_focus)
+        ingredient_focus = [text] if text else []
     purpose = clean_text(step.get("purpose")) or "肌状態に合わせた基本ケア"
 
     step["category"] = category
@@ -14609,7 +14649,7 @@ def _serum_sub_sort_key(step):
       ③ 成分特性    → ingredient_rank: 0=保湿/導入, 1=機能系, 2=刺激系
       ④ テクスチャ  → texture_rank: 0=軽い, 1=中間, 2=重い
     """
-    focuses = set(as_list(step.get("ingredient_focus") or []))
+    focuses = _resolve_focus_tags(step.get("ingredient_focus"))
 
     # ② 刺激成分フラグ
     is_irritant = bool(focuses & _SERUM_IRRITANT_FOCUS)
