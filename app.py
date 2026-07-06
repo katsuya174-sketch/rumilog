@@ -13202,6 +13202,83 @@ def get_step_display_role(step):
 
     return "美容液"
 
+
+def _safe_num(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def build_candidate_comparison_notes(top_candidates):
+    """
+    1位候補が「なぜ1位か」、2位・3位が「1位とどう違うか」を、追加のGemini
+    呼び出し無しでスコア内訳(base/improve/routine)・成分・価格から機械的に
+    生成する（プレミアム機能「AI比較」の表示用）。
+    戻り値: {"why_best": str, "diffs": [{"label": "2位"|"3位", "text": str}]}
+    """
+    if not isinstance(top_candidates, list) or not top_candidates:
+        return {"why_best": "", "diffs": []}
+
+    best = top_candidates[0]
+    if not isinstance(best, dict):
+        return {"why_best": "", "diffs": []}
+
+    base = _safe_num(best.get("base_score", 0))
+    improve = _safe_num(best.get("improve_score", 0))
+    routine = _safe_num(best.get("routine_score", 0))
+
+    reasons = []
+    if base > 0 and base >= improve and base >= routine:
+        reasons.append("肌質・悩みへの基本適合度が高い")
+    if improve > 0 and improve >= base and improve >= routine:
+        reasons.append("優先すべき改善項目に合う成分を含む")
+    if routine > 0 and routine >= base and routine >= improve:
+        reasons.append("既存ルーティンとの相性が良い")
+
+    best_actives = [a for a in (best.get("active_ingredients") or []) if a]
+    best_actives_ja = [ingredient_map.get(a, a) for a in best_actives]
+    if best_actives_ja:
+        reasons.append(f"{'・'.join(best_actives_ja[:2])}を配合している")
+
+    why_best = (
+        "、".join(reasons) + "ため、総合スコアが最も高くなっています。"
+        if reasons else ""
+    )
+
+    diffs = []
+    rank_labels = {1: "2位", 2: "3位"}
+    for idx, cand in enumerate(top_candidates[1:3], start=1):
+        if not isinstance(cand, dict):
+            continue
+
+        parts = []
+
+        score_gap = round(_safe_num(best.get("score", 0)) - _safe_num(cand.get("score", 0)), 1)
+        if score_gap > 0:
+            parts.append(f"総合スコアが{score_gap}点差")
+
+        cand_actives = set(a for a in (cand.get("active_ingredients") or []) if a)
+        unique_to_best = [a for a in best_actives if a not in cand_actives]
+        if unique_to_best:
+            parts.append(f"{ingredient_map.get(unique_to_best[0], unique_to_best[0])}を含む点が優位")
+
+        best_price = safe_price(best.get("price_ref", 0))
+        cand_price = safe_price(cand.get("price_ref", 0))
+        if best_price > 0 and cand_price > 0:
+            if best_price < cand_price:
+                parts.append(f"価格は¥{cand_price - best_price:,}安い")
+            elif best_price > cand_price:
+                parts.append(f"価格は¥{best_price - cand_price:,}高いが評価スコアで優位")
+
+        diffs.append({
+            "label": rank_labels.get(idx, f"{idx + 1}位"),
+            "text": "、".join(parts) if parts else "スコア内訳がわずかに劣る",
+        })
+
+    return {"why_best": why_best, "diffs": diffs}
+
+
 def finalize_step_data(step, user_data, premium_improvement_priority=None):
     if not isinstance(step, dict):
         step = {}
@@ -13454,6 +13531,7 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
         step[key] = to_number(step.get(key, 0))
 
     step["top_candidates"] = preserve_ranked_top_candidates(step)
+    step["candidate_comparison"] = build_candidate_comparison_notes(step["top_candidates"])
 
     if step["top_candidates"]:
         best = step["top_candidates"][0]

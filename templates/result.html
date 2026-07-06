@@ -66,6 +66,34 @@
 .sub-candidate-sep {
     color: #c9a8b5;
 }
+.candidate-comparison-box {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: rgba(255, 248, 240, 0.8);
+    border: 1px solid #f0dcc0;
+}
+.candidate-comparison-title {
+    font-size: 12px;
+    font-weight: bold;
+    color: #b4791f;
+    margin-bottom: 4px;
+}
+.candidate-comparison-text {
+    font-size: 12px;
+    color: #666;
+    line-height: 1.6;
+}
+.candidate-diff-row {
+    font-size: 11px;
+    color: #7a6b72;
+    margin-top: 4px;
+    line-height: 1.5;
+}
+.candidate-diff-label {
+    font-weight: bold;
+    color: #cc6f90;
+}
 .score-detail-compact {
     margin-top: 4px;
     font-size: 11px;
@@ -435,6 +463,13 @@
               {% endif %}
   
               {% if data.get("is_premium") or data.get("is_dev_mode") %}
+                  {% set comparison = step.get("candidate_comparison") or {} %}
+                  {% if comparison.get("why_best") %}
+                  <div class="candidate-comparison-box">
+                      <div class="candidate-comparison-title">なぜこの商品が1位か</div>
+                      <div class="candidate-comparison-text">{{ comparison.get("why_best") }}</div>
+                  </div>
+                  {% endif %}
                   {% if step.get("top_candidates", [])|length > 1 %}
                   <div class="sub-candidates-box compact">
                       <div class="sub-candidates-title">次点候補</div>
@@ -446,6 +481,12 @@
                               </span>{% if not loop.last %}<span class="sub-candidate-sep"> / </span>{% endif %}
                           {% endfor %}
                       </div>
+                      {% for diff in comparison.get("diffs", []) %}
+                      <div class="candidate-diff-row">
+                          <span class="candidate-diff-label">{{ diff.label }}との違い:</span>
+                          <span class="candidate-diff-text">{{ diff.text }}</span>
+                      </div>
+                      {% endfor %}
                   </div>
                   {% endif %}
               {% else %}
