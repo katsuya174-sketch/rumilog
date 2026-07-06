@@ -14248,6 +14248,13 @@ def prepare_result_for_view(result):
             result.get("ai_improvement_strategy", [])
         )
 
+    # weekly_usage_plan は毎回 build_weekly_usage_plan() で再計算する。
+    # 保存済みの値をそのまま使うと、build_weekly_usage_plan のロジック変更
+    # （例: パックを夜の化粧水後・美容液前に統合）が過去の履歴に反映されない。
+    # 再計算に必要な morning/night/weekly_care/routine_strategy は履歴に保存済み。
+    if result.get("morning") or result.get("night") or result.get("weekly_care"):
+        result["weekly_usage_plan"] = build_weekly_usage_plan(result)
+
     return result
 
 def lightweight_result_payload(item):
