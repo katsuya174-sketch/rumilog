@@ -17322,6 +17322,30 @@ def build_weekly_usage_plan(data):
         and step_label(s)
     ]
 
+    def _label_category(label):
+        return label.split(":", 1)[0].strip() if ":" in label else str(label).strip()
+
+    def _insert_pack_into_night(items, pack_labels):
+        """パックを夜の並びの「化粧水の後・美容液の前」に挿入する。
+        美容液が無ければ化粧水の直後、どちらも無ければ末尾。"""
+        if not pack_labels:
+            return items
+        insert_idx = None
+        for i, lbl in enumerate(items):
+            if _label_category(lbl) == "美容液":
+                insert_idx = i
+                break
+        if insert_idx is None:
+            last_lotion = None
+            for i, lbl in enumerate(items):
+                if _label_category(lbl) == "化粧水":
+                    last_lotion = i
+            if last_lotion is not None:
+                insert_idx = last_lotion + 1
+        if insert_idx is None:
+            insert_idx = len(items)
+        return items[:insert_idx] + pack_labels + items[insert_idx:]
+
     usage_plan = []
     for day in days:
         # 夜: 洗顔・クレンジング以外を表示
@@ -17342,11 +17366,24 @@ def build_weekly_usage_plan(data):
             )
         ]
 
-        # 週ケア: use_daysにこの曜日が含まれるstepのみ表示
+        # 週ケアのうちパックは、特別ケア枠ではなく夜の並びの化粧水後・美容液前に
+        # 挿入する（ユーザー指定）。ピーリング等その他の週ケアは特別ケア枠に残す。
+        pack_labels = [
+            step_label(s)
+            for s in weekly_steps
+            if isinstance(s, dict)
+            and str(s.get("category") or "").strip() == "パック"
+            and step_label(s)
+            and day in get_use_days(s)
+        ]
+        night_items = _insert_pack_into_night(night_items, pack_labels)
+
+        # 週ケア: use_daysにこの曜日が含まれるstepのみ表示（パックは上で夜に統合済み）
         special_care = [
             step_label(s)
             for s in weekly_steps
             if isinstance(s, dict)
+            and str(s.get("category") or "").strip() != "パック"
             and step_label(s)
             and day in get_use_days(s)
         ]
