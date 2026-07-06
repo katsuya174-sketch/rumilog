@@ -27,7 +27,7 @@ import threading
 from psycopg2.pool import SimpleConnectionPool
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v14"  # ブースターの朝使用ルールを追加し、朝ブースター一律削除(enforce_booster_night_only)を廃止
+ANALYSIS_CACHE_VERSION = "v15"  # Phase1に原因分析(root_causes)・肌タイプ分析(skin_type_analysis)を追加
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
@@ -13851,6 +13851,19 @@ def finalize_result_data(data, user_data):
 
     data["root_causes"] = cleaned_causes
 
+    # skin_type_analysis
+    _sta = data.get("skin_type_analysis")
+    if not isinstance(_sta, dict):
+        _sta = {}
+    _traits = _sta.get("traits")
+    if not isinstance(_traits, list):
+        _traits = []
+    data["skin_type_analysis"] = {
+        "skin_type": str(_sta.get("skin_type", "") or ""),
+        "summary": str(_sta.get("summary", "") or ""),
+        "traits": [str(t) for t in _traits if str(t or "").strip()],
+    }
+
     # use_timing 注意書きをステップに付与
     # 美容液の after_serum は同一セクションに他の美容液がある場合のみ表示する
     _morning_serum_count = sum(
@@ -14068,6 +14081,7 @@ def normalize_result(raw_data, image_path=""):
         "skin_summary": raw_data.get("skin_summary", ""),
         "observation": raw_data.get("observation", {}),
         "root_causes": raw_data.get("root_causes", []),
+        "skin_type_analysis": raw_data.get("skin_type_analysis", {}),
         "morning": {
             "steps": [
                 {
@@ -15128,9 +15142,31 @@ def get_analysis_schema_phase1():
                     },
                     "required": ["rank","item","score","reason"]
                 }
+            },
+            "root_causes": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "cause":          {"type": "string"},
+                        "evidence":       {"type": "string"},
+                        "priority":       {"type": "integer"},
+                        "care_direction": {"type": "string"}
+                    },
+                    "required": ["cause","evidence","priority","care_direction"]
+                }
+            },
+            "skin_type_analysis": {
+                "type": "object",
+                "properties": {
+                    "skin_type": {"type": "string"},
+                    "summary":   {"type": "string"},
+                    "traits":    {"type": "array", "items": {"type": "string"}}
+                },
+                "required": ["skin_type","summary","traits"]
             }
         },
-        "required": ["skin_summary","scores","score_reasons","symmetry_analysis","skin_age_estimate","improvement_plan","moisture_plan","ai_improvement_strategy"]
+        "required": ["skin_summary","scores","score_reasons","symmetry_analysis","skin_age_estimate","improvement_plan","moisture_plan","ai_improvement_strategy","root_causes","skin_type_analysis"]
     }
 
 
@@ -15648,6 +15684,8 @@ ai_improvement_strategy: 改善優先順位を戦略的に10項目分出力。�
   ・相乗効果（例: 保湿改善→化粧水の浸透性向上→後続の美容液の効果増幅）
   ・ユーザーの悩みとの一致度
   各itemはスコアラベル名(日本語)、scoreはそのスコア値、reason は「なぜその順番か」を30〜50字で具体的に記述。
+root_causes: 肌悩みの根本原因を2〜4個。表面的な症状ではなく「なぜそうなっているか」の構造的原因を推定する。各要素は cause(原因を10〜25字)/evidence(画像やスコアから読み取れる根拠を20〜40字)/priority(重要度1が最優先の整数)/care_direction(その原因に対するケアの方向性を20〜40字)。例: cause="皮脂過剰による毛穴詰まり" evidence="Tゾーンのテカリと鼻周りの毛穴の開きが顕著" priority=1 care_direction="皮脂コントロールと角質ケアで毛穴の詰まりを防ぐ"。
+skin_type_analysis: ユーザーの申告(皮脂:{user_data['oil']} 敏感度:{user_data['sens']})と画像を総合した肌タイプ分析。skin_type(乾燥肌/脂性肌/混合肌/普通肌/敏感肌 等の短い分類)/summary(その肌タイプと判断した理由を30〜50字)/traits(肌の特徴を3〜5個の配列、各10〜20字)。
 
 JSONのみ返す。説明・Markdown・前置き禁止。JSONキーは英語、値は日本語。"""
 
