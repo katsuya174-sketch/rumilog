@@ -1224,7 +1224,8 @@
                             <span class="wplan-sec-icon m">☀</span>
                             <div class="wplan-sec-items">
                                 {% for item in day.morning %}
-                                <span class="wplan-sec-item">{{ item }}</span>
+                                {# パック・ピーリングは並びの中でも緑色（特別ケア色）で表示 #}
+                                <span class="wplan-sec-item {% if item.startswith('パック') or item.startswith('ピーリング') %}w{% endif %}">{{ item }}</span>
                                 {% endfor %}
                             </div>
                         </div>
@@ -1234,7 +1235,7 @@
                             <span class="wplan-sec-icon n">🌙</span>
                             <div class="wplan-sec-items">
                                 {% for item in day.night %}
-                                <span class="wplan-sec-item n">{{ item }}</span>
+                                <span class="wplan-sec-item {% if item.startswith('パック') or item.startswith('ピーリング') %}w{% else %}n{% endif %}">{{ item }}</span>
                                 {% endfor %}
                             </div>
                         </div>
