@@ -235,27 +235,6 @@
     font-size: 11px;
     padding: 2px 9px;
 }
-.synergy-note {
-    margin-top: 8px;
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: linear-gradient(135deg, #f0f4ff, #e8eeff);
-    border: 1px solid #c8d4f8;
-    font-size: 12px;
-    color: #4a5fc4;
-    line-height: 1.6;
-}
-.timing-note {
-    margin-top: 8px;
-    padding: 8px 12px;
-    border-radius: 10px;
-    background: #fffbea;
-    border: 1px solid #f5d86e;
-    font-size: 12px;
-    color: #7a5c00;
-    line-height: 1.6;
-}
-
 .product-score {
     margin-top: 8px;
     font-size: 12px;
@@ -481,13 +460,6 @@
               <div class="product-meta">
                   <div class="reason-label">理由</div>
                   <div class="reason-text">{{ step.get("recommend_reason", "") }}</div>
-
-                  {% if step.get("synergy_note") %}
-                  <div class="synergy-note">✨ {{ step.get("synergy_note") }}</div>
-                  {% endif %}
-                  {% if step.get("timing_note") %}
-                  <div class="timing-note">{{ step.get("timing_note") }}</div>
-                  {% endif %}
               </div>
 
               {% if step.get("top_impacts", []) %}

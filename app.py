@@ -27,7 +27,7 @@ import threading
 from psycopg2.pool import SimpleConnectionPool
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v15"  # Phase1に原因分析(root_causes)・肌タイプ分析(skin_type_analysis)を追加
+ANALYSIS_CACHE_VERSION = "v17"  # 週間ルーティンの使用順でパックを化粧水後・美容液前に配置するルールをプロンプトに追加
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
@@ -8063,6 +8063,29 @@ IMPROVEMENT_KEYWORDS = {
             "beta_glucan", "βグルカン",
         ],
     },
+    # キメ改善: ターンオーバー促進・角質ケア・肌表面の平滑化
+    "texture": {
+        "strong": [
+            "aha", "bha", "pha", "グリコール酸", "glycolic_acid",
+            "乳酸", "lactic_acid", "酵素", "enzyme",
+            "retinol", "レチノール", "retinal", "レチナール",
+        ],
+        "support": [
+            "niacinamide", "ナイアシンアミド", "ceramide", "セラミド",
+            "hyaluronic", "ヒアルロン酸", "panthenol", "パンテノール",
+        ],
+    },
+    # 皮脂バランス改善: 皮脂コントロール・毛穴引き締め
+    "oil_balance": {
+        "strong": [
+            "niacinamide", "ナイアシンアミド", "salicylic_acid", "サリチル酸",
+            "bha", "clay", "クレイ", "zinc", "亜鉛",
+        ],
+        "support": [
+            "retinol", "レチノール", "green_tea", "緑茶", "茶エキス",
+            "witch_hazel", "ハマメリス", "low_irritation", "低刺激",
+        ],
+    },
 }
 
 
@@ -8480,12 +8503,17 @@ def term_matches(terms, keywords):
     return False
 
 
-# build_premium_improvement_priority() が返す詳細項目キーを、
-# IMPROVEMENT_KEYWORDS の既存ターゲットキーに対応付ける。
+# build_premium_improvement_priority() が返す項目キー（基本10項目の親キー＋
+# 詳細サブスコアの子キー）を、IMPROVEMENT_KEYWORDS のターゲットキーに対応付ける。
 # 1つの基本項目が複数の詳細項目に分解されているもの（例:「毛穴」→
 # enlarged_pores/blackhead_pores）は同じターゲットにまとめる。
 # symmetry（左右差）は成分で改善できる悩みではないため対応なし。
+#
+# 【重要】基本10項目の親キー（barrier/texture/acne/oil_balance等）も必ず登録すること。
+# 詳細サブスコアを持たない基本項目（バリア/キメ/ニキビ/皮脂）は、ここに親キーが
+# 無いと順位が何位でも商品選定スコアに一切反映されない（2026-07-06に発覚・修正）。
 _PREMIUM_ITEM_TO_IMPROVEMENT_TARGET = {
+    # 詳細サブスコア（子キー）
     "acne_marks_red":  "acne_marks_red",
     "pigmentation":    "pigmentation",
     "enlarged_pores":  "pores",
@@ -8493,7 +8521,17 @@ _PREMIUM_ITEM_TO_IMPROVEMENT_TARGET = {
     "translucency":    "pigmentation",
     "tone_uniformity": "pigmentation",
     "skin_balance":    "barrier",
+    # 基本10項目（親キー）
+    "oil_balance":     "oil_balance",
+    "redness":         "acne_marks_red",
+    "pores":           "pores",
+    "hydration":       "dryness",
     "firmness":        "firmness",
+    "acne":            "acne",
+    "dullness":        "pigmentation",
+    "barrier":         "barrier",
+    "texture":         "texture",
+    "tone_evenness":   "pigmentation",
 }
 
 
@@ -8628,25 +8666,37 @@ def score_improvement(product, improvement_plan=None, premium_improvement_priori
         score -= 8
 
     # 合算した改善優先順位（premium_improvement_priority）を候補選定に直接反映する。
-    # ランクが高い（数値が小さい＝優先度が高い）項目に合う商品ほど大きく加点し、
-    # 下位の項目は加点を弱める。結果画面の「改善優先順位」表示と、
-    # 実際に選ばれる商品の傾向を一致させるため。
+    # 【階層ルール（ユーザー指定, 2026-07-06）】
+    #   上位3項目=主目的（強く加点）／4〜6位=改善できれば加点（弱め）／
+    #   7位以下=加点対象外（「悪化させない」条件はGemini候補生成側＋
+    #   contraindicationsで担保し、ここでは積極加点しない）。
+    # さらに「改善の緊急度」= スコアが低いほど加点を強める（スコア差の考慮）。
     if premium_improvement_priority:
         for item in premium_improvement_priority:
+            rank = int(item.get("rank", 99) or 99)
+            if rank <= 3:
+                tier_weight = 13 - rank      # 1位=12, 2位=11, 3位=10
+            elif rank <= 6:
+                tier_weight = 9 - rank       # 4位=5, 5位=4, 6位=3
+            else:
+                continue                     # 7位以下は積極加点しない
+
+            # 緊急度係数: スコアが低い(=悩みが強い)ほど加点を強める。
+            # score 0→1.5倍, 50→1.0倍, 100→0.5倍 の線形。
+            item_score = _safe_num(item.get("score", 50))
+            urgency = max(0.5, min(1.5, 1.5 - item_score / 100.0))
+
             # 詳細サブスコアは親項目の子要素としてネストされているため、
             # 親自身に加えて子（details）も同じ優先度（親のrank）で評価する。
-            weight = max(0, 10 - int(item.get("rank", 99) or 99))
-            if weight <= 0:
-                continue
             for candidate in [item] + list(item.get("details", []) or []):
                 target = _PREMIUM_ITEM_TO_IMPROVEMENT_TARGET.get(candidate.get("key"))
                 if not target:
                     continue
                 rule = IMPROVEMENT_KEYWORDS.get(target, {})
                 if term_matches(terms, rule.get("strong", [])):
-                    score += weight * 3
+                    score += tier_weight * 3 * urgency
                 elif term_matches(terms, rule.get("support", [])):
-                    score += weight * 1.5
+                    score += tier_weight * 1.5 * urgency
 
     # 上限を設定して暴走防止
     return max(0, min(score, 100))
@@ -11475,12 +11525,6 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
         profile = infer_active_profile(best)
 
-        # routine_context更新前に相乗効果・悩みタグを計算
-        _product_families = profile.get("families", set())
-        _existing_families = set(routine_context.get("families", []))
-        step["synergy_note"] = build_synergy_note(
-            _product_families, _existing_families, synergy_rules
-        )
         step["concern_tags"] = build_concern_tags(best, step)
 
         routine_context["families"].extend(profile.get("families", []))
@@ -11870,44 +11914,6 @@ def enrich_supplements(data, user_data):
     data["supplements"] = cleaned
     return data
 
-
-_SYNERGY_FAMILY_LABELS = {
-    "retinoid": "レチノイド",
-    "aha_bha": "AHA/BHA",
-    "vitamin_c": "ビタミンC",
-    "strong_vitamin_c": "高濃度ビタミンC",
-    "niacinamide": "ナイアシンアミド",
-    "ceramide": "セラミド",
-    "barrier": "バリア成分",
-    "peptide": "ペプチド",
-    "pdrn": "PDRN",
-    "azelaic": "アゼライン酸",
-    "uv_protection": "紫外線防御",
-}
-
-def build_synergy_note(product_families, existing_families, synergy_rules):
-    product_fam_set = set(product_families)
-    existing_fam_set = set(existing_families)
-    for rule in synergy_rules:
-        rule_fams = rule.get("families", [])
-        if len(rule_fams) < 2:
-            continue
-        rule_fam_set = set(rule_fams)
-        product_contrib = product_fam_set & rule_fam_set
-        existing_contrib = existing_fam_set & rule_fam_set
-        if not (product_contrib and existing_contrib):
-            continue
-        reason = str(rule.get("reason", "")).strip()
-        labels = list(dict.fromkeys(
-            _SYNERGY_FAMILY_LABELS.get(f, f)
-            for f in rule_fams
-            if f in (product_contrib | existing_contrib)
-        ))
-        combo = "と".join(labels[:2]) if len(labels) >= 2 else (labels[0] if labels else "成分")
-        if reason:
-            return f"{combo}の相乗効果が期待できます。{reason}"
-        return f"{combo}の組み合わせで相乗効果が期待できます。"
-    return ""
 
 _CONCERN_LABEL_MAP = {
     "pores": "毛穴ケア",
@@ -13864,45 +13870,6 @@ def finalize_result_data(data, user_data):
         "traits": [str(t) for t in _traits if str(t or "").strip()],
     }
 
-    # use_timing 注意書きをステップに付与
-    # 美容液の after_serum は同一セクションに他の美容液がある場合のみ表示する
-    _morning_serum_count = sum(
-        1 for s in data.get("morning", {}).get("steps", [])
-        if isinstance(s, dict)
-        and normalize_candidate_category(s.get("category", ""), fallback=s.get("category", "")) == "美容液"
-    )
-    _night_serum_count = sum(
-        1 for s in data.get("night", {}).get("steps", [])
-        if isinstance(s, dict)
-        and normalize_candidate_category(s.get("category", ""), fallback=s.get("category", "")) == "美容液"
-    )
-
-    for _section_name, _section_steps in [
-        ("morning", data.get("morning", {}).get("steps", [])),
-        ("night",   data.get("night",   {}).get("steps", [])),
-        ("weekly",  data.get("weekly_care", [])),
-    ]:
-        _serum_count = _morning_serum_count if _section_name == "morning" else (
-            _night_serum_count if _section_name == "night" else 0
-        )
-        for _step in _section_steps:
-            if not isinstance(_step, dict):
-                continue
-            _timing = _step.get("use_timing", "standard")
-            _cat = normalize_candidate_category(_step.get("category", ""), fallback=_step.get("category", ""))
-            _default = _CATEGORY_DEFAULT_TIMING.get(_cat, "standard")
-            if _timing not in ("standard", "", None) and _timing != _default:
-                if _cat == "美容液" and _timing == "after_serum":
-                    # 同セクションに複数美容液がある場合のみ「他の美容液の後に」を表示
-                    if _serum_count >= 2:
-                        _step["timing_note"] = "💡 他の美容液の後にご使用ください"
-                    else:
-                        _step.pop("timing_note", None)
-                else:
-                    _step["timing_note"] = _TIMING_NOTES.get(_timing, "")
-            else:
-                _step.pop("timing_note", None)
-
     # warnings
     if not isinstance(data.get("warnings"), list):
         data["warnings"] = []
@@ -14871,27 +14838,6 @@ _TIMING_ORDER_OVERRIDE = {
     "last":         6.9,   # 日焼け止め(7)の直前
 }
 
-# カテゴリのデフォルトタイミング（注意書き表示判定に使用）
-_CATEGORY_DEFAULT_TIMING = {
-    "クレンジング": "standard",
-    "洗顔":       "standard",
-    "化粧水":     "standard",
-    "美容液":     "after_toner",
-    "乳液":       "standard",
-    "クリーム":   "standard",
-    "日焼け止め": "last",
-    "パック":     "standard",
-    "ピーリング": "standard",
-}
-
-# use_timing → ユーザー向け注意書き
-_TIMING_NOTES = {
-    "before_toner": "💡 この商品は洗顔後・化粧水の前にご使用ください",
-    "after_toner":  "💡 この商品は化粧水の直後にご使用ください",
-    "after_serum":  "💡 この商品は美容液の後・乳液の前にご使用ください",
-    "last":         "💡 この商品はスキンケアの最後にご使用ください",
-}
-
 # 美容液内サブ並び順で使う成分セット
 _SERUM_IRRITANT_FOCUS  = {"retinoid", "retinol", "retinal", "aha_bha", "aha", "bha", "pha"}
 _SERUM_HYDRATING_FOCUS = {
@@ -15760,6 +15706,12 @@ def build_analysis_prompt_phase2(user_data, phase1):
 【改善優先順位（AI戦略分析・この順に商品・成分を優先して構成すること）】
 {_strategy_lines}
 
+【商品選定ルール（必須・厳守）】
+・上位3項目を「主目的」とし、これらを改善する成分・商品を最優先で構成する。
+・4〜6位は「改善できれば加点」。主目的を阻害しない範囲で兼ねられる商品を優先する。
+・7位以下は「悪化させないことを必須条件」とする。積極的に狙う必要はないが、これらを明確に悪化させる商品（例: 皮脂過剰肌に高油分クリーム、敏感肌に高刺激成分）は選ばない。
+・順位だけでなく各項目のスコアも考慮し、改善の緊急度（スコアが低いほど緊急）が高い項目ほど強く対処する。同順位帯ならスコアが低い方を優先的にカバーする。
+
 【改善方針(分析済)】
 優先事項:{_pc}
 主要成分:{_ki}
@@ -15985,6 +15937,7 @@ active_care_frequency/recovery_care_frequency
 rotation_targets: ローテーション対象成分配列
 morning_order: 朝の使用順序配列(ブースターは化粧水前)
 night_order: 夜の使用順序配列
+※パックを使う日は、原則「化粧水の後・美容液の前」に配置する。ただしメーカーが使用順を指定している製品はその順に従う。
 reason: この肌状態に合う理由
 
 avoid_combinations(3件以上必須):
@@ -16295,6 +16248,7 @@ active_care_frequency/recovery_care_frequency
 rotation_targets: ローテーション対象成分配列
 morning_order: 朝の使用順序配列(ブースターは化粧水前)
 night_order: 夜の使用順序配列(役割・テクスチャーに基づく順序)
+※パックを使う日は、原則「化粧水の後・美容液の前」に配置する。ただしメーカーが使用順を指定している製品はその順に従う。
 reason: この肌状態に合う理由
 
 avoid_combinations(3件以上必須):
