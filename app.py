@@ -12304,6 +12304,7 @@ def calculate_step_impact(step, product):
         "redness": 0,
         "pores": 0,
         "hydration": 0,
+        "barrier": 0,
         "firmness": 0
     }
 
@@ -12331,6 +12332,9 @@ def calculate_step_impact(step, product):
     if "乾燥" in purpose or "保湿" in purpose or "うるおい" in purpose:
         impact["hydration"] += 12
 
+    if "バリア" in purpose or "barrier" in purpose or "肌荒れ" in purpose:
+        impact["barrier"] += 12
+
     if "ハリ" in purpose or "エイジング" in purpose or "しわ" in purpose:
         impact["firmness"] += 10
 
@@ -12347,8 +12351,11 @@ def calculate_step_impact(step, product):
     if "redness" in concerns:
         impact["redness"] += 10
 
-    if "dryness" in concerns or "barrier" in concerns:
+    if "dryness" in concerns:
         impact["hydration"] += 10
+
+    if "barrier" in concerns:
+        impact["barrier"] += 10
 
     if "aging" in concerns:
         impact["firmness"] += 10
@@ -12390,28 +12397,34 @@ def calculate_step_impact(step, product):
         impact["redness"] += 4
         impact["hydration"] += 3
 
+    # セラミドは角層構造を整える代表的な「バリア」成分。保湿ではなくバリアに加点。
     if "ceramide" in all_ingredients:
-        impact["hydration"] += 12
+        impact["barrier"] += 12
 
+    # ヒアルロン酸は水分を抱える「保湿」成分。
     if "hyaluronic_acid" in all_ingredients:
         impact["hydration"] += 10
 
     if "panthenol" in all_ingredients:
-        impact["hydration"] += 6
+        impact["barrier"] += 6
         impact["redness"] += 4
 
     if "beta_glucan" in all_ingredients:
-        impact["hydration"] += 5
+        impact["barrier"] += 5
         impact["redness"] += 3
 
+    # CICA(ツボクサ)系は鎮静(赤み)が主だがバリア補修も担うため両方に加点。
     if "cica" in all_ingredients:
         impact["redness"] += 10
+        impact["barrier"] += 4
 
     if "madecassoside" in all_ingredients:
         impact["redness"] += 8
+        impact["barrier"] += 3
 
     if "centella_extract" in all_ingredients:
         impact["redness"] += 6
+        impact["barrier"] += 2
 
     if "dipotassium_glycyrrhizate" in all_ingredients:
         impact["redness"] += 6
@@ -12446,7 +12459,7 @@ def calculate_step_impact(step, product):
         impact["firmness"] += 8
 
     if "ceramide" in all_ingredients and "cholesterol" in all_ingredients:
-        impact["hydration"] += 4
+        impact["barrier"] += 4
 
     if "mugwort" in all_ingredients or "azulene" in all_ingredients:
         impact["redness"] += 5
@@ -12474,7 +12487,7 @@ def calculate_step_impact(step, product):
         impact["oil_balance"] += 4
         impact["pores"] += 3
     elif ingredient_focus == "ceramide":
-        impact["hydration"] += 5
+        impact["barrier"] += 5
     elif ingredient_focus == "peptide":
         impact["firmness"] += 4
     elif ingredient_focus == "cica":
@@ -12517,7 +12530,7 @@ def calculate_step_impact(step, product):
         impact["oil_balance"] += 6
 
     if "multi_ceramide_complex" in all_ingredients or "ceramide_complex_ex" in all_ingredients:
-        impact["hydration"] += 8
+        impact["barrier"] += 8
 
     if "pore_refining_complex" in all_ingredients or "pore_minimizing_complex" in all_ingredients:
         impact["pores"] += 6
@@ -12565,6 +12578,7 @@ def format_top_impacts(impact, top_n=2, priority_ranks=None):
         "redness": "赤み",
         "pores": "毛穴",
         "hydration": "保湿",
+        "barrier": "バリア",
         "firmness": "ハリ",
         "dullness": "くすみ",
     }
