@@ -103,6 +103,37 @@
       .chart-wrapper.chart-md { height: 340px; }
       .chart-wrapper canvas { display: block; }
 
+      /* 改善率 */
+      .improvement-rate-box {
+          background: rgba(255, 250, 252, 0.8);
+          border: 1px solid #f1d5dd;
+          border-radius: 12px;
+          padding: 12px 14px;
+          margin-bottom: 14px;
+      }
+      .improvement-rate-main {
+          display: flex;
+          align-items: baseline;
+          gap: 10px;
+      }
+      .improvement-rate-label {
+          font-size: 13px;
+          color: #9a6070;
+          font-weight: bold;
+      }
+      .improvement-rate-value {
+          font-size: 26px;
+          font-weight: bold;
+          color: #8a7a80;
+      }
+      .improvement-rate-value.rate-up { color: #2a7040; }
+      .improvement-rate-value.rate-down { color: #b83030; }
+      .improvement-rate-sub {
+          font-size: 12px;
+          color: #9b8a90;
+          margin-top: 4px;
+      }
+
       @media (min-width: 600px) {
           body { padding: 24px; }
           h2 { font-size: 18px; }
@@ -393,6 +424,26 @@
 
         <div class="card">
             <h2>Skin Score 推移</h2>
+            {% if is_premium %}
+                {% if skin_score_improvement and skin_score_improvement.rate is not none %}
+                <div class="improvement-rate-box">
+                    <div class="improvement-rate-main">
+                        <span class="improvement-rate-label">総合スコア改善率</span>
+                        <span class="improvement-rate-value {% if skin_score_improvement.rate > 0 %}rate-up{% elif skin_score_improvement.rate < 0 %}rate-down{% endif %}">
+                            {% if skin_score_improvement.rate > 0 %}+{% endif %}{{ skin_score_improvement.rate }}%
+                        </span>
+                    </div>
+                    <div class="improvement-rate-sub">
+                        初回 {{ skin_score_improvement.oldest }}点 → 最新 {{ skin_score_improvement.latest }}点
+                        （{{ skin_score_improvement.count }}回の診断）
+                    </div>
+                </div>
+                {% endif %}
+            {% else %}
+                <div class="premium-lock-box" style="margin-bottom:12px;">
+                    <div style="font-size:13px; color:#9a6070;">総合スコアの改善率はプレミアム機能です。</div>
+                </div>
+            {% endif %}
             <div class="chart-wrapper chart-sm">
                 <canvas id="scoreChart"></canvas>
             </div>

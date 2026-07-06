@@ -18886,6 +18886,22 @@ def history():
             reverse=True
         )[:5]
 
+        # 改善率（プレミアム機能）: 総合スコアの最古→最新の変化率(%)。
+        # all_skin_scores は history_data 順（[0]=最新, [-1]=最古）。
+        skin_score_improvement = None
+        if len(all_skin_scores) >= 2:
+            latest_score = all_skin_scores[0]
+            oldest_score = all_skin_scores[-1]
+            diff = latest_score - oldest_score
+            rate = round(diff / oldest_score * 100, 1) if oldest_score > 0 else None
+            skin_score_improvement = {
+                "latest": latest_score,
+                "oldest": oldest_score,
+                "diff": diff,
+                "rate": rate,
+                "count": len(all_skin_scores),
+            }
+
         # ① 改善ハイライト: 各診断に前回比スコア差分と期間ラベルを付与
         # prepared は DESC 順: prepared[0]=最新, prepared[1]=その前, ...
         # → prepared[i-1]=新しい, prepared[i]=古い
@@ -19028,6 +19044,7 @@ def history():
             scores=skin_scores,
             score_series=score_series,
             improvement_summary=improvement_summary,
+            skin_score_improvement=skin_score_improvement,
             premium_score_series=premium_score_series,
             is_premium=is_premium_user(),
             monthly_report=monthly_report,
@@ -19048,6 +19065,7 @@ def history():
             scores=[],
             score_series={},
             improvement_summary=[],
+            skin_score_improvement=None,
             premium_score_series={},
             is_premium=is_premium_user(),
             monthly_report=None,
