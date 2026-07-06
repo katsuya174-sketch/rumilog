@@ -469,56 +469,6 @@
           <div class="routine-chip">{{ chip }}</div>
       </div>
 
-      {# サプリメントのみ：ingredient_focusタグに基づく動的注意書き #}
-      {# 選定されたサプリの実際の成分タグにのみ反応する（汎用caution文では発火しない） #}
-      {% if not is_device %}
-      {% set ns = namespace(fat=false, iron=false, zinc=false, calcium=false, copper=false, overdose_supp_count=0, drug=false) %}
-      {% set _fat_tags    = ['vitamin_a','vitamin_d','vitamin_e','vitamin_k'] %}
-      {% set _overdose_tags = ['vitamin_a','vitamin_e','zinc','selenium','iron'] %}
-      {% for item in items %}
-          {# サプリごとに overdose_tags に該当するか判定（タグ数ではなくサプリ数でカウント） #}
-          {% set ns2 = namespace(has_overdose=false) %}
-          {% for tag in (item.ingredient_focus or []) %}
-              {% if tag in _fat_tags %}{% set ns.fat = true %}{% endif %}
-              {% if tag == 'iron'     %}{% set ns.iron     = true %}{% endif %}
-              {% if tag == 'zinc'     %}{% set ns.zinc     = true %}{% endif %}
-              {% if tag == 'calcium'  %}{% set ns.calcium  = true %}{% endif %}
-              {% if tag == 'copper'   %}{% set ns.copper   = true %}{% endif %}
-              {% if tag in _overdose_tags %}{% set ns2.has_overdose = true %}{% endif %}
-          {% endfor %}
-          {% if ns2.has_overdose %}{% set ns.overdose_supp_count = ns.overdose_supp_count + 1 %}{% endif %}
-          {# 薬との相互作用：汎用「医師に相談」ではなく具体的な成分名・薬名がある場合のみ #}
-          {% set _c = item.caution or '' %}
-          {% if '抗凝固' in _c or 'ワーファリン' in _c or 'セントジョーンズ' in _c or '甲状腺ホルモン' in _c or '免疫抑制' in _c or '血液凝固' in _c %}
-              {% set ns.drug = true %}
-          {% endif %}
-      {% endfor %}
-      {% set _show_fat     = ns.fat %}
-      {% set _show_mineral = (ns.iron and (ns.zinc or ns.calcium)) or (ns.zinc and ns.copper) %}
-      {% set _show_overlap = ns.overdose_supp_count >= 2 %}
-      {% set _show_drug    = ns.drug %}
-      {% set _any_notice   = _show_overlap or _show_fat or _show_mineral or _show_drug %}
-      {% if _any_notice %}
-      <div class="supplement-notice">
-          <div class="supplement-notice-title">このサプリを飲む前に確認を</div>
-          <ul class="supplement-notice-list">
-              {% if _show_overlap %}
-              <li><strong>成分の重複に注意</strong> — マルチビタミン等の併用でビタミン・ミネラルが重複しがちです。特にビタミンA・E・亜鉛・セレン・鉄は過剰摂取に注意。</li>
-              {% endif %}
-              {% if _show_fat %}
-              <li><strong>脂溶性ビタミン（A・D・E・K）は蓄積リスクあり</strong> — 体内に蓄積されるため複数サプリの含有量を合算して確認してください。</li>
-              {% endif %}
-              {% if _show_mineral %}
-              <li><strong>ミネラル同士は吸収を邪魔することがある</strong> — 鉄×亜鉛、鉄×カルシウム、亜鉛×銅は同時摂取で吸収率が低下します。タイミングを分けるのが理想的です。</li>
-              {% endif %}
-              {% if _show_drug %}
-              <li><strong>薬を服用中の方は医師・薬剤師に相談を</strong> — 抗凝固薬×ビタミンK、多くの医薬品×セントジョーンズワートなど相互作用が起きることがあります。</li>
-              {% endif %}
-          </ul>
-      </div>
-      {% endif %}
-      {% endif %}
-
       {% for item in items %}
       <div class="product-card-new"
            data-product="{{ item.get('product', '') }}"

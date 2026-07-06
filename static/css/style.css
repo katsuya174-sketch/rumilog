@@ -676,35 +676,6 @@ body.result-page {
     }
 }
 
-/* ---- サプリメント注意書き ---- */
-.supplement-notice {
-    background: #fff8f0;
-    border: 1px solid #f5c897;
-    border-left: 4px solid #e08a2e;
-    border-radius: 10px;
-    padding: 14px 16px;
-    margin: 0 0 16px;
-    font-size: 13px;
-    color: #5a3e1b;
-}
-
-.supplement-notice-title {
-    font-weight: bold;
-    font-size: 13px;
-    color: #c06a00;
-    margin-bottom: 8px;
-}
-
-.supplement-notice-list {
-    margin: 0;
-    padding-left: 18px;
-    line-height: 1.8;
-}
-
-.supplement-notice-list li {
-    margin-bottom: 4px;
-}
-
 /* サプリ個別注意点（AI生成） */
 .supplement-caution {
     display: flex;

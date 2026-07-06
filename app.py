@@ -4796,7 +4796,15 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
     # この下には「既に画像+リンクが揃っている」場合の早期returnが複数あり、
     # 画像ベースの補完（fetch_rakuten_item成功時のみ実行）はそれらのケースで
     # 一度も呼ばれないため、ここで先にブランドを埋めておく。
-    if not brand:
+    #
+    # ただし美容機器・サプリメントはenrich_beauty_devices()/enrich_supplements()が
+    # 「LED美顔器」のようなカテゴリ総称語をbrand=""のまま検索キーワードとして
+    # 意図的に設定する設計（ブランド不問の緩い検索でヒットさせるため）。
+    # この総称語をGeminiにそのまま渡すとブランドを推測（実質ハルシネーション）
+    # してしまい、その推測ブランドがfetch_rakuten_item側で「楽天タイトルに
+    # ブランド名が含まれること」という必須条件として使われるため、
+    # 実在の対象商品が軒並み弾かれてリンク無しになる不具合があった。
+    if not brand and category not in ("美容機器", "サプリメント"):
         _inferred_brand = infer_brand_from_title(product_name, category)
         if _inferred_brand:
             brand = _inferred_brand
@@ -5439,9 +5447,13 @@ def gemini_clean_rakuten_product_names(data):
     items = []
 
     # 1位ステップの product 名
+    # rakuten_fallback（次点候補フォールバックで繰り上がった実商品）も
+    # rakuten_criteria同様、楽天の生タイトルがそのままproductに入っているため
+    # クリーニング対象に含める。含めないと日付・角括弧付きの販促文言が
+    # そのまま表示されてしまう。
     for step in all_steps:
         source = step.get("product_source", "")
-        if source not in ["ai_rakuten_verified", "rakuten_criteria"]:
+        if source not in ["ai_rakuten_verified", "rakuten_criteria", "rakuten_fallback"]:
             continue
         raw_title = str(step.get("rakuten_title", "") or step.get("product", "") or "").strip()
         if not raw_title:
@@ -14696,11 +14708,15 @@ CATEGORY_ORDER = {
     "洗顔": 2,
     "ピーリング": 2.3,   # 洗顔直後・before_toner(2.5)ゾーン前が自然位置
     "化粧水": 3,
+    # パックは原則、化粧水後・美容液前（after_toner=3.5と同じ位置）に表示する。
+    # メーカー指定の使用順番がある商品は use_timing が _TIMING_ORDER_OVERRIDE の
+    # いずれかに設定されるため、この既定値より優先して step_sort_key() で
+    # 上書きされる（このCATEGORY_ORDER値はuse_timing="standard"の場合のみ使われる）。
+    "パック": 3.5,
     "美容液": 4,
     "乳液": 5,
     "クリーム": 6,
     "日焼け止め": 7,
-    "パック": 8,
 }
 
 # use_timing → 並び順オフセット（CATEGORY_ORDERを上書き）
