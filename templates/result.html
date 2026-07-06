@@ -94,6 +94,45 @@
     font-weight: bold;
     color: #cc6f90;
 }
+.candidate-compare-table-box {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: rgba(255, 250, 252, 0.75);
+    border: 1px solid #f1d5dd;
+    overflow-x: auto;
+}
+.candidate-compare-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+    color: #555;
+}
+.candidate-compare-table th,
+.candidate-compare-table td {
+    padding: 4px 6px;
+    text-align: left;
+    white-space: nowrap;
+    border-bottom: 1px solid #f1d5dd;
+}
+.candidate-compare-table th {
+    color: #cc6f90;
+    font-weight: bold;
+}
+.candidate-compare-table td:nth-child(2) {
+    white-space: normal;
+    min-width: 120px;
+}
+.best-value-badge {
+    color: #2a7040;
+    font-weight: bold;
+    margin-left: 2px;
+}
+.candidate-compare-note {
+    font-size: 10px;
+    color: #9b8a90;
+    margin-top: 4px;
+}
 .score-detail-compact {
     margin-top: 4px;
     font-size: 11px;
@@ -487,6 +526,34 @@
                           <span class="candidate-diff-text">{{ diff.text }}</span>
                       </div>
                       {% endfor %}
+                  </div>
+                  {% endif %}
+                  {% set comp_table = step.get("candidate_comparison_table") or [] %}
+                  {% if comp_table|length > 1 %}
+                  <div class="candidate-compare-table-box">
+                      <div class="sub-candidates-title">商品比較（価格・コスパ）</div>
+                      <table class="candidate-compare-table">
+                          <thead>
+                              <tr><th></th><th>商品</th><th>価格</th><th>スコア</th><th>コスパ</th></tr>
+                          </thead>
+                          <tbody>
+                              {% for row in comp_table %}
+                              <tr>
+                                  <td>{{ row.rank }}位</td>
+                                  <td>{{ (row.brand ~ " " ~ row.name).strip() }}</td>
+                                  <td>{% if row.price %}¥{{ "{:,}".format(row.price) }}{% else %}不明{% endif %}</td>
+                                  <td>{{ row.score }}</td>
+                                  <td>
+                                      {% if row.cost_perf is not none %}
+                                          {{ row.cost_perf }}
+                                          {% if row.is_best_value %}<span class="best-value-badge">◎</span>{% endif %}
+                                      {% else %}-{% endif %}
+                                  </td>
+                              </tr>
+                              {% endfor %}
+                          </tbody>
+                      </table>
+                      <div class="candidate-compare-note">コスパ = 1,000円あたりの評価スコア。◎は最もコスパが良い候補。</div>
                   </div>
                   {% endif %}
               {% else %}

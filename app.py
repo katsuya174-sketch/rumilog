@@ -13279,6 +13279,43 @@ def build_candidate_comparison_notes(top_candidates):
     return {"why_best": why_best, "diffs": diffs}
 
 
+def build_candidate_comparison_table(top_candidates):
+    """
+    1〜3位候補の価格・スコア・コスパを並べた比較表を作る（プレミアム機能
+    「商品比較」用）。コスパは「1000円あたりのスコア」（score/price*1000）で
+    表し、価格が不明な候補は比較対象から除外してNoneにする。
+    """
+    if not isinstance(top_candidates, list) or not top_candidates:
+        return []
+
+    rows = []
+    for idx, cand in enumerate(top_candidates[:3], start=1):
+        if not isinstance(cand, dict):
+            continue
+        price = safe_price(cand.get("price_ref", 0))
+        score = _safe_num(cand.get("score", 0))
+        cost_perf = round(score / price * 1000, 1) if price > 0 else None
+        rows.append({
+            "rank": idx,
+            "brand": cand.get("brand", ""),
+            "name": cand.get("name", ""),
+            "price": price,
+            "score": round(score, 1),
+            "cost_perf": cost_perf,
+            "is_best_value": False,
+        })
+
+    valid_cost_perf = [r["cost_perf"] for r in rows if r["cost_perf"] is not None]
+    if valid_cost_perf:
+        best_cost_perf = max(valid_cost_perf)
+        for r in rows:
+            if r["cost_perf"] == best_cost_perf:
+                r["is_best_value"] = True
+                break
+
+    return rows
+
+
 def finalize_step_data(step, user_data, premium_improvement_priority=None):
     if not isinstance(step, dict):
         step = {}
@@ -13532,6 +13569,7 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
 
     step["top_candidates"] = preserve_ranked_top_candidates(step)
     step["candidate_comparison"] = build_candidate_comparison_notes(step["top_candidates"])
+    step["candidate_comparison_table"] = build_candidate_comparison_table(step["top_candidates"])
 
     if step["top_candidates"]:
         best = step["top_candidates"][0]
