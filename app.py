@@ -14017,7 +14017,7 @@ def normalize_result(raw_data, image_path=""):
 
 
 # 診断結果を履歴に追加
-FREE_HISTORY_LIMIT = 5  # 無料ユーザーの保存上限件数
+FREE_HISTORY_LIMIT = 3  # 無料ユーザーの保存上限件数
 
 def append_result(raw_data, image_path="", is_premium=False):
     history = load_results()

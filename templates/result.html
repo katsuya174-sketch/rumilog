@@ -583,7 +583,8 @@
             
             <div class="result-card">
                 <h2 class="section-title">項目別スコア</h2>
-                {% set reasons = data.get("score_reasons", {}) %}
+                {# 各スコアの理由文は有料機能。スコア数値自体は無料会員にも表示する #}
+                {% set reasons = data.get("score_reasons", {}) if (data.get("is_premium") or data.get("is_dev_mode")) else {} %}
                 <div class="score-mini-grid">
                         <div class="score-mini">
                             <div class="score-mini-name">皮脂バランス</div>
@@ -689,12 +690,12 @@
             </div>
 
             {% else %}
-            {# 無料: スコア昇順 #}
+            {# 無料: スコア昇順・上位3項目のみ #}
             {% if not (data.get("is_premium") or data.get("is_dev_mode")) %}
-            <p style="font-size:12px;color:#9b7f88;margin:0 0 12px;">スコアが低い順に表示しています。プレミアムではAIが戦略的に優先順位を決定します。</p>
+            <p style="font-size:12px;color:#9b7f88;margin:0 0 12px;">スコアが低い順に上位3項目を表示しています。プレミアムではAIが戦略的に優先順位を決定します。</p>
             {% endif %}
             <div class="improvement-priority-list">
-                {% for item in data.get("improvement_priority", []) %}
+                {% for item in data.get("improvement_priority", [])[:3] %}
                 <div class="ip-row">
                     <div class="ip-rank {% if item.rank == 1 %}ip-rank-1{% elif item.rank == 2 %}ip-rank-2{% elif item.rank == 3 %}ip-rank-3{% endif %}">{{ item.rank }}</div>
                     <div class="ip-body">
