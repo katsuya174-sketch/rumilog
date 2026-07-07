@@ -631,10 +631,6 @@
               <div class="product-meta">頻度: {{ item.get('frequency', '') }}</div>
               {% endif %}
 
-              {% if not is_device and item.get('timing') %}
-              <div class="product-meta">摂取タイミング: {{ item.get('timing', '') }}</div>
-              {% endif %}
-
               {% if item.get('reason') %}
               <div class="product-meta">
                   <div class="reason-label">ルーティンとの相性</div>
