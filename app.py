@@ -18237,6 +18237,35 @@ def premium_success():
     return render_template("premium_success.html")
 
 
+@app.route("/.well-known/assetlinks.json")
+def android_assetlinks():
+    """
+    TWA(Trusted Web Activity)のDigital Asset Links。
+    ブラウザがこのファイルを取得し、Androidアプリ(jp.lumilog.app)と
+    lumilog.jpの所有者が同一であることを検証する。検証が通るとアプリの
+    URLバーが非表示になり全画面のネイティブアプリのように表示される。
+
+    sha256_cert_fingerprints は「アプリ署名鍵のSHA-256」。
+    Google Play App Signing 利用時は Play Console →「設定 > アプリの署名」の
+    SHA-256証明書フィンガープリントを使う。環境変数 ANDROID_CERT_SHA256 に
+    カンマ区切りでセットする（複数可: アップロード鍵とApp Signing鍵の両方等）。
+    コード再デプロイ無しに値を差し替えられるよう環境変数から読む。
+    """
+    fingerprints = [
+        f.strip()
+        for f in os.getenv("ANDROID_CERT_SHA256", "").split(",")
+        if f.strip()
+    ]
+    return jsonify([{
+        "relation": ["delegate_permission/common.handle_all_urls"],
+        "target": {
+            "namespace": "android_app",
+            "package_name": os.getenv("ANDROID_PACKAGE_NAME", "jp.lumilog.app"),
+            "sha256_cert_fingerprints": fingerprints,
+        },
+    }])
+
+
 @app.route("/privacy-policy")
 def privacy_policy():
     return render_template("privacy_policy.html")

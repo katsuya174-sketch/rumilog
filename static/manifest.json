@@ -1,9 +1,14 @@
 {
+  "id": "/",
   "name": "るみろぐ",
   "short_name": "るみろぐ",
   "description": "AIスキンケア診断アプリ",
+  "lang": "ja",
+  "dir": "ltr",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
+  "orientation": "portrait",
   "background_color": "#ffffff",
   "theme_color": "#FFB6C1",
   "icons": [
