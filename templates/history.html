@@ -6,7 +6,7 @@
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>診断履歴</title>
+    <title>分析履歴</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
@@ -369,7 +369,7 @@
         </div>
         {% endif %}
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
-            <h1 style="margin:0;">診断履歴</h1>
+            <h1 style="margin:0;">分析履歴</h1>
             <a href="/premium" style="font-size:12px; color:#c75b7a; text-decoration:none; background:rgba(199,91,122,0.08); border:1px solid #f0c5d0; border-radius:999px; padding:5px 14px; font-weight:bold; white-space:nowrap;">✨ プレミアム</a>
         </div>
 
@@ -377,7 +377,7 @@
         {% if streak and streak > 0 %}
         <div class="streak-bar">
             <div class="streak-badge">
-                🔥 <span class="streak-num">{{ streak }}</span>日連続診断中
+                🔥 <span class="streak-num">{{ streak }}</span>日連続分析中
             </div>
             <span class="streak-sub">継続は美肌への近道！</span>
         </div>
@@ -386,7 +386,7 @@
         <div class="card">
             <div class="card-title">📦 よく提案される商品</div>
             <div class="lead">
-                過去の診断で提案された回数が多い商品を確認できます。
+                過去の分析で提案された回数が多い商品を確認できます。
             </div>
             <a href="/my-product-ranking" class="pill-link">見てみる</a>
         </div>
@@ -397,7 +397,7 @@
             <h2>📊 今月の肌レポート</h2>
             <div class="report-grid">
                 <div class="report-item">
-                    <div class="report-label">今月の診断回数</div>
+                    <div class="report-label">今月の分析回数</div>
                     <div class="report-value">{{ monthly_report.count }}<span class="report-unit"> 回</span></div>
                 </div>
                 <div class="report-item">
@@ -435,7 +435,7 @@
                     </div>
                     <div class="improvement-rate-sub">
                         初回 {{ skin_score_improvement.oldest }}点 → 最新 {{ skin_score_improvement.latest }}点
-                        （{{ skin_score_improvement.count }}回の診断）
+                        （{{ skin_score_improvement.count }}回の分析）
                     </div>
                 </div>
                 {% endif %}
@@ -459,7 +459,7 @@
                     </div>
                 {% endfor %}
             {% else %}
-                <div class="meta">まだ比較できる診断履歴がありません。</div>
+                <div class="meta">まだ比較できる分析履歴がありません。</div>
             {% endif %}
         </div>
 
@@ -496,7 +496,7 @@
             {% endif %}
         </div>
 
-        <!-- 診断履歴カード一覧 -->
+        <!-- 分析履歴カード一覧 -->
         {% if history %}
             {% for item in history %}
                 <div class="card">
@@ -593,10 +593,10 @@
                 </div>
             {% endfor %}
         {% else %}
-            <div class="card empty">まだ診断履歴はありません。</div>
+            <div class="card empty">まだ分析履歴はありません。</div>
         {% endif %}
 
-        <p><a href="/lab" class="back-link">← 診断に戻る</a></p>
+        <p><a href="/lab" class="back-link">← 分析に戻る</a></p>
     </div>
 
     <script id="chart-labels" type="application/json">{{ labels | tojson }}</script>
@@ -631,12 +631,12 @@
 
         const labelMap = {
             oil_balance: "皮脂バランス", redness: "赤み", pores: "毛穴",
-            hydration: "水分", firmness: "ハリ", acne: "ニキビ",
+            hydration: "水分", firmness: "ハリ", acne: "ブツブツ",
             dullness: "くすみ", barrier: "バリア", texture: "キメ", tone_evenness: "色ムラ"
         };
 
         const premiumLabelMap = {
-            acne_marks_red: "赤ニキビ跡", pigmentation: "色素沈着",
+            acne_marks_red: "赤み跡", pigmentation: "色素沈着",
             enlarged_pores: "開き毛穴", blackhead_pores: "黒ずみ毛穴",
             translucency: "透明感", tone_uniformity: "肌トーン均一性",
             skin_balance: "肌バランス", symmetry: "左右差"

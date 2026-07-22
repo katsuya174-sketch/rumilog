@@ -6,11 +6,11 @@
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>診断詳細</title>
+    <title>分析詳細</title>
 </head>
 <body style="font-family:sans-serif; line-height:1.8; padding:24px; max-width:900px; margin:auto;">
 
-    <h1>診断詳細</h1>
+    <h1>分析詳細</h1>
 
     <div style="
         border:1px solid #ddd;
@@ -120,7 +120,7 @@
             {% endif %}
         </div>
         <div>
-            <strong>ニキビ差分:</strong>
+            <strong>ブツブツ差分:</strong>
             {% if comparison.acne_diff > 0 %}
                 <span style="font-weight:bold; color: green;">+{{ comparison.acne_diff }}</span>
             {% elif comparison.acne_diff < 0 %}
@@ -202,7 +202,7 @@
             <li>毛穴: {{ data.scores.pores }}</li>
             <li>保湿: {{ data.scores.hydration }}</li>
             <li>ハリ: {{ data.scores.firmness }}</li>
-            <li>ニキビ: {{ data.scores.acne }}</li>
+            <li>ブツブツ: {{ data.scores.acne }}</li>
             <li>くすみ: {{ data.scores.dullness }}</li>
             <li>バリア: {{ data.scores.barrier }}</li>
             <li>キメ: {{ data.scores.texture }}</li>
@@ -500,7 +500,7 @@
         <a href="/history">← 履歴一覧に戻る</a>
     </p>
     <p>
-        <a href="/lab">← 診断に戻る</a>
+        <a href="/lab">← 分析に戻る</a>
     </p>
 
 </body>

@@ -400,7 +400,7 @@
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>診断結果 | るみろぐ</title>
+    <title>分析結果 | るみろぐ</title>
     <link href="https://fonts.googleapis.com/css2?family=Kosugi+Maru&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
@@ -686,7 +686,7 @@
 
     <div class="result-container">
         <section class="result-hero">
-            <h1 class="result-title">診断結果</h1>
+            <h1 class="result-title">分析結果</h1>
             <p class="result-subtitle">
                 AIがあなたの肌状態を分析し、<br>
                 今の肌に合うスキンケアをまとめました
@@ -739,7 +739,7 @@
                         </div>
 
                         <div class="score-mini">
-                            <div class="score-mini-name">ニキビ</div>
+                            <div class="score-mini-name">ブツブツ</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("acne", "-") }}</div>
                             {% if reasons.get("acne") %}<div class="score-mini-reason">{{ reasons.get("acne") }}</div>{% endif %}
                         </div>
@@ -848,7 +848,7 @@
             {% if data.get("is_premium") or data.get("is_dev_mode") %}
             <div class="score-mini-grid">
                 <div class="score-mini">
-                    <div class="score-mini-name">赤ニキビ跡</div>
+                    <div class="score-mini-name">赤み跡</div>
                     <div class="score-mini-value">{{ data.premium_scores.get("acne_marks_red", 0) }}</div>
                 </div>
                 <div class="score-mini">
@@ -1293,7 +1293,7 @@
               </div>
           
               <div class="deep-analysis-text">
-                  ニキビ跡・毛穴・バリア状態をさらに深く分析します
+                  赤み跡・毛穴・バリア状態をさらに深く分析します
               </div>
           
               <a

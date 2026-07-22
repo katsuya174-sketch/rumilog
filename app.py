@@ -814,7 +814,7 @@ _CONCERN_FORM_TAGS = {
     "redness": ["redness", "barrier"],
 }
 _CONCERN_LABELS_JA = {
-    "acne":    "ニキビ・吹き出物",
+    "acne":    "ブツブツ・吹き出物",
     "pores":   "毛穴・テカり",
     "spots":   "シミ・くすみ",
     "aging":   "シワ・たるみ",
@@ -8135,7 +8135,7 @@ def build_score_based_improvement_plan(scores, existing_plan=None):
         },
         {
             "score_key": "acne",
-            "label": "ニキビ",
+            "label": "ブツブツ",
             "ingredients": ["アゼライン酸", "BHA", "CICA"]
         },
         {
@@ -8223,7 +8223,7 @@ def build_improvement_priority(scores):
         ("pores",         "毛穴"),
         ("hydration",     "保湿"),
         ("firmness",      "ハリ"),
-        ("acne",          "ニキビ"),
+        ("acne",          "ブツブツ"),
         ("dullness",      "くすみ"),
         ("barrier",       "バリア"),
         ("texture",       "キメ"),
@@ -8257,7 +8257,7 @@ _BASE_SCORE_LABELS = {
     "pores":         "毛穴",
     "hydration":     "保湿",
     "firmness":      "ハリ",
-    "acne":          "ニキビ",
+    "acne":          "ブツブツ",
     "dullness":      "くすみ",
     "barrier":       "バリア",
     "texture":       "キメ",
@@ -8277,7 +8277,7 @@ _PREMIUM_SCORE_COVERED_BASE_KEYS = {
 
 
 _PREMIUM_DETAIL_LABELS = {
-    "acne_marks_red":  "赤ニキビ跡",
+    "acne_marks_red":  "赤み跡",
     "pigmentation":    "色素沈着",
     "enlarged_pores":  "開き毛穴",
     "blackhead_pores": "黒ずみ毛穴",
@@ -8714,8 +8714,8 @@ def build_improvement_reason(product, improvement_plan=None):
     sensitive_ok = str(product.get("sensitive_ok", "")).lower()
 
     target_labels = {
-        "acne": "ニキビ予防",
-        "acne_marks_red": "赤み・赤ニキビ跡",
+        "acne": "ブツブツ予防",
+        "acne_marks_red": "赤み・赤み跡",
         "pigmentation": "色素沈着・くすみ",
         "pores": "毛穴",
         "firmness": "ハリ",
@@ -8743,7 +8743,7 @@ def build_improvement_reason(product, improvement_plan=None):
         reasons.append("角質ケアでくすみ・毛穴目立ちを支える")
 
     elif category in ["洗顔", "洗顔料", "クレンジング"]:
-        reasons.append("皮脂や汚れを落とし、ニキビ・毛穴悪化を防ぐ")
+        reasons.append("皮脂や汚れを落とし、ブツブツ・毛穴悪化を防ぐ")
 
     elif category in ["乳液", "クリーム"]:
         reasons.append("バリアを守り、攻め成分を続けやすくする")
@@ -10319,7 +10319,7 @@ def ensure_required_routine_steps(data):
         night_steps.insert(1, {
             "category": "洗顔",
             "role": "main",
-            "purpose": "残った汚れを落として、毛穴・ニキビ悪化を防ぐ",
+            "purpose": "残った汚れを落として、毛穴・ブツブツ悪化を防ぐ",
             "ingredient_focus": "低刺激",
             "risk_note": "",
             "priority": 2,
@@ -11737,7 +11737,7 @@ _DEVICE_DEFAULTS = {
 
 _DEVICE_PURPOSE_LABELS = {
     "RF": "ハリ・たるみの引き締めケア",
-    "LED": "赤み・炎症の鎮静、ニキビ跡ケア",
+    "LED": "赤み・炎症の鎮静、ブツブツ跡ケア",
     "EMS": "フェイスラインの引き締め",
     "エレクトロポレーション": "美容液成分の浸透サポート、乾燥ケア",
     "超音波洗浄": "毛穴汚れ・皮脂の毛穴ケア",
@@ -11797,7 +11797,7 @@ _SUPPLEMENT_DEFAULTS = {
     "ビタミンC": {
         "product": "ビタミンC サプリメント",
         "ingredient_focus": ["vitamin_c"],
-        "purpose": "シミ・くすみ・ニキビ跡(色素沈着)・透明感ケア",
+        "purpose": "シミ・くすみ・ブツブツ跡(色素沈着)・透明感ケア",
         "timing": "朝食後",
         "caution": "",
         "priority": 1,
@@ -11813,7 +11813,7 @@ _SUPPLEMENT_DEFAULTS = {
     "ビタミンB群": {
         "product": "ビタミンB群 サプリメント",
         "ingredient_focus": ["vitamin_b"],
-        "purpose": "ニキビ・皮脂・肌荒れケア",
+        "purpose": "ブツブツ・皮脂・肌荒れケア",
         "timing": "朝食後",
         "caution": "",
         "priority": 1,
@@ -11821,7 +11821,7 @@ _SUPPLEMENT_DEFAULTS = {
     "ビタミンD": {
         "product": "ビタミンD サプリメント",
         "ingredient_focus": ["vitamin_d"],
-        "purpose": "ニキビ・炎症・肌バリア低下ケア",
+        "purpose": "ブツブツ・炎症・肌バリア低下ケア",
         "timing": "朝食後（脂質と一緒に摂ると吸収されやすい）",
         "caution": "脂溶性ビタミンのため過剰摂取・体内蓄積に注意してください。",
         "priority": 2,
@@ -11829,7 +11829,7 @@ _SUPPLEMENT_DEFAULTS = {
     "オメガ3": {
         "product": "オメガ3 サプリメント(EPA・DHA)",
         "ingredient_focus": ["omega3"],
-        "purpose": "赤み・炎症・ニキビ・バリア機能ケア",
+        "purpose": "赤み・炎症・ブツブツ・バリア機能ケア",
         "timing": "食後",
         "caution": "抗凝固薬（ワーファリン等）を服用中の方は医師に相談してください。",
         "priority": 2,
@@ -11861,7 +11861,7 @@ _SUPPLEMENT_DEFAULTS = {
     "乳酸菌": {
         "product": "乳酸菌サプリメント",
         "ingredient_focus": ["probiotics"],
-        "purpose": "肌荒れ・炎症・ニキビケア（腸内環境サポート）",
+        "purpose": "肌荒れ・炎症・ブツブツケア（腸内環境サポート）",
         "timing": "食後",
         "caution": "免疫抑制剤を服用中の方は医師に相談してください。",
         "priority": 2,
@@ -11869,7 +11869,7 @@ _SUPPLEMENT_DEFAULTS = {
     "亜鉛": {
         "product": "亜鉛 サプリメント",
         "ingredient_focus": ["zinc"],
-        "purpose": "ニキビ・肌荒れ・皮脂ケア",
+        "purpose": "ブツブツ・肌荒れ・皮脂ケア",
         "timing": "食後",
         "caution": "",
         "priority": 2,
@@ -11923,17 +11923,17 @@ _CONCERN_LABEL_MAP = {
     "dullness": "くすみ改善",
     "whitening": "美白",
     "pigmentation": "色素沈着",
-    "acne": "ニキビ対策",
+    "acne": "ブツブツ対策",
     "aging": "エイジングケア",
     "firmness": "ハリ補給",
     "texture": "質感改善",
     "oiliness": "皮脂コントロール",
-    "acne_marks": "ニキビ跡",
+    "acne_marks": "ブツブツ跡",
 }
 _PURPOSE_KEYWORD_LABELS = [
     ("毛穴", "毛穴ケア"), ("赤み", "赤み鎮静"), ("乾燥", "乾燥対策"),
     ("バリア", "バリア強化"), ("くすみ", "くすみ改善"), ("美白", "美白"),
-    ("色素沈着", "色素沈着"), ("ニキビ", "ニキビ対策"), ("ハリ", "ハリ補給"),
+    ("色素沈着", "色素沈着"), ("ニキビ", "ブツブツ対策"), ("ハリ", "ハリ補給"),
     ("ざらつき", "質感改善"), ("皮脂", "皮脂コントロール"),
 ]
 
@@ -12128,7 +12128,7 @@ def build_recommend_reason(product, step, user_data):
     if "whitening" in product_concerns or "色素沈着" in purpose or "美白" in purpose:
         concern_phrases.append("色ムラ・色素沈着")
     if "acne" in product_concerns or "ニキビ" in purpose:
-        concern_phrases.append("ニキビができやすい状態")
+        concern_phrases.append("ブツブツができやすい状態")
     if "aging" in product_concerns or "ハリ" in purpose or "エイジング" in purpose:
         concern_phrases.append("ハリ不足")
 
@@ -16582,7 +16582,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img, force_re
         print("DEV_MODE: analyze_skin_with_gemini ダミー返却")
         return {
             "skin_score": 65,
-            "skin_summary": "テストモードのダミー診断結果です",
+            "skin_summary": "テストモードのダミー分析結果です",
             "morning": {"steps": [{"category": "化粧水", "purpose": "保湿"}]},
             "night": {"steps": [{"category": "美容液", "purpose": "毛穴ケア"}]},
             "weekly_care": [{"category": "パック", "purpose": "集中ケア"}],
@@ -16651,7 +16651,7 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img, force_re
                     print("[GEMINI FALLBACK CACHE HIT]", fallback_key, flush=True)
                     cached = copy.deepcopy(GEMINI_ANALYSIS_CACHE[fallback_key])
                     cached.setdefault("warnings", [])
-                    cached["warnings"].append("現在AI診断が混み合っているため、同じ入力の前回診断結果をもとに表示しています。")
+                    cached["warnings"].append("現在AI分析が混み合っているため、同じ入力の前回分析結果をもとに表示しています。")
                     return cached
         raise
 
@@ -17479,7 +17479,7 @@ def lab_test_function():
                 if not can_use_premium_diagnosis(_premium_key):
                     return render_template(
                         "lab.html",
-                        error=f"今月の診断回数（月{PREMIUM_MONTHLY_LIMIT}回）に達しました。来月また利用できます。",
+                        error=f"今月の分析回数（月{PREMIUM_MONTHLY_LIMIT}回）に達しました。来月また利用できます。",
                         is_premium=True,
                         premium_key=_premium_key,
                         remaining_premium_count=0,
@@ -17488,7 +17488,7 @@ def lab_test_function():
             elif not can_use_free_diagnosis(client_ip):
                 return render_template(
                     "lab.html",
-                    error=f"無料診断は月{FREE_MONTHLY_LIMIT}回までです。続けて利用するには有料プランをご利用ください。",
+                    error=f"無料分析は月{FREE_MONTHLY_LIMIT}回までです。続けて利用するには有料プランをご利用ください。",
                     remaining_free_count=0,
                     DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT
                 )
@@ -17497,8 +17497,8 @@ def lab_test_function():
 
             if not _is_creator and is_rate_limited(ip):
                 if is_ajax:
-                    return jsonify({"success": False, "error": "本日の診断回数の上限に達しました。明日またお試しください。"}), 429
-                return render_template("lab.html", error="本日の診断回数の上限に達しました。明日またお試しください。", is_premium=_is_premium, premium_key=_premium_key, DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT)
+                    return jsonify({"success": False, "error": "本日の分析回数の上限に達しました。明日またお試しください。"}), 429
+                return render_template("lab.html", error="本日の分析回数の上限に達しました。明日またお試しください。", is_premium=_is_premium, premium_key=_premium_key, DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT)
             validate_lab_dependencies()
             # =========================
             # ① 入力取得
@@ -17518,7 +17518,7 @@ def lab_test_function():
             # =========================
             front_img, left_img, right_img = load_uploaded_images(request)
             if not can_use_global_diagnosis():
-                message = "現在、今月の診断上限に達しています。来月以降に再度お試しください。"
+                message = "現在、今月の分析上限に達しています。来月以降に再度お試しください。"
 
                 if is_ajax:
                     return jsonify({
@@ -17572,16 +17572,16 @@ def lab_test_function():
                     or ("429" in error_text and "RESOURCE_EXHAUSTED" in error_text)
                 )
 
-                message = "診断中にエラーが発生しました。時間をおいて再度お試しください。"
+                message = "分析中にエラーが発生しました。時間をおいて再度お試しください。"
 
                 if _is_quota_error:
-                    message = "現在、診断サービスを一時停止しています。ご不便をおかけして申し訳ありません。復旧までしばらくお待ちください。"
+                    message = "現在、分析サービスを一時停止しています。ご不便をおかけして申し訳ありません。復旧までしばらくお待ちください。"
 
                 elif "503" in error_text or "UNAVAILABLE" in error_text:
-                    message = "現在診断が混み合っています。少し時間をおいて再度お試しください。"
+                    message = "現在分析が混み合っています。少し時間をおいて再度お試しください。"
 
                 elif "429" in error_text:
-                    message = "現在診断利用が集中しています。しばらくしてから再度お試しください。"
+                    message = "現在分析利用が集中しています。しばらくしてから再度お試しください。"
 
                 if is_ajax:
                     return jsonify({
@@ -18890,7 +18890,7 @@ def history():
             "pores": "毛穴",
             "hydration": "水分",
             "firmness": "ハリ",
-            "acne": "ニキビ",
+            "acne": "ブツブツ",
             "dullness": "くすみ",
             "barrier": "バリア",
             "texture": "キメ",
@@ -19209,13 +19209,13 @@ def build_user_friendly_error_message(error_text=""):
 
     if "503" in text:
         return (
-            "現在診断が混み合っています。"
+            "現在分析が混み合っています。"
             "少し時間を空けてから再度お試しください。"
         )
 
     if "timeout" in text:
         return (
-            "診断処理に時間がかかっています。"
+            "分析処理に時間がかかっています。"
             "通信環境を確認して、再度お試しください。"
         )
 
@@ -19226,7 +19226,7 @@ def build_user_friendly_error_message(error_text=""):
         )
 
     return (
-        "診断中に一時的なエラーが発生しました。"
+        "分析中に一時的なエラーが発生しました。"
         "少し時間を空けて再度お試しください。"
     )
 

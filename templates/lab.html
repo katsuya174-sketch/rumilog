@@ -727,7 +727,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
     {% elif is_creator %}
       <div style="margin: 14px auto 0; max-width: 360px; text-align:center;">
         <p style="font-size:13px; color:#a0778a; margin:0 0 4px;">
-          <span style="display:inline-block; background:linear-gradient(135deg,#ffe6ee,#ffd6e8); color:#c75b7a; font-size:10px; font-weight:bold; border-radius:999px; padding:1px 8px; vertical-align:middle; margin-right:6px;">✦ Creator</span>診断回数：無制限
+          <span style="display:inline-block; background:linear-gradient(135deg,#ffe6ee,#ffd6e8); color:#c75b7a; font-size:10px; font-weight:bold; border-radius:999px; padding:1px 8px; vertical-align:middle; margin-right:6px;">✦ Creator</span>分析回数：無制限
         </p>
       </div>
     {% elif is_premium and remaining_premium_count is defined %}
@@ -735,7 +735,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
       {% set pct = (remaining_premium_count / 30 * 100) | int %}
       <div style="margin: 14px auto 0; max-width: 360px; text-align:center;">
         <p style="font-size:13px; color:#a0778a; margin:0 0 6px;">
-          今月の診断残り回数
+          今月の分析残り回数
           <strong class="count-num{% if remaining_premium_count <= 5 %} count-warn{% endif %}">{{ remaining_premium_count }}</strong>
           <span style="font-size:12px; color:#b89aa6;">/ 30回</span>
           <span style="display:inline-block; background:linear-gradient(135deg,#ffe6ee,#ffd6e8); color:#c75b7a; font-size:10px; font-weight:bold; border-radius:999px; padding:1px 8px; margin-left:6px; vertical-align:middle;">✨ Premium</span>
@@ -758,10 +758,10 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           box-shadow: 0 4px 14px rgba(199,91,122,0.12);
         ">
           <div style="font-size:13px; color:#c75b7a; font-weight:bold; margin-bottom:6px;">
-            今月の無料診断回数を使い切りました
+            今月の無料分析回数を使い切りました
           </div>
           <div style="font-size:12px; color:#9a6070; margin-bottom:10px; line-height:1.6;">
-            プレミアムプランなら月30回まで診断できます。
+            プレミアムプランなら月30回まで分析できます。
           </div>
           <a href="/premium" style="
             display:inline-block;
@@ -779,7 +779,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
         {% set pct_free = (remaining_free_count / 5 * 100) | int %}
         <div style="margin: 14px auto 0; max-width: 360px; text-align:center;">
           <p style="font-size:13px; color:#a0778a; margin:0 0 6px;">
-            今月の診断残り回数
+            今月の分析残り回数
             <strong class="count-num{% if remaining_free_count <= 2 %} count-warn{% endif %}">{{ remaining_free_count }}</strong>
             <span style="font-size:12px; color:#b89aa6;">/ 5回</span>
             {% if remaining_free_count <= 2 %}
@@ -806,7 +806,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
             text-decoration: none;
             border: 2px solid #ffd8e2;
          ">
-        📈 過去の診断記録を見る
+        📈 過去の分析記録を見る
       </a>
     </div>
 
@@ -896,7 +896,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
         
             <p class="form-note">
                 ※顔全体がわかる正面、左頬、右頬の3枚を登録してください<br>
-                ※正確な診断のため、メイクをしていない状態で撮影してください
+                ※正確な分析のため、メイクをしていない状態で撮影してください
             </p>
         </div>
 
@@ -957,7 +957,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                 <div class="concern-grid">
                     <label class="concern-chip" for="c_acne">
                         <input type="checkbox" name="concerns" value="acne" id="c_acne" onchange="syncConcernChip(this)">
-                        <span class="concern-check">✓</span>ニキビ・吹き出物
+                        <span class="concern-check">✓</span>ブツブツ・吹き出物
                     </label>
                     <label class="concern-chip" for="c_pores">
                         <input type="checkbox" name="concerns" value="pores" id="c_pores" onchange="syncConcernChip(this)">
@@ -982,7 +982,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                 </div>
             </div>
 
-            <button id="submitBtn" type="submit">診断する</button>
+            <button id="submitBtn" type="submit">分析する</button>
             <div id="qualityHint" style="display:none; margin-top:8px; font-size:0.75rem; color:#c0392b; text-align:center;">写真の品質に問題があります。上の警告を確認して撮り直してください。</div>
 
             {% if error_message %}
@@ -1005,7 +1005,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 
             <div id="loadingOverlay" class="loading-overlay" style="display:none;">
             <div class="loading-inner">
-                <div class="loading-text-main" id="loadingTextMain">診断中です…</div>
+                <div class="loading-text-main" id="loadingTextMain">分析中です…</div>
                 <div class="loading-text-sub" id="loadingTextSub"></div>
 
                 <div id="loadingAnimation">
@@ -1100,7 +1100,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 
       function updateSubmitButton() {
           const submitBtn = document.getElementById("submitBtn");
-          if (!submitBtn || submitBtn.innerText === "診断中…") return;
+          if (!submitBtn || submitBtn.innerText === "分析中…") return;
           const hasIssue = Object.values(photoQualityOK).some(v => !v);
           submitBtn.disabled = hasIssue;
           const hint = document.getElementById("qualityHint");
@@ -1143,7 +1143,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                   const message =
                       (result && result.message)
                       ? result.message
-                      : "診断中にエラーが発生しました。少し時間をおいて再度お試しください。";
+                      : "分析中にエラーが発生しました。少し時間をおいて再度お試しください。";
 
                   showLoadingError(message);
                   return false;
@@ -1156,7 +1156,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                   return false;
               }
 
-              showLoadingError("診断結果の表示に失敗しました。もう一度お試しください。");
+              showLoadingError("分析結果の表示に失敗しました。もう一度お試しください。");
               return false;
 
           } catch (error) {
@@ -1167,7 +1167,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           } finally {
               if (submitBtn) {
                   submitBtn.disabled = false;
-                  submitBtn.innerText = "診断する";
+                  submitBtn.innerText = "分析する";
               }
           }
       }
@@ -1674,7 +1674,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 
           overlay.style.display = "flex";
 
-          if (mainText) mainText.textContent = "診断中です…";
+          if (mainText) mainText.textContent = "分析中です…";
           if (icon) icon.textContent = LOADING_PHASES[0].icon;
 
           document.querySelectorAll(".loading-dot").forEach(dot => {
@@ -1691,7 +1691,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 
           if (submitBtn) {
               submitBtn.disabled = true;
-              submitBtn.innerText = "診断中…";
+              submitBtn.innerText = "分析中…";
           }
       }
       function showLoadingError(message) {
@@ -1710,7 +1710,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           }
 
           if (mainText) {
-              mainText.textContent = message || "診断中にエラーが発生しました。";
+              mainText.textContent = message || "分析中にエラーが発生しました。";
           }
 
           if (animation) {
@@ -1744,7 +1744,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 
           if (submitBtn) {
               submitBtn.disabled = false;
-              submitBtn.innerText = "診断する";
+              submitBtn.innerText = "分析する";
           }
       }
 
