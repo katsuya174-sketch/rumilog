@@ -120,7 +120,7 @@
             {% endif %}
         </div>
         <div>
-            <strong>ブツブツ差分:</strong>
+            <strong>ニキビ差分:</strong>
             {% if comparison.acne_diff > 0 %}
                 <span style="font-weight:bold; color: green;">+{{ comparison.acne_diff }}</span>
             {% elif comparison.acne_diff < 0 %}
@@ -202,7 +202,7 @@
             <li>毛穴: {{ data.scores.pores }}</li>
             <li>保湿: {{ data.scores.hydration }}</li>
             <li>ハリ: {{ data.scores.firmness }}</li>
-            <li>ブツブツ: {{ data.scores.acne }}</li>
+            <li>ニキビ: {{ data.scores.acne }}</li>
             <li>くすみ: {{ data.scores.dullness }}</li>
             <li>バリア: {{ data.scores.barrier }}</li>
             <li>キメ: {{ data.scores.texture }}</li>

@@ -814,7 +814,7 @@ _CONCERN_FORM_TAGS = {
     "redness": ["redness", "barrier"],
 }
 _CONCERN_LABELS_JA = {
-    "acne":    "ブツブツ・吹き出物",
+    "acne":    "ニキビ・吹き出物",
     "pores":   "毛穴・テカり",
     "spots":   "シミ・くすみ",
     "aging":   "シワ・たるみ",
@@ -8135,7 +8135,7 @@ def build_score_based_improvement_plan(scores, existing_plan=None):
         },
         {
             "score_key": "acne",
-            "label": "ブツブツ",
+            "label": "ニキビ",
             "ingredients": ["アゼライン酸", "BHA", "CICA"]
         },
         {
@@ -8223,7 +8223,7 @@ def build_improvement_priority(scores):
         ("pores",         "毛穴"),
         ("hydration",     "保湿"),
         ("firmness",      "ハリ"),
-        ("acne",          "ブツブツ"),
+        ("acne",          "ニキビ"),
         ("dullness",      "くすみ"),
         ("barrier",       "バリア"),
         ("texture",       "キメ"),
@@ -8257,7 +8257,7 @@ _BASE_SCORE_LABELS = {
     "pores":         "毛穴",
     "hydration":     "保湿",
     "firmness":      "ハリ",
-    "acne":          "ブツブツ",
+    "acne":          "ニキビ",
     "dullness":      "くすみ",
     "barrier":       "バリア",
     "texture":       "キメ",
@@ -8277,7 +8277,7 @@ _PREMIUM_SCORE_COVERED_BASE_KEYS = {
 
 
 _PREMIUM_DETAIL_LABELS = {
-    "acne_marks_red":  "赤み跡",
+    "acne_marks_red":  "赤ニキビ跡",
     "pigmentation":    "色素沈着",
     "enlarged_pores":  "開き毛穴",
     "blackhead_pores": "黒ずみ毛穴",
@@ -8714,8 +8714,8 @@ def build_improvement_reason(product, improvement_plan=None):
     sensitive_ok = str(product.get("sensitive_ok", "")).lower()
 
     target_labels = {
-        "acne": "ブツブツ予防",
-        "acne_marks_red": "赤み・赤み跡",
+        "acne": "ニキビ予防",
+        "acne_marks_red": "赤み・赤ニキビ跡",
         "pigmentation": "色素沈着・くすみ",
         "pores": "毛穴",
         "firmness": "ハリ",
@@ -8743,7 +8743,7 @@ def build_improvement_reason(product, improvement_plan=None):
         reasons.append("角質ケアでくすみ・毛穴目立ちを支える")
 
     elif category in ["洗顔", "洗顔料", "クレンジング"]:
-        reasons.append("皮脂や汚れを落とし、ブツブツ・毛穴悪化を防ぐ")
+        reasons.append("皮脂や汚れを落とし、ニキビ・毛穴悪化を防ぐ")
 
     elif category in ["乳液", "クリーム"]:
         reasons.append("バリアを守り、攻め成分を続けやすくする")
@@ -10319,7 +10319,7 @@ def ensure_required_routine_steps(data):
         night_steps.insert(1, {
             "category": "洗顔",
             "role": "main",
-            "purpose": "残った汚れを落として、毛穴・ブツブツ悪化を防ぐ",
+            "purpose": "残った汚れを落として、毛穴・ニキビ悪化を防ぐ",
             "ingredient_focus": "低刺激",
             "risk_note": "",
             "priority": 2,
@@ -11737,7 +11737,7 @@ _DEVICE_DEFAULTS = {
 
 _DEVICE_PURPOSE_LABELS = {
     "RF": "ハリ・たるみの引き締めケア",
-    "LED": "赤み・炎症の鎮静、ブツブツ跡ケア",
+    "LED": "赤み・炎症の鎮静、ニキビ跡ケア",
     "EMS": "フェイスラインの引き締め",
     "エレクトロポレーション": "美容液成分の浸透サポート、乾燥ケア",
     "超音波洗浄": "毛穴汚れ・皮脂の毛穴ケア",
@@ -11797,7 +11797,7 @@ _SUPPLEMENT_DEFAULTS = {
     "ビタミンC": {
         "product": "ビタミンC サプリメント",
         "ingredient_focus": ["vitamin_c"],
-        "purpose": "シミ・くすみ・ブツブツ跡(色素沈着)・透明感ケア",
+        "purpose": "シミ・くすみ・ニキビ跡(色素沈着)・透明感ケア",
         "timing": "朝食後",
         "caution": "",
         "priority": 1,
@@ -11813,7 +11813,7 @@ _SUPPLEMENT_DEFAULTS = {
     "ビタミンB群": {
         "product": "ビタミンB群 サプリメント",
         "ingredient_focus": ["vitamin_b"],
-        "purpose": "ブツブツ・皮脂・肌荒れケア",
+        "purpose": "ニキビ・皮脂・肌荒れケア",
         "timing": "朝食後",
         "caution": "",
         "priority": 1,
@@ -11821,7 +11821,7 @@ _SUPPLEMENT_DEFAULTS = {
     "ビタミンD": {
         "product": "ビタミンD サプリメント",
         "ingredient_focus": ["vitamin_d"],
-        "purpose": "ブツブツ・炎症・肌バリア低下ケア",
+        "purpose": "ニキビ・炎症・肌バリア低下ケア",
         "timing": "朝食後（脂質と一緒に摂ると吸収されやすい）",
         "caution": "脂溶性ビタミンのため過剰摂取・体内蓄積に注意してください。",
         "priority": 2,
@@ -11829,7 +11829,7 @@ _SUPPLEMENT_DEFAULTS = {
     "オメガ3": {
         "product": "オメガ3 サプリメント(EPA・DHA)",
         "ingredient_focus": ["omega3"],
-        "purpose": "赤み・炎症・ブツブツ・バリア機能ケア",
+        "purpose": "赤み・炎症・ニキビ・バリア機能ケア",
         "timing": "食後",
         "caution": "抗凝固薬（ワーファリン等）を服用中の方は医師に相談してください。",
         "priority": 2,
@@ -11861,7 +11861,7 @@ _SUPPLEMENT_DEFAULTS = {
     "乳酸菌": {
         "product": "乳酸菌サプリメント",
         "ingredient_focus": ["probiotics"],
-        "purpose": "肌荒れ・炎症・ブツブツケア（腸内環境サポート）",
+        "purpose": "肌荒れ・炎症・ニキビケア（腸内環境サポート）",
         "timing": "食後",
         "caution": "免疫抑制剤を服用中の方は医師に相談してください。",
         "priority": 2,
@@ -11869,7 +11869,7 @@ _SUPPLEMENT_DEFAULTS = {
     "亜鉛": {
         "product": "亜鉛 サプリメント",
         "ingredient_focus": ["zinc"],
-        "purpose": "ブツブツ・肌荒れ・皮脂ケア",
+        "purpose": "ニキビ・肌荒れ・皮脂ケア",
         "timing": "食後",
         "caution": "",
         "priority": 2,
@@ -11923,17 +11923,17 @@ _CONCERN_LABEL_MAP = {
     "dullness": "くすみ改善",
     "whitening": "美白",
     "pigmentation": "色素沈着",
-    "acne": "ブツブツ対策",
+    "acne": "ニキビ対策",
     "aging": "エイジングケア",
     "firmness": "ハリ補給",
     "texture": "質感改善",
     "oiliness": "皮脂コントロール",
-    "acne_marks": "ブツブツ跡",
+    "acne_marks": "ニキビ跡",
 }
 _PURPOSE_KEYWORD_LABELS = [
     ("毛穴", "毛穴ケア"), ("赤み", "赤み鎮静"), ("乾燥", "乾燥対策"),
     ("バリア", "バリア強化"), ("くすみ", "くすみ改善"), ("美白", "美白"),
-    ("色素沈着", "色素沈着"), ("ニキビ", "ブツブツ対策"), ("ハリ", "ハリ補給"),
+    ("色素沈着", "色素沈着"), ("ニキビ", "ニキビ対策"), ("ハリ", "ハリ補給"),
     ("ざらつき", "質感改善"), ("皮脂", "皮脂コントロール"),
 ]
 
@@ -12128,7 +12128,7 @@ def build_recommend_reason(product, step, user_data):
     if "whitening" in product_concerns or "色素沈着" in purpose or "美白" in purpose:
         concern_phrases.append("色ムラ・色素沈着")
     if "acne" in product_concerns or "ニキビ" in purpose:
-        concern_phrases.append("ブツブツができやすい状態")
+        concern_phrases.append("ニキビができやすい状態")
     if "aging" in product_concerns or "ハリ" in purpose or "エイジング" in purpose:
         concern_phrases.append("ハリ不足")
 
@@ -18890,7 +18890,7 @@ def history():
             "pores": "毛穴",
             "hydration": "水分",
             "firmness": "ハリ",
-            "acne": "ブツブツ",
+            "acne": "ニキビ",
             "dullness": "くすみ",
             "barrier": "バリア",
             "texture": "キメ",
