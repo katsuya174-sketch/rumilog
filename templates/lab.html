@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{{ current_locale }}">
 <head>
     <meta charset="UTF-8">
     <link rel="icon" type="image/png" href="/static/favicon.png?v=3">
@@ -710,24 +710,24 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
    
     <div id="bgEffects"></div>
     {% if is_premium and premium_key %}
-    <a href="/customer-portal?premium_key={{ premium_key }}" style="position:fixed; top:14px; right:16px; z-index:999; font-size:13px; color:#c75b7a; text-decoration:none; background:#fff0f5; border:1.5px solid #e8a5bc; border-radius:999px; padding:6px 16px; font-weight:bold; box-shadow:0 2px 8px rgba(199,91,122,0.18);">✨ サブスク管理</a>
+    <a href="/customer-portal?premium_key={{ premium_key }}" style="position:fixed; top:14px; right:16px; z-index:999; font-size:13px; color:#c75b7a; text-decoration:none; background:#fff0f5; border:1.5px solid #e8a5bc; border-radius:999px; padding:6px 16px; font-weight:bold; box-shadow:0 2px 8px rgba(199,91,122,0.18);">✨ {{ _("サブスク管理") }}</a>
     {% else %}
-    <a href="/premium" style="position:fixed; top:14px; right:16px; z-index:999; font-size:13px; color:#c75b7a; text-decoration:none; background:#fff0f5; border:1.5px solid #e8a5bc; border-radius:999px; padding:6px 16px; font-weight:bold; box-shadow:0 2px 8px rgba(199,91,122,0.18);">✨ プレミアム</a>
+    <a href="/premium" style="position:fixed; top:14px; right:16px; z-index:999; font-size:13px; color:#c75b7a; text-decoration:none; background:#fff0f5; border:1.5px solid #e8a5bc; border-radius:999px; padding:6px 16px; font-weight:bold; box-shadow:0 2px 8px rgba(199,91,122,0.18);">✨ {{ _("プレミアム") }}</a>
     {% endif %}
     <div class="container">
         <h1>るみろぐ</h1>
 
 <p class="subtitle">
-    AIがあなたの肌状態を分析し、<br>
-    最適なスキンケアを提案します</p>
+    {{ _("AIがあなたの肌状態を分析し、") }}<br>
+    {{ _("最適なスキンケアを提案します") }}</p>
 
-    
+
     {% if DISABLE_USAGE_LIMIT %}
-      <p style="font-size:14px; color:#666; margin-top:8px;">開発中：回数制限なし</p>
+      <p style="font-size:14px; color:#666; margin-top:8px;">{{ _("開発中：回数制限なし") }}</p>
     {% elif is_creator %}
       <div style="margin: 14px auto 0; max-width: 360px; text-align:center;">
         <p style="font-size:13px; color:#a0778a; margin:0 0 4px;">
-          <span style="display:inline-block; background:linear-gradient(135deg,#ffe6ee,#ffd6e8); color:#c75b7a; font-size:10px; font-weight:bold; border-radius:999px; padding:1px 8px; vertical-align:middle; margin-right:6px;">✦ Creator</span>分析回数：無制限
+          <span style="display:inline-block; background:linear-gradient(135deg,#ffe6ee,#ffd6e8); color:#c75b7a; font-size:10px; font-weight:bold; border-radius:999px; padding:1px 8px; vertical-align:middle; margin-right:6px;">✦ Creator</span>{{ _("分析回数：無制限") }}
         </p>
       </div>
     {% elif is_premium and remaining_premium_count is defined %}
@@ -735,9 +735,9 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
       {% set pct = (remaining_premium_count / 30 * 100) | int %}
       <div style="margin: 14px auto 0; max-width: 360px; text-align:center;">
         <p style="font-size:13px; color:#a0778a; margin:0 0 6px;">
-          今月の分析残り回数
+          {{ _("今月の分析残り回数") }}
           <strong class="count-num{% if remaining_premium_count <= 5 %} count-warn{% endif %}">{{ remaining_premium_count }}</strong>
-          <span style="font-size:12px; color:#b89aa6;">/ 30回</span>
+          <span style="font-size:12px; color:#b89aa6;">/ {{ _("30回") }}</span>
           <span style="display:inline-block; background:linear-gradient(135deg,#ffe6ee,#ffd6e8); color:#c75b7a; font-size:10px; font-weight:bold; border-radius:999px; padding:1px 8px; margin-left:6px; vertical-align:middle;">✨ Premium</span>
         </p>
         <div class="count-bar-track">
@@ -758,10 +758,10 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           box-shadow: 0 4px 14px rgba(199,91,122,0.12);
         ">
           <div style="font-size:13px; color:#c75b7a; font-weight:bold; margin-bottom:6px;">
-            今月の無料分析回数を使い切りました
+            {{ _("今月の無料分析回数を使い切りました") }}
           </div>
           <div style="font-size:12px; color:#9a6070; margin-bottom:10px; line-height:1.6;">
-            プレミアムプランなら月30回まで分析できます。
+            {{ _("プレミアムプランなら月30回まで分析できます。") }}
           </div>
           <a href="/premium" style="
             display:inline-block;
@@ -773,17 +773,17 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
             font-weight: bold;
             text-decoration: none;
             box-shadow: 0 3px 10px rgba(199,91,122,0.3);
-          ">✨ プレミアムプランを見る</a>
+          ">✨ {{ _("プレミアムプランを見る") }}</a>
         </div>
       {% else %}
         {% set pct_free = (remaining_free_count / 5 * 100) | int %}
         <div style="margin: 14px auto 0; max-width: 360px; text-align:center;">
           <p style="font-size:13px; color:#a0778a; margin:0 0 6px;">
-            今月の分析残り回数
+            {{ _("今月の分析残り回数") }}
             <strong class="count-num{% if remaining_free_count <= 2 %} count-warn{% endif %}">{{ remaining_free_count }}</strong>
-            <span style="font-size:12px; color:#b89aa6;">/ 5回</span>
+            <span style="font-size:12px; color:#b89aa6;">/ {{ _("5回") }}</span>
             {% if remaining_free_count <= 2 %}
-              <a href="/premium" style="font-size:11px; color:#c75b7a; text-decoration:underline; margin-left:6px;">上限を増やす →</a>
+              <a href="/premium" style="font-size:11px; color:#c75b7a; text-decoration:underline; margin-left:6px;">{{ _("上限を増やす") }} →</a>
             {% endif %}
           </p>
           <div class="count-bar-track">
@@ -806,7 +806,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
             text-decoration: none;
             border: 2px solid #ffd8e2;
          ">
-        📈 過去の分析記録を見る
+        📈 {{ _("過去の分析記録を見る") }}
       </a>
     </div>
 
@@ -818,172 +818,172 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
     <form id="diagnosisForm" method="POST" enctype="multipart/form-data" onsubmit="return handleSubmit(event)">
         <div class="form-group">
           <div class="form-group">
-            <label>📷 顔写真</label>
-        
+            <label>📷 {{ _("顔写真") }}</label>
+
             <div class="photo-action-row">
               <button type="button" id="cameraModeBtn" class="photo-action-btn" onclick="openCameraPanel()">
-                  📸 3枚まとめて撮影
+                  📸 {{ _("3枚まとめて撮影") }}
               </button>
-              
+
               <button type="button" id="galleryModeBtn" class="photo-action-btn" onclick="openGalleryMode()">
-                🖼️ 写真を選ぶ
+                🖼️ {{ _("写真を選ぶ") }}
               </button>
             </div>
-        
+
             <div id="captureGuide" class="capture-guide">
                 <div id="captureStepText" class="capture-step-text">
-                    正面・左頬・右頬の3枚を登録します
+                    {{ _("正面・左頬・右頬の3枚を登録します") }}
                 </div>
                 <div class="capture-progress">
-                    <span id="stepFront" class="capture-chip">正面</span>
-                    <span id="stepLeft" class="capture-chip">左頬</span>
-                    <span id="stepRight" class="capture-chip">右頬</span>
+                    <span id="stepFront" class="capture-chip">{{ _("正面") }}</span>
+                    <span id="stepLeft" class="capture-chip">{{ _("左頬") }}</span>
+                    <span id="stepRight" class="capture-chip">{{ _("右頬") }}</span>
                 </div>
             </div>
-        
+
             <div id="cameraPanel" class="camera-panel" style="display:none;">
                 <div class="camera-frame">
                     <video id="cameraVideo" autoplay playsinline muted></video>
                     <canvas id="cameraCanvas" style="display:none;"></canvas>
-        
+
                     <div class="camera-overlay">
-                        <div class="camera-overlay-text" id="cameraOverlayText">正面を枠に合わせてください</div>
+                        <div class="camera-overlay-text" id="cameraOverlayText">{{ _("正面を枠に合わせてください") }}</div>
                         <div class="face-guide"></div>
                     </div>
                 </div>
-        
+
                 <div class="camera-buttons">
-                    <button type="button" class="camera-btn secondary" onclick="switchCamera()">カメラ切替</button>
-                    <button type="button" class="camera-btn secondary" onclick="closeCameraPanel()">閉じる</button>
-                    <button type="button" class="camera-btn" onclick="captureCurrentPhoto()">この写真を使う</button>
+                    <button type="button" class="camera-btn secondary" onclick="switchCamera()">{{ _("カメラ切替") }}</button>
+                    <button type="button" class="camera-btn secondary" onclick="closeCameraPanel()">{{ _("閉じる") }}</button>
+                    <button type="button" class="camera-btn" onclick="captureCurrentPhoto()">{{ _("この写真を使う") }}</button>
                 </div>
             </div>
-        
+
             <div id="galleryPanel" class="gallery-panel" style="display:none;">
                 <div class="gallery-row">
-                    <button type="button" class="gallery-btn" onclick="openGalleryInput('front_photo')">正面を選ぶ</button>
-                    <button type="button" class="gallery-btn" onclick="openGalleryInput('left_photo')">左頬を選ぶ</button>
-                    <button type="button" class="gallery-btn" onclick="openGalleryInput('right_photo')">右頬を選ぶ</button>
+                    <button type="button" class="gallery-btn" onclick="openGalleryInput('front_photo')">{{ _("正面を選ぶ") }}</button>
+                    <button type="button" class="gallery-btn" onclick="openGalleryInput('left_photo')">{{ _("左頬を選ぶ") }}</button>
+                    <button type="button" class="gallery-btn" onclick="openGalleryInput('right_photo')">{{ _("右頬を選ぶ") }}</button>
                 </div>
             </div>
-        
+
             <div class="photo-preview-grid">
                 <div id="front_card" class="photo-preview-card">
-                    <div class="photo-preview-title">正面</div>
-                    <img id="front_preview" class="photo-preview-image" alt="正面プレビュー">
-                    <div id="front_status" class="photo-preview-status">未登録</div>
+                    <div class="photo-preview-title">{{ _("正面") }}</div>
+                    <img id="front_preview" class="photo-preview-image" alt="{{ _('正面プレビュー') }}">
+                    <div id="front_status" class="photo-preview-status">{{ _("未登録") }}</div>
                     <div id="front_quality_warning" class="photo-quality-warning"></div>
                 </div>
 
                 <div id="left_card" class="photo-preview-card">
-                    <div class="photo-preview-title">左頬</div>
-                    <img id="left_preview" class="photo-preview-image" alt="左頬プレビュー">
-                    <div id="left_status" class="photo-preview-status">未登録</div>
+                    <div class="photo-preview-title">{{ _("左頬") }}</div>
+                    <img id="left_preview" class="photo-preview-image" alt="{{ _('左頬プレビュー') }}">
+                    <div id="left_status" class="photo-preview-status">{{ _("未登録") }}</div>
                     <div id="left_quality_warning" class="photo-quality-warning"></div>
                 </div>
 
                 <div id="right_card" class="photo-preview-card">
-                    <div class="photo-preview-title">右頬</div>
-                    <img id="right_preview" class="photo-preview-image" alt="右頬プレビュー">
-                    <div id="right_status" class="photo-preview-status">未登録</div>
+                    <div class="photo-preview-title">{{ _("右頬") }}</div>
+                    <img id="right_preview" class="photo-preview-image" alt="{{ _('右頬プレビュー') }}">
+                    <div id="right_status" class="photo-preview-status">{{ _("未登録") }}</div>
                     <div id="right_quality_warning" class="photo-quality-warning"></div>
                 </div>
             </div>
-        
+
             <input type="file" id="front_photo" name="front_photo" accept="image/*" hidden required onchange="handleGalleryPhotoSelected('front')">
 <input type="file" id="left_photo" name="left_photo" accept="image/*" hidden required onchange="handleGalleryPhotoSelected('left')">
 <input type="file" id="right_photo" name="right_photo" accept="image/*" hidden required onchange="handleGalleryPhotoSelected('right')">
-        
+
             <p class="form-note">
-                ※顔全体がわかる正面、左頬、右頬の3枚を登録してください<br>
-                ※正確な分析のため、メイクをしていない状態で撮影してください
+                {{ _("※顔全体がわかる正面、左頬、右頬の3枚を登録してください") }}<br>
+                {{ _("※正確な分析のため、メイクをしていない状態で撮影してください") }}
             </p>
         </div>
 
             <div class="form-group">
-                <label>🎂 年齢</label>
+                <label>🎂 {{ _("年齢") }}</label>
                 <input type="number" name="age">
             </div>
 
             <div class="form-group">
-                <label>💧 肌質（現在の状態）</label>
+                <label>💧 {{ _("肌質（現在の状態）") }}</label>
                 <select name="oil_status">
                     <option value="" selected></option>
-                    <option value="dry">乾燥肌</option>
-                    <option value="oily">脂性肌</option>
-                    <option value="mixed">混合肌</option>
-                    <option value="normal">普通肌</option>
+                    <option value="dry">{{ _("乾燥肌") }}</option>
+                    <option value="oily">{{ _("脂性肌") }}</option>
+                    <option value="mixed">{{ _("混合肌") }}</option>
+                    <option value="normal">{{ _("普通肌") }}</option>
                 </select>
             </div>
 
             <div class="form-group">
-                <label>🌿 敏感度</label>
+                <label>🌿 {{ _("敏感度") }}</label>
                 <select name="sensitivity">
                     <option value="" selected></option>
-                    <option value="low">低い</option>
-                    <option value="middle">普通</option>
-                    <option value="high">高い</option>
+                    <option value="low">{{ _("低い") }}</option>
+                    <option value="middle">{{ _("普通") }}</option>
+                    <option value="high">{{ _("高い") }}</option>
                 </select>
             </div>
 
             <div class="form-group">
-                <label for="retinol_exp">🧴 レチノール使用経験</label>
+                <label for="retinol_exp">🧴 {{ _("レチノール使用経験") }}</label>
                 <select name="retinol_exp" id="retinol_exp" required>
-                    <option value="">選択してください</option>
-                    <option value="beginner">なし</option>
-                    <option value="middle">少しある</option>
-                    <option value="high">慣れている</option>
+                    <option value="">{{ _("選択してください") }}</option>
+                    <option value="beginner">{{ _("なし") }}</option>
+                    <option value="middle">{{ _("少しある") }}</option>
+                    <option value="high">{{ _("慣れている") }}</option>
                 </select>
             </div>
 
             <div class="form-group">
-                <label>💴 月間スキンケア予算</label>
-            
+                <label>💴 {{ _("月間スキンケア予算") }}</label>
+
                 <select name="budget_type" id="budget_type">
-                    <option value="monthly_total">月間トータル</option>
-                    <option value="per_item">1アイテムあたり</option>
+                    <option value="monthly_total">{{ _("月間トータル") }}</option>
+                    <option value="per_item">{{ _("1アイテムあたり") }}</option>
                 </select>
-            
-                <input type="number" name="budget" id="budget" placeholder="例：5000" min="0" step="100">
-            
+
+                <input type="number" name="budget" id="budget" placeholder="{{ _('例：5000') }}" min="0" step="100">
+
                 <p class="form-note">
-                    ※月間トータルを選んだ場合は、朝・夜・週ケアを含む合計予算です
+                    {{ _("※月間トータルを選んだ場合は、朝・夜・週ケアを含む合計予算です") }}
                 </p>
             </div>
-              
+
 
             <div class="form-group">
-                <label>🪷 肌の悩み（複数選択可）</label>
+                <label>🪷 {{ _("肌の悩み（複数選択可）") }}</label>
                 <div class="concern-grid">
                     <label class="concern-chip" for="c_acne">
                         <input type="checkbox" name="concerns" value="acne" id="c_acne" onchange="syncConcernChip(this)">
-                        <span class="concern-check">✓</span>ニキビ・吹き出物
+                        <span class="concern-check">✓</span>{{ _("ニキビ・吹き出物") }}
                     </label>
                     <label class="concern-chip" for="c_pores">
                         <input type="checkbox" name="concerns" value="pores" id="c_pores" onchange="syncConcernChip(this)">
-                        <span class="concern-check">✓</span>毛穴・テカり
+                        <span class="concern-check">✓</span>{{ _("毛穴・テカり") }}
                     </label>
                     <label class="concern-chip" for="c_spots">
                         <input type="checkbox" name="concerns" value="spots" id="c_spots" onchange="syncConcernChip(this)">
-                        <span class="concern-check">✓</span>シミ・くすみ
+                        <span class="concern-check">✓</span>{{ _("シミ・くすみ") }}
                     </label>
                     <label class="concern-chip" for="c_aging">
                         <input type="checkbox" name="concerns" value="aging" id="c_aging" onchange="syncConcernChip(this)">
-                        <span class="concern-check">✓</span>シワ・たるみ
+                        <span class="concern-check">✓</span>{{ _("シワ・たるみ") }}
                     </label>
                     <label class="concern-chip" for="c_dryness">
                         <input type="checkbox" name="concerns" value="dryness" id="c_dryness" onchange="syncConcernChip(this)">
-                        <span class="concern-check">✓</span>乾燥・かさつき
+                        <span class="concern-check">✓</span>{{ _("乾燥・かさつき") }}
                     </label>
                     <label class="concern-chip" for="c_redness">
                         <input type="checkbox" name="concerns" value="redness" id="c_redness" onchange="syncConcernChip(this)">
-                        <span class="concern-check">✓</span>肌荒れ・赤み
+                        <span class="concern-check">✓</span>{{ _("肌荒れ・赤み") }}
                     </label>
                 </div>
             </div>
 
-            <button id="submitBtn" type="submit">分析する</button>
-            <div id="qualityHint" style="display:none; margin-top:8px; font-size:0.75rem; color:#c0392b; text-align:center;">写真の品質に問題があります。上の警告を確認して撮り直してください。</div>
+            <button id="submitBtn" type="submit">{{ _("分析する") }}</button>
+            <div id="qualityHint" style="display:none; margin-top:8px; font-size:0.75rem; color:#c0392b; text-align:center;">{{ _("写真の品質に問題があります。上の警告を確認して撮り直してください。") }}</div>
 
             {% if error_message %}
               <div style="
@@ -1005,7 +1005,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 
             <div id="loadingOverlay" class="loading-overlay" style="display:none;">
             <div class="loading-inner">
-                <div class="loading-text-main" id="loadingTextMain">分析中です…</div>
+                <div class="loading-text-main" id="loadingTextMain">{{ _("分析中です…") }}</div>
                 <div class="loading-text-sub" id="loadingTextSub"></div>
 
                 <div id="loadingAnimation">
@@ -1032,17 +1032,17 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
     <div style="text-align:center; padding: 8px 0 16px;">
       <a href="{% if premium_key %}/customer-portal?premium_key={{ premium_key }}{% else %}/portal-by-email{% endif %}"
          style="font-size:12px; color:#b89aa6; text-decoration:underline;">
-        サブスクリプション管理・解約はこちら
+        {{ _("サブスクリプション管理・解約はこちら") }}
       </a>
     </div>
     {% endif %}
 
     <footer style="text-align:center; padding: 16px 0 32px; margin-top: 8px;">
-      <a href="/feedback?page=lab" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">お問い合わせ・ご意見</a>
+      <a href="/feedback?page=lab" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">{{ _("お問い合わせ・ご意見") }}</a>
       <span style="color:#d8c0ca; font-size:11px;">|</span>
-      <a href="/privacy-policy" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">プライバシーポリシー</a>
+      <a href="/privacy-policy" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">{{ _("プライバシーポリシー") }}</a>
       <span style="color:#d8c0ca; font-size:11px;">|</span>
-      <a href="/terms-of-service" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">利用規約</a>
+      <a href="/terms-of-service" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">{{ _("利用規約") }}</a>
     </footer>
 
     <script>
@@ -1067,7 +1067,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
               cardId: "front_card",
               chipId: "stepFront",
               warningId: "front_quality_warning",
-              label: "正面"
+              label: {{ _("正面") | tojson }}
           },
           {
               key: "left",
@@ -1077,7 +1077,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
               cardId: "left_card",
               chipId: "stepLeft",
               warningId: "left_quality_warning",
-              label: "左頬"
+              label: {{ _("左頬") | tojson }}
           },
           {
               key: "right",
@@ -1087,7 +1087,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
               cardId: "right_card",
               chipId: "stepRight",
               warningId: "right_quality_warning",
-              label: "右頬"
+              label: {{ _("右頬") | tojson }}
           }
       ];
   
@@ -1100,7 +1100,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 
       function updateSubmitButton() {
           const submitBtn = document.getElementById("submitBtn");
-          if (!submitBtn || submitBtn.innerText === "分析中…") return;
+          if (!submitBtn || submitBtn.innerText === {{ _("分析中…") | tojson }}) return;
           const hasIssue = Object.values(photoQualityOK).some(v => !v);
           submitBtn.disabled = hasIssue;
           const hint = document.getElementById("qualityHint");
@@ -1143,7 +1143,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                   const message =
                       (result && result.message)
                       ? result.message
-                      : "分析中にエラーが発生しました。少し時間をおいて再度お試しください。";
+                      : {{ _("分析中にエラーが発生しました。少し時間をおいて再度お試しください。") | tojson }};
 
                   showLoadingError(message);
                   return false;
@@ -1156,18 +1156,18 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                   return false;
               }
 
-              showLoadingError("分析結果の表示に失敗しました。もう一度お試しください。");
+              showLoadingError({{ _("分析結果の表示に失敗しました。もう一度お試しください。") | tojson }});
               return false;
 
           } catch (error) {
               console.error("diagnosis ajax error:", error);
-              showLoadingError("通信エラーが発生しました。時間をおいて再度お試しください。");
+              showLoadingError({{ _("通信エラーが発生しました。時間をおいて再度お試しください。") | tojson }});
               return false;
 
           } finally {
               if (submitBtn) {
                   submitBtn.disabled = false;
-                  submitBtn.innerText = "分析する";
+                  submitBtn.innerText = {{ _("分析する") | tojson }};
               }
           }
       }
@@ -1212,14 +1212,14 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           });
   
           if (completed === 3) {
-              updateGuideText("3枚の登録が完了しました");
+              updateGuideText({{ _("3枚の登録が完了しました") | tojson }});
               return;
           }
-  
+
           const nextIndex = getNextMissingIndex();
-          if (nextIndex === 0) updateGuideText("まずは「正面」を登録してください");
-          if (nextIndex === 1) updateGuideText("次は「左頬」を登録してください");
-          if (nextIndex === 2) updateGuideText("最後に「右頬」を登録してください");
+          if (nextIndex === 0) updateGuideText({{ _('まずは「正面」を登録してください') | tojson }});
+          if (nextIndex === 1) updateGuideText({{ _('次は「左頬」を登録してください') | tojson }});
+          if (nextIndex === 2) updateGuideText({{ _('最後に「右頬」を登録してください') | tojson }});
           updateSubmitButton();
       }
   
@@ -1259,9 +1259,19 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
               }
           } catch (error) {
               console.error("camera error:", error);
-              alert("カメラを起動できませんでした。ブラウザのカメラ許可を確認してください。");
+              alert({{ _("カメラを起動できませんでした。ブラウザのカメラ許可を確認してください。") | tojson }});
               closeCameraPanel();
           }
+      }
+
+      const overlayFitTemplate = {{ _("__LABEL__を枠に合わせてください") | tojson }};
+      function overlayFitText(label) {
+          return overlayFitTemplate.replace("__LABEL__", label);
+      }
+
+      const registeredLabelTemplate = {{ _("__LABEL__を登録済み") | tojson }};
+      function registeredLabelText(label) {
+          return registeredLabelTemplate.replace("__LABEL__", label);
       }
   
       function setPhotoMode(mode) {
@@ -1294,7 +1304,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
   
           const currentLabel = captureOrder[currentCaptureIndex].label;
           if (overlayText) {
-              overlayText.textContent = `${currentLabel}を枠に合わせてください`;
+              overlayText.textContent = overlayFitText(currentLabel);
           }
   
           currentFacingMode = "user";
@@ -1328,7 +1338,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           if (!video || !canvas) return;
   
           if (!video.videoWidth || !video.videoHeight) {
-              alert("カメラ映像の準備ができていません");
+              alert({{ _("カメラ映像の準備ができていません") | tojson }});
               return;
           }
   
@@ -1349,7 +1359,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
   
           canvas.toBlob(function(blob) {
               if (!blob) {
-                  alert("写真の保存に失敗しました");
+                  alert({{ _("写真の保存に失敗しました") | tojson }});
                   return;
               }
   
@@ -1363,7 +1373,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
               if (currentCaptureIndex < captureOrder.length) {
                   const nextLabel = captureOrder[currentCaptureIndex].label;
                   if (overlayText) {
-                      overlayText.textContent = `${nextLabel}を枠に合わせてください`;
+                      overlayText.textContent = overlayFitText(nextLabel);
                   }
                   refreshStepUI();
               } else {
@@ -1403,9 +1413,9 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                       const avgB = sumB / total;
 
                       // 1. 暗さチェック
-                      if (avgB < 35) { callback({ ok: false, message: "⚠️ 画像が暗すぎます。明るい場所で撮り直すと精度が上がります。" }); return; }
+                      if (avgB < 35) { callback({ ok: false, message: {{ _("⚠️ 画像が暗すぎます。明るい場所で撮り直すと精度が上がります。") | tojson }} }); return; }
                       // 2. 明るすぎチェック
-                      if (avgB > 240) { callback({ ok: false, message: "⚠️ 画像が明るすぎます。直射日光を避けて撮り直してください。" }); return; }
+                      if (avgB > 240) { callback({ ok: false, message: {{ _("⚠️ 画像が明るすぎます。直射日光を避けて撮り直してください。") | tojson }} }); return; }
 
                       // 3. 逆光チェック: 中央(内側40%)と周辺の輝度差
                       const cSize = Math.floor(SIZE * 0.4);
@@ -1419,7 +1429,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                           }
                       }
                       if ((bSum / bCnt) - (cSum / cCnt) > 70) {
-                          callback({ ok: false, message: "⚠️ 逆光になっています。光を正面から当てて撮り直してください。" }); return;
+                          callback({ ok: false, message: {{ _("⚠️ 逆光になっています。光を正面から当てて撮り直してください。") | tojson }} }); return;
                       }
 
                       // 4. ぼやけチェック（ラプラシアン分散）
@@ -1433,7 +1443,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                       }
                       const lapVar = (sumL2 / cnt) - Math.pow(sumL / cnt, 2);
                       const sharpness = Math.sqrt(Math.max(0, lapVar));
-                      if (sharpness < 6) { callback({ ok: false, message: "⚠️ 画像がぼやけています。カメラを安定させて撮り直すと精度が上がります。" }); return; }
+                      if (sharpness < 6) { callback({ ok: false, message: {{ _("⚠️ 画像がぼやけています。カメラを安定させて撮り直すと精度が上がります。") | tojson }} }); return; }
 
                       // 5. 顔検出（FaceDetector API 対応ブラウザのみ・非対応はスキップ）
                       if (typeof FaceDetector !== "undefined") {
@@ -1441,7 +1451,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                               const fd = new FaceDetector({ fastMode: true });
                               const faces = await fd.detect(img);
                               if (faces.length === 0) {
-                                  callback({ ok: false, message: "⚠️ 顔が検出されませんでした。顔全体が画面に収まるように撮り直してください。" }); return;
+                                  callback({ ok: false, message: {{ _("⚠️ 顔が検出されませんでした。顔全体が画面に収まるように撮り直してください。") | tojson }} }); return;
                               }
                           } catch(e) { /* 非対応または権限なし: スキップ */ }
                       }
@@ -1470,7 +1480,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           };
           reader.readAsDataURL(file);
 
-          if (status) status.textContent = `${item.label}を登録済み`;
+          if (status) status.textContent = registeredLabelText(item.label);
           if (card) card.classList.add("active");
           if (warning) { warning.style.display = "none"; warning.textContent = ""; }
 
@@ -1529,7 +1539,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                 preview.classList.remove("show");
             }
 
-            if (status) status.textContent = "未登録";
+            if (status) status.textContent = {{ _("未登録") | tojson }};
             if (card) card.classList.remove("active");
 
             refreshStepUI();
@@ -1624,10 +1634,10 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
       // 目安時間に合わせているが、サーバー側の進捗と厳密に同期はしていない
       // （フォーム送信後は完了までレスポンスが返らないため）。
       const LOADING_PHASES = [
-          { until: 15,        icon: "📷", sub: "お預かりした写真を確認しています…" },
-          { until: 45,        icon: "💧", sub: "うるおい・皮脂・毛穴などをスコア化しています…" },
-          { until: 80,        icon: "🧴", sub: "スコアに合わせて成分とアイテムを選んでいます…" },
-          { until: Infinity,  icon: "✨", sub: "結果をまとめています。もうすぐ完成です…" },
+          { until: 15,        icon: "📷", sub: {{ _("お預かりした写真を確認しています…") | tojson }} },
+          { until: 45,        icon: "💧", sub: {{ _("うるおい・皮脂・毛穴などをスコア化しています…") | tojson }} },
+          { until: 80,        icon: "🧴", sub: {{ _("スコアに合わせて成分とアイテムを選んでいます…") | tojson }} },
+          { until: Infinity,  icon: "✨", sub: {{ _("結果をまとめています。もうすぐ完成です…") | tojson }} },
       ];
 
       function updateLoadingPhase() {
@@ -1674,7 +1684,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 
           overlay.style.display = "flex";
 
-          if (mainText) mainText.textContent = "分析中です…";
+          if (mainText) mainText.textContent = {{ _("分析中です…") | tojson }};
           if (icon) icon.textContent = LOADING_PHASES[0].icon;
 
           document.querySelectorAll(".loading-dot").forEach(dot => {
@@ -1691,7 +1701,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 
           if (submitBtn) {
               submitBtn.disabled = true;
-              submitBtn.innerText = "分析中…";
+              submitBtn.innerText = {{ _("分析中…") | tojson }};
           }
       }
       function showLoadingError(message) {
@@ -1710,7 +1720,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
           }
 
           if (mainText) {
-              mainText.textContent = message || "分析中にエラーが発生しました。";
+              mainText.textContent = message || {{ _("分析中にエラーが発生しました。") | tojson }};
           }
 
           if (animation) {
@@ -1725,7 +1735,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                       font-size: 14px;
                       line-height: 1.7;
                   ">
-                      画面を閉じずに、少し時間をおいてからもう一度お試しください。
+                      ${ {{ _("画面を閉じずに、少し時間をおいてからもう一度お試しください。") | tojson }} }
                       <br>
                       <button type="button" onclick="hideLoadingError()" style="
                           margin-top: 12px;
@@ -1736,7 +1746,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
                           color: #c75b7a;
                           font-weight: bold;
                       ">
-                          入力画面に戻る
+                          ${ {{ _("入力画面に戻る") | tojson }} }
                       </button>
                   </div>
               `;
@@ -1744,7 +1754,7 @@ box-shadow: 0 0 12px rgba(230,230,240,0.9);
 
           if (submitBtn) {
               submitBtn.disabled = false;
-              submitBtn.innerText = "分析する";
+              submitBtn.innerText = {{ _("分析する") | tojson }};
           }
       }
 

@@ -1,0 +1,1794 @@
+# Translations template for PROJECT.
+# Copyright (C) 2026 ORGANIZATION
+# This file is distributed under the same license as the PROJECT project.
+# FIRST AUTHOR <EMAIL@ADDRESS>, 2026.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PROJECT VERSION\n"
+"Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
+"POT-Creation-Date: 2026-07-30 17:44+0900\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Generated-By: Babel 2.18.0\n"
+
+#: app.py:17711
+#, python-format
+msgid "今月の分析回数（月%(limit)s回）に達しました。来月また利用できます。"
+msgstr ""
+
+#: app.py:17723
+#, python-format
+msgid "無料分析は月%(limit)s回までです。続けて利用するには有料プランをご利用ください。"
+msgstr ""
+
+#: app.py:17734 app.py:17735
+msgid "本日の分析回数の上限に達しました。明日またお試しください。"
+msgstr ""
+
+#: app.py:18392
+msgid "決済処理中にエラーが発生しました。しばらくしてから再度お試しください。"
+msgstr ""
+
+#: app.py:18533
+msgid "内容を入力してください。"
+msgstr ""
+
+#: app.py:18555
+msgid "メールアドレスを入力してください。"
+msgstr ""
+
+#: app.py:18571
+msgid "入力されたメールアドレスに紐づくプレミアム会員が見つかりませんでした。ご登録時のアドレスをご確認ください。"
+msgstr ""
+
+#: app.py:18575
+msgid "決済システムへの接続に失敗しました。"
+msgstr ""
+
+#: app.py:18587 app.py:18614
+msgid "カスタマーポータルへの接続に失敗しました。しばらく経ってからお試しください。"
+msgstr ""
+
+#: app.py:18603
+msgid "カスタマー情報が見つかりません。サポートにお問い合わせください。"
+msgstr ""
+
+#: app.py:18646
+msgid "よく提案される商品（全ユーザー集計）"
+msgstr ""
+
+#: app.py:18651 templates/history.html:387
+msgid "よく提案される商品"
+msgstr ""
+
+#: app.py:18678
+msgid "リンクがありません"
+msgstr ""
+
+#: app.py:18691
+msgid "許可されていないリンクです"
+msgstr ""
+
+#: app.py:18693
+msgid "無効なURLです"
+msgstr ""
+
+#: app.py:18991
+msgid "メールアドレスを正しく入力してください"
+msgstr ""
+
+#: app.py:18994
+msgid "エラーが発生しました。しばらく後でお試しください"
+msgstr ""
+
+#: app.py:19004
+msgid "このリンクは無効または期限切れです。再度ログインしてください"
+msgstr ""
+
+#: app.py:19007
+msgid "ログインに失敗しました。再度お試しください"
+msgstr ""
+
+#: app.py:19430
+msgid "結果が見つかりません"
+msgstr ""
+
+#: app.py:19437
+msgid "エラーが発生しました"
+msgstr ""
+
+#: app.py:19443
+msgid "現在アクセスが集中しているため、少し時間を空けてから再度お試しください。"
+msgstr ""
+
+#: app.py:19446
+msgid "現在分析が混み合っています。少し時間を空けてから再度お試しください。"
+msgstr ""
+
+#: app.py:19449
+msgid "分析処理に時間がかかっています。通信環境を確認して、再度お試しください。"
+msgstr ""
+
+#: app.py:19452
+msgid "通信エラーが発生しました。時間を空けて再度お試しください。"
+msgstr ""
+
+#: app.py:19454
+msgid "分析中に一時的なエラーが発生しました。少し時間を空けて再度お試しください。"
+msgstr ""
+
+#: templates/data_deletion.html:8
+msgid "データ削除のご案内 | るみろぐ"
+msgstr ""
+
+#: templates/data_deletion.html:67
+msgid "データ削除のご案内"
+msgstr ""
+
+#: templates/data_deletion.html:68
+msgid "最終更新日：2026年7月8日"
+msgstr ""
+
+#: templates/data_deletion.html:72
+msgid "収集しているデータ"
+msgstr ""
+
+#: templates/data_deletion.html:73
+msgid "るみろぐ（以下「本サービス」）が保持するユーザーデータは以下のとおりです。"
+msgstr ""
+
+#: templates/data_deletion.html:75
+msgid "<strong>顔写真</strong>：肌分析のためにAI分析へ送信しますが、<strong>分析完了後にサーバーへ保存することはありません</strong>（一時的に処理されるのみ）。そのため削除対象となる顔写真は残っていません。"
+msgstr ""
+
+#: templates/data_deletion.html:76
+msgid "<strong>分析結果</strong>：スコアや提案商品などの分析データを、サービス改善のためデータベースに保存しています。"
+msgstr ""
+
+#: templates/data_deletion.html:77
+msgid "<strong>メールアドレス</strong>：プレミアムプランをご利用の方のみ、プレミアムキーの発行・送付のために保持しています。"
+msgstr ""
+
+#: templates/data_deletion.html:82
+msgid "データ削除のリクエスト方法"
+msgstr ""
+
+#: templates/data_deletion.html:84
+#, python-format
+msgid "保存されている分析結果・メールアドレスの削除をご希望の場合は、以下のメールアドレス宛に「%(keyword)s」と記載してご連絡ください。"
+msgstr ""
+
+#: templates/data_deletion.html:84 templates/data_deletion.html:86
+msgid "データ削除希望"
+msgstr ""
+
+#: templates/data_deletion.html:88
+msgid "本人確認のため、プレミアム会員の方は登録メールアドレスからご連絡ください。無料でご利用の方は、分析日時など特定に必要な情報を添えてください。"
+msgstr ""
+
+#: templates/data_deletion.html:93
+msgid "削除の範囲と期間"
+msgstr ""
+
+#: templates/data_deletion.html:95
+msgid "ご連絡を受けてから<strong>30日以内</strong>に、該当する分析結果・メールアドレスをデータベースから削除します。"
+msgstr ""
+
+#: templates/data_deletion.html:96
+msgid "プレミアムキーは無効化され、以降プレミアム機能は利用できなくなります。"
+msgstr ""
+
+#: templates/data_deletion.html:97
+msgid "顔写真は元々保存していないため、追加の削除操作は不要です。"
+msgstr ""
+
+#: templates/data_deletion.html:98
+msgid "法令上の保存義務がある情報（決済に関する記録など）は、必要な期間に限り保持する場合があります。"
+msgstr ""
+
+#: templates/data_deletion.html:103 templates/privacy_policy.html:173
+#: templates/terms_of_service.html:167
+msgid "お問い合わせ"
+msgstr ""
+
+#: templates/data_deletion.html:104
+msgid "データ削除やプライバシーに関するご質問は、上記メールアドレスまでお気軽にお問い合わせください。"
+msgstr ""
+
+#: templates/data_deletion.html:107 templates/login.html:162
+#: templates/privacy_policy.html:180 templates/terms_of_service.html:172
+msgid "トップに戻る"
+msgstr ""
+
+#: templates/error.html:9
+msgid "るみろぐ | エラー"
+msgstr ""
+
+#: templates/error.html:144
+msgid "分析を完了できませんでした"
+msgstr ""
+
+#: templates/error.html:151
+msgid "もう一度分析する"
+msgstr ""
+
+#: templates/error.html:155
+msgid "時間を空けると改善する場合があります"
+msgstr ""
+
+#: templates/feedback.html:9 templates/feedback.html:154
+#: templates/history.html:808 templates/lab.html:1041
+#: templates/premium.html:315
+msgid "お問い合わせ・ご意見"
+msgstr ""
+
+#: templates/feedback.html:146
+msgid "送信しました"
+msgstr ""
+
+#: templates/feedback.html:148
+msgid "ご報告・ご意見ありがとうございます。"
+msgstr ""
+
+#: templates/feedback.html:149
+msgid "内容を確認し、改善に役立てさせていただきます。"
+msgstr ""
+
+#: templates/feedback.html:151
+msgid "履歴に戻る"
+msgstr ""
+
+#: templates/feedback.html:156
+msgid "不具合報告や「もっとこうしてほしい」というご意見をお寄せください。"
+msgstr ""
+
+#: templates/feedback.html:157
+msgid "分析結果ページからお越しの場合は、該当の分析内容も一緒に確認します。"
+msgstr ""
+
+#: templates/feedback.html:164
+msgid "種別"
+msgstr ""
+
+#: templates/feedback.html:166
+msgid "不具合報告（例: リンクが開けない、候補が出ない など）"
+msgstr ""
+
+#: templates/feedback.html:167
+msgid "改善要望(もっとこうしてほしい)"
+msgstr ""
+
+#: templates/feedback.html:168
+msgid "その他"
+msgstr ""
+
+#: templates/feedback.html:171
+msgid "内容"
+msgstr ""
+
+#: templates/feedback.html:172
+msgid "できるだけ詳しく教えてください(例: どの画面で・何が起きたか)"
+msgstr ""
+
+#: templates/feedback.html:174
+msgid "返信先メールアドレス（任意）"
+msgstr ""
+
+#: templates/feedback.html:175
+msgid "返信が必要な場合のみご入力ください"
+msgstr ""
+
+#: templates/feedback.html:180
+msgid "送信する"
+msgstr ""
+
+#: templates/feedback.html:186 templates/history.html:810
+#: templates/lab.html:1043 templates/premium.html:317
+#: templates/privacy_policy.html:103
+msgid "プライバシーポリシー"
+msgstr ""
+
+#: templates/feedback.html:188 templates/history.html:812
+#: templates/lab.html:1045 templates/premium.html:319
+#: templates/terms_of_service.html:94
+msgid "利用規約"
+msgstr ""
+
+#: templates/history.html:9 templates/history.html:372
+msgid "分析履歴"
+msgstr ""
+
+#: templates/history.html:364
+msgid "ログアウト"
+msgstr ""
+
+#: templates/history.html:368
+msgid "ログインで全デバイスから履歴を見る"
+msgstr ""
+
+#: templates/history.html:373 templates/lab.html:715 templates/premium.html:218
+msgid "プレミアム"
+msgstr ""
+
+#: templates/history.html:380
+msgid "日連続分析中"
+msgstr ""
+
+#: templates/history.html:382
+msgid "継続は美肌への近道！"
+msgstr ""
+
+#: templates/history.html:389
+msgid "過去の分析で提案された回数が多い商品を確認できます。"
+msgstr ""
+
+#: templates/history.html:391
+msgid "見てみる"
+msgstr ""
+
+#: templates/history.html:397 templates/premium.html:212
+#: templates/premium.html:231
+msgid "今月の肌レポート"
+msgstr ""
+
+#: templates/history.html:400
+msgid "今月の分析回数"
+msgstr ""
+
+#: templates/history.html:401
+msgid "回"
+msgstr ""
+
+#: templates/history.html:404
+msgid "今月の平均スコア"
+msgstr ""
+
+#: templates/history.html:405 templates/history.html:617
+msgid "点"
+msgstr ""
+
+#: templates/history.html:409
+msgid "最も改善した項目"
+msgstr ""
+
+#: templates/history.html:411
+#, python-format
+msgid "+%(diff)s点 UP"
+msgstr ""
+
+#: templates/history.html:416
+msgid "注意が必要な項目"
+msgstr ""
+
+#: templates/history.html:418
+#, python-format
+msgid "現在 %(score)s点"
+msgstr ""
+
+#: templates/history.html:426
+msgid "Skin Score 推移"
+msgstr ""
+
+#: templates/history.html:431
+msgid "総合スコア改善率"
+msgstr ""
+
+#: templates/history.html:437
+#, python-format
+msgid "初回 %(oldest)s点 → 最新 %(latest)s点（%(count)s回の分析）"
+msgstr ""
+
+#: templates/history.html:443
+msgid "総合スコアの改善率はプレミアム機能です。"
+msgstr ""
+
+#: templates/history.html:452
+msgid "改善の変化"
+msgstr ""
+
+#: templates/history.html:461
+msgid "まだ比較できる分析履歴がありません。"
+msgstr ""
+
+#: templates/history.html:466
+msgid "項目別スコア推移"
+msgstr ""
+
+#: templates/history.html:473
+msgid "有料詳細スコア推移"
+msgstr ""
+
+#: templates/history.html:481
+msgid "詳細スコアの推移はプレミアム機能です。"
+msgstr ""
+
+#: templates/history.html:493 templates/lab.html:776
+msgid "プレミアムプランを見る"
+msgstr ""
+
+#: templates/history.html:502 templates/result.html:1279
+msgid "記録日"
+msgstr ""
+
+#: templates/history.html:509
+msgid "前回比"
+msgstr ""
+
+#: templates/history.html:509
+msgid "変化"
+msgstr ""
+
+#: templates/history.html:514
+#, python-format
+msgid "+%(diff)s点"
+msgstr ""
+
+#: templates/history.html:518
+#, python-format
+msgid "%(diff)s点"
+msgstr ""
+
+#: templates/history.html:536
+msgid "肌状態"
+msgstr ""
+
+#: templates/history.html:540
+msgid "予算"
+msgstr ""
+
+#: templates/history.html:541
+msgid "合計"
+msgstr ""
+
+#: templates/history.html:542 templates/result.html:1085
+msgid "判定"
+msgstr ""
+
+#: templates/history.html:548 templates/premium.html:211
+#: templates/premium.html:230
+msgid "肌年齢推定"
+msgstr ""
+
+#: templates/history.html:551
+msgid "歳相当"
+msgstr ""
+
+#: templates/history.html:554
+#, python-format
+msgid "実年齢より %(diff)s歳若い肌"
+msgstr ""
+
+#: templates/history.html:556
+#, python-format
+msgid "実年齢より %(diff)s歳上の肌"
+msgstr ""
+
+#: templates/history.html:564
+msgid "左右差分析"
+msgstr ""
+
+#: templates/history.html:575 templates/lab.html:839 templates/lab.html:879
+#: templates/lab.html:1080 templates/result.html:910
+msgid "左頬"
+msgstr ""
+
+#: templates/history.html:578 templates/lab.html:840 templates/lab.html:886
+#: templates/lab.html:1090 templates/result.html:917
+msgid "右頬"
+msgstr ""
+
+#: templates/history.html:586
+msgid "肌年齢推定・左右差分析"
+msgstr ""
+
+#: templates/history.html:587
+msgid "プレミアムで見る"
+msgstr ""
+
+#: templates/history.html:591
+msgid "詳細を見る"
+msgstr ""
+
+#: templates/history.html:595
+msgid "まだ分析履歴はありません。"
+msgstr ""
+
+#: templates/history.html:598 templates/premium.html:298
+msgid "分析に戻る"
+msgstr ""
+
+#: templates/history.html:606 templates/result.html:712
+msgid "皮脂バランス"
+msgstr ""
+
+#: templates/history.html:607 templates/result.html:718
+msgid "赤み"
+msgstr ""
+
+#: templates/history.html:608 templates/result.html:724
+msgid "毛穴"
+msgstr ""
+
+#: templates/history.html:609
+msgid "水分"
+msgstr ""
+
+#: templates/history.html:610 templates/result.html:736
+msgid "ハリ"
+msgstr ""
+
+#: templates/history.html:611 templates/result.html:742
+msgid "ニキビ"
+msgstr ""
+
+#: templates/history.html:612 templates/result.html:748
+msgid "くすみ"
+msgstr ""
+
+#: templates/history.html:613 templates/result.html:754
+msgid "バリア"
+msgstr ""
+
+#: templates/history.html:614 templates/result.html:760
+msgid "キメ"
+msgstr ""
+
+#: templates/history.html:615 templates/result.html:766
+msgid "色ムラ"
+msgstr ""
+
+#: templates/history.html:619 templates/result.html:851
+msgid "赤ニキビ跡"
+msgstr ""
+
+#: templates/history.html:620 templates/result.html:855
+msgid "色素沈着"
+msgstr ""
+
+#: templates/history.html:621 templates/result.html:859
+msgid "開き毛穴"
+msgstr ""
+
+#: templates/history.html:622 templates/result.html:863
+msgid "黒ずみ毛穴"
+msgstr ""
+
+#: templates/history.html:623 templates/result.html:867
+msgid "透明感"
+msgstr ""
+
+#: templates/history.html:624 templates/result.html:871
+msgid "肌トーン均一性"
+msgstr ""
+
+#: templates/history.html:625 templates/result.html:875
+msgid "肌バランス"
+msgstr ""
+
+#: templates/history.html:626 templates/result.html:879
+msgid "左右差"
+msgstr ""
+
+#: templates/lab.html:713
+msgid "サブスク管理"
+msgstr ""
+
+#: templates/lab.html:721 templates/result.html:691
+msgid "AIがあなたの肌状態を分析し、"
+msgstr ""
+
+#: templates/lab.html:722
+msgid "最適なスキンケアを提案します"
+msgstr ""
+
+#: templates/lab.html:726
+msgid "開発中：回数制限なし"
+msgstr ""
+
+#: templates/lab.html:730
+msgid "分析回数：無制限"
+msgstr ""
+
+#: templates/lab.html:738 templates/lab.html:782
+msgid "今月の分析残り回数"
+msgstr ""
+
+#: templates/lab.html:740
+msgid "30回"
+msgstr ""
+
+#: templates/lab.html:761
+msgid "今月の無料分析回数を使い切りました"
+msgstr ""
+
+#: templates/lab.html:764
+msgid "プレミアムプランなら月30回まで分析できます。"
+msgstr ""
+
+#: templates/lab.html:784
+msgid "5回"
+msgstr ""
+
+#: templates/lab.html:786
+msgid "上限を増やす"
+msgstr ""
+
+#: templates/lab.html:809
+msgid "過去の分析記録を見る"
+msgstr ""
+
+#: templates/lab.html:821
+msgid "顔写真"
+msgstr ""
+
+#: templates/lab.html:825
+msgid "3枚まとめて撮影"
+msgstr ""
+
+#: templates/lab.html:829
+msgid "写真を選ぶ"
+msgstr ""
+
+#: templates/lab.html:835
+msgid "正面・左頬・右頬の3枚を登録します"
+msgstr ""
+
+#: templates/lab.html:838 templates/lab.html:872 templates/lab.html:1070
+msgid "正面"
+msgstr ""
+
+#: templates/lab.html:850
+msgid "正面を枠に合わせてください"
+msgstr ""
+
+#: templates/lab.html:856
+msgid "カメラ切替"
+msgstr ""
+
+#: templates/lab.html:857
+msgid "閉じる"
+msgstr ""
+
+#: templates/lab.html:858
+msgid "この写真を使う"
+msgstr ""
+
+#: templates/lab.html:864
+msgid "正面を選ぶ"
+msgstr ""
+
+#: templates/lab.html:865
+msgid "左頬を選ぶ"
+msgstr ""
+
+#: templates/lab.html:866
+msgid "右頬を選ぶ"
+msgstr ""
+
+#: templates/lab.html:873
+msgid "正面プレビュー"
+msgstr ""
+
+#: templates/lab.html:874 templates/lab.html:881 templates/lab.html:888
+#: templates/lab.html:1542
+msgid "未登録"
+msgstr ""
+
+#: templates/lab.html:880
+msgid "左頬プレビュー"
+msgstr ""
+
+#: templates/lab.html:887
+msgid "右頬プレビュー"
+msgstr ""
+
+#: templates/lab.html:898
+msgid "※顔全体がわかる正面、左頬、右頬の3枚を登録してください"
+msgstr ""
+
+#: templates/lab.html:899
+msgid "※正確な分析のため、メイクをしていない状態で撮影してください"
+msgstr ""
+
+#: templates/lab.html:904
+msgid "年齢"
+msgstr ""
+
+#: templates/lab.html:909
+msgid "肌質（現在の状態）"
+msgstr ""
+
+#: templates/lab.html:912
+msgid "乾燥肌"
+msgstr ""
+
+#: templates/lab.html:913
+msgid "脂性肌"
+msgstr ""
+
+#: templates/lab.html:914
+msgid "混合肌"
+msgstr ""
+
+#: templates/lab.html:915
+msgid "普通肌"
+msgstr ""
+
+#: templates/lab.html:920
+msgid "敏感度"
+msgstr ""
+
+#: templates/lab.html:923
+msgid "低い"
+msgstr ""
+
+#: templates/lab.html:924
+msgid "普通"
+msgstr ""
+
+#: templates/lab.html:925
+msgid "高い"
+msgstr ""
+
+#: templates/lab.html:930
+msgid "レチノール使用経験"
+msgstr ""
+
+#: templates/lab.html:932
+msgid "選択してください"
+msgstr ""
+
+#: templates/lab.html:933
+msgid "なし"
+msgstr ""
+
+#: templates/lab.html:934
+msgid "少しある"
+msgstr ""
+
+#: templates/lab.html:935
+msgid "慣れている"
+msgstr ""
+
+#: templates/lab.html:940
+msgid "月間スキンケア予算"
+msgstr ""
+
+#: templates/lab.html:943
+msgid "月間トータル"
+msgstr ""
+
+#: templates/lab.html:944
+msgid "1アイテムあたり"
+msgstr ""
+
+#: templates/lab.html:947
+msgid "例：5000"
+msgstr ""
+
+#: templates/lab.html:950
+msgid "※月間トータルを選んだ場合は、朝・夜・週ケアを含む合計予算です"
+msgstr ""
+
+#: templates/lab.html:956
+msgid "肌の悩み（複数選択可）"
+msgstr ""
+
+#: templates/lab.html:960
+msgid "ニキビ・吹き出物"
+msgstr ""
+
+#: templates/lab.html:964
+msgid "毛穴・テカり"
+msgstr ""
+
+#: templates/lab.html:968
+msgid "シミ・くすみ"
+msgstr ""
+
+#: templates/lab.html:972
+msgid "シワ・たるみ"
+msgstr ""
+
+#: templates/lab.html:976
+msgid "乾燥・かさつき"
+msgstr ""
+
+#: templates/lab.html:980
+msgid "肌荒れ・赤み"
+msgstr ""
+
+#: templates/lab.html:985 templates/lab.html:1170 templates/lab.html:1757
+msgid "分析する"
+msgstr ""
+
+#: templates/lab.html:986
+msgid "写真の品質に問題があります。上の警告を確認して撮り直してください。"
+msgstr ""
+
+#: templates/lab.html:1008 templates/lab.html:1687
+msgid "分析中です…"
+msgstr ""
+
+#: templates/lab.html:1035
+msgid "サブスクリプション管理・解約はこちら"
+msgstr ""
+
+#: templates/lab.html:1103 templates/lab.html:1704
+msgid "分析中…"
+msgstr ""
+
+#: templates/lab.html:1146
+msgid "分析中にエラーが発生しました。少し時間をおいて再度お試しください。"
+msgstr ""
+
+#: templates/lab.html:1159
+msgid "分析結果の表示に失敗しました。もう一度お試しください。"
+msgstr ""
+
+#: templates/lab.html:1164
+msgid "通信エラーが発生しました。時間をおいて再度お試しください。"
+msgstr ""
+
+#: templates/lab.html:1215
+msgid "3枚の登録が完了しました"
+msgstr ""
+
+#: templates/lab.html:1220
+msgid "まずは「正面」を登録してください"
+msgstr ""
+
+#: templates/lab.html:1221
+msgid "次は「左頬」を登録してください"
+msgstr ""
+
+#: templates/lab.html:1222
+msgid "最後に「右頬」を登録してください"
+msgstr ""
+
+#: templates/lab.html:1262
+msgid "カメラを起動できませんでした。ブラウザのカメラ許可を確認してください。"
+msgstr ""
+
+#: templates/lab.html:1267
+msgid "__LABEL__を枠に合わせてください"
+msgstr ""
+
+#: templates/lab.html:1272
+msgid "__LABEL__を登録済み"
+msgstr ""
+
+#: templates/lab.html:1341
+msgid "カメラ映像の準備ができていません"
+msgstr ""
+
+#: templates/lab.html:1362
+msgid "写真の保存に失敗しました"
+msgstr ""
+
+#: templates/lab.html:1416
+msgid "⚠️ 画像が暗すぎます。明るい場所で撮り直すと精度が上がります。"
+msgstr ""
+
+#: templates/lab.html:1418
+msgid "⚠️ 画像が明るすぎます。直射日光を避けて撮り直してください。"
+msgstr ""
+
+#: templates/lab.html:1432
+msgid "⚠️ 逆光になっています。光を正面から当てて撮り直してください。"
+msgstr ""
+
+#: templates/lab.html:1446
+msgid "⚠️ 画像がぼやけています。カメラを安定させて撮り直すと精度が上がります。"
+msgstr ""
+
+#: templates/lab.html:1454
+msgid "⚠️ 顔が検出されませんでした。顔全体が画面に収まるように撮り直してください。"
+msgstr ""
+
+#: templates/lab.html:1637
+msgid "お預かりした写真を確認しています…"
+msgstr ""
+
+#: templates/lab.html:1638
+msgid "うるおい・皮脂・毛穴などをスコア化しています…"
+msgstr ""
+
+#: templates/lab.html:1639
+msgid "スコアに合わせて成分とアイテムを選んでいます…"
+msgstr ""
+
+#: templates/lab.html:1640
+msgid "結果をまとめています。もうすぐ完成です…"
+msgstr ""
+
+#: templates/lab.html:1723
+msgid "分析中にエラーが発生しました。"
+msgstr ""
+
+#: templates/lab.html:1738
+msgid "画面を閉じずに、少し時間をおいてからもう一度お試しください。"
+msgstr ""
+
+#: templates/lab.html:1749
+msgid "入力画面に戻る"
+msgstr ""
+
+#: templates/login.html:8
+msgid "ログイン — るみろぐ"
+msgstr ""
+
+#: templates/login.html:118
+msgid "るみろぐ ログイン"
+msgstr ""
+
+#: templates/login.html:123
+msgid "メールを送信しました"
+msgstr ""
+
+#: templates/login.html:124
+msgid "宛にログインリンクを送りました。"
+msgstr ""
+
+#: templates/login.html:125
+msgid "メールのリンクをタップしてください。"
+msgstr ""
+
+#: templates/login.html:127
+msgid "リンクは15分間有効です。"
+msgstr ""
+
+#: templates/login.html:128
+msgid "届かない場合はスパムフォルダをご確認ください。"
+msgstr ""
+
+#: templates/login.html:131
+msgid "別のメールアドレスで試す"
+msgstr ""
+
+#: templates/login.html:135
+msgid "メールアドレスを入力するとログインリンクを送ります。"
+msgstr ""
+
+#: templates/login.html:136
+msgid "スマホ・PCどちらからでも同じ履歴を確認できます。"
+msgstr ""
+
+#: templates/login.html:144 templates/portal_by_email.html:116
+msgid "メールアドレス"
+msgstr ""
+
+#: templates/login.html:153
+msgid "ログインリンクを送る"
+msgstr ""
+
+#: templates/login.html:157
+msgid "初めての方もこのメールアドレスで自動的に登録されます。"
+msgstr ""
+
+#: templates/login.html:158
+msgid "パスワードは不要です。"
+msgstr ""
+
+#: templates/portal_by_email.html:8
+msgid "サブスクリプション管理 | るみろぐ"
+msgstr ""
+
+#: templates/portal_by_email.html:109
+msgid "サブスクリプション管理"
+msgstr ""
+
+#: templates/portal_by_email.html:111
+msgid "ご登録時のメールアドレスを入力すると、"
+msgstr ""
+
+#: templates/portal_by_email.html:112
+msgid "解約・プラン変更ページに移動します。"
+msgstr ""
+
+#: templates/portal_by_email.html:120
+msgid "管理ページへ進む"
+msgstr ""
+
+#: templates/portal_by_email.html:127
+msgid "分析ページに戻る"
+msgstr ""
+
+#: templates/premium.html:8
+msgid "プレミアムプラン | るみろぐ"
+msgstr ""
+
+#: templates/premium.html:192
+msgid "プレミアムプラン"
+msgstr ""
+
+#: templates/premium.html:193
+msgid "本格的な肌ケアを、続けるために。"
+msgstr ""
+
+#: templates/premium.html:199
+msgid "無料プラン"
+msgstr ""
+
+#: templates/premium.html:201
+msgid "ずっと無料"
+msgstr ""
+
+#: templates/premium.html:203
+msgid "月5回の分析"
+msgstr ""
+
+#: templates/premium.html:204 templates/premium.html:223
+msgid "基本スキンスコア（10項目）"
+msgstr ""
+
+#: templates/premium.html:205 templates/premium.html:224
+msgid "朝・夜・週ケアの提案"
+msgstr ""
+
+#: templates/premium.html:206 templates/premium.html:225
+#: templates/result.html:1091
+msgid "予算内おすすめ構成"
+msgstr ""
+
+#: templates/premium.html:207
+msgid "分析履歴（直近3件）"
+msgstr ""
+
+#: templates/premium.html:208 templates/premium.html:227
+msgid "詳細スコア8項目"
+msgstr ""
+
+#: templates/premium.html:209 templates/premium.html:228
+#: templates/result.html:897
+msgid "左右差の分析"
+msgstr ""
+
+#: templates/premium.html:210 templates/premium.html:229
+#: templates/result.html:1172 templates/result.html:1258
+msgid "週間ルーティン"
+msgstr ""
+
+#: templates/premium.html:219
+msgid "/月"
+msgstr ""
+
+#: templates/premium.html:220
+msgid "税込・いつでも解約可"
+msgstr ""
+
+#: templates/premium.html:222
+msgid "月30回の分析"
+msgstr ""
+
+#: templates/premium.html:226
+msgid "分析履歴 無制限"
+msgstr ""
+
+#: templates/premium.html:240
+msgid "プレミアム会員です"
+msgstr ""
+
+#: templates/premium.html:242
+msgid "現在プレミアムプランをご利用中です。"
+msgstr ""
+
+#: templates/premium.html:243
+msgid "サブスクリプションの管理・解約はカスタマーポータルから行えます。"
+msgstr ""
+
+#: templates/premium.html:248
+msgid "サブスク管理・解約はこちら"
+msgstr ""
+
+#: templates/premium.html:252
+msgid "管理ページへのアクセスは、メールに記載されたプレミアムリンクからお願いします。"
+msgstr ""
+
+#: templates/premium.html:259
+msgid "プレミアムプランを始める"
+msgstr ""
+
+#: templates/premium.html:262
+msgid "メールアドレス（プレミアムキーの送付先）"
+msgstr ""
+
+#: templates/premium.html:267
+msgid "Stripeで安全に支払う"
+msgstr ""
+
+#: templates/premium.html:272
+msgid "Stripe による安全な決済 · カード情報は当サービスに保存されません"
+msgstr ""
+
+#: templates/premium.html:275
+msgid "支払い完了後、入力したメールアドレスに専用リンクをお送りします。¥980/月・いつでも解約可"
+msgstr ""
+
+#: templates/premium.html:281
+msgid "プレミアムキーをお持ちの方"
+msgstr ""
+
+#: templates/premium.html:284
+msgid "プレミアムキー"
+msgstr ""
+
+#: templates/premium.html:285
+msgid "キーを入力してください"
+msgstr ""
+
+#: templates/premium.html:289
+msgid "キーで有効化する"
+msgstr ""
+
+#: templates/premium.html:293
+msgid "購入後にメールで届いたキーを入力すると、プレミアム機能が有効になります。"
+msgstr ""
+
+#: templates/premium.html:307
+msgid "処理中..."
+msgstr ""
+
+#: templates/premium_success.html:8
+msgid "お支払い完了 | るみろぐ"
+msgstr ""
+
+#: templates/premium_success.html:100
+msgid "お支払いが完了しました！"
+msgstr ""
+
+#: templates/premium_success.html:102
+msgid "プレミアムプランへのご登録ありがとうございます。"
+msgstr ""
+
+#: templates/premium_success.html:103
+msgid "まもなく専用リンクをメールでお送りします。"
+msgstr ""
+
+#: templates/premium_success.html:107
+msgid "次のステップ"
+msgstr ""
+
+#: templates/premium_success.html:110
+msgid "登録したメールアドレスを確認してください（数分以内に届きます）"
+msgstr ""
+
+#: templates/premium_success.html:114
+msgid "メール内の「プレミアムリンク」をタップ"
+msgstr ""
+
+#: templates/premium_success.html:118
+msgid "そのリンクをブックマークして毎回ご利用ください"
+msgstr ""
+
+#: templates/premium_success.html:122
+msgid "分析ページへ戻る"
+msgstr ""
+
+#: templates/privacy_policy.html:8
+msgid "プライバシーポリシー | るみろぐ"
+msgstr ""
+
+#: templates/privacy_policy.html:104 templates/terms_of_service.html:95
+msgid "最終更新日：2026年6月16日"
+msgstr ""
+
+#: templates/privacy_policy.html:108
+msgid "はじめに"
+msgstr ""
+
+#: templates/privacy_policy.html:110
+msgid "るみろぐ（以下「本サービス」）は、ユーザーのプライバシーを尊重し、個人情報の保護に努めます。本ポリシーは、本サービスが収集する情報・利用目的・第三者提供について説明するものです。"
+msgstr ""
+
+#: templates/privacy_policy.html:115
+msgid "収集する情報"
+msgstr ""
+
+#: templates/privacy_policy.html:116
+msgid "本サービスでは、以下の情報を取得・利用します。"
+msgstr ""
+
+#: templates/privacy_policy.html:118
+msgid "<strong>顔写真</strong>：肌分析のためにアップロードされた画像。AI分析にのみ使用し、分析完了後はサーバーに保存しません。"
+msgstr ""
+
+#: templates/privacy_policy.html:119
+msgid "<strong>IPアドレス</strong>：利用回数の管理（レート制限）のために収集します。"
+msgstr ""
+
+#: templates/privacy_policy.html:120
+msgid "<strong>メールアドレス</strong>：プレミアムプランご利用のお客様のみ、プレミアムキーの発行・送付に使用します。"
+msgstr ""
+
+#: templates/privacy_policy.html:121
+msgid "<strong>分析結果</strong>：スコア・提案商品などの分析データを、サービス改善のためデータベースに保存します。"
+msgstr ""
+
+#: templates/privacy_policy.html:126
+msgid "情報の利用目的"
+msgstr ""
+
+#: templates/privacy_policy.html:128
+msgid "AIによる肌状態の分析と、パーソナライズされたスキンケア提案の提供"
+msgstr ""
+
+#: templates/privacy_policy.html:129
+msgid "分析履歴の表示・管理"
+msgstr ""
+
+#: templates/privacy_policy.html:130
+msgid "サービスの品質改善および不正利用の防止"
+msgstr ""
+
+#: templates/privacy_policy.html:131
+msgid "プレミアムプランの管理（課金・解約処理）"
+msgstr ""
+
+#: templates/privacy_policy.html:136
+msgid "第三者への情報提供"
+msgstr ""
+
+#: templates/privacy_policy.html:137
+msgid "本サービスは、以下の外部サービスを利用しており、それぞれのプライバシーポリシーに従いデータが処理されます。"
+msgstr ""
+
+#: templates/privacy_policy.html:140
+msgid ""
+"<strong>Google Gemini（Google "
+"LLC）</strong>：アップロードされた顔写真および肌に関するテキスト情報をAI分析のために送信します。"
+msgstr ""
+
+#: templates/privacy_policy.html:141
+msgid "Googleプライバシーポリシー"
+msgstr ""
+
+#: templates/privacy_policy.html:144
+msgid "<strong>楽天株式会社（楽天API）</strong>：スキンケア商品の検索・取得のために商品名・カテゴリ情報を送信します。"
+msgstr ""
+
+#: templates/privacy_policy.html:145
+msgid "楽天プライバシーポリシー"
+msgstr ""
+
+#: templates/privacy_policy.html:148
+msgid ""
+"<strong>Stripe, "
+"Inc.</strong>：プレミアムプランの決済処理のために、メールアドレスおよび支払い情報を送信します。カード番号等の決済情報はStripeが直接処理し、本サービスのサーバーには保存されません。"
+msgstr ""
+
+#: templates/privacy_policy.html:149
+msgid "Stripeプライバシーポリシー"
+msgstr ""
+
+#: templates/privacy_policy.html:152
+msgid "上記以外の目的で第三者に個人情報を提供することはありません。"
+msgstr ""
+
+#: templates/privacy_policy.html:156
+msgid "アフィリエイトについて"
+msgstr ""
+
+#: templates/privacy_policy.html:158
+msgid "本サービスでは、<strong>楽天アフィリエイトプログラム</strong>に参加しています。分析結果に表示される楽天商品リンクには、アフィリエイトタグが含まれており、リンク経由でご購入いただいた場合、本サービスが楽天より紹介報酬を受け取ることがあります。"
+msgstr ""
+
+#: templates/privacy_policy.html:161
+msgid "ただし、アフィリエイト報酬の有無に関わらず、分析結果はAIによる客観的な分析に基づいており、特定商品を優遇するものではありません。"
+msgstr ""
+
+#: templates/privacy_policy.html:166
+msgid "Cookieおよびセッション情報"
+msgstr ""
+
+#: templates/privacy_policy.html:168
+msgid "本サービスはセッション管理のためにCookieを使用します。Cookieにはプレミアムキーなどのセッション情報が含まれます。ブラウザの設定でCookieを無効にすると、一部機能が正常に動作しない場合があります。"
+msgstr ""
+
+#: templates/privacy_policy.html:175
+msgid "プライバシーに関するご質問・ご要望は、以下のメールアドレスまでお問い合わせください。"
+msgstr ""
+
+#: templates/privacy_policy.html:177 templates/terms_of_service.html:169
+msgid "メール："
+msgstr ""
+
+#: templates/product_ranking.html:166
+msgid "過去の分析で提案された回数が多い商品をカテゴリ別に表示しています。"
+msgstr ""
+
+#: templates/product_ranking.html:178 templates/result.html:560
+#, python-format
+msgid "%(rank)s位"
+msgstr ""
+
+#: templates/product_ranking.html:185
+#, python-format
+msgid "%(count)s回"
+msgstr ""
+
+#: templates/product_ranking.html:185
+msgid "提案"
+msgstr ""
+
+#: templates/product_ranking.html:193
+msgid "まだ表示できる商品がありません。"
+msgstr ""
+
+#: templates/product_ranking.html:197
+msgid "分析履歴に戻る"
+msgstr ""
+
+#: templates/result.html:403
+msgid "分析結果 | るみろぐ"
+msgstr ""
+
+#: templates/result.html:432 templates/result.html:555
+#: templates/result.html:612
+msgid "商品"
+msgstr ""
+
+#: templates/result.html:441 templates/result.html:631
+msgid "頻度"
+msgstr ""
+
+#: templates/result.html:445
+msgid "役割"
+msgstr ""
+
+#: templates/result.html:448 templates/result.html:624
+msgid "目的"
+msgstr ""
+
+#: templates/result.html:461
+msgid "理由"
+msgstr ""
+
+#: templates/result.html:467
+msgid "改善期待"
+msgstr ""
+
+#: templates/result.html:478 templates/result.html:650
+msgid "参考価格"
+msgstr ""
+
+#: templates/result.html:482 templates/result.html:654
+msgid "価格確認中"
+msgstr ""
+
+#: templates/result.html:497 templates/result.html:665
+msgid "Amazonで見る"
+msgstr ""
+
+#: templates/result.html:507 templates/result.html:674
+msgid "楽天で見る"
+msgstr ""
+
+#: templates/result.html:513
+msgid "適合"
+msgstr ""
+
+#: templates/result.html:513 templates/result.html:518
+msgid "改善"
+msgstr ""
+
+#: templates/result.html:518
+msgid "ベース"
+msgstr ""
+
+#: templates/result.html:518
+msgid "ルーティン"
+msgstr ""
+
+#: templates/result.html:518
+msgid "最終"
+msgstr ""
+
+#: templates/result.html:526
+msgid "なぜこの商品が1位か"
+msgstr ""
+
+#: templates/result.html:532
+msgid "次点候補"
+msgstr ""
+
+#: templates/result.html:536
+msgid "2位"
+msgstr ""
+
+#: templates/result.html:536
+msgid "3位"
+msgstr ""
+
+#: templates/result.html:543
+msgid "との違い"
+msgstr ""
+
+#: templates/result.html:552
+msgid "商品比較（価格・コスパ）"
+msgstr ""
+
+#: templates/result.html:555
+msgid "価格"
+msgstr ""
+
+#: templates/result.html:555
+msgid "スコア"
+msgstr ""
+
+#: templates/result.html:555
+msgid "コスパ"
+msgstr ""
+
+#: templates/result.html:562
+msgid "不明"
+msgstr ""
+
+#: templates/result.html:574
+msgid "コスパ = 1,000円あたりの評価スコア。◎は最もコスパが良い候補。"
+msgstr ""
+
+#: templates/result.html:579
+msgid "詳細スコア・次点候補は有料プランで確認できます"
+msgstr ""
+
+#: templates/result.html:580 templates/result.html:835
+#: templates/result.html:886 templates/result.html:955
+#: templates/result.html:983 templates/result.html:1261
+msgid "詳しく見る"
+msgstr ""
+
+#: templates/result.html:621
+msgid "カテゴリ"
+msgstr ""
+
+#: templates/result.html:627
+msgid "機能"
+msgstr ""
+
+#: templates/result.html:636
+msgid "ルーティンとの相性"
+msgstr ""
+
+#: templates/result.html:689
+msgid "分析結果"
+msgstr ""
+
+#: templates/result.html:692
+msgid "今の肌に合うスキンケアをまとめました"
+msgstr ""
+
+#: templates/result.html:698
+msgid "Skin Score"
+msgstr ""
+
+#: templates/result.html:700
+msgid "総合スコア"
+msgstr ""
+
+#: templates/result.html:702
+msgid "今日の肌コンディションの目安です"
+msgstr ""
+
+#: templates/result.html:707
+msgid "項目別スコア"
+msgstr ""
+
+#: templates/result.html:730
+msgid "保湿"
+msgstr ""
+
+#: templates/result.html:777
+msgid "改善優先順位"
+msgstr ""
+
+#: templates/result.html:788
+msgid "項目間の関係・刺激リスク・相乗効果を考慮したAIの分析で優先順位を決定し、該当する項目には詳細スコアの内訳を表示しています。"
+msgstr ""
+
+#: templates/result.html:817
+msgid "スコアが低い順に上位3項目を表示しています。プレミアムではAIが戦略的に優先順位を決定します。"
+msgstr ""
+
+#: templates/result.html:834
+msgid "AI戦略分析（項目間の関係・刺激リスク・相乗効果の考慮）と、より細かい詳細スコアを合わせた優先順位はプレミアム機能です。"
+msgstr ""
+
+#: templates/result.html:844
+msgid "詳細スコア"
+msgstr ""
+
+#: templates/result.html:885
+msgid "詳細スコアはプレミアム機能です。"
+msgstr ""
+
+#: templates/result.html:903
+msgid "全体"
+msgstr ""
+
+#: templates/result.html:926
+msgid "肌状態のまとめ"
+msgstr ""
+
+#: templates/result.html:935
+msgid "肌タイプ分析"
+msgstr ""
+
+#: templates/result.html:954
+msgid "肌タイプ分析はプレミアム機能です。"
+msgstr ""
+
+#: templates/result.html:966
+msgid "原因分析"
+msgstr ""
+
+#: templates/result.html:976
+msgid "根拠"
+msgstr ""
+
+#: templates/result.html:977
+msgid "ケア方針"
+msgstr ""
+
+#: templates/result.html:982
+msgid "肌悩みの根本原因分析はプレミアム機能です。"
+msgstr ""
+
+#: templates/result.html:992
+msgid "100点改善プラン"
+msgstr ""
+
+#: templates/result.html:997
+msgid "今すぐ（1週間）"
+msgstr ""
+
+#: templates/result.html:1012
+msgid "1〜4週間"
+msgstr ""
+
+#: templates/result.html:1027
+msgid "1〜3ヶ月"
+msgstr ""
+
+#: templates/result.html:1042
+msgid "スコア改善予測"
+msgstr ""
+
+#: templates/result.html:1044
+msgid "1週間後"
+msgstr ""
+
+#: templates/result.html:1045
+msgid "1か月後"
+msgstr ""
+
+#: templates/result.html:1046
+msgid "3か月後"
+msgstr ""
+
+#: templates/result.html:1054
+msgid "改善の順番"
+msgstr ""
+
+#: templates/result.html:1066
+msgid "予算チェック"
+msgstr ""
+
+#: templates/result.html:1069
+msgid "入力予算"
+msgstr ""
+
+#: templates/result.html:1074
+msgid "未入力"
+msgstr ""
+
+#: templates/result.html:1080
+msgid "推定合計"
+msgstr ""
+
+#: templates/result.html:1096 templates/result.html:1190
+msgid "朝"
+msgstr ""
+
+#: templates/result.html:1115 templates/result.html:1201
+msgid "夜"
+msgstr ""
+
+#: templates/result.html:1134 templates/result.html:1162
+msgid "週ケア"
+msgstr ""
+
+#: templates/result.html:1152
+msgid "プラン合計"
+msgstr ""
+
+#: templates/result.html:1158
+msgid "朝のスキンケア"
+msgstr ""
+
+#: templates/result.html:1160
+msgid "夜のスキンケア"
+msgstr ""
+
+#: templates/result.html:1164
+msgid "サプリメント"
+msgstr ""
+
+#: templates/result.html:1166
+msgid "美容機器"
+msgstr ""
+
+#: templates/result.html:1187
+msgid "使用順序"
+msgstr ""
+
+#: templates/result.html:1260
+msgid "1週間の使い分けプランは有料プランで確認できます。"
+msgstr ""
+
+#: templates/result.html:1267
+msgid "注意点"
+msgstr ""
+
+#: templates/result.html:1276
+msgid "保存情報"
+msgstr ""
+
+#: templates/result.html:1280
+msgid "保存日時"
+msgstr ""
+
+#: templates/result.html:1286
+msgid "もっと詳しく分析したい方はこちら"
+msgstr ""
+
+#: templates/result.html:1292
+msgid "もっと詳しく分析"
+msgstr ""
+
+#: templates/result.html:1296
+msgid "ニキビ跡・毛穴・バリア状態をさらに深く分析します"
+msgstr ""
+
+#: templates/result.html:1303
+msgid "詳細分析を見る"
+msgstr ""
+
+#: templates/result.html:1309
+msgid "戻る"
+msgstr ""
+
+#: templates/result.html:1310
+msgid "履歴を見る"
+msgstr ""
+
+#: templates/result.html:1314
+msgid "この結果について不具合報告・ご意見を送る"
+msgstr ""
+
+#: templates/terms_of_service.html:8
+msgid "利用規約 | るみろぐ"
+msgstr ""
+
+#: templates/terms_of_service.html:99
+msgid "第1条（適用）"
+msgstr ""
+
+#: templates/terms_of_service.html:101
+msgid "本規約は、るみろぐ（以下「本サービス」）の利用に関する条件を定めるものです。本サービスをご利用いただくことで、本規約に同意したものとみなします。"
+msgstr ""
+
+#: templates/terms_of_service.html:106
+msgid "第2条（サービスの内容）"
+msgstr ""
+
+#: templates/terms_of_service.html:108
+msgid "本サービスは、AIを利用した肌状態の分析・スキンケア商品の提案を行うものです。提案内容はあくまでも参考情報であり、医療的な診断・治療の代替となるものではありません。肌トラブルや皮膚疾患については、医療機関にご相談ください。"
+msgstr ""
+
+#: templates/terms_of_service.html:113
+msgid "第3条（禁止事項）"
+msgstr ""
+
+#: templates/terms_of_service.html:114
+msgid "ユーザーは、以下の行為を行ってはなりません。"
+msgstr ""
+
+#: templates/terms_of_service.html:116
+msgid "本サービスの運営を妨害する行為"
+msgstr ""
+
+#: templates/terms_of_service.html:117
+msgid "自動化されたツール等による過剰なアクセス"
+msgstr ""
+
+#: templates/terms_of_service.html:118
+msgid "他者になりすます行為"
+msgstr ""
+
+#: templates/terms_of_service.html:119
+msgid "本サービスを通じて得た情報の無断転載・商用利用"
+msgstr ""
+
+#: templates/terms_of_service.html:120
+msgid "法令または公序良俗に違反する行為"
+msgstr ""
+
+#: templates/terms_of_service.html:121
+msgid "その他、運営者が不適切と判断する行為"
+msgstr ""
+
+#: templates/terms_of_service.html:126
+msgid "第4条（プレミアムプラン）"
+msgstr ""
+
+#: templates/terms_of_service.html:128
+msgid "プレミアムプランは月額制のサブスクリプションです。"
+msgstr ""
+
+#: templates/terms_of_service.html:129
+msgid "料金はStripe経由で毎月自動決済されます。"
+msgstr ""
+
+#: templates/terms_of_service.html:130
+msgid "解約はカスタマーポータルからいつでも行えます。解約後は次回請求日までサービスをご利用いただけます。"
+msgstr ""
+
+#: templates/terms_of_service.html:131
+msgid "返金は原則として行いませんが、二重課金等の明らかなシステム不具合が発生した場合はご連絡ください。"
+msgstr ""
+
+#: templates/terms_of_service.html:136
+msgid "第5条（免責事項）"
+msgstr ""
+
+#: templates/terms_of_service.html:138
+msgid "本サービスの分析結果はAIによる参考情報であり、正確性・完全性を保証するものではありません。"
+msgstr ""
+
+#: templates/terms_of_service.html:139
+msgid "本サービスの利用により生じた損害について、運営者は責任を負いません。"
+msgstr ""
+
+#: templates/terms_of_service.html:140
+msgid "外部サービス（楽天・Stripe・Google Gemini）の障害・仕様変更により、本サービスの一部機能が利用できなくなる場合があります。"
+msgstr ""
+
+#: templates/terms_of_service.html:141
+msgid "推奨商品は楽天市場での取り扱い状況により変動します。購入前に商品ページをご確認ください。"
+msgstr ""
+
+#: templates/terms_of_service.html:146
+msgid "第6条（アフィリエイト）"
+msgstr ""
+
+#: templates/terms_of_service.html:148
+msgid "本サービスは楽天アフィリエイトプログラムに参加しており、分析結果に表示されるリンクを通じて商品を購入された場合、運営者が楽天から紹介報酬を受け取ることがあります。これによりユーザーの購入価格が変わることはありません。"
+msgstr ""
+
+#: templates/terms_of_service.html:153
+msgid "第7条（サービスの変更・終了）"
+msgstr ""
+
+#: templates/terms_of_service.html:155
+msgid "運営者は、予告なくサービス内容の変更・停止・終了を行うことがあります。これによりユーザーに損害が生じた場合でも、運営者は責任を負いません。"
+msgstr ""
+
+#: templates/terms_of_service.html:160
+msgid "第8条（準拠法・管轄）"
+msgstr ""
+
+#: templates/terms_of_service.html:162
+msgid "本規約は日本法に準拠します。本サービスに関する紛争については、運営者の所在地を管轄する裁判所を専属的合意管轄裁判所とします。"
+msgstr ""
+
+#: templates/terms_of_service.html:168
+msgid "本規約に関するご質問は、以下のメールアドレスまでお問い合わせください。"
+msgstr ""
+

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{{ current_locale }}">
 <style>
     .role-badge {
         background: linear-gradient(135deg, #ffe6ee, #ffd6e8);
@@ -400,7 +400,7 @@
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>分析結果 | るみろぐ</title>
+    <title>{{ _("分析結果 | るみろぐ") }}</title>
     <link href="https://fonts.googleapis.com/css2?family=Kosugi+Maru&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
@@ -429,64 +429,64 @@
           >
 
           <div class="product-img-empty {% if step.get('image') %}is-hidden{% endif %}">
-              {{ step.get('category', '') or '商品' }}
+              {{ _(step.get('category', '')) if step.get('category') else _('商品') }}
           </div>
-  
+
           <div class="product-body">
               <div class="product-name">
                   {{ (step.get("brand", "") ~ " " ~ step.get("product", "")).strip() }}
               </div>
-  
+
               {% if show_frequency and step.get("frequency", "") %}
-              <div class="product-meta">頻度: {{ step.get("frequency", "") }}</div>
+              <div class="product-meta">{{ _("頻度") }}: {{ step.get("frequency", "") }}</div>
               {% endif %}
-  
+
               <div class="product-meta">
-                  役割: <span class="role-badge">{{ step.get("display_role", step.get("category", "")) }}</span>
+                  {{ _("役割") }}: <span class="role-badge">{{ _(step.get("display_role", step.get("category", ""))) }}</span>
               </div>
-  
-              <div class="product-meta">目的: {{ step.get("purpose", "") }}</div>
+
+              <div class="product-meta">{{ _("目的") }}: {{ step.get("purpose", "") }}</div>
 
               {% if step.get("concern_tags") %}
               <div class="product-meta">
                   <div class="concern-tags">
                       {% for tag in step.get("concern_tags", []) %}
-                      <span class="concern-tag">{{ tag }}</span>
+                      <span class="concern-tag">{{ _(tag) }}</span>
                       {% endfor %}
                   </div>
               </div>
               {% endif %}
 
               <div class="product-meta">
-                  <div class="reason-label">理由</div>
+                  <div class="reason-label">{{ _("理由") }}</div>
                   <div class="reason-text">{{ step.get("recommend_reason", "") }}</div>
               </div>
 
               {% if step.get("top_impacts", []) %}
               <div class="product-meta">
-                  <div class="reason-label">改善期待</div>
+                  <div class="reason-label">{{ _("改善期待") }}</div>
                   <div class="reason-text">
                       {% for item in step.get("top_impacts", []) %}
-                          {{ item.get("label", "") }} +{{ item.get("value", 0) }}{% if not loop.last %} / {% endif %}
+                          {{ _(item.get("label", "")) }} +{{ item.get("value", 0) }}{% if not loop.last %} / {% endif %}
                       {% endfor %}
                   </div>
               </div>
               {% endif %}
-  
+
               <div class="product-price">
                   {% if step.get("rakuten_link") and step.get("price", 0) > 0 %}
-                      参考価格: ¥{{ step.get("price", 0) }}
+                      {{ _("参考価格") }}: ¥{{ step.get("price", 0) }}
                   {% elif step.get("price_band", "") %}
                       {{ step.get("price_band", "") }}
                   {% else %}
-                      価格確認中
+                      {{ _("価格確認中") }}
                   {% endif %}
               </div>
-  
+
               <div class="buy-lead">
                   {{ step.get("buy_lead", "") }}
               </div>
-  
+
               <div class="buy-buttons">
                   {% if step.get("amazon_link") %}
                   <a href="{{ step.amazon_link }}"
@@ -494,7 +494,7 @@
                      data-src="amazon"
                      data-prod="{{ step.get('product', '')|e }}"
                      data-cat="{{ step.get('category', '')|e }}">
-                      <button type="button" class="amazon-btn">Amazonで見る</button>
+                      <button type="button" class="amazon-btn">{{ _("Amazonで見る") }}</button>
                   </a>
                   {% endif %}
 
@@ -504,43 +504,43 @@
                      data-src="rakuten"
                      data-prod="{{ step.get('product', '')|e }}"
                      data-cat="{{ step.get('category', '')|e }}">
-                      <button type="button" class="rakuten-btn">楽天で見る</button>
+                      <button type="button" class="rakuten-btn">{{ _("楽天で見る") }}</button>
                   </a>
                   {% endif %}
               </div>
-  
+
               <div class="product-score">
-                  適合: {{ step.get("base_score", 0) }} / 改善: {{ step.get("improve_score", 0) }}
+                  {{ _("適合") }}: {{ step.get("base_score", 0) }} / {{ _("改善") }}: {{ step.get("improve_score", 0) }}
               </div>
-  
+
               {% if step.get("score_detail") %}
               <div class="score-detail-compact">
-                  ベース {{ step.score_detail.base }} / 改善 {{ step.score_detail.improve }} / ルーティン {{ step.score_detail.routine }} / 最終 {{ step.score_detail.final }}
+                  {{ _("ベース") }} {{ step.score_detail.base }} / {{ _("改善") }} {{ step.score_detail.improve }} / {{ _("ルーティン") }} {{ step.score_detail.routine }} / {{ _("最終") }} {{ step.score_detail.final }}
               </div>
               {% endif %}
-  
+
               {% if data.get("is_premium") or data.get("is_dev_mode") %}
                   {% set comparison = step.get("candidate_comparison") or {} %}
                   {% if comparison.get("why_best") %}
                   <div class="candidate-comparison-box">
-                      <div class="candidate-comparison-title">なぜこの商品が1位か</div>
+                      <div class="candidate-comparison-title">{{ _("なぜこの商品が1位か") }}</div>
                       <div class="candidate-comparison-text">{{ comparison.get("why_best") }}</div>
                   </div>
                   {% endif %}
                   {% if step.get("top_candidates", [])|length > 1 %}
                   <div class="sub-candidates-box compact">
-                      <div class="sub-candidates-title">次点候補</div>
+                      <div class="sub-candidates-title">{{ _("次点候補") }}</div>
                       <div class="sub-candidate-names">
                           {% for c in step.get("top_candidates", [])[1:3] %}
                               <span class="sub-candidate-name-only">
-                                  {% if loop.index == 1 %}2位{% elif loop.index == 2 %}3位{% endif %}
+                                  {% if loop.index == 1 %}{{ _("2位") }}{% elif loop.index == 2 %}{{ _("3位") }}{% endif %}
                                   {{ (c.get("brand", "") ~ " " ~ c.get("name", "")).strip() }}
                               </span>{% if not loop.last %}<span class="sub-candidate-sep"> / </span>{% endif %}
                           {% endfor %}
                       </div>
                       {% for diff in comparison.get("diffs", []) %}
                       <div class="candidate-diff-row">
-                          <span class="candidate-diff-label">{{ diff.label }}との違い:</span>
+                          <span class="candidate-diff-label">{{ _(diff.label) }}{{ _("との違い") }}:</span>
                           <span class="candidate-diff-text">{{ diff.text }}</span>
                       </div>
                       {% endfor %}
@@ -549,17 +549,17 @@
                   {% set comp_table = step.get("candidate_comparison_table") or [] %}
                   {% if comp_table|length > 1 %}
                   <div class="candidate-compare-table-box">
-                      <div class="sub-candidates-title">商品比較（価格・コスパ）</div>
+                      <div class="sub-candidates-title">{{ _("商品比較（価格・コスパ）") }}</div>
                       <table class="candidate-compare-table">
                           <thead>
-                              <tr><th></th><th>商品</th><th>価格</th><th>スコア</th><th>コスパ</th></tr>
+                              <tr><th></th><th>{{ _("商品") }}</th><th>{{ _("価格") }}</th><th>{{ _("スコア") }}</th><th>{{ _("コスパ") }}</th></tr>
                           </thead>
                           <tbody>
                               {% for row in comp_table %}
                               <tr>
-                                  <td>{{ row.rank }}位</td>
+                                  <td>{{ _("%(rank)s位", rank=row.rank) }}</td>
                                   <td>{{ (row.brand ~ " " ~ row.name).strip() }}</td>
-                                  <td>{% if row.price %}¥{{ "{:,}".format(row.price) }}{% else %}不明{% endif %}</td>
+                                  <td>{% if row.price %}¥{{ "{:,}".format(row.price) }}{% else %}{{ _("不明") }}{% endif %}</td>
                                   <td>{{ row.score }}</td>
                                   <td>
                                       {% if row.cost_perf is not none %}
@@ -571,13 +571,13 @@
                               {% endfor %}
                           </tbody>
                       </table>
-                      <div class="candidate-compare-note">コスパ = 1,000円あたりの評価スコア。◎は最もコスパが良い候補。</div>
+                      <div class="candidate-compare-note">{{ _("コスパ = 1,000円あたりの評価スコア。◎は最もコスパが良い候補。") }}</div>
                   </div>
                   {% endif %}
               {% else %}
                   <div class="premium-lock-box">
-                      詳細スコア・次点候補は有料プランで確認できます
-                      <a href="/pricing?source=result" class="premium-link">詳しく見る</a>
+                      {{ _("詳細スコア・次点候補は有料プランで確認できます") }}
+                      <a href="/pricing?source=result" class="premium-link">{{ _("詳しく見る") }}</a>
                   </div>
               {% endif %}
           </div>
@@ -609,7 +609,7 @@
               onerror="this.classList.add('is-hidden'); this.nextElementSibling.classList.remove('is-hidden');"
           >
           <div class="product-img-empty {% if item.get('image') %}is-hidden{% endif %}">
-              {{ item.get('category', '') or '商品' }}
+              {{ _(item.get('category', '')) if item.get('category') else _('商品') }}
           </div>
 
           <div class="product-body">
@@ -618,22 +618,22 @@
               </div>
 
               <div class="product-meta">
-                  カテゴリ: <span class="role-badge">{{ item.get('category', '') }}</span>
+                  {{ _("カテゴリ") }}: <span class="role-badge">{{ _(item.get('category', '')) }}</span>
               </div>
 
-              <div class="product-meta">目的: {{ item.get('purpose', '') }}</div>
+              <div class="product-meta">{{ _("目的") }}: {{ item.get('purpose', '') }}</div>
 
               {% if is_device and item.get('device_function') %}
-              <div class="product-meta">機能: {{ item.get('device_function', '') }}</div>
+              <div class="product-meta">{{ _("機能") }}: {{ item.get('device_function', '') }}</div>
               {% endif %}
 
               {% if is_device and item.get('frequency') %}
-              <div class="product-meta">頻度: {{ item.get('frequency', '') }}</div>
+              <div class="product-meta">{{ _("頻度") }}: {{ item.get('frequency', '') }}</div>
               {% endif %}
 
               {% if item.get('reason') %}
               <div class="product-meta">
-                  <div class="reason-label">ルーティンとの相性</div>
+                  <div class="reason-label">{{ _("ルーティンとの相性") }}</div>
                   <div class="reason-text">{{ item.get('reason', '') }}</div>
               </div>
               {% endif %}
@@ -647,11 +647,11 @@
 
               <div class="product-price">
                   {% if item.get('rakuten_link') and item.get('price', 0) > 0 %}
-                      参考価格: ¥{{ item.get('price', 0) }}
+                      {{ _("参考価格") }}: ¥{{ item.get('price', 0) }}
                   {% elif item.get('price_band', '') %}
                       {{ item.get('price_band', '') }}
                   {% else %}
-                      価格確認中
+                      {{ _("価格確認中") }}
                   {% endif %}
               </div>
 
@@ -662,7 +662,7 @@
                      data-src="amazon"
                      data-prod="{{ item.get('product', '')|e }}"
                      data-cat="{{ item.get('category', '')|e }}">
-                      <button type="button" class="amazon-btn">Amazonで見る</button>
+                      <button type="button" class="amazon-btn">{{ _("Amazonで見る") }}</button>
                   </a>
                   {% endif %}
                   {% if item.get('rakuten_link') %}
@@ -671,7 +671,7 @@
                      data-src="rakuten"
                      data-prod="{{ item.get('product', '')|e }}"
                      data-cat="{{ item.get('category', '')|e }}">
-                      <button type="button" class="rakuten-btn">楽天で見る</button>
+                      <button type="button" class="rakuten-btn">{{ _("楽天で見る") }}</button>
                   </a>
                   {% endif %}
               </div>
@@ -686,84 +686,84 @@
 
     <div class="result-container">
         <section class="result-hero">
-            <h1 class="result-title">分析結果</h1>
+            <h1 class="result-title">{{ _("分析結果") }}</h1>
             <p class="result-subtitle">
-                AIがあなたの肌状態を分析し、<br>
-                今の肌に合うスキンケアをまとめました
+                {{ _("AIがあなたの肌状態を分析し、") }}<br>
+                {{ _("今の肌に合うスキンケアをまとめました") }}
             </p>
         </section>
 
         <section class="result-grid">
             <div class="result-card">
-                <h2 class="section-title">Skin Score</h2>
+                <h2 class="section-title">{{ _("Skin Score") }}</h2>
                 <div class="skin-score-main">
-                    <div class="skin-score-label">総合スコア</div>
+                    <div class="skin-score-label">{{ _("総合スコア") }}</div>
                     <div class="skin-score-value">{{ data.get("skin_score", "-") }}</div>
-                    <div class="skin-score-caption">今日の肌コンディションの目安です</div>
+                    <div class="skin-score-caption">{{ _("今日の肌コンディションの目安です") }}</div>
                 </div>
             </div>
-            
+
             <div class="result-card">
-                <h2 class="section-title">項目別スコア</h2>
+                <h2 class="section-title">{{ _("項目別スコア") }}</h2>
                 {# 各スコアの理由文は有料機能。スコア数値自体は無料会員にも表示する #}
                 {% set reasons = data.get("score_reasons", {}) if (data.get("is_premium") or data.get("is_dev_mode")) else {} %}
                 <div class="score-mini-grid">
                         <div class="score-mini">
-                            <div class="score-mini-name">皮脂バランス</div>
+                            <div class="score-mini-name">{{ _("皮脂バランス") }}</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("oil_balance", "-") }}</div>
                             {% if reasons.get("oil_balance") %}<div class="score-mini-reason">{{ reasons.get("oil_balance") }}</div>{% endif %}
                         </div>
 
                         <div class="score-mini">
-                            <div class="score-mini-name">赤み</div>
+                            <div class="score-mini-name">{{ _("赤み") }}</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("redness", "-") }}</div>
                             {% if reasons.get("redness") %}<div class="score-mini-reason">{{ reasons.get("redness") }}</div>{% endif %}
                         </div>
 
                         <div class="score-mini">
-                            <div class="score-mini-name">毛穴</div>
+                            <div class="score-mini-name">{{ _("毛穴") }}</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("pores", "-") }}</div>
                             {% if reasons.get("pores") %}<div class="score-mini-reason">{{ reasons.get("pores") }}</div>{% endif %}
                         </div>
 
                         <div class="score-mini">
-                            <div class="score-mini-name">保湿</div>
+                            <div class="score-mini-name">{{ _("保湿") }}</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("hydration", "-") }}</div>
                             {% if reasons.get("hydration") %}<div class="score-mini-reason">{{ reasons.get("hydration") }}</div>{% endif %}
                         </div>
 
                         <div class="score-mini">
-                            <div class="score-mini-name">ハリ</div>
+                            <div class="score-mini-name">{{ _("ハリ") }}</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("firmness", "-") }}</div>
                             {% if reasons.get("firmness") %}<div class="score-mini-reason">{{ reasons.get("firmness") }}</div>{% endif %}
                         </div>
 
                         <div class="score-mini">
-                            <div class="score-mini-name">ニキビ</div>
+                            <div class="score-mini-name">{{ _("ニキビ") }}</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("acne", "-") }}</div>
                             {% if reasons.get("acne") %}<div class="score-mini-reason">{{ reasons.get("acne") }}</div>{% endif %}
                         </div>
 
                         <div class="score-mini">
-                            <div class="score-mini-name">くすみ</div>
+                            <div class="score-mini-name">{{ _("くすみ") }}</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("dullness", "-") }}</div>
                             {% if reasons.get("dullness") %}<div class="score-mini-reason">{{ reasons.get("dullness") }}</div>{% endif %}
                         </div>
 
                         <div class="score-mini">
-                            <div class="score-mini-name">バリア</div>
+                            <div class="score-mini-name">{{ _("バリア") }}</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("barrier", "-") }}</div>
                             {% if reasons.get("barrier") %}<div class="score-mini-reason">{{ reasons.get("barrier") }}</div>{% endif %}
                         </div>
 
                         <div class="score-mini">
-                            <div class="score-mini-name">キメ</div>
+                            <div class="score-mini-name">{{ _("キメ") }}</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("texture", "-") }}</div>
                             {% if reasons.get("texture") %}<div class="score-mini-reason">{{ reasons.get("texture") }}</div>{% endif %}
                         </div>
-                        
+
                         <div class="score-mini">
-                            <div class="score-mini-name">色ムラ</div>
+                            <div class="score-mini-name">{{ _("色ムラ") }}</div>
                             <div class="score-mini-value">{{ data.get("scores", {}).get("tone_evenness", "-") }}</div>
                             {% if reasons.get("tone_evenness") %}<div class="score-mini-reason">{{ reasons.get("tone_evenness") }}</div>{% endif %}
                         </div>
@@ -774,7 +774,7 @@
         {# ===== 改善優先順位 ===== #}
         <section class="result-card">
             <div class="routine-header">
-                <h2 class="section-title" style="margin:0;">改善優先順位</h2>
+                <h2 class="section-title" style="margin:0;">{{ _("改善優先順位") }}</h2>
                 {% if data.get("is_premium") or data.get("is_dev_mode") %}
                 <div class="routine-chip">Premium</div>
                 {% endif %}
@@ -785,14 +785,14 @@
                優先順位とし、対応する詳細サブスコア(赤ニキビ跡/色素沈着/開き毛穴/黒ずみ毛穴/
                透明感/肌トーン均一性/肌バランス)がある項目には内訳として子要素で表示。
                左右差(左右差)は基本項目から独立した指標のため末尾に表示 #}
-            <p style="font-size:12px;color:#9b7f88;margin:0 0 12px;">項目間の関係・刺激リスク・相乗効果を考慮したAIの分析で優先順位を決定し、該当する項目には詳細スコアの内訳を表示しています。</p>
+            <p style="font-size:12px;color:#9b7f88;margin:0 0 12px;">{{ _("項目間の関係・刺激リスク・相乗効果を考慮したAIの分析で優先順位を決定し、該当する項目には詳細スコアの内訳を表示しています。") }}</p>
             <div class="improvement-priority-list">
                 {% for item in data.get("premium_improvement_priority", []) %}
                 <div class="ip-row">
                     <div class="ip-rank {% if item.rank == 1 %}ip-rank-1{% elif item.rank == 2 %}ip-rank-2{% elif item.rank == 3 %}ip-rank-3{% endif %}">{{ item.rank }}</div>
                     <div class="ip-body">
                         <div class="ip-header-row">
-                            <span class="ip-label">{{ item.label }}</span>
+                            <span class="ip-label">{{ _(item.label) }}</span>
                             <span class="ip-score {% if item.score <= 44 %}ip-score-low{% elif item.score <= 64 %}ip-score-mid{% else %}ip-score-ok{% endif %}">{{ item.score }}</span>
                         </div>
                         {% if item.reason %}<div class="ip-reason">{{ item.reason }}</div>{% endif %}
@@ -800,7 +800,7 @@
                         <div class="ip-details">
                             {% for d in item.details %}
                             <div class="ip-detail-row">
-                                <span class="ip-detail-label">{{ d.label }}</span>
+                                <span class="ip-detail-label">{{ _(d.label) }}</span>
                                 <span class="ip-detail-score">{{ d.score }}</span>
                             </div>
                             {% endfor %}
@@ -814,7 +814,7 @@
             {% else %}
             {# 無料: スコア昇順・上位3項目のみ #}
             {% if not (data.get("is_premium") or data.get("is_dev_mode")) %}
-            <p style="font-size:12px;color:#9b7f88;margin:0 0 12px;">スコアが低い順に上位3項目を表示しています。プレミアムではAIが戦略的に優先順位を決定します。</p>
+            <p style="font-size:12px;color:#9b7f88;margin:0 0 12px;">{{ _("スコアが低い順に上位3項目を表示しています。プレミアムではAIが戦略的に優先順位を決定します。") }}</p>
             {% endif %}
             <div class="improvement-priority-list">
                 {% for item in data.get("improvement_priority", [])[:3] %}
@@ -822,7 +822,7 @@
                     <div class="ip-rank {% if item.rank == 1 %}ip-rank-1{% elif item.rank == 2 %}ip-rank-2{% elif item.rank == 3 %}ip-rank-3{% endif %}">{{ item.rank }}</div>
                     <div class="ip-body">
                         <div class="ip-header-row">
-                            <span class="ip-label">{{ item.label }}</span>
+                            <span class="ip-label">{{ _(item.label) }}</span>
                             <span class="ip-score {% if item.score <= 44 %}ip-score-low{% elif item.score <= 64 %}ip-score-mid{% else %}ip-score-ok{% endif %}">{{ item.score }}</span>
                         </div>
                     </div>
@@ -831,8 +831,8 @@
             </div>
             {% if not (data.get("is_premium") or data.get("is_dev_mode")) %}
             <div class="premium-lock-box" style="margin-top:12px;">
-                AI戦略分析（項目間の関係・刺激リスク・相乗効果の考慮）と、より細かい詳細スコアを合わせた優先順位はプレミアム機能です。
-                <a href="/pricing?source=result_priority" class="premium-link">詳しく見る</a>
+                {{ _("AI戦略分析（項目間の関係・刺激リスク・相乗効果の考慮）と、より細かい詳細スコアを合わせた優先順位はプレミアム機能です。") }}
+                <a href="/pricing?source=result_priority" class="premium-link">{{ _("詳しく見る") }}</a>
             </div>
             {% endif %}
             {% endif %}
@@ -841,49 +841,49 @@
         {% if data.get("premium_scores") %}
         <section class="result-card">
             <div class="routine-header">
-                <h2 class="section-title" style="margin:0;">詳細スコア</h2>
+                <h2 class="section-title" style="margin:0;">{{ _("詳細スコア") }}</h2>
                 <div class="routine-chip">Premium</div>
             </div>
 
             {% if data.get("is_premium") or data.get("is_dev_mode") %}
             <div class="score-mini-grid">
                 <div class="score-mini">
-                    <div class="score-mini-name">赤ニキビ跡</div>
+                    <div class="score-mini-name">{{ _("赤ニキビ跡") }}</div>
                     <div class="score-mini-value">{{ data.premium_scores.get("acne_marks_red", 0) }}</div>
                 </div>
                 <div class="score-mini">
-                    <div class="score-mini-name">色素沈着</div>
+                    <div class="score-mini-name">{{ _("色素沈着") }}</div>
                     <div class="score-mini-value">{{ data.premium_scores.get("pigmentation", 0) }}</div>
                 </div>
                 <div class="score-mini">
-                    <div class="score-mini-name">開き毛穴</div>
+                    <div class="score-mini-name">{{ _("開き毛穴") }}</div>
                     <div class="score-mini-value">{{ data.premium_scores.get("enlarged_pores", 0) }}</div>
                 </div>
                 <div class="score-mini">
-                    <div class="score-mini-name">黒ずみ毛穴</div>
+                    <div class="score-mini-name">{{ _("黒ずみ毛穴") }}</div>
                     <div class="score-mini-value">{{ data.premium_scores.get("blackhead_pores", 0) }}</div>
                 </div>
                 <div class="score-mini">
-                    <div class="score-mini-name">透明感</div>
+                    <div class="score-mini-name">{{ _("透明感") }}</div>
                     <div class="score-mini-value">{{ data.premium_scores.get("translucency", 0) }}</div>
                 </div>
                 <div class="score-mini">
-                    <div class="score-mini-name">肌トーン均一性</div>
+                    <div class="score-mini-name">{{ _("肌トーン均一性") }}</div>
                     <div class="score-mini-value">{{ data.premium_scores.get("tone_uniformity", 0) }}</div>
                 </div>
                 <div class="score-mini">
-                    <div class="score-mini-name">肌バランス</div>
+                    <div class="score-mini-name">{{ _("肌バランス") }}</div>
                     <div class="score-mini-value">{{ data.premium_scores.get("skin_balance", 0) }}</div>
                 </div>
                 <div class="score-mini">
-                    <div class="score-mini-name">左右差</div>
+                    <div class="score-mini-name">{{ _("左右差") }}</div>
                     <div class="score-mini-value">{{ data.premium_scores.get("symmetry", 0) }}</div>
                 </div>
             </div>
             {% else %}
             <div class="premium-lock-box">
-                詳細スコアはプレミアム機能です。
-                <a href="/premium" class="premium-link">詳しく見る</a>
+                {{ _("詳細スコアはプレミアム機能です。") }}
+                <a href="/premium" class="premium-link">{{ _("詳しく見る") }}</a>
             </div>
             {% endif %}
         </section>
@@ -894,27 +894,27 @@
         {% if sym.get("summary") or sym.get("left_tendency") or sym.get("right_tendency") %}
         <section class="result-card">
             <div class="routine-header">
-                <h2 class="section-title" style="margin:0;">左右差の分析</h2>
+                <h2 class="section-title" style="margin:0;">{{ _("左右差の分析") }}</h2>
                 <div class="routine-chip">Premium</div>
             </div>
 
             {% if sym.get("summary") %}
             <div class="symmetry-row">
-                <div class="symmetry-label">全体</div>
+                <div class="symmetry-label">{{ _("全体") }}</div>
                 <div class="symmetry-text">{{ sym.get("summary") }}</div>
             </div>
             {% endif %}
 
             {% if sym.get("left_tendency") %}
             <div class="symmetry-row">
-                <div class="symmetry-label">左頬</div>
+                <div class="symmetry-label">{{ _("左頬") }}</div>
                 <div class="symmetry-text">{{ sym.get("left_tendency") }}</div>
             </div>
             {% endif %}
 
             {% if sym.get("right_tendency") %}
             <div class="symmetry-row">
-                <div class="symmetry-label">右頬</div>
+                <div class="symmetry-label">{{ _("右頬") }}</div>
                 <div class="symmetry-text">{{ sym.get("right_tendency") }}</div>
             </div>
             {% endif %}
@@ -923,7 +923,7 @@
         {% endif %}
 
         <section class="result-card">
-            <h2 class="section-title">肌状態のまとめ</h2>
+            <h2 class="section-title">{{ _("肌状態のまとめ") }}</h2>
             <div class="summary-text">{{ data.get("skin_summary", "") }}</div>
         </section>
 
@@ -932,7 +932,7 @@
         {% if sta.get("skin_type") or sta.get("summary") %}
         <section class="result-card">
             <div class="routine-header">
-                <h2 class="section-title" style="margin:0;">肌タイプ分析</h2>
+                <h2 class="section-title" style="margin:0;">{{ _("肌タイプ分析") }}</h2>
                 {% if data.get("is_premium") or data.get("is_dev_mode") %}<div class="routine-chip">Premium</div>{% endif %}
             </div>
             {% if data.get("is_premium") or data.get("is_dev_mode") %}
@@ -951,8 +951,8 @@
                 {% endif %}
             {% else %}
                 <div class="premium-lock-box">
-                    肌タイプ分析はプレミアム機能です。
-                    <a href="/pricing?source=result_skintype" class="premium-link">詳しく見る</a>
+                    {{ _("肌タイプ分析はプレミアム機能です。") }}
+                    <a href="/pricing?source=result_skintype" class="premium-link">{{ _("詳しく見る") }}</a>
                 </div>
             {% endif %}
         </section>
@@ -963,7 +963,7 @@
         {% if causes %}
         <section class="result-card">
             <div class="routine-header">
-                <h2 class="section-title" style="margin:0;">原因分析</h2>
+                <h2 class="section-title" style="margin:0;">{{ _("原因分析") }}</h2>
                 {% if data.get("is_premium") or data.get("is_dev_mode") %}<div class="routine-chip">Premium</div>{% endif %}
             </div>
             {% if data.get("is_premium") or data.get("is_dev_mode") %}
@@ -973,14 +973,14 @@
                         <span class="root-cause-rank">{{ loop.index }}</span>
                         <span class="root-cause-title">{{ c.get("cause", "") }}</span>
                     </div>
-                    {% if c.get("evidence") %}<div class="root-cause-evidence">根拠: {{ c.get("evidence") }}</div>{% endif %}
-                    {% if c.get("care_direction") %}<div class="root-cause-direction">ケア方針: {{ c.get("care_direction") }}</div>{% endif %}
+                    {% if c.get("evidence") %}<div class="root-cause-evidence">{{ _("根拠") }}: {{ c.get("evidence") }}</div>{% endif %}
+                    {% if c.get("care_direction") %}<div class="root-cause-direction">{{ _("ケア方針") }}: {{ c.get("care_direction") }}</div>{% endif %}
                 </div>
                 {% endfor %}
             {% else %}
                 <div class="premium-lock-box">
-                    肌悩みの根本原因分析はプレミアム機能です。
-                    <a href="/pricing?source=result_rootcause" class="premium-link">詳しく見る</a>
+                    {{ _("肌悩みの根本原因分析はプレミアム機能です。") }}
+                    <a href="/pricing?source=result_rootcause" class="premium-link">{{ _("詳しく見る") }}</a>
                 </div>
             {% endif %}
         </section>
@@ -989,12 +989,12 @@
         {% set plan = data.get("improvement_plan", {}) %}
         {% if plan %}
         <section class="result-card">
-            <h2 class="section-title">100点改善プラン</h2>
+            <h2 class="section-title">{{ _("100点改善プラン") }}</h2>
 
             {% set immediate = plan.get("immediate", {}) %}
             {% if immediate %}
             <div class="plan-block">
-                <h3>🔥 今すぐ（1週間）</h3>
+                <h3>🔥 {{ _("今すぐ（1週間）") }}</h3>
                 <p>{{ immediate.get("goal", "") }}</p>
                 {% if immediate.get("actions", []) %}
                 <ul>
@@ -1009,7 +1009,7 @@
             {% set short = plan.get("short_term", {}) %}
             {% if short %}
             <div class="plan-block">
-                <h3>⚡ 1〜4週間</h3>
+                <h3>⚡ {{ _("1〜4週間") }}</h3>
                 <p>{{ short.get("goal", "") }}</p>
                 {% if short.get("actions", []) %}
                 <ul>
@@ -1024,7 +1024,7 @@
             {% set long_term = plan.get("long_term", {}) %}
             {% if long_term %}
             <div class="plan-block">
-                <h3>🌱 1〜3ヶ月</h3>
+                <h3>🌱 {{ _("1〜3ヶ月") }}</h3>
                 <p>{{ long_term.get("goal", "") }}</p>
                 {% if long_term.get("actions", []) %}
                 <ul>
@@ -1039,11 +1039,11 @@
             {% set projection = plan.get("score_projection", {}) %}
             {% if projection %}
             <div class="plan-block">
-                <h3>📈 スコア改善予測</h3>
+                <h3>📈 {{ _("スコア改善予測") }}</h3>
                 <ul>
-                    <li>1週間後: {{ projection.get("1week", 0) }}</li>
-                    <li>1か月後: {{ projection.get("1month", 0) }}</li>
-                    <li>3か月後: {{ projection.get("3month", 0) }}</li>
+                    <li>{{ _("1週間後") }}: {{ projection.get("1week", 0) }}</li>
+                    <li>{{ _("1か月後") }}: {{ projection.get("1month", 0) }}</li>
+                    <li>{{ _("3か月後") }}: {{ projection.get("3month", 0) }}</li>
                 </ul>
             </div>
             {% endif %}
@@ -1051,7 +1051,7 @@
             {% set improvement_steps = plan.get("improvement_steps", []) %}
             {% if improvement_steps %}
             <div class="plan-block">
-                <h3>🪜 改善の順番</h3>
+                <h3>🪜 {{ _("改善の順番") }}</h3>
                 <ul>
                     {% for s in improvement_steps %}
                     <li>{{ s }}</li>
@@ -1063,41 +1063,41 @@
         {% endif %}
 
         <section class="result-card">
-            <h2 class="section-title">予算チェック</h2>
+            <h2 class="section-title">{{ _("予算チェック") }}</h2>
             <div class="budget-box">
                 <div class="budget-pill">
-                    <div class="budget-pill-label">入力予算</div>
+                    <div class="budget-pill-label">{{ _("入力予算") }}</div>
                     <div class="budget-pill-value">
                         {% if data.get("input_budget", 0) > 0 %}
                             ¥{{ data.get("input_budget", 0) }}
                         {% else %}
-                            未入力
+                            {{ _("未入力") }}
                         {% endif %}
                     </div>
                 </div>
 
                 <div class="budget-pill">
-                    <div class="budget-pill-label">推定合計</div>
+                    <div class="budget-pill-label">{{ _("推定合計") }}</div>
                     <div class="budget-pill-value">¥{{ data.get("total_price", 0) }}</div>
                 </div>
 
                 <div class="budget-pill">
-                    <div class="budget-pill-label">判定</div>
-                    <div class="budget-pill-value">{{ data.get("budget_status", "未判定") }}</div>
+                    <div class="budget-pill-label">{{ _("判定") }}</div>
+                    <div class="budget-pill-value">{{ _(data.get("budget_status", "未判定")) }}</div>
                 </div>
             </div>
 
             <div class="budget-fit-section">
-                <h3>予算内おすすめ構成</h3>
+                <h3>{{ _("予算内おすすめ構成") }}</h3>
 
                 {% set morning_steps = data.get("budget_fit_plan", {}).get("morning", {}).get("steps", []) %}
                 {% if morning_steps %}
                 <div class="budget-fit-time-header">
-                    <span class="budget-fit-time-chip">🌅 朝</span>
+                    <span class="budget-fit-time-chip">🌅 {{ _("朝") }}</span>
                 </div>
                 {% for step in morning_steps %}
                 <div class="budget-fit-step">
-                    <div class="budget-fit-step-category">{{ step.get("category", "") }}</div>
+                    <div class="budget-fit-step-category">{{ _(step.get("category", "")) }}</div>
                     <div class="budget-fit-step-body">
                         <div class="budget-fit-step-name">{{ step.get("product", "") }}</div>
                         {% if step.get("purpose") %}<div class="budget-fit-step-purpose">{{ step.get("purpose", "") }}</div>{% endif %}
@@ -1112,11 +1112,11 @@
                 {% set night_steps = data.get("budget_fit_plan", {}).get("night", {}).get("steps", []) %}
                 {% if night_steps %}
                 <div class="budget-fit-time-header">
-                    <span class="budget-fit-time-chip">🌙 夜</span>
+                    <span class="budget-fit-time-chip">🌙 {{ _("夜") }}</span>
                 </div>
                 {% for step in night_steps %}
                 <div class="budget-fit-step">
-                    <div class="budget-fit-step-category">{{ step.get("category", "") }}</div>
+                    <div class="budget-fit-step-category">{{ _(step.get("category", "")) }}</div>
                     <div class="budget-fit-step-body">
                         <div class="budget-fit-step-name">{{ step.get("product", "") }}</div>
                         {% if step.get("purpose") %}<div class="budget-fit-step-purpose">{{ step.get("purpose", "") }}</div>{% endif %}
@@ -1131,11 +1131,11 @@
                 {% set weekly_steps = data.get("budget_fit_plan", {}).get("weekly_care", []) %}
                 {% if weekly_steps %}
                 <div class="budget-fit-time-header">
-                    <span class="budget-fit-time-chip">📅 週ケア</span>
+                    <span class="budget-fit-time-chip">📅 {{ _("週ケア") }}</span>
                 </div>
                 {% for step in weekly_steps %}
                 <div class="budget-fit-step">
-                    <div class="budget-fit-step-category">{{ step.get("category", "") }}</div>
+                    <div class="budget-fit-step-category">{{ _(step.get("category", "")) }}</div>
                     <div class="budget-fit-step-body">
                         <div class="budget-fit-step-name">{{ step.get("product", "") }}</div>
                         {% if step.get("purpose") %}<div class="budget-fit-step-purpose">{{ step.get("purpose", "") }}</div>{% endif %}
@@ -1149,27 +1149,27 @@
 
                 {% if data.get("budget_fit_total", 0) > 0 %}
                 <div class="budget-fit-total">
-                    <span class="budget-fit-total-label">プラン合計</span>
+                    <span class="budget-fit-total-label">{{ _("プラン合計") }}</span>
                     <span class="budget-fit-total-value">¥{{ data.get("budget_fit_total", 0) }}</span>
                 </div>
                 {% endif %}
             </div>
         </section>
-        {{ render_routine_section("朝のスキンケア", "Morning", data.get("morning", {}).get("steps", [])) }}
+        {{ render_routine_section(_("朝のスキンケア"), "Morning", data.get("morning", {}).get("steps", [])) }}
 
-        {{ render_routine_section("夜のスキンケア", "Night", data.get("night", {}).get("steps", [])) }}
-        
-        {{ render_routine_section("週ケア", "Weekly", data.get("weekly_care", []), True) }}
+        {{ render_routine_section(_("夜のスキンケア"), "Night", data.get("night", {}).get("steps", [])) }}
 
-        {{ render_extra_section("サプリメント", "Supplement", data.get("supplements", []), False) }}
+        {{ render_routine_section(_("週ケア"), "Weekly", data.get("weekly_care", []), True) }}
 
-        {{ render_extra_section("美容機器", "Device", data.get("beauty_devices", []), True) }}
+        {{ render_extra_section(_("サプリメント"), "Supplement", data.get("supplements", []), False) }}
+
+        {{ render_extra_section(_("美容機器"), "Device", data.get("beauty_devices", []), True) }}
 
         {% if (data.get("is_premium") or data.get("is_dev_mode")) and data.get("weekly_usage_plan", []) %}
         {% set strategy = data.get("routine_strategy") or {} %}
         <section class="routine-shell">
             <div class="routine-header">
-                <h2 class="routine-title">週間ルーティン</h2>
+                <h2 class="routine-title">{{ _("週間ルーティン") }}</h2>
                 <div class="routine-chip">Premium</div>
             </div>
 
@@ -1184,13 +1184,13 @@
 
             {% if strategy.get("morning_order") or strategy.get("night_order") %}
             <div class="wplan-order-block">
-                <div class="wplan-order-title">使用順序</div>
+                <div class="wplan-order-title">{{ _("使用順序") }}</div>
                 {% if strategy.get("morning_order") %}
                 <div class="wplan-order-row">
-                    <span class="wplan-order-label morning-label">☀ 朝</span>
+                    <span class="wplan-order-label morning-label">☀ {{ _("朝") }}</span>
                     <div class="wplan-order-steps">
                         {% for step in strategy.morning_order %}
-                        <span class="wplan-order-step">{{ step }}</span>
+                        <span class="wplan-order-step">{{ _(step) }}</span>
                         {% if not loop.last %}<span class="wplan-order-arrow">→</span>{% endif %}
                         {% endfor %}
                     </div>
@@ -1198,10 +1198,10 @@
                 {% endif %}
                 {% if strategy.get("night_order") %}
                 <div class="wplan-order-row">
-                    <span class="wplan-order-label night-label">🌙 夜</span>
+                    <span class="wplan-order-label night-label">🌙 {{ _("夜") }}</span>
                     <div class="wplan-order-steps">
                         {% for step in strategy.night_order %}
-                        <span class="wplan-order-step">{{ step }}</span>
+                        <span class="wplan-order-step">{{ _(step) }}</span>
                         {% if not loop.last %}<span class="wplan-order-arrow">→</span>{% endif %}
                         {% endfor %}
                     </div>
@@ -1255,63 +1255,63 @@
 
         {% if not data.get("is_premium") and not data.get("is_dev_mode") %}
         <section class="result-card">
-            <h2 class="section-title">週間ルーティン</h2>
+            <h2 class="section-title">{{ _("週間ルーティン") }}</h2>
             <div class="premium-lock-box">
-                1週間の使い分けプランは有料プランで確認できます。
-                <a href="/pricing?source=result" class="premium-link">詳しく見る</a>
+                {{ _("1週間の使い分けプランは有料プランで確認できます。") }}
+                <a href="/pricing?source=result" class="premium-link">{{ _("詳しく見る") }}</a>
             </div>
         </section>
         {% endif %}
 
         <section class="result-card">
-            <h2 class="section-title">注意点</h2>
+            <h2 class="section-title">{{ _("注意点") }}</h2>
             <ul class="simple-list">
                 {% for warning in data.get("warnings", []) %}
                 <li>{{ warning }}</li>
                 {% endfor %}
             </ul>
         </section>
-       
+
         <section class="result-card">
-            <h2 class="section-title">保存情報</h2>
+            <h2 class="section-title">{{ _("保存情報") }}</h2>
             <ul class="simple-list">
                 <li>ID: {{ data.get("id", "") }}</li>
-                <li>記録日: {{ data.get("record_date", "") }}</li>
-                <li>保存日時: {{ data.get("saved_at", "") }}</li>
+                <li>{{ _("記録日") }}: {{ data.get("record_date", "") }}</li>
+                <li>{{ _("保存日時") }}: {{ data.get("saved_at", "") }}</li>
             </ul>
 
             <div style="text-align:center; margin: 18px 0 10px;">
               <a href="/pricing?source=result"
                  style="font-size:13px; color:#b88b96; text-decoration:underline;">
-                もっと詳しく分析したい方はこちら
+                {{ _("もっと詳しく分析したい方はこちら") }}
               </a>
             </div>
             <div class="deep-analysis-box">
 
               <div class="deep-analysis-title">
-                  🔬 もっと詳しく分析
+                  🔬 {{ _("もっと詳しく分析") }}
               </div>
-          
+
               <div class="deep-analysis-text">
-                  ニキビ跡・毛穴・バリア状態をさらに深く分析します
+                  {{ _("ニキビ跡・毛穴・バリア状態をさらに深く分析します") }}
               </div>
-          
+
               <a
                   href="/deep-analysis/{{ data.id }}"
                   class="deep-analysis-btn"
               >
-                  詳細分析を見る
+                  {{ _("詳細分析を見る") }}
               </a>
-          
+
             </div>
 
             <div class="nav-row">
-                <a href="/lab" class="result-btn secondary">← 戻る</a>
-                <a href="/history" class="result-btn">📈 履歴を見る</a>
+                <a href="/lab" class="result-btn secondary">← {{ _("戻る") }}</a>
+                <a href="/history" class="result-btn">📈 {{ _("履歴を見る") }}</a>
             </div>
             <div style="text-align:center; margin-top: 14px;">
                 <a href="/feedback?page=result&result_id={{ data.id }}" style="font-size:12px; color:#b89aa6; text-decoration:underline;">
-                    この結果について不具合報告・ご意見を送る
+                    {{ _("この結果について不具合報告・ご意見を送る") }}
                 </a>
             </div>
         </section>

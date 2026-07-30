@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{{ current_locale }}">
 <head>
     <meta charset="UTF-8">
     <link rel="icon" type="image/png" href="/static/favicon.png?v=3">
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>るみろぐ | エラー</title>
+    <title>{{ _("るみろぐ | エラー") }}</title>
 
     <style>
         body{
@@ -141,18 +141,18 @@
 
         <div class="icon">🫧</div>
 
-        <h1>分析を完了できませんでした</h1>
+        <h1>{{ _("分析を完了できませんでした") }}</h1>
 
         <div class="message">
             {{ error_message | e }}
         </div>
 
         <a href="/lab" class="retry-btn">
-            もう一度分析する
+            {{ _("もう一度分析する") }}
         </a>
 
         <div class="sub">
-            時間を空けると改善する場合があります
+            {{ _("時間を空けると改善する場合があります") }}
         </div>
 
     </div>

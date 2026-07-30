@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{{ current_locale }}">
 <head>
     <meta charset="UTF-8">
     <link rel="icon" type="image/png" href="/static/favicon.png?v=3">
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>お問い合わせ・ご意見</title>
+    <title>{{ _("お問い合わせ・ご意見") }}</title>
 
     <style>
       body {
@@ -143,49 +143,49 @@
     <div class="page">
         {% if sent %}
         <div class="card sent-box">
-            <div class="sent-title">送信しました</div>
+            <div class="sent-title">{{ _("送信しました") }}</div>
             <div class="sent-text">
-                ご報告・ご意見ありがとうございます。<br>
-                内容を確認し、改善に役立てさせていただきます。
+                {{ _("ご報告・ご意見ありがとうございます。") }}<br>
+                {{ _("内容を確認し、改善に役立てさせていただきます。") }}
             </div>
-            <a href="/history" class="back-link">← 履歴に戻る</a>
+            <a href="/history" class="back-link">← {{ _("履歴に戻る") }}</a>
         </div>
         {% else %}
-        <h1>お問い合わせ・ご意見</h1>
+        <h1>{{ _("お問い合わせ・ご意見") }}</h1>
         <div class="lead">
-            不具合報告や「もっとこうしてほしい」というご意見をお寄せください。<br>
-            分析結果ページからお越しの場合は、該当の分析内容も一緒に確認します。
+            {{ _("不具合報告や「もっとこうしてほしい」というご意見をお寄せください。") }}<br>
+            {{ _("分析結果ページからお越しの場合は、該当の分析内容も一緒に確認します。") }}
         </div>
         <div class="card">
             {% if error %}
             <div class="error-box">{{ error }}</div>
             {% endif %}
             <form method="POST" action="/feedback">
-                <label>種別</label>
+                <label>{{ _("種別") }}</label>
                 <select name="category">
-                    <option value="bug" {% if category == "bug" %}selected{% endif %}>不具合報告（例: リンクが開けない、候補が出ない など）</option>
-                    <option value="suggestion" {% if category == "suggestion" %}selected{% endif %}>改善要望（もっとこうしてほしい）</option>
-                    <option value="other" {% if not category or category == "other" %}selected{% endif %}>その他</option>
+                    <option value="bug" {% if category == "bug" %}selected{% endif %}>{{ _("不具合報告（例: リンクが開けない、候補が出ない など）") }}</option>
+                    <option value="suggestion" {% if category == "suggestion" %}selected{% endif %}>{{ _("改善要望(もっとこうしてほしい)") }}</option>
+                    <option value="other" {% if not category or category == "other" %}selected{% endif %}>{{ _("その他") }}</option>
                 </select>
 
-                <label>内容</label>
-                <textarea name="message" placeholder="できるだけ詳しく教えてください（例: どの画面で・何が起きたか）" required>{{ message or "" }}</textarea>
+                <label>{{ _("内容") }}</label>
+                <textarea name="message" placeholder="{{ _('できるだけ詳しく教えてください(例: どの画面で・何が起きたか)') }}" required>{{ message or "" }}</textarea>
 
-                <label>返信先メールアドレス（任意）</label>
-                <input type="email" name="email" value="{{ email or '' }}" placeholder="返信が必要な場合のみご入力ください">
+                <label>{{ _("返信先メールアドレス（任意）") }}</label>
+                <input type="email" name="email" value="{{ email or '' }}" placeholder="{{ _('返信が必要な場合のみご入力ください') }}">
 
                 <input type="hidden" name="result_id" value="{{ result_id or '' }}">
                 <input type="hidden" name="page" value="{{ page or '' }}">
 
-                <button type="submit" class="submit-btn">送信する</button>
+                <button type="submit" class="submit-btn">{{ _("送信する") }}</button>
             </form>
         </div>
         {% endif %}
 
         <footer>
-            <a href="/privacy-policy" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">プライバシーポリシー</a>
+            <a href="/privacy-policy" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">{{ _("プライバシーポリシー") }}</a>
             <span style="color:#d8c0ca; font-size:11px;">|</span>
-            <a href="/terms-of-service" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">利用規約</a>
+            <a href="/terms-of-service" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">{{ _("利用規約") }}</a>
         </footer>
     </div>
 </body>

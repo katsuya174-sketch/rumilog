@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{{ current_locale }}">
 <head>
     <meta charset="UTF-8">
     <link rel="icon" type="image/png" href="/static/favicon.png?v=3">
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.json">
-    <title>お支払い完了 | るみろぐ</title>
+    <title>{{ _("お支払い完了 | るみろぐ") }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://fonts.googleapis.com/css2?family=Kosugi+Maru&display=swap" rel="stylesheet">
     <style>
@@ -97,29 +97,29 @@
 <body>
 <div class="card">
     <div class="icon">💌</div>
-    <h1>お支払いが完了しました！</h1>
+    <h1>{{ _("お支払いが完了しました！") }}</h1>
     <p class="lead">
-        プレミアムプランへのご登録ありがとうございます。<br>
-        まもなく専用リンクをメールでお送りします。
+        {{ _("プレミアムプランへのご登録ありがとうございます。") }}<br>
+        {{ _("まもなく専用リンクをメールでお送りします。") }}
     </p>
 
     <div class="steps">
-        <div class="steps-title">次のステップ</div>
+        <div class="steps-title">{{ _("次のステップ") }}</div>
         <div class="step">
             <div class="step-num">1</div>
-            <div>登録したメールアドレスを確認してください（数分以内に届きます）</div>
+            <div>{{ _("登録したメールアドレスを確認してください（数分以内に届きます）") }}</div>
         </div>
         <div class="step">
             <div class="step-num">2</div>
-            <div>メール内の「プレミアムリンク」をタップ</div>
+            <div>{{ _("メール内の「プレミアムリンク」をタップ") }}</div>
         </div>
         <div class="step">
             <div class="step-num">3</div>
-            <div>そのリンクをブックマークして毎回ご利用ください</div>
+            <div>{{ _("そのリンクをブックマークして毎回ご利用ください") }}</div>
         </div>
     </div>
 
-    <a href="/lab" class="btn">分析ページへ戻る</a>
+    <a href="/lab" class="btn">{{ _("分析ページへ戻る") }}</a>
 </div>
 </body>
 </html>

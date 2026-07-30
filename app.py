@@ -696,6 +696,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 from PIL import Image, ImageOps, ImageFilter
 from flask import Flask, render_template, request, jsonify, redirect, make_response, session as flask_session
+from flask_babel import Babel, gettext, ngettext
 from google import genai
 from google.genai import types
 # ==========================================
@@ -705,6 +706,50 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "lumilog-dev-secret-change-in-prod")
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=365)
 RUMILOG_UID_COOKIE = "lumilog_uid"
+
+# ==========================================
+# 多言語対応(i18n) — 対応言語: 日本語(ja) / 英語(en)
+# ブラウザ/端末の言語設定(Accept-Language)に従い自動切り替え。
+# ja/en以外の言語は日本語にフォールバックする。
+# ==========================================
+app.config["BABEL_DEFAULT_LOCALE"] = "ja"
+app.config["BABEL_TRANSLATION_DIRECTORIES"] = "translations"
+SUPPORTED_LOCALES = ["ja", "en"]
+
+
+def select_locale():
+    """優先順位: 明示指定された ?lang= → セッション保持値 → Accept-Language → 日本語フォールバック。
+    各段階は独立したフォールバック層とし、上位の値が未対応言語でも下位の層を飛ばさない。"""
+    lang = request.args.get("lang")
+    if lang in SUPPORTED_LOCALES:
+        return lang
+
+    lang = flask_session.get("lang")
+    if lang in SUPPORTED_LOCALES:
+        return lang
+
+    return request.accept_languages.best_match(SUPPORTED_LOCALES) or "ja"
+
+
+babel = Babel(app, locale_selector=select_locale)
+
+
+@app.before_request
+def _persist_lang_override():
+    """?lang=en のようなクエリでの明示指定はセッションに保持する(任意の言語切り替えUI用)。"""
+    lang = request.args.get("lang")
+    if lang in SUPPORTED_LOCALES:
+        flask_session["lang"] = lang
+
+
+def get_locale():
+    """現在のリクエストの表示言語("ja" または "en")。Gemini出力言語の切り替え等、Jinja外のPythonコードから使用する。"""
+    return select_locale()
+
+
+@app.context_processor
+def inject_locale():
+    return {"current_locale": get_locale()}
 
 @app.after_request
 def attach_user_id_cookie(response):
@@ -14271,6 +14316,230 @@ def prepare_result_for_view(result):
 
     return result
 
+
+# ==========================================
+# 診断結果の自由記述文（AI生成・ルールベース生成の両方）を
+# 表示直前に翻訳する境界層。
+#
+# 方針: recommend_reason / root_causes / score_reasons 等の
+# 「どの理由文を選ぶか」を決めるロジック（スコア計算・優先順位決定・
+# 商品選定）には一切触れず、既に組み上がった日本語の文章だけを
+# enロケール表示時に翻訳して差し替える。
+# 同じ文章は元テキストのハッシュ単位でキャッシュし、
+# results.payload の "i18n_en" キー（既存JSONBに追加するだけで
+# テーブル構造は不変）に保存して、同じ診断結果なら再翻訳しない。
+# ==========================================
+
+_RESULT_I18N_LEAF_KEYS = {
+    "skin_summary", "summary", "left_tendency", "right_tendency",
+    "cause", "evidence", "care_direction", "recommend_reason",
+    "purpose", "reason", "caution", "why_best", "text",
+    "overall_policy", "skin_type", "goal",
+}
+_RESULT_I18N_LIST_KEYS = {
+    "traits", "warnings", "actions", "improvement_steps",
+}
+# 注意: weekly_usage_plan の day.morning / day.night / day.special_care は、
+# テンプレート側で item.startswith('パック'/'ピーリング') による色分け表示に
+# 使われているため、ここでは翻訳対象に含めない（翻訳すると色分け判定が壊れる）。
+_RESULT_I18N_BLOB_DICT_KEYS = {"score_reasons"}
+
+
+def _collect_result_i18n_texts(node, acc):
+    """既知のキー配下の自由記述文だけを収集する（商品名・ID・リンク等には触れない）。"""
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if k in _RESULT_I18N_BLOB_DICT_KEYS and isinstance(v, dict):
+                for vv in v.values():
+                    if isinstance(vv, str) and vv.strip():
+                        acc.add(vv)
+                continue
+            if k in _RESULT_I18N_LEAF_KEYS and isinstance(v, str) and v.strip():
+                acc.add(v)
+            elif k in _RESULT_I18N_LIST_KEYS and isinstance(v, list):
+                for elem in v:
+                    if isinstance(elem, str) and elem.strip():
+                        acc.add(elem)
+            _collect_result_i18n_texts(v, acc)
+    elif isinstance(node, list):
+        for elem in node:
+            _collect_result_i18n_texts(elem, acc)
+
+
+def _apply_result_i18n_texts(node, text_map):
+    """収集時と同じキー規則で、原文が見つかった箇所だけ翻訳後の文章に差し替える。"""
+    if isinstance(node, dict):
+        new_node = {}
+        for k, v in node.items():
+            if k in _RESULT_I18N_BLOB_DICT_KEYS and isinstance(v, dict):
+                new_node[k] = {
+                    kk: (text_map.get(vv, vv) if isinstance(vv, str) else vv)
+                    for kk, vv in v.items()
+                }
+                continue
+            if k in _RESULT_I18N_LEAF_KEYS and isinstance(v, str):
+                new_node[k] = text_map.get(v, v)
+            elif k in _RESULT_I18N_LIST_KEYS and isinstance(v, list):
+                new_node[k] = [
+                    (text_map.get(elem, elem) if isinstance(elem, str) else _apply_result_i18n_texts(elem, text_map))
+                    for elem in v
+                ]
+            else:
+                new_node[k] = _apply_result_i18n_texts(v, text_map)
+        return new_node
+    if isinstance(node, list):
+        return [_apply_result_i18n_texts(elem, text_map) for elem in node]
+    return node
+
+
+def _text_hash(text):
+    return hashlib.sha1(text.encode("utf-8")).hexdigest()
+
+
+def _translate_texts_to_en_via_gemini(texts):
+    """日本語文のリストを英語へ一括翻訳する。文章の選定ロジックには触れず、翻訳のみ行う。"""
+    if not texts:
+        return {}
+
+    numbered = "\n".join(f"{i}: {t}" for i, t in enumerate(texts))
+    prompt = (
+        "You are translating skincare-app UI copy from Japanese to natural, concise English "
+        "for a skincare-analysis app. Translate each numbered line independently. "
+        "Do not use words implying medical diagnosis or treatment (avoid 'diagnose', 'cure', 'treat'); "
+        "prefer neutral cosmetic wording (e.g. 'skin analysis', 'care priorities'). "
+        "Return strict JSON: a list of objects [{\"i\": <line number>, \"en\": \"<translation>\"}], "
+        "covering every line, no extra commentary.\n\n" + numbered
+    )
+    try:
+        config = types.GenerateContentConfig(
+            temperature=0,
+            max_output_tokens=min(8000, 200 + 120 * len(texts)),
+            response_mime_type="application/json",
+        )
+        response = call_gemini_with_retry(
+            client, DETAIL_MODEL, prompt, config=config, max_retries=1, timeout=30
+        )
+        if not response or not response.text:
+            return {}
+        raw = response.text.strip()
+        if raw.startswith("```"):
+            raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
+        parsed = json.loads(raw)
+        out = {}
+        if isinstance(parsed, list):
+            for entry in parsed:
+                if not isinstance(entry, dict):
+                    continue
+                idx = entry.get("i")
+                en = entry.get("en")
+                if isinstance(idx, int) and 0 <= idx < len(texts) and isinstance(en, str) and en.strip():
+                    out[texts[idx]] = en.strip()
+        return out
+    except Exception as e:
+        print(f"[RESULT I18N TRANSLATE ERROR] {repr(e)}", flush=True)
+        return {}
+
+
+def _save_result_i18n_cache(result_id, cache_dict):
+    if not result_id or not cache_dict:
+        return
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE results
+            SET payload = jsonb_set(COALESCE(payload, '{}'::jsonb), '{i18n_en}', %s::jsonb, true)
+            WHERE id = %s;
+            """,
+            (json.dumps(cache_dict, ensure_ascii=False), str(result_id)),
+        )
+        conn.commit()
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        print(f"[RESULT I18N CACHE SAVE ERROR] {repr(e)}", flush=True)
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
+
+def _validate_translation(original, translated):
+    """翻訳結果が保存に値するか簡易検証する。
+    翻訳選定ロジック（何を訳すか）ではなく、Geminiからの応答が壊れていないかの
+    最低限の健全性チェックのみ行う（JSON崩れ・空応答・暴走生成等の混入防止）。
+    """
+    if not isinstance(translated, str):
+        return False
+    t = translated.strip()
+    if not t:
+        return False
+    # 元の日本語がそのまま返っただけ（訳されていない）は、ごく短い記号等を除き不採用
+    if t == original.strip() and len(original.strip()) > 8:
+        return False
+    # 極端な長さの乖離は、JSON崩れ・繰り返し生成等の異常とみなす
+    if len(t) > len(original) * 6 + 200:
+        return False
+    return True
+
+
+def apply_result_i18n_for_display(data):
+    """
+    enロケール表示時だけ、既に組み上がった自由記述文を英訳して差し替えたコピーを返す。
+    スコア計算・優先順位決定・商品選定ロジックは呼び出さない（一切変更しない）。
+    同じ診断結果（result_id）なら、一度翻訳した文章は payload["i18n_en"] に保存され再利用される。
+    キーは翻訳元テキストのハッシュ（= 原文が変われば別キーになる）のため、
+    元の文章が将来変わった場合は変更された文章だけが再翻訳される。
+    検証に失敗した翻訳（空・非翻訳・異常な長さ）はキャッシュに保存しない。
+    """
+    if not isinstance(data, dict):
+        return data
+    if get_locale() != "en":
+        return data
+
+    texts = set()
+    _collect_result_i18n_texts(data, texts)
+    if not texts:
+        return data
+
+    cache = data.get("i18n_en")
+    cache = dict(cache) if isinstance(cache, dict) else {}
+
+    hash_to_text = {_text_hash(t): t for t in texts}
+    missing_hashes = [h for h in hash_to_text if h not in cache]
+
+    if missing_hashes:
+        # ここで何が起きても（Gemini呼び出し・保存処理いずれの異常でも）画面を落とさず
+        # 日本語原文へフォールバックする最終防波堤。call_gemini_with_retry や
+        # _translate_texts_to_en_via_gemini / _save_result_i18n_cache は内部でも
+        # 例外を握りつぶしているが、翻訳境界層の呼び出し元（各ルート）を
+        # 500エラーから守るため、ここでも二重に保護する。
+        try:
+            missing_texts = [hash_to_text[h] for h in missing_hashes]
+            translated = _translate_texts_to_en_via_gemini(missing_texts)
+            newly_validated = {}
+            for h, original in zip(missing_hashes, missing_texts):
+                candidate = translated.get(original) if isinstance(translated, dict) else None
+                if candidate and _validate_translation(original, candidate):
+                    cache[h] = candidate
+                    newly_validated[h] = candidate
+
+            if newly_validated:
+                result_id = str(data.get("id", "") or "")
+                _save_result_i18n_cache(result_id, cache)
+        except Exception as e:
+            print(f"[RESULT I18N BOUNDARY ERROR] {repr(e)} → 日本語原文にフォールバック", flush=True)
+
+    text_map = {t: cache[_text_hash(t)] for t in texts if _text_hash(t) in cache}
+    if not text_map:
+        return data
+    return _apply_result_i18n_texts(data, text_map)
+
+
 def lightweight_result_payload(item):
     """
     DB保存前に、表示に不要な一時データだけ削る。
@@ -17479,7 +17748,10 @@ def lab_test_function():
                 if not can_use_premium_diagnosis(_premium_key):
                     return render_template(
                         "lab.html",
-                        error=f"今月の分析回数（月{PREMIUM_MONTHLY_LIMIT}回）に達しました。来月また利用できます。",
+                        error=gettext(
+                            "今月の分析回数（月%(limit)s回）に達しました。来月また利用できます。",
+                            limit=PREMIUM_MONTHLY_LIMIT,
+                        ),
                         is_premium=True,
                         premium_key=_premium_key,
                         remaining_premium_count=0,
@@ -17488,7 +17760,10 @@ def lab_test_function():
             elif not can_use_free_diagnosis(client_ip):
                 return render_template(
                     "lab.html",
-                    error=f"無料分析は月{FREE_MONTHLY_LIMIT}回までです。続けて利用するには有料プランをご利用ください。",
+                    error=gettext(
+                        "無料分析は月%(limit)s回までです。続けて利用するには有料プランをご利用ください。",
+                        limit=FREE_MONTHLY_LIMIT,
+                    ),
                     remaining_free_count=0,
                     DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT
                 )
@@ -17497,8 +17772,8 @@ def lab_test_function():
 
             if not _is_creator and is_rate_limited(ip):
                 if is_ajax:
-                    return jsonify({"success": False, "error": "本日の分析回数の上限に達しました。明日またお試しください。"}), 429
-                return render_template("lab.html", error="本日の分析回数の上限に達しました。明日またお試しください。", is_premium=_is_premium, premium_key=_premium_key, DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT)
+                    return jsonify({"success": False, "error": gettext("本日の分析回数の上限に達しました。明日またお試しください。")}), 429
+                return render_template("lab.html", error=gettext("本日の分析回数の上限に達しました。明日またお試しください。"), is_premium=_is_premium, premium_key=_premium_key, DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT)
             validate_lab_dependencies()
             # =========================
             # ① 入力取得
@@ -17919,6 +18194,7 @@ def lab_test_function():
             data = lightweight_result_payload(data)
             data["is_premium"] = is_premium_user()
             data["is_dev_mode"] = DEV_MODE or DEV_PREMIUM_MODE
+            data = apply_result_i18n_for_display(data)
             print("[LAB TIME] before render_template", round(time.time() - lab_t0, 2), flush=True)
             _log_mem("before-render")
             html = render_template(
@@ -18154,7 +18430,7 @@ def create_checkout_session():
         return redirect(session.url, code=303)
     except Exception as e:
         print(f"[STRIPE ERROR] {repr(e)}", flush=True)
-        return jsonify({"error": "決済処理中にエラーが発生しました。しばらくしてから再度お試しください。"}), 500
+        return jsonify({"error": gettext("決済処理中にエラーが発生しました。しばらくしてから再度お試しください。")}), 500
 
 
 @app.route("/stripe-webhook", methods=["POST"], strict_slashes=False)
@@ -18295,7 +18571,7 @@ def feedback():
         if not message:
             return render_template(
                 "feedback.html",
-                error="内容を入力してください。",
+                error=gettext("内容を入力してください。"),
                 category=category, email=email, result_id=result_id, message=message
             )
 
@@ -18317,7 +18593,7 @@ def portal_by_email():
 
     email = (request.form.get("email") or "").strip().lower()
     if not email:
-        return render_template("portal_by_email.html", error="メールアドレスを入力してください。")
+        return render_template("portal_by_email.html", error=gettext("メールアドレスを入力してください。"))
 
     # premium_keys からメールで一致するエントリを検索
     keys = load_premium_keys()
@@ -18333,11 +18609,11 @@ def portal_by_email():
         return render_template(
             "portal_by_email.html",
             submitted_email=email,
-            error="入力されたメールアドレスに紐づくプレミアム会員が見つかりませんでした。ご登録時のアドレスをご確認ください。"
+            error=gettext("入力されたメールアドレスに紐づくプレミアム会員が見つかりませんでした。ご登録時のアドレスをご確認ください。")
         )
 
     if not stripe.api_key:
-        return render_template("error.html", error_message="決済システムへの接続に失敗しました。")
+        return render_template("error.html", error_message=gettext("決済システムへの接続に失敗しました。"))
 
     try:
         base_url = SITE_URL.rstrip("/") if SITE_URL else request.host_url.rstrip("/")
@@ -18349,7 +18625,7 @@ def portal_by_email():
         return redirect(portal_session.url)
     except Exception as e:
         print(f"[PORTAL BY EMAIL ERROR] {repr(e)}", flush=True)
-        return render_template("error.html", error_message="カスタマーポータルへの接続に失敗しました。しばらく経ってからお試しください。")
+        return render_template("error.html", error_message=gettext("カスタマーポータルへの接続に失敗しました。しばらく経ってからお試しください。"))
 
 
 @app.route("/customer-portal")
@@ -18365,7 +18641,7 @@ def customer_portal():
 
     customer_id = entry.get("stripe_customer_id", "")
     if not customer_id or not stripe.api_key:
-        return render_template("error.html", error_message="カスタマー情報が見つかりません。サポートにお問い合わせください。")
+        return render_template("error.html", error_message=gettext("カスタマー情報が見つかりません。サポートにお問い合わせください。"))
 
     try:
         base_url = SITE_URL.rstrip("/") if SITE_URL else request.host_url.rstrip("/")
@@ -18376,7 +18652,7 @@ def customer_portal():
         return redirect(portal_session.url)
     except Exception as e:
         print(f"[PORTAL ERROR] {repr(e)}", flush=True)
-        return render_template("error.html", error_message="カスタマーポータルへの接続に失敗しました。しばらく経ってからお試しください。")
+        return render_template("error.html", error_message=gettext("カスタマーポータルへの接続に失敗しました。しばらく経ってからお試しください。"))
 
 @app.route("/admin/product-ranking")
 def admin_product_ranking():
@@ -18408,12 +18684,12 @@ def my_product_ranking():
         # 全ユーザー集計・カテゴリ別20件
         ranking = build_product_ranking(results, user_id=None, limit=300)
         ranking_by_category = group_ranking_by_category(ranking, per_category_limit=20)
-        title = "よく提案される商品（全ユーザー集計）"
+        title = gettext("よく提案される商品（全ユーザー集計）")
     else:
         uid = get_or_create_user_id()
         ranking = build_product_ranking(results, user_id=uid, limit=200)
         ranking_by_category = group_ranking_by_category(ranking, per_category_limit=10)
-        title = "よく提案される商品"
+        title = gettext("よく提案される商品")
 
     return render_template(
         "product_ranking.html",
@@ -18440,7 +18716,7 @@ def product_click():
     log_product_click(source, product, category)
 
     if not url:
-        return "リンクがありません", 400
+        return gettext("リンクがありません"), 400
 
     allowed_domains = [
         "rakuten.co.jp",
@@ -18453,9 +18729,9 @@ def product_click():
         parsed = urllib.parse.urlparse(url)
         netloc = parsed.netloc.lower().lstrip("www.")
         if not any(netloc == d or netloc.endswith("." + d) for d in allowed_domains):
-            return "許可されていないリンクです", 400
+            return gettext("許可されていないリンクです"), 400
     except Exception:
-        return "無効なURLです", 400
+        return gettext("無効なURLです"), 400
 
     return redirect(url)
 
@@ -18753,10 +19029,10 @@ def login():
     if request.method == "POST":
         email = (request.form.get("email") or "").strip().lower()
         if not email or "@" not in email or "." not in email.split("@")[-1]:
-            return render_template("login.html", error="メールアドレスを正しく入力してください")
+            return render_template("login.html", error=gettext("メールアドレスを正しく入力してください"))
         token = create_magic_token(email)
         if not token:
-            return render_template("login.html", error="エラーが発生しました。しばらく後でお試しください")
+            return render_template("login.html", error=gettext("エラーが発生しました。しばらく後でお試しください"))
         send_magic_link_email(email, token)
         return render_template("login.html", sent=True, email=email)
     return render_template("login.html")
@@ -18766,10 +19042,10 @@ def login():
 def auth_verify(token):
     email = verify_magic_token(token)
     if not email:
-        return render_template("login.html", error="このリンクは無効または期限切れです。再度ログインしてください")
+        return render_template("login.html", error=gettext("このリンクは無効または期限切れです。再度ログインしてください"))
     new_user_id = get_or_create_user_for_email(email)
     if not new_user_id:
-        return render_template("login.html", error="ログインに失敗しました。再度お試しください")
+        return render_template("login.html", error=gettext("ログインに失敗しました。再度お試しください"))
     # 現在のデバイスに既存の診断結果があれば email アカウントに移行
     old_user_id = request.cookies.get(RUMILOG_UID_COOKIE, "") or flask_session.get("user_id", "")
     if old_user_id and old_user_id != new_user_id:
@@ -18850,7 +19126,7 @@ def history():
             if not isinstance(item, dict):
                 continue
 
-            prepared.append({
+            prepared.append(apply_result_i18n_for_display({
                 "id": item.get("id", ""),
                 "record_date": item.get("record_date", ""),
                 "analysis_date": item.get("analysis_date", ""),
@@ -18866,7 +19142,8 @@ def history():
                 "skin_age_estimate": item.get("skin_age_estimate", 0),
                 "input_age": item.get("input_age", 0),
                 "score_diff": {},
-            })
+                "i18n_en": item.get("i18n_en", {}),
+            }))
 
         labels = []
         skin_scores = []
@@ -19188,47 +19465,34 @@ def result_detail(result_id):
                         "left_tendency": "",
                         "right_tendency": ""
                     }
+                data = apply_result_i18n_for_display(data)
                 return render_template("result.html", data=data, result_id=result_id)
 
-        return "結果が見つかりません", 404
+        return gettext("結果が見つかりません"), 404
 
     except Exception as e:
         print("===== HISTORY DETAIL ERROR =====", flush=True)
         print(e, flush=True)
         traceback.print_exc()
         print("================================", flush=True)
-        return "エラーが発生しました", 500
+        return gettext("エラーが発生しました"), 500
 
 def build_user_friendly_error_message(error_text=""):
     text = str(error_text).lower()
 
     if "429" in text:
-        return (
-            "現在アクセスが集中しているため、少し時間を空けてから再度お試しください。"
-        )
+        return gettext("現在アクセスが集中しているため、少し時間を空けてから再度お試しください。")
 
     if "503" in text:
-        return (
-            "現在分析が混み合っています。"
-            "少し時間を空けてから再度お試しください。"
-        )
+        return gettext("現在分析が混み合っています。少し時間を空けてから再度お試しください。")
 
     if "timeout" in text:
-        return (
-            "分析処理に時間がかかっています。"
-            "通信環境を確認して、再度お試しください。"
-        )
+        return gettext("分析処理に時間がかかっています。通信環境を確認して、再度お試しください。")
 
     if "ssl" in text:
-        return (
-            "通信エラーが発生しました。"
-            "時間を空けて再度お試しください。"
-        )
+        return gettext("通信エラーが発生しました。時間を空けて再度お試しください。")
 
-    return (
-        "分析中に一時的なエラーが発生しました。"
-        "少し時間を空けて再度お試しください。"
-    )
+    return gettext("分析中に一時的なエラーが発生しました。少し時間を空けて再度お試しください。")
 
 @app.route("/result/<result_id>")
 def history_detail(result_id):

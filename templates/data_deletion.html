@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{{ current_locale }}">
 <head>
     <meta charset="UTF-8">
     <link rel="icon" type="image/png" href="/static/favicon.png?v=3">
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.json">
-    <title>データ削除のご案内 | るみろぐ</title>
+    <title>{{ _("データ削除のご案内 | るみろぐ") }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         * { box-sizing: border-box; }
@@ -64,49 +64,47 @@
 <body>
     <div class="page">
         <div class="header-card">
-            <h1>データ削除のご案内</h1>
-            <p class="updated">最終更新日：2026年7月8日</p>
+            <h1>{{ _("データ削除のご案内") }}</h1>
+            <p class="updated">{{ _("最終更新日：2026年7月8日") }}</p>
         </div>
 
         <div class="section">
-            <h2>収集しているデータ</h2>
-            <p>るみろぐ（以下「本サービス」）が保持するユーザーデータは以下のとおりです。</p>
+            <h2>{{ _("収集しているデータ") }}</h2>
+            <p>{{ _("るみろぐ（以下「本サービス」）が保持するユーザーデータは以下のとおりです。") }}</p>
             <ul>
-                <li><strong>顔写真</strong>：肌分析のためにAI分析へ送信しますが、<strong>分析完了後にサーバーへ保存することはありません</strong>（一時的に処理されるのみ）。そのため削除対象となる顔写真は残っていません。</li>
-                <li><strong>分析結果</strong>：スコアや提案商品などの分析データを、サービス改善のためデータベースに保存しています。</li>
-                <li><strong>メールアドレス</strong>：プレミアムプランをご利用の方のみ、プレミアムキーの発行・送付のために保持しています。</li>
+                <li>{{ _("<strong>顔写真</strong>：肌分析のためにAI分析へ送信しますが、<strong>分析完了後にサーバーへ保存することはありません</strong>（一時的に処理されるのみ）。そのため削除対象となる顔写真は残っていません。") | safe }}</li>
+                <li>{{ _("<strong>分析結果</strong>：スコアや提案商品などの分析データを、サービス改善のためデータベースに保存しています。") | safe }}</li>
+                <li>{{ _("<strong>メールアドレス</strong>：プレミアムプランをご利用の方のみ、プレミアムキーの発行・送付のために保持しています。") | safe }}</li>
             </ul>
         </div>
 
         <div class="section">
-            <h2>データ削除のリクエスト方法</h2>
+            <h2>{{ _("データ削除のリクエスト方法") }}</h2>
             <p>
-                保存されている分析結果・メールアドレスの削除をご希望の場合は、
-                以下のメールアドレス宛に「<strong>データ削除希望</strong>」と記載してご連絡ください。
+                {{ _("保存されている分析結果・メールアドレスの削除をご希望の場合は、以下のメールアドレス宛に「%(keyword)s」と記載してご連絡ください。", keyword='<strong>' ~ _("データ削除希望") ~ '</strong>') | safe }}
             </p>
-            <p class="mail">✉ <a href="mailto:lumilog.support@gmail.com?subject=データ削除希望">lumilog.support@gmail.com</a></p>
+            <p class="mail">✉ <a href="mailto:lumilog.support@gmail.com?subject={{ _('データ削除希望') | urlencode }}">lumilog.support@gmail.com</a></p>
             <p>
-                本人確認のため、プレミアム会員の方は登録メールアドレスからご連絡ください。
-                無料でご利用の方は、分析日時など特定に必要な情報を添えてください。
+                {{ _("本人確認のため、プレミアム会員の方は登録メールアドレスからご連絡ください。無料でご利用の方は、分析日時など特定に必要な情報を添えてください。") }}
             </p>
         </div>
 
         <div class="section">
-            <h2>削除の範囲と期間</h2>
+            <h2>{{ _("削除の範囲と期間") }}</h2>
             <ul>
-                <li>ご連絡を受けてから<strong>30日以内</strong>に、該当する分析結果・メールアドレスをデータベースから削除します。</li>
-                <li>プレミアムキーは無効化され、以降プレミアム機能は利用できなくなります。</li>
-                <li>顔写真は元々保存していないため、追加の削除操作は不要です。</li>
-                <li>法令上の保存義務がある情報（決済に関する記録など）は、必要な期間に限り保持する場合があります。</li>
+                <li>{{ _("ご連絡を受けてから<strong>30日以内</strong>に、該当する分析結果・メールアドレスをデータベースから削除します。") | safe }}</li>
+                <li>{{ _("プレミアムキーは無効化され、以降プレミアム機能は利用できなくなります。") }}</li>
+                <li>{{ _("顔写真は元々保存していないため、追加の削除操作は不要です。") }}</li>
+                <li>{{ _("法令上の保存義務がある情報（決済に関する記録など）は、必要な期間に限り保持する場合があります。") }}</li>
             </ul>
         </div>
 
         <div class="section">
-            <h2>お問い合わせ</h2>
-            <p>データ削除やプライバシーに関するご質問は、上記メールアドレスまでお気軽にお問い合わせください。</p>
+            <h2>{{ _("お問い合わせ") }}</h2>
+            <p>{{ _("データ削除やプライバシーに関するご質問は、上記メールアドレスまでお気軽にお問い合わせください。") }}</p>
         </div>
 
-        <a class="back-link" href="/lab">← トップに戻る</a>
+        <a class="back-link" href="/lab">← {{ _("トップに戻る") }}</a>
     </div>
 </body>
 </html>

@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{{ current_locale }}">
 <head>
     <meta charset="UTF-8">
     <link rel="icon" type="image/png" href="/static/favicon.png?v=3">
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.json">
-    <title>プレミアムプラン | るみろぐ</title>
+    <title>{{ _("プレミアムプラン | るみろぐ") }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link href="https://fonts.googleapis.com/css2?family=Kosugi+Maru&display=swap" rel="stylesheet">
     <style>
@@ -189,46 +189,46 @@
 </head>
 <body>
 <div class="page">
-    <h1>プレミアムプラン</h1>
-    <p class="subtitle">本格的な肌ケアを、続けるために。</p>
+    <h1>{{ _("プレミアムプラン") }}</h1>
+    <p class="subtitle">{{ _("本格的な肌ケアを、続けるために。") }}</p>
 
     <!-- プラン比較 -->
     <div class="plans">
         <div class="plan-card">
             <div class="plan-label">FREE</div>
-            <div class="plan-name">無料プラン</div>
+            <div class="plan-name">{{ _("無料プラン") }}</div>
             <div class="plan-price plan-price-free">¥0</div>
-            <div class="plan-period">ずっと無料</div>
+            <div class="plan-period">{{ _("ずっと無料") }}</div>
             <ul class="plan-features">
-                <li>月5回の分析</li>
-                <li>基本スキンスコア（10項目）</li>
-                <li>朝・夜・週ケアの提案</li>
-                <li>予算内おすすめ構成</li>
-                <li>分析履歴（直近3件）</li>
-                <li class="locked">詳細スコア8項目</li>
-                <li class="locked">左右差の分析</li>
-                <li class="locked">週間ルーティン</li>
-                <li class="locked">肌年齢推定</li>
-                <li class="locked">今月の肌レポート</li>
+                <li>{{ _("月5回の分析") }}</li>
+                <li>{{ _("基本スキンスコア（10項目）") }}</li>
+                <li>{{ _("朝・夜・週ケアの提案") }}</li>
+                <li>{{ _("予算内おすすめ構成") }}</li>
+                <li>{{ _("分析履歴（直近3件）") }}</li>
+                <li class="locked">{{ _("詳細スコア8項目") }}</li>
+                <li class="locked">{{ _("左右差の分析") }}</li>
+                <li class="locked">{{ _("週間ルーティン") }}</li>
+                <li class="locked">{{ _("肌年齢推定") }}</li>
+                <li class="locked">{{ _("今月の肌レポート") }}</li>
             </ul>
         </div>
 
         <div class="plan-card premium">
             <div class="plan-label">✨ PREMIUM</div>
-            <div class="plan-name">プレミアム</div>
-            <div class="plan-price">¥980<span> /月</span></div>
-            <div class="plan-period">税込・いつでも解約可</div>
+            <div class="plan-name">{{ _("プレミアム") }}</div>
+            <div class="plan-price">¥980<span> {{ _("/月") }}</span></div>
+            <div class="plan-period">{{ _("税込・いつでも解約可") }}</div>
             <ul class="plan-features">
-                <li>月30回の分析</li>
-                <li>基本スキンスコア（10項目）</li>
-                <li>朝・夜・週ケアの提案</li>
-                <li>予算内おすすめ構成</li>
-                <li>分析履歴 無制限</li>
-                <li>詳細スコア8項目</li>
-                <li>左右差の分析</li>
-                <li>週間ルーティン</li>
-                <li>肌年齢推定</li>
-                <li>今月の肌レポート</li>
+                <li>{{ _("月30回の分析") }}</li>
+                <li>{{ _("基本スキンスコア（10項目）") }}</li>
+                <li>{{ _("朝・夜・週ケアの提案") }}</li>
+                <li>{{ _("予算内おすすめ構成") }}</li>
+                <li>{{ _("分析履歴 無制限") }}</li>
+                <li>{{ _("詳細スコア8項目") }}</li>
+                <li>{{ _("左右差の分析") }}</li>
+                <li>{{ _("週間ルーティン") }}</li>
+                <li>{{ _("肌年齢推定") }}</li>
+                <li>{{ _("今月の肌レポート") }}</li>
             </ul>
         </div>
     </div>
@@ -237,65 +237,65 @@
     <!-- 既存プレミアム会員向け -->
     <div class="checkout-card" style="text-align:center;">
         <div style="font-size:40px; margin-bottom:12px;">✨</div>
-        <h2 style="margin-bottom:8px;">プレミアム会員です</h2>
+        <h2 style="margin-bottom:8px;">{{ _("プレミアム会員です") }}</h2>
         <p style="font-size:13px; color:#a0778a; margin-bottom:20px; line-height:1.7;">
-            現在プレミアムプランをご利用中です。<br>
-            サブスクリプションの管理・解約はカスタマーポータルから行えます。
+            {{ _("現在プレミアムプランをご利用中です。") }}<br>
+            {{ _("サブスクリプションの管理・解約はカスタマーポータルから行えます。") }}
         </p>
         {% if premium_key %}
         <a href="/customer-portal?premium_key={{ premium_key }}" class="btn-checkout" style="display:flex; text-decoration:none;">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>
-            サブスク管理・解約はこちら
+            {{ _("サブスク管理・解約はこちら") }}
         </a>
         {% else %}
         <p style="font-size:12px; color:#a0778a;">
-            管理ページへのアクセスは、メールに記載されたプレミアムリンクからお願いします。
+            {{ _("管理ページへのアクセスは、メールに記載されたプレミアムリンクからお願いします。") }}
         </p>
         {% endif %}
     </div>
     {% else %}
     <!-- 購入フォーム -->
     <div class="checkout-card">
-        <h2>プレミアムプランを始める</h2>
+        <h2>{{ _("プレミアムプランを始める") }}</h2>
         <form action="/create-checkout-session" method="POST" id="checkout-form">
             <div class="form-group">
-                <label for="email">メールアドレス（プレミアムキーの送付先）</label>
+                <label for="email">{{ _("メールアドレス（プレミアムキーの送付先）") }}</label>
                 <input type="email" id="email" name="email" placeholder="example@email.com" required autocomplete="email">
             </div>
             <button type="submit" class="btn-checkout" id="checkout-btn">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
-                Stripeで安全に支払う
+                {{ _("Stripeで安全に支払う") }}
             </button>
         </form>
         <div class="stripe-badge">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
-            Stripe による安全な決済 · カード情報は当サービスに保存されません
+            {{ _("Stripe による安全な決済 · カード情報は当サービスに保存されません") }}
         </div>
         <p class="note">
-            支払い完了後、入力したメールアドレスに専用リンクをお送りします。¥980/月・いつでも解約可
+            {{ _("支払い完了後、入力したメールアドレスに専用リンクをお送りします。¥980/月・いつでも解約可") }}
         </p>
     </div>
 
     <!-- プレミアムキーをお持ちの方（メールリンクが使えない場合の手動有効化） -->
     <div class="checkout-card" style="margin-top:16px;">
-        <h2 style="font-size:15px;">プレミアムキーをお持ちの方</h2>
+        <h2 style="font-size:15px;">{{ _("プレミアムキーをお持ちの方") }}</h2>
         <form action="/lab" method="GET">
             <div class="form-group">
-                <label for="premium_key_input">プレミアムキー</label>
-                <input type="text" id="premium_key_input" name="premium_key" placeholder="キーを入力してください" required autocomplete="off" autocapitalize="off" spellcheck="false">
+                <label for="premium_key_input">{{ _("プレミアムキー") }}</label>
+                <input type="text" id="premium_key_input" name="premium_key" placeholder="{{ _('キーを入力してください') }}" required autocomplete="off" autocapitalize="off" spellcheck="false">
             </div>
             <button type="submit" class="btn-checkout">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3"/></svg>
-                キーで有効化する
+                {{ _("キーで有効化する") }}
             </button>
         </form>
         <p class="note">
-            購入後にメールで届いたキーを入力すると、プレミアム機能が有効になります。
+            {{ _("購入後にメールで届いたキーを入力すると、プレミアム機能が有効になります。") }}
         </p>
     </div>
     {% endif %}
 
-    <a href="/lab{% if premium_key %}?premium_key={{ premium_key }}{% endif %}" class="back-link">← 分析に戻る</a>
+    <a href="/lab{% if premium_key %}?premium_key={{ premium_key }}{% endif %}" class="back-link">← {{ _("分析に戻る") }}</a>
 </div>
 
 <script>
@@ -304,7 +304,7 @@
         form.addEventListener("submit", function() {
             const btn = document.getElementById("checkout-btn");
             btn.disabled = true;
-            btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1s linear infinite"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> 処理中...';
+            btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="animation:spin 1s linear infinite"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg> ' + {{ _("処理中...") | tojson }};
         });
     }
 </script>
@@ -312,11 +312,11 @@
     @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 </style>
 <footer style="text-align:center; padding: 20px 0 32px;">
-  <a href="/feedback?page=premium" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">お問い合わせ・ご意見</a>
+  <a href="/feedback?page=premium" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">{{ _("お問い合わせ・ご意見") }}</a>
   <span style="color:#d8c0ca; font-size:11px;">|</span>
-  <a href="/privacy-policy" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">プライバシーポリシー</a>
+  <a href="/privacy-policy" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">{{ _("プライバシーポリシー") }}</a>
   <span style="color:#d8c0ca; font-size:11px;">|</span>
-  <a href="/terms-of-service" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">利用規約</a>
+  <a href="/terms-of-service" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">{{ _("利用規約") }}</a>
 </footer>
 </body>
 </html>

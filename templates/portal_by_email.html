@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{{ current_locale }}">
 <head>
     <meta charset="UTF-8">
     <link rel="icon" type="image/png" href="/static/favicon.png?v=3">
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.json">
-    <title>サブスクリプション管理 | るみろぐ</title>
+    <title>{{ _("サブスクリプション管理 | るみろぐ") }}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         * { box-sizing: border-box; }
@@ -106,25 +106,25 @@
 <body>
     <div class="card">
         <div class="icon">✉️</div>
-        <h1>サブスクリプション管理</h1>
+        <h1>{{ _("サブスクリプション管理") }}</h1>
         <p>
-            ご登録時のメールアドレスを入力すると、<br>
-            解約・プラン変更ページに移動します。
+            {{ _("ご登録時のメールアドレスを入力すると、") }}<br>
+            {{ _("解約・プラン変更ページに移動します。") }}
         </p>
 
         <form method="POST" action="/portal-by-email">
-            <label for="email">メールアドレス</label>
+            <label for="email">{{ _("メールアドレス") }}</label>
             <input type="email" id="email" name="email" placeholder="example@email.com"
                    required autocomplete="email"
                    value="{{ submitted_email or '' }}">
-            <button type="submit">管理ページへ進む</button>
+            <button type="submit">{{ _("管理ページへ進む") }}</button>
         </form>
 
         {% if error %}
         <div class="error-msg">{{ error }}</div>
         {% endif %}
 
-        <a class="back-link" href="/lab">← 分析ページに戻る</a>
+        <a class="back-link" href="/lab">← {{ _("分析ページに戻る") }}</a>
     </div>
 </body>
 </html>

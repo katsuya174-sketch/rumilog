@@ -1,12 +1,12 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{{ current_locale }}">
 <head>
     <meta charset="UTF-8">
     <link rel="icon" type="image/png" href="/static/favicon.png?v=3">
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
     <link rel="manifest" href="/static/manifest.json">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>分析履歴</title>
+    <title>{{ _("分析履歴") }}</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
     <style>
@@ -361,61 +361,61 @@
         {% if email %}
         <div style="text-align:right; margin-bottom:10px;">
           <span style="font-size:12px; color:#9b7f88;">{{ email }}</span>
-          <a href="/logout" style="margin-left:10px; font-size:12px; color:#c75b7a; text-decoration:none; border:1px solid #f0c5d0; border-radius:6px; padding:3px 10px;">ログアウト</a>
+          <a href="/logout" style="margin-left:10px; font-size:12px; color:#c75b7a; text-decoration:none; border:1px solid #f0c5d0; border-radius:6px; padding:3px 10px;">{{ _("ログアウト") }}</a>
         </div>
         {% elif is_premium %}
         <div style="text-align:right; margin-bottom:10px;">
-          <a href="/login" style="font-size:12px; color:#c75b7a; text-decoration:none; border:1px solid #f0c5d0; border-radius:6px; padding:4px 12px;">🔑 ログインで全デバイスから履歴を見る</a>
+          <a href="/login" style="font-size:12px; color:#c75b7a; text-decoration:none; border:1px solid #f0c5d0; border-radius:6px; padding:4px 12px;">🔑 {{ _("ログインで全デバイスから履歴を見る") }}</a>
         </div>
         {% endif %}
         <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:4px;">
-            <h1 style="margin:0;">分析履歴</h1>
-            <a href="/premium" style="font-size:12px; color:#c75b7a; text-decoration:none; background:rgba(199,91,122,0.08); border:1px solid #f0c5d0; border-radius:999px; padding:5px 14px; font-weight:bold; white-space:nowrap;">✨ プレミアム</a>
+            <h1 style="margin:0;">{{ _("分析履歴") }}</h1>
+            <a href="/premium" style="font-size:12px; color:#c75b7a; text-decoration:none; background:rgba(199,91,122,0.08); border:1px solid #f0c5d0; border-radius:999px; padding:5px 14px; font-weight:bold; white-space:nowrap;">✨ {{ _("プレミアム") }}</a>
         </div>
 
         <!-- ⑥ ストリーク -->
         {% if streak and streak > 0 %}
         <div class="streak-bar">
             <div class="streak-badge">
-                🔥 <span class="streak-num">{{ streak }}</span>日連続分析中
+                🔥 <span class="streak-num">{{ streak }}</span>{{ _("日連続分析中") }}
             </div>
-            <span class="streak-sub">継続は美肌への近道！</span>
+            <span class="streak-sub">{{ _("継続は美肌への近道！") }}</span>
         </div>
         {% endif %}
 
         <div class="card">
-            <div class="card-title">📦 よく提案される商品</div>
+            <div class="card-title">📦 {{ _("よく提案される商品") }}</div>
             <div class="lead">
-                過去の分析で提案された回数が多い商品を確認できます。
+                {{ _("過去の分析で提案された回数が多い商品を確認できます。") }}
             </div>
-            <a href="/my-product-ranking" class="pill-link">見てみる</a>
+            <a href="/my-product-ranking" class="pill-link">{{ _("見てみる") }}</a>
         </div>
 
         <!-- 今月の肌レポート -->
         {% if is_premium and monthly_report %}
         <div class="card monthly-report-card">
-            <h2>📊 今月の肌レポート</h2>
+            <h2>📊 {{ _("今月の肌レポート") }}</h2>
             <div class="report-grid">
                 <div class="report-item">
-                    <div class="report-label">今月の分析回数</div>
-                    <div class="report-value">{{ monthly_report.count }}<span class="report-unit"> 回</span></div>
+                    <div class="report-label">{{ _("今月の分析回数") }}</div>
+                    <div class="report-value">{{ monthly_report.count }}<span class="report-unit"> {{ _("回") }}</span></div>
                 </div>
                 <div class="report-item">
-                    <div class="report-label">今月の平均スコア</div>
-                    <div class="report-value">{{ monthly_report.avg_score }}<span class="report-unit"> 点</span></div>
+                    <div class="report-label">{{ _("今月の平均スコア") }}</div>
+                    <div class="report-value">{{ monthly_report.avg_score }}<span class="report-unit"> {{ _("点") }}</span></div>
                 </div>
                 {% if monthly_report.most_improved %}
                 <div class="report-item improved">
-                    <div class="report-label">最も改善した項目</div>
-                    <div class="report-value">{{ monthly_report.most_improved.label }}</div>
-                    <div class="report-sub">+{{ monthly_report.most_improved.diff }}点 UP ✨</div>
+                    <div class="report-label">{{ _("最も改善した項目") }}</div>
+                    <div class="report-value">{{ _(monthly_report.most_improved.label) }}</div>
+                    <div class="report-sub">{{ _("+%(diff)s点 UP", diff=monthly_report.most_improved.diff) }} ✨</div>
                 </div>
                 {% endif %}
                 {% if monthly_report.needs_attention %}
                 <div class="report-item warn">
-                    <div class="report-label">注意が必要な項目</div>
-                    <div class="report-value">{{ monthly_report.needs_attention.label }}</div>
-                    <div class="report-sub">現在 {{ monthly_report.needs_attention.score }}点</div>
+                    <div class="report-label">{{ _("注意が必要な項目") }}</div>
+                    <div class="report-value">{{ _(monthly_report.needs_attention.label) }}</div>
+                    <div class="report-sub">{{ _("現在 %(score)s点", score=monthly_report.needs_attention.score) }}</div>
                 </div>
                 {% endif %}
             </div>
@@ -423,25 +423,24 @@
         {% endif %}
 
         <div class="card">
-            <h2>Skin Score 推移</h2>
+            <h2>{{ _("Skin Score 推移") }}</h2>
             {% if is_premium %}
                 {% if skin_score_improvement and skin_score_improvement.rate is not none %}
                 <div class="improvement-rate-box">
                     <div class="improvement-rate-main">
-                        <span class="improvement-rate-label">総合スコア改善率</span>
+                        <span class="improvement-rate-label">{{ _("総合スコア改善率") }}</span>
                         <span class="improvement-rate-value {% if skin_score_improvement.rate > 0 %}rate-up{% elif skin_score_improvement.rate < 0 %}rate-down{% endif %}">
                             {% if skin_score_improvement.rate > 0 %}+{% endif %}{{ skin_score_improvement.rate }}%
                         </span>
                     </div>
                     <div class="improvement-rate-sub">
-                        初回 {{ skin_score_improvement.oldest }}点 → 最新 {{ skin_score_improvement.latest }}点
-                        （{{ skin_score_improvement.count }}回の分析）
+                        {{ _("初回 %(oldest)s点 → 最新 %(latest)s点（%(count)s回の分析）", oldest=skin_score_improvement.oldest, latest=skin_score_improvement.latest, count=skin_score_improvement.count) }}
                     </div>
                 </div>
                 {% endif %}
             {% else %}
                 <div class="premium-lock-box" style="margin-bottom:12px;">
-                    <div style="font-size:13px; color:#9a6070;">総合スコアの改善率はプレミアム機能です。</div>
+                    <div style="font-size:13px; color:#9a6070;">{{ _("総合スコアの改善率はプレミアム機能です。") }}</div>
                 </div>
             {% endif %}
             <div class="chart-wrapper chart-sm">
@@ -450,28 +449,28 @@
         </div>
 
         <div class="card">
-            <h2>改善の変化</h2>
+            <h2>{{ _("改善の変化") }}</h2>
             {% if improvement_summary %}
                 {% for item in improvement_summary %}
                     <div class="meta">
-                        {{ item.label }}：
+                        {{ _(item.label) }}：
                         {% if item.diff > 0 %}+{{ item.diff }}{% else %}{{ item.diff }}{% endif %}
                     </div>
                 {% endfor %}
             {% else %}
-                <div class="meta">まだ比較できる分析履歴がありません。</div>
+                <div class="meta">{{ _("まだ比較できる分析履歴がありません。") }}</div>
             {% endif %}
         </div>
 
         <div class="card">
-            <h2>項目別スコア推移</h2>
+            <h2>{{ _("項目別スコア推移") }}</h2>
             <div class="chart-wrapper chart-md">
                 <canvas id="detailScoreChart"></canvas>
             </div>
         </div>
 
         <div class="card">
-            <h2>有料詳細スコア推移</h2>
+            <h2>{{ _("有料詳細スコア推移") }}</h2>
             {% if is_premium %}
                 <div class="chart-wrapper chart-md">
                     <canvas id="premiumScoreChart"></canvas>
@@ -479,7 +478,7 @@
             {% else %}
                 <div class="premium-lock-box">
                     <div style="font-size:13px; color:#9a6070; margin-bottom:10px;">
-                        詳細スコアの推移はプレミアム機能です。
+                        {{ _("詳細スコアの推移はプレミアム機能です。") }}
                     </div>
                     <a href="/premium" style="
                         display:inline-block;
@@ -491,7 +490,7 @@
                         font-weight: bold;
                         text-decoration: none;
                         box-shadow: 0 3px 10px rgba(199,91,122,0.25);
-                    ">✨ プレミアムプランを見る</a>
+                    ">✨ {{ _("プレミアムプランを見る") }}</a>
                 </div>
             {% endif %}
         </div>
@@ -500,23 +499,23 @@
         {% if history %}
             {% for item in history %}
                 <div class="card">
-                    <div class="meta"><strong>記録日:</strong> {{ item.record_date or item.saved_at }}</div>
+                    <div class="meta"><strong>{{ _("記録日") }}:</strong> {{ item.record_date or item.saved_at }}</div>
 
                     <div class="score">Skin Score: {{ item.skin_score }}</div>
 
                     <!-- ① 改善ハイライト -->
                     {% if item.improvement_highlights %}
                     <div class="improvement-highlight-box">
-                        <div class="improvement-highlight-label">{{ item.period_label or "前回比" }} 変化</div>
+                        <div class="improvement-highlight-label">{{ item.period_label or _("前回比") }} {{ _("変化") }}</div>
                         <div class="improvement-highlight-items">
                             {% for label, diff in item.improvement_highlights %}
                             {% if diff > 0 %}
                             <span class="improvement-highlight-item{% if diff >= 7 %} big{% endif %}">
-                                {{ label }} +{{ diff }}点
+                                {{ _(label) }} {{ _("+%(diff)s点", diff=diff) }}
                             </span>
                             {% else %}
                             <span class="improvement-highlight-item down">
-                                {{ label }} {{ diff }}点
+                                {{ _(label) }} {{ _("%(diff)s点", diff=diff) }}
                             </span>
                             {% endif %}
                             {% endfor %}
@@ -526,35 +525,35 @@
                     <div class="diff-tags">
                         {% for label, diff in item.score_diff.items() %}
                             {% if diff > 0 %}
-                                <span class="diff-tag up">{{ label }} +{{ diff }}</span>
+                                <span class="diff-tag up">{{ _(label) }} +{{ diff }}</span>
                             {% else %}
-                                <span class="diff-tag down">{{ label }} {{ diff }}</span>
+                                <span class="diff-tag down">{{ _(label) }} {{ diff }}</span>
                             {% endif %}
                         {% endfor %}
                     </div>
                     {% endif %}
 
-                    <div class="meta" style="margin-top:6px;"><strong>肌状態:</strong> {{ item.skin_summary }}</div>
+                    <div class="meta" style="margin-top:6px;"><strong>{{ _("肌状態") }}:</strong> {{ item.skin_summary }}</div>
 
                     <hr>
 
-                    <div class="meta"><strong>予算:</strong> ¥{{ item.input_budget }}</div>
-                    <div class="meta"><strong>合計:</strong> ¥{{ item.total_price }}</div>
-                    <div class="meta"><strong>判定:</strong> {{ item.budget_status }}</div>
+                    <div class="meta"><strong>{{ _("予算") }}:</strong> ¥{{ item.input_budget }}</div>
+                    <div class="meta"><strong>{{ _("合計") }}:</strong> ¥{{ item.total_price }}</div>
+                    <div class="meta"><strong>{{ _("判定") }}:</strong> {{ _(item.budget_status) }}</div>
 
                     <!-- ④⑤ プレミアム: 肌年齢 + 左右差 -->
                     {% if is_premium %}
                         {% if item.skin_age_estimate and item.skin_age_estimate > 0 %}
                         <div class="premium-section">
-                            <div class="premium-section-title">✨ 肌年齢推定</div>
+                            <div class="premium-section-title">✨ {{ _("肌年齢推定") }}</div>
                             <div class="skin-age-row">
                                 <span class="skin-age-num">{{ item.skin_age_estimate }}</span>
-                                <span class="skin-age-unit">歳相当</span>
+                                <span class="skin-age-unit">{{ _("歳相当") }}</span>
                                 {% set age_diff = item.skin_age_estimate | int - (item.input_age | default(0) | int) %}
                                 {% if age_diff < 0 %}
-                                    <span class="skin-age-diff young">実年齢より {{ age_diff | abs }}歳若い肌</span>
+                                    <span class="skin-age-diff young">{{ _("実年齢より %(diff)s歳若い肌", diff=(age_diff | abs)) }}</span>
                                 {% elif age_diff > 0 %}
-                                    <span class="skin-age-diff older">実年齢より {{ age_diff }}歳上の肌</span>
+                                    <span class="skin-age-diff older">{{ _("実年齢より %(diff)s歳上の肌", diff=age_diff) }}</span>
                                 {% endif %}
                             </div>
                         </div>
@@ -562,7 +561,7 @@
 
                         {% if item.symmetry_analysis and item.symmetry_analysis.score is defined %}
                         <div class="premium-section">
-                            <div class="premium-section-title">🔍 左右差分析</div>
+                            <div class="premium-section-title">🔍 {{ _("左右差分析") }}</div>
                             <div class="symmetry-score-row">
                                 <span class="symmetry-score-num">{{ item.symmetry_analysis.score }}</span>
                                 <span class="skin-age-unit">/ 100</span>
@@ -573,10 +572,10 @@
                             {% if item.symmetry_analysis.left_tendency or item.symmetry_analysis.right_tendency %}
                             <div class="symmetry-grid">
                                 <div class="symmetry-cell">
-                                    <strong>左頬</strong>{{ item.symmetry_analysis.left_tendency }}
+                                    <strong>{{ _("左頬") }}</strong>{{ item.symmetry_analysis.left_tendency }}
                                 </div>
                                 <div class="symmetry-cell">
-                                    <strong>右頬</strong>{{ item.symmetry_analysis.right_tendency }}
+                                    <strong>{{ _("右頬") }}</strong>{{ item.symmetry_analysis.right_tendency }}
                                 </div>
                             </div>
                             {% endif %}
@@ -584,25 +583,48 @@
                         {% endif %}
                     {% else %}
                         <div style="margin-top:10px; padding-top:10px; border-top:1px dashed #e7b8c5; display:flex; align-items:center; justify-content:space-between; gap:10px;">
-                            <span style="font-size:12px; color:#c0a8b0;">🔒 肌年齢推定・左右差分析</span>
-                            <a href="/premium" style="font-size:11px; color:#c75b7a; text-decoration:none; background:rgba(199,91,122,0.08); border:1px solid #f0c5d0; border-radius:999px; padding:4px 10px; white-space:nowrap;">✨ プレミアムで見る</a>
+                            <span style="font-size:12px; color:#c0a8b0;">🔒 {{ _("肌年齢推定・左右差分析") }}</span>
+                            <a href="/premium" style="font-size:11px; color:#c75b7a; text-decoration:none; background:rgba(199,91,122,0.08); border:1px solid #f0c5d0; border-radius:999px; padding:4px 10px; white-space:nowrap;">✨ {{ _("プレミアムで見る") }}</a>
                         </div>
                     {% endif %}
 
-                    <a href="/history/{{ item.id }}" class="detail-link">詳細を見る →</a>
+                    <a href="/history/{{ item.id }}" class="detail-link">{{ _("詳細を見る") }} →</a>
                 </div>
             {% endfor %}
         {% else %}
-            <div class="card empty">まだ分析履歴はありません。</div>
+            <div class="card empty">{{ _("まだ分析履歴はありません。") }}</div>
         {% endif %}
 
-        <p><a href="/lab" class="back-link">← 分析に戻る</a></p>
+        <p><a href="/lab" class="back-link">← {{ _("分析に戻る") }}</a></p>
     </div>
 
     <script id="chart-labels" type="application/json">{{ labels | tojson }}</script>
     <script id="chart-scores" type="application/json">{{ scores | tojson }}</script>
     <script id="score-series" type="application/json">{{ score_series | tojson }}</script>
     <script id="premium-score-series" type="application/json">{{ premium_score_series | tojson }}</script>
+    <script id="score-label-map" type="application/json">{
+        "oil_balance": {{ _("皮脂バランス") | tojson }},
+        "redness": {{ _("赤み") | tojson }},
+        "pores": {{ _("毛穴") | tojson }},
+        "hydration": {{ _("水分") | tojson }},
+        "firmness": {{ _("ハリ") | tojson }},
+        "acne": {{ _("ニキビ") | tojson }},
+        "dullness": {{ _("くすみ") | tojson }},
+        "barrier": {{ _("バリア") | tojson }},
+        "texture": {{ _("キメ") | tojson }},
+        "tone_evenness": {{ _("色ムラ") | tojson }}
+    }</script>
+    <script id="score-unit-label" type="application/json">{{ _("点") | tojson }}</script>
+    <script id="premium-score-label-map" type="application/json">{
+        "acne_marks_red": {{ _("赤ニキビ跡") | tojson }},
+        "pigmentation": {{ _("色素沈着") | tojson }},
+        "enlarged_pores": {{ _("開き毛穴") | tojson }},
+        "blackhead_pores": {{ _("黒ずみ毛穴") | tojson }},
+        "translucency": {{ _("透明感") | tojson }},
+        "tone_uniformity": {{ _("肌トーン均一性") | tojson }},
+        "skin_balance": {{ _("肌バランス") | tojson }},
+        "symmetry": {{ _("左右差") | tojson }}
+    }</script>
 
     <script>
         const chartLabels = JSON.parse(document.getElementById("chart-labels").textContent);
@@ -629,18 +651,9 @@
         // 色の多い系列では破線も混ぜて区別しやすくする
         const DASHES = [[], [], [], [], [5,3], [5,3], [2,3], [2,3], [8,3,2,3], [8,3,2,3]];
 
-        const labelMap = {
-            oil_balance: "皮脂バランス", redness: "赤み", pores: "毛穴",
-            hydration: "水分", firmness: "ハリ", acne: "ニキビ",
-            dullness: "くすみ", barrier: "バリア", texture: "キメ", tone_evenness: "色ムラ"
-        };
-
-        const premiumLabelMap = {
-            acne_marks_red: "赤ニキビ跡", pigmentation: "色素沈着",
-            enlarged_pores: "開き毛穴", blackhead_pores: "黒ずみ毛穴",
-            translucency: "透明感", tone_uniformity: "肌トーン均一性",
-            skin_balance: "肌バランス", symmetry: "左右差"
-        };
+        const labelMap = JSON.parse(document.getElementById("score-label-map").textContent);
+        const premiumLabelMap = JSON.parse(document.getElementById("premium-score-label-map").textContent);
+        const scoreUnitLabel = JSON.parse(document.getElementById("score-unit-label").textContent);
 
         function shortenLabel(label) {
             if (!label) return label;
@@ -718,7 +731,7 @@
                         tooltip: {
                             ...darkTooltip,
                             callbacks: {
-                                label: ctx => ` Skin Score: ${ctx.parsed.y} 点`
+                                label: ctx => ` Skin Score: ${ctx.parsed.y} ${scoreUnitLabel}`
                             }
                         }
                     },
@@ -792,11 +805,11 @@
         }
     </script>
     <footer style="text-align:center; padding: 20px 0 32px;">
-      <a href="/feedback?page=history" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">お問い合わせ・ご意見</a>
+      <a href="/feedback?page=history" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">{{ _("お問い合わせ・ご意見") }}</a>
       <span style="color:#d8c0ca; font-size:11px;">|</span>
-      <a href="/privacy-policy" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">プライバシーポリシー</a>
+      <a href="/privacy-policy" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">{{ _("プライバシーポリシー") }}</a>
       <span style="color:#d8c0ca; font-size:11px;">|</span>
-      <a href="/terms-of-service" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">利用規約</a>
+      <a href="/terms-of-service" style="font-size:11px; color:#b89aa6; text-decoration:none; margin: 0 10px;">{{ _("利用規約") }}</a>
     </footer>
 </body>
 </html>

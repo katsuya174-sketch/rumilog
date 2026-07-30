@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{{ current_locale }}">
 <head>
   <meta charset="UTF-8">
   <link rel="icon" type="image/png" href="/static/favicon.png?v=3">
   <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ログイン — るみろぐ</title>
+  <title>{{ _("ログイン — るみろぐ") }}</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -115,26 +115,25 @@
 <body>
   <div class="card">
     <div class="logo">🌸</div>
-    <h1>るみろぐ ログイン</h1>
+    <h1>{{ _("るみろぐ ログイン") }}</h1>
 
     {% if sent %}
       <div class="sent-box">
         <div class="check">✉️</div>
-        メールを送信しました<br>
-        <span class="email-addr">{{ email }}</span> 宛に<br>
-        ログインリンクを送りました。<br>
-        メールのリンクをタップしてください。
+        {{ _("メールを送信しました") }}<br>
+        <span class="email-addr">{{ email }}</span> {{ _("宛にログインリンクを送りました。") }}<br>
+        {{ _("メールのリンクをタップしてください。") }}
         <div class="note">
-          リンクは15分間有効です。<br>
-          届かない場合はスパムフォルダをご確認ください。
+          {{ _("リンクは15分間有効です。") }}<br>
+          {{ _("届かない場合はスパムフォルダをご確認ください。") }}
         </div>
       </div>
-      <a href="/login" class="back">← 別のメールアドレスで試す</a>
+      <a href="/login" class="back">← {{ _("別のメールアドレスで試す") }}</a>
 
     {% else %}
       <p class="subtitle">
-        メールアドレスを入力するとログインリンクを送ります。<br>
-        スマホ・PCどちらからでも同じ履歴を確認できます。
+        {{ _("メールアドレスを入力するとログインリンクを送ります。") }}<br>
+        {{ _("スマホ・PCどちらからでも同じ履歴を確認できます。") }}
       </p>
 
       {% if error %}
@@ -142,7 +141,7 @@
       {% endif %}
 
       <form method="post">
-        <label for="email">メールアドレス</label>
+        <label for="email">{{ _("メールアドレス") }}</label>
         <input
           type="email"
           id="email"
@@ -151,16 +150,16 @@
           required
           autocomplete="email"
         >
-        <button type="submit">ログインリンクを送る</button>
+        <button type="submit">{{ _("ログインリンクを送る") }}</button>
       </form>
 
       <p class="page-note">
-        初めての方もこのメールアドレスで自動的に登録されます。<br>
-        パスワードは不要です。
+        {{ _("初めての方もこのメールアドレスで自動的に登録されます。") }}<br>
+        {{ _("パスワードは不要です。") }}
       </p>
     {% endif %}
 
-    <a href="/" class="back">← トップに戻る</a>
+    <a href="/" class="back">← {{ _("トップに戻る") }}</a>
   </div>
 </body>
 </html>

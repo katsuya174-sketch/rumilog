@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="{{ current_locale }}">
 <head>
     <meta charset="UTF-8">
     <link rel="icon" type="image/png" href="/static/favicon.png?v=3">
@@ -163,7 +163,7 @@
         <div class="header-card">
             <h1>📦 {{ title }}</h1>
             <p class="lead">
-                過去の分析で提案された回数が多い商品をカテゴリ別に表示しています。
+                {{ _("過去の分析で提案された回数が多い商品をカテゴリ別に表示しています。") }}
             </p>
         </div>
 
@@ -175,14 +175,14 @@
                     {% for item in group.products %}
                         <div class="ranking-card">
                             <span class="rank{% if loop.index == 1 %} top1{% elif loop.index == 2 %} top2{% elif loop.index == 3 %} top3{% endif %}">
-                                {{ loop.index }}位
+                                {{ _("%(rank)s位", rank=loop.index) }}
                             </span>
                             <div class="card-body">
                                 {% if item.brand %}
                                 <div class="brand">{{ item.brand }}</div>
                                 {% endif %}
                                 <div class="product">{{ item.product }}</div>
-                                <div class="meta"><span class="count">{{ item.count }}回</span> 提案</div>
+                                <div class="meta"><span class="count">{{ _("%(count)s回", count=item.count) }}</span> {{ _("提案") }}</div>
                             </div>
                         </div>
                     {% endfor %}
@@ -190,11 +190,11 @@
             {% endfor %}
         {% else %}
             <div class="empty">
-                まだ表示できる商品がありません。
+                {{ _("まだ表示できる商品がありません。") }}
             </div>
         {% endif %}
 
-        <a class="back-link" href="/history">← 分析履歴に戻る</a>
+        <a class="back-link" href="/history">← {{ _("分析履歴に戻る") }}</a>
     </div>
 </body>
 </html>
