@@ -354,6 +354,11 @@ def save_rakuten_search_to_db(cache_key, results):
 BRAND_CACHE_TTL_SECONDS = 60 * 60 * 24 * 180  # 180日（ブランド名はほぼ不変のため長め）
 _BRAND_NAME_CACHE = {}  # メモリキャッシュ（同一プロセス内での再検索を避ける）
 
+# Geminiが正常応答した上で「ブランド不明」と判定した結果を表す負キャッシュ用の番人値。
+# 実在のブランド名と衝突しない値であればよい。timeout・通信エラー・例外時はこの値を
+# 保存しない（一時障害を恒久的な「ブランド不明」と誤認しないため、呼び出し側で分岐する）。
+_BRAND_CACHE_NO_BRAND_SENTINEL = "__rumilog_no_brand__"
+
 def init_brand_cache_table():
     conn = None
     try:
@@ -375,11 +380,14 @@ def init_brand_cache_table():
         if conn: conn.close()
 
 def get_cached_brand(cache_key):
+    """cache_key未保存ならNone、保存済みならブランド名(負キャッシュ済みなら空文字)を返す。
+    呼び出し側は「Noneなら未検索」「Noneでなければ結果確定済み（空文字含む）」として扱える。"""
     if not cache_key:
         return None
 
     if cache_key in _BRAND_NAME_CACHE:
-        return _BRAND_NAME_CACHE[cache_key]
+        _cached = _BRAND_NAME_CACHE[cache_key]
+        return "" if _cached == _BRAND_CACHE_NO_BRAND_SENTINEL else _cached
 
     conn = None
     try:
@@ -396,7 +404,7 @@ def get_cached_brand(cache_key):
             if age <= BRAND_CACHE_TTL_SECONDS:
                 print(f"[BRAND CACHE HIT] {cache_key} -> {brand}", flush=True)
                 _BRAND_NAME_CACHE[cache_key] = brand
-                return brand
+                return "" if brand == _BRAND_CACHE_NO_BRAND_SENTINEL else brand
     except Exception as e:
         print(f"[BRAND CACHE GET ERROR] {repr(e)}", flush=True)
     finally:
@@ -4762,6 +4770,10 @@ def infer_brand_from_image(image_url: str, product_name: str, category: str = ""
         _brand = (_response.text or "").strip()
         _brand = _brand.replace("「", "").replace("」", "").replace('"', "").replace("'", "").strip()
         if not _brand or len(_brand) > 40:
+            # Geminiが正常応答した上でブランドを特定できなかった結果のみ負キャッシュする
+            # (通信エラー・例外はexceptブロック側で扱われここには来ない)。
+            if cache_key:
+                save_brand_to_cache(cache_key, _BRAND_CACHE_NO_BRAND_SENTINEL)
             return ""
         print(f"[BRAND INFER FROM IMAGE] {product_name} → {_brand}", flush=True)
         save_brand_to_cache(cache_key, _brand)
@@ -4804,8 +4816,12 @@ def infer_brand_from_title(product_name: str, category: str = "") -> str:
         _brand = (_response.text or "").strip()
         _brand = _brand.replace("「", "").replace("」", "").replace('"', "").replace("'", "").strip()
         if not _brand or len(_brand) > 40:
+            # Geminiが正常応答した上でブランドを特定できなかった結果のみ負キャッシュする
+            # (通信エラー・例外はexceptブロック側で扱われここには来ない)。
+            save_brand_to_cache(cache_key, _BRAND_CACHE_NO_BRAND_SENTINEL)
             return ""
         if _brand.strip() in _GENERIC_CATEGORY_NAMES:
+            save_brand_to_cache(cache_key, _BRAND_CACHE_NO_BRAND_SENTINEL)
             return ""
         print(f"[BRAND INFER FROM TITLE] {product_name} → {_brand}", flush=True)
         save_brand_to_cache(cache_key, _brand)
@@ -4813,6 +4829,86 @@ def infer_brand_from_title(product_name: str, category: str = "") -> str:
     except Exception as _e:
         print(f"[BRAND INFER FROM TITLE ERROR] {_e}", flush=True)
         return ""
+
+
+def prewarm_brand_cache_for_all_steps(data, max_workers=4):
+    """
+    finalize_result_data(→finalize_step_data→preserve_ranked_top_candidates)が
+    後段で逐次呼ぶ infer_brand_from_title() を先回りして並列実行し、
+    ブランドキャッシュ(_BRAND_NAME_CACHE / brand_name_cacheテーブル)を
+    温めておくための事前ウォームアップ処理。
+
+    infer_brand_from_title・get_cached_brand・save_brand_to_cacheの実装は
+    一切変更していない。後段のfinalize_result_dataは本関数の戻り値に
+    依存せず、従来どおり自分でinfer_brand_from_titleを呼ぶ（ロジック無変更）。
+    本関数はその呼び出しが「既に温まっているキャッシュを読むだけ」になるよう
+    事前に済ませておくだけなので、出力結果には一切影響しない。
+
+    同一cache_keyはこの関数内で重複排除してから1回だけ ThreadPoolExecutor に
+    投げるため、並列実行下でも同一ブランドへの同時Gemini問い合わせは発生しない
+    （Rakuten Phase-A prefetchの重複排除と同じ設計パターン）。
+    """
+    import concurrent.futures
+
+    all_steps = []
+    for section in ["morning", "night"]:
+        steps = data.get(section, {}).get("steps", [])
+        if isinstance(steps, list):
+            all_steps.extend(s for s in steps if isinstance(s, dict))
+    weekly = data.get("weekly_care", [])
+    if isinstance(weekly, list):
+        all_steps.extend(s for s in weekly if isinstance(s, dict))
+
+    # cache_key -> (product_name, category) の代表1件のみを保持する
+    targets = {}
+    for step in all_steps:
+        category = str(step.get("category", "") or "")
+        raw_candidates = step.get("top_candidates", [])
+        if not isinstance(raw_candidates, list):
+            continue
+        # preserve_ranked_top_candidatesは正規化・フィルタ後の上位3件のみを
+        # ブランド推測対象にするが、正規化前の生候補でも上位3件に絞っておけば
+        # 実際に使われる候補とほぼ一致する。フィルタで稀に対象から外れても、
+        # 後段が従来どおりinfer_brand_from_titleを呼ぶだけなので結果は変わらない。
+        for cand in raw_candidates[:3]:
+            if not isinstance(cand, dict):
+                continue
+            if cand.get("brand"):
+                continue
+            raw_name = str(
+                cand.get("name") or cand.get("product") or cand.get("product_name") or ""
+            ).strip()
+            if not raw_name:
+                continue
+            # infer_brand_from_title内のcache_key算出と同一の変換
+            # (clean_brand_and_product_nameはbrand未指定時、
+            #  clean_display_product_nameのみ適用した名前を返す)
+            _, cleaned_name = clean_brand_and_product_name("", raw_name)
+            if not cleaned_name:
+                continue
+            cache_key = f"brand_v1:{normalize_product_name(cleaned_name)}"
+            if cache_key in targets:
+                continue
+            targets[cache_key] = (cleaned_name, category)
+
+    if not targets:
+        return
+
+    print(f"[BRAND PREWARM START] unique_targets={len(targets)} max_workers={max_workers}", flush=True)
+    _t0 = time.time()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(infer_brand_from_title, name, category)
+            for name, category in targets.values()
+        ]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                print(f"[BRAND PREWARM ERROR] {repr(e)}", flush=True)
+
+    print(f"[BRAND PREWARM DONE] {len(targets)}件 elapsed={time.time()-_t0:.2f}s", flush=True)
 
 
 def attach_affiliate_links_to_step(step, affiliate_ai_db):
@@ -13896,6 +13992,7 @@ def build_rule_based_warnings(data, user_data):
     return cleaned
 
 def finalize_result_data(data, user_data):
+    _t_frd0 = time.time()
     if not isinstance(data, dict):
         data = {}
 
@@ -13914,20 +14011,41 @@ def finalize_result_data(data, user_data):
 
     _premium_improvement_priority = data.get("premium_improvement_priority", [])
 
+    print(f"[FINALIZE TIME] normalize_sections elapsed={time.time()-_t_frd0:.2f}s", flush=True)
+
+    _t_morning = time.time()
     data["morning"]["steps"] = [
         finalize_step_data(step, user_data, _premium_improvement_priority)
         for step in data["morning"]["steps"]
     ]
+    print(
+        f"[FINALIZE TIME] morning finalize_step_data x{len(data['morning']['steps'])} "
+        f"elapsed={time.time()-_t_morning:.2f}s",
+        flush=True
+    )
 
+    _t_night = time.time()
     data["night"]["steps"] = [
         finalize_step_data(step, user_data, _premium_improvement_priority)
         for step in data["night"]["steps"]
     ]
+    print(
+        f"[FINALIZE TIME] night finalize_step_data x{len(data['night']['steps'])} "
+        f"elapsed={time.time()-_t_night:.2f}s",
+        flush=True
+    )
 
+    _t_weekly = time.time()
     data["weekly_care"] = [
         finalize_step_data(step, user_data, _premium_improvement_priority)
         for step in data["weekly_care"]
     ]
+    print(
+        f"[FINALIZE TIME] weekly_care finalize_step_data x{len(data['weekly_care'])} "
+        f"elapsed={time.time()-_t_weekly:.2f}s",
+        flush=True
+    )
+    _t_after_steps = time.time()
 
     # scores
     if not isinstance(data.get("scores"), dict):
@@ -14072,6 +14190,12 @@ def finalize_result_data(data, user_data):
             data[key] = ""
         else:
             data[key] = str(data[key])
+
+    print(
+        f"[FINALIZE TIME] remainder(scores/observation/budget等) "
+        f"elapsed={time.time()-_t_after_steps:.2f}s total={time.time()-_t_frd0:.2f}s",
+        flush=True
+    )
 
     return data
 
@@ -18156,11 +18280,12 @@ def lab_test_function():
             }, flush=True)
             
             affiliate_ai_db = load_affiliate_links_ai()
-            
+
             debug_log("AFTER ASSIGN PRODUCTS")
             debug_step_summary("morning assigned", data.get("morning", {}).get("steps", []))
             debug_step_summary("night assigned", data.get("night", {}).get("steps", []))
             debug_step_summary("weekly assigned", data.get("weekly_care", []))
+            _lab_segment("assign_flow_log_debug")
 
             # =========================
             # ⑧ 選定後の調整
@@ -18168,10 +18293,16 @@ def lab_test_function():
             data = limit_serum_steps(data)
             data = limit_booster_steps(data)
             data = sort_steps(data)
+            _lab_segment("limit_and_sort_steps")
 
             # =========================
             # ⑨ 最終整形
             # =========================
+            # finalize_result_data内で逐次呼ばれるinfer_brand_from_titleを
+            # 先回りで並列ウォームアップしておく(結果は変えず、待ち時間のみ短縮)。
+            prewarm_brand_cache_for_all_steps(data)
+            _lab_segment("brand_cache_prewarm")
+
             data = finalize_result_data(data, user_data)
             _lab_segment("post_assign_finalize_local")
 
