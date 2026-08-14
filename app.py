@@ -11690,22 +11690,34 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=3):
         flush=True
     )
 
-    # prefetch完了後にセッションキャッシュを解放（Gemini評価はファイルキャッシュに永続化済み）
+    # _step_rakuten_resultsはPhase-A→Phase-B(Gemini評価)の橋渡し専用で、
+    # ここまでで役目を終えるため解放する(Gemini評価結果自体はファイル
+    # キャッシュに永続化済み)。
+    #
+    # _rakuten_criteria_cacheはここではクリアしない。この直後に実行される
+    # select_best_market_candidate(assign_one_stepループ、全ステップ分)が
+    # 同じsearch_rakuten_for_stepを再度呼び、同一キーワードの検索結果を
+    # 参照するため、ここで空にすると同一診断内なのにDB永続キャッシュへの
+    # 再照会（接続オーバーヘッド）が毎ステップ発生してしまっていた。
+    # 診断間の分離は診断開始時(lab_test_function)のリセットで保証される。
     _step_rakuten_results = {}
-    _rakuten_criteria_cache = {}
     _log_mem("cache-freed")
 
 
 def assign_products_to_all_steps(data, products, user_data, budget_value):
+    _t_apts0 = time.time()
 
     ai_image_db = load_ai_product_images()
     improvement_plan = data.get("improvement_plan", {})
     premium_improvement_priority = data.get("premium_improvement_priority", [])
     impact_priority_ranks = build_impact_priority_ranks(premium_improvement_priority)
     verified_products = load_verified_products_cache()
+    print(f"[ASSIGN TIME] preload(ai_image_db/verified_products) elapsed={time.time()-_t_apts0:.2f}s", flush=True)
 
     # 全ステップのRakuten検索を並列プリフェッチ（スコアリングループはキャッシュヒット）
+    _t_prefetch = time.time()
     prefetch_rakuten_for_all_steps(data, improvement_plan)
+    print(f"[ASSIGN TIME] prefetch_rakuten_for_all_steps elapsed={time.time()-_t_prefetch:.2f}s", flush=True)
 
     _raw_avoid = data.get("routine_strategy", {}).get("avoid_combinations", [])
     avoid_rules = [r for r in _raw_avoid if isinstance(r, dict) and r.get("families")]
@@ -11881,6 +11893,7 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
 
     # ② scope:"any" 衝突を検出するためにセクション間で成分familiesを引き継ぐ
     global_families: list = []
+    _t_assign_loop = time.time()
 
     for section in ["morning", "night"]:
         used_product_names = set()
@@ -11910,6 +11923,9 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
         # このセクションで選ばれた成分を次セクションに引き継ぐ
         global_families.extend(routine_context["families"])
 
+    print(f"[ASSIGN TIME] morning+night assign_one_step loop elapsed={time.time()-_t_assign_loop:.2f}s", flush=True)
+    _t_weekly_loop = time.time()
+
     weekly_used_product_names = set()
     weekly_routine_context = {
         "families": [],
@@ -11931,6 +11947,12 @@ def assign_products_to_all_steps(data, products, user_data, budget_value):
                 "weekly_care",
                 weekly_routine_context
             )
+
+    print(
+        f"[ASSIGN TIME] weekly_care assign_one_step loop elapsed={time.time()-_t_weekly_loop:.2f}s "
+        f"total={time.time()-_t_apts0:.2f}s",
+        flush=True
+    )
 
     return data
 
@@ -18318,6 +18340,7 @@ def lab_test_function():
 
             data = assign_products_to_all_steps(data, products, user_data, budget_value)
             _log_mem("after-assign-products")
+            _lab_segment("assign_products_to_all_steps_only")
 
             # 美容機器: Geminiが選んだdevice_type(+reason)に検索用商品名・機能・頻度・優先度を補完
             data = enrich_beauty_devices(data, user_data)
