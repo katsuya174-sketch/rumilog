@@ -5029,31 +5029,46 @@ def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
     （最大6件保持）が一度も試されずリンク無しのまま確定してしまうため、
     リンクが無い全ステップを対象にする。
     """
-    skipped = []  # クールダウンでスキップされたステップ
+    import concurrent.futures
+
     all_steps = []
-
-    def _attach(step):
-        if not isinstance(step, dict):
-            return
-        all_steps.append(step)
-        link_before = str(step.get("rakuten_link", "") or "")
-        attach_affiliate_links_to_step(step, affiliate_ai_db)
-        if not str(step.get("rakuten_link", "") or "") and not link_before:
-            if time.time() < RAKUTEN_COOLDOWN_UNTIL:
-                skipped.append(step)
-
     for section in ["morning", "night"]:
         for step in data.get(section, {}).get("steps", []):
-            _attach(step)
+            if isinstance(step, dict):
+                all_steps.append(step)
 
     for step in data.get("weekly_care", []):
-        _attach(step)
+        if isinstance(step, dict):
+            all_steps.append(step)
 
     for step in data.get("supplements", []):
-        _attach(step)
+        if isinstance(step, dict):
+            all_steps.append(step)
 
     for step in data.get("beauty_devices", []):
-        _attach(step)
+        if isinstance(step, dict):
+            all_steps.append(step)
+
+    skipped = []  # クールダウンでスキップされたステップ
+
+    def _attach(step):
+        link_before = str(step.get("rakuten_link", "") or "")
+        attach_affiliate_links_to_step(step, affiliate_ai_db)
+        return link_before
+
+    # prefetch_rakuten_for_all_steps（Phase-A）と同じレートリミッタ
+    # (wait_for_rakuten_rate_limit)をfetch_rakuten_item内部で共有しているため、
+    # ここを並列化しても実際のリクエスト間隔・取得されるリンクや候補は変わらず、
+    # 逐次実行だった分の待ち時間だけが短縮される。
+    if all_steps:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+            futures = {executor.submit(_attach, step): step for step in all_steps}
+            for future in concurrent.futures.as_completed(futures):
+                step = futures[future]
+                link_before = future.result()
+                if not str(step.get("rakuten_link", "") or "") and not link_before:
+                    if time.time() < RAKUTEN_COOLDOWN_UNTIL:
+                        skipped.append(step)
 
     # クールダウン解消後に再試行（最大30秒待機）
     if skipped and RAKUTEN_COOLDOWN_UNTIL > time.time():
@@ -11445,8 +11460,28 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=3):
             print(f"[PREFETCH ERROR] {repr(e)}", flush=True)
             return []
 
+    # 同一(category, ingredient_focus)キー（_get_step_rakuten_key）を持つ
+    # ステップはクエリ構築(make_q1/make_q2)がstepのcategory/ingredient_focus/
+    # improvement_planのみに依存するため検索結果が完全に同一になる。
+    # 全ステップ分そのままfetchを投げると、並列実行下では
+    # _rakuten_criteria_search_single内のメモリキャッシュチェックが
+    # 完了前の同時アクセスでレースし、同一キーワードで楽天検索が
+    # 複数回発火しうる。ここでキー単位に代表1ステップへ絞ってから
+    # fetchする（結果はsearch_rakuten_for_step内でキー単位に
+    # _step_rakuten_resultsへ書き込まれるため、同キーの他ステップも
+    # 後段でそのまま同じ結果を参照できる＝取得結果は変わらない）。
+    representative_steps = {}
+    for step in all_steps:
+        key = _get_step_rakuten_key(step)
+        representative_steps.setdefault(key, step)
+
+    print(
+        f"[PREFETCH DEDUP] steps={len(all_steps)} unique_keys={len(representative_steps)}",
+        flush=True
+    )
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(fetch, step): step for step in all_steps}
+        futures = {executor.submit(fetch, step): step for step in representative_steps.values()}
         for future in concurrent.futures.as_completed(futures):
             future.result()
 
@@ -13239,6 +13274,66 @@ def save_results(data):
         if conn:
             conn.close()
 
+
+def insert_result_row(record):
+    """
+    新規1件のみをDBへ保存するO(1)版（append_result専用）。
+    save_results()は全件ロード＋全件ループUPSERTのため件数に比例して遅くなるが、
+    append_resultは新規1件を追加するだけなので、その1件だけをUPSERTすれば十分。
+    SQL文はsave_results()のループ本体と同一。
+    """
+    if not isinstance(record, dict):
+        return False
+
+    record_id = str(record.get("id", "")).strip()
+    if not record_id:
+        return False
+
+    conn = None
+    cur = None
+
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            INSERT INTO results (id, saved_at, payload)
+            VALUES (%s, %s, %s::jsonb)
+            ON CONFLICT (id)
+            DO UPDATE SET
+                saved_at = EXCLUDED.saved_at,
+                payload = EXCLUDED.payload;
+            """,
+            (
+                record_id,
+                record.get("saved_at"),
+                json.dumps(lightweight_result_payload(record), ensure_ascii=False)
+            )
+        )
+
+        conn.commit()
+
+        print("[RESULT ROW INSERTED]", record_id, flush=True)
+
+        return True
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+
+        print("[RESULT ROW INSERT ERROR]", e, flush=True)
+
+        raise
+
+    finally:
+        if cur:
+            cur.close()
+
+        if conn:
+            conn.close()
+
+
 # 診断ID生成
 def generate_result_id(history):
     existing_ids = set()
@@ -14176,11 +14271,6 @@ def normalize_result(raw_data, image_path=""):
 FREE_HISTORY_LIMIT = 3  # 無料ユーザーの保存上限件数
 
 def append_result(raw_data, image_path="", is_premium=False):
-    history = load_results()
-
-    if not isinstance(history, list):
-        history = []
-
     normalized = normalize_result(raw_data, image_path=image_path)
 
     if not isinstance(normalized, dict):
@@ -14189,7 +14279,10 @@ def append_result(raw_data, image_path="", is_premium=False):
     record_id = normalized.get("id")
 
     if not record_id:
-        record_id = generate_result_id(history)
+        # idは %Y%m%d%H%M%S%f（マイクロ秒まで含む）でTEXT PRIMARY KEYのため、
+        # 全履歴をロードして衝突チェックしなくても実質衝突しない。
+        # 万一衝突してもinsert_result_rowのON CONFLICT DO UPDATEが安全に処理する。
+        record_id = generate_result_id([])
 
     record = {
         **normalized,
@@ -14202,8 +14295,7 @@ def append_result(raw_data, image_path="", is_premium=False):
         ),
     }
 
-    history.append(record)
-    save_results(history)
+    insert_result_row(record)
 
     print(f"[RESULT SAVED] id={record_id} user_id={record.get('user_id')!r} client_ip={record.get('client_ip')!r}", flush=True)
 
@@ -17736,6 +17828,18 @@ def lab_test_function():
         lab_t0 = time.time()
         print("[LAB TIME] start 0.0", flush=True)
         is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+        # 区間別タイミング計測: 直前のチェックポイントからの経過時間と
+        # リクエスト開始からの累計を1区間1行で出力する。変更前後の
+        # 処理時間比較に使うため、既存ログは削除せずこのログを追加するのみ。
+        _lab_seg_state = {"prev": lab_t0}
+
+        def _lab_segment(label):
+            now = time.time()
+            elapsed = now - _lab_seg_state["prev"]
+            total = now - lab_t0
+            print(f"[LAB SEGMENT] {label} elapsed={elapsed:.2f}s total={total:.2f}s", flush=True)
+            _lab_seg_state["prev"] = now
         try:
             client_ip = get_client_ip()
             _is_creator = is_creator()
@@ -17792,6 +17896,7 @@ def lab_test_function():
             # ② 画像取得
             # =========================
             front_img, left_img, right_img = load_uploaded_images(request)
+            _lab_segment("image_load_resize")
             if not can_use_global_diagnosis():
                 message = "現在、今月の分析上限に達しています。来月以降に再度お試しください。"
 
@@ -17832,6 +17937,7 @@ def lab_test_function():
 
                 print("[LAB CHECK] after Gemini", flush=True)
                 _log_mem("after-gemini-analysis")
+                _lab_segment("gemini_analysis_phase1_2")
 
             except Exception as e:
                 print("===== LAB ERROR =====")
@@ -17878,17 +17984,25 @@ def lab_test_function():
 
             data = ensure_result_structure(data)
             data["skin_score"] = calculate_skin_score(data.get("scores", {}))
-            data["premium_scores"] = calculate_premium_scores(
-                data.get("scores", {})
-            )
+
             symmetry_analysis = data.get("symmetry_analysis", {})
 
             if not isinstance(symmetry_analysis, dict):
                 symmetry_analysis = {}
 
-            data["premium_scores"]["symmetry"] = safe_int(
-                symmetry_analysis.get("score", 0)
-            )
+            # premium_scores/premium_improvement_priorityはanalyze_skin_with_gemini内
+            # (Phase1直後、Phase2がこのランキングを参照できるように)で既に計算済みで
+            # dataにマージ済み。ensure_result_structureはscores/symmetry_analysis/
+            # ai_improvement_strategyに触れないため入力は同一であり、再計算しても
+            # 結果は変わらない。ここでは未計算の場合(DEV_MODEダミーデータ等)の
+            # フォールバックとしてのみ計算する。
+            if not isinstance(data.get("premium_scores"), dict):
+                data["premium_scores"] = calculate_premium_scores(
+                    data.get("scores", {})
+                )
+                data["premium_scores"]["symmetry"] = safe_int(
+                    symmetry_analysis.get("score", 0)
+                )
 
             data["symmetry_analysis"] = {
                 "score": safe_int(symmetry_analysis.get("score", 0)),
@@ -17896,11 +18010,13 @@ def lab_test_function():
                 "left_tendency": str(symmetry_analysis.get("left_tendency", "") or ""),
                 "right_tendency": str(symmetry_analysis.get("right_tendency", "") or "")
             }
-            data["premium_improvement_priority"] = build_premium_improvement_priority(
-                data.get("scores", {}),
-                data["premium_scores"],
-                data.get("ai_improvement_strategy", [])
-            )
+
+            if not data.get("premium_improvement_priority"):
+                data["premium_improvement_priority"] = build_premium_improvement_priority(
+                    data.get("scores", {}),
+                    data["premium_scores"],
+                    data.get("ai_improvement_strategy", [])
+                )
             debug_log("AFTER ANALYZE", {
                 "skin_score": data.get("skin_score"),
                 "summary": data.get("skin_summary"),
@@ -18014,6 +18130,7 @@ def lab_test_function():
 
             # サプリメント: Geminiが選んだsupplement_type(+reason)に検索用商品名・成分タグ・タイミング・注意点・優先度を補完
             data = enrich_supplements(data, user_data)
+            _lab_segment("product_assign_rakuten")
 
             print("[FLOW AFTER ASSIGN]", {
                 "night": [
@@ -18056,6 +18173,7 @@ def lab_test_function():
             # ⑨ 最終整形
             # =========================
             data = finalize_result_data(data, user_data)
+            _lab_segment("post_assign_finalize_local")
 
             print("[FLOW AFTER FINALIZE]", {
                 "night": [
@@ -18083,6 +18201,7 @@ def lab_test_function():
             }, flush=True)
 
             data = attach_affiliate_links_to_all_steps(data, affiliate_ai_db)
+            _lab_segment("affiliate_links")
 
             # 化粧水・美容液がnight_stepsにない場合はmorning_stepsから補完
             data = supplement_night_steps_from_morning(data)
@@ -18093,12 +18212,15 @@ def lab_test_function():
             data = resolve_night_irritant_conflicts(data)
             # 美容機器×レチノール/ピーリングの併用可否を判定（use_days確定後に実行）
             data = resolve_beauty_device_day_conflicts(data)
+            _lab_segment("day_conflict_resolution")
 
             # 楽天商品名をGeminiで短く整形（rakuten_criteria / ai_rakuten_verified のみ対象）
             data = gemini_clean_rakuten_product_names(data)
+            _lab_segment("gemini_name_clean")
 
             # Geminiによる商品選定理由・1位vs2位比較文を生成
             data = gemini_generate_selection_reasons(data, user_data)
+            _lab_segment("gemini_selection_reason")
 
             print("[FLOW AFTER AFFILIATE]", {
                 "night": [
@@ -18135,6 +18257,7 @@ def lab_test_function():
             # =========================
             data = finalize_budget_info(data, budget_value)
             data["weekly_usage_plan"] = build_weekly_usage_plan(data)
+            _lab_segment("budget_finalize")
             print("[LAB TIME] after build_weekly_usage_plan", round(time.time() - lab_t0, 2), flush=True)
             print(
                 "[WEEKLY USAGE PLAN]",
@@ -18186,6 +18309,7 @@ def lab_test_function():
                 traceback.print_exc()
                 print("=============================")
                 # 保存に失敗しても結果表示は止めない
+            _lab_segment("db_save")
 
             # =========================
             # ⑫ 表示
@@ -18202,6 +18326,8 @@ def lab_test_function():
                 data=data,
                 result_id=data.get("id", "")
             )
+            _lab_segment("render_template")
+            print(f"[LAB TIME] TOTAL={time.time() - lab_t0:.2f}s", flush=True)
             if is_ajax:
                 return jsonify({
                     "success": True,
