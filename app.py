@@ -4831,6 +4831,52 @@ def infer_brand_from_title(product_name: str, category: str = "") -> str:
         return ""
 
 
+def _batch_prewarm_brand_memory_cache(cache_keys):
+    """
+    複数のbrand_v1キーを1回のSELECT(cache_key = ANY(%s))でまとめて取得し、
+    get_cached_brandが最初に参照するプロセス内メモリキャッシュ(_BRAND_NAME_CACHE)
+    へ反映する。TTL判定・保存する値の形式(負キャッシュの番人値を含め、生の値を
+    そのまま_BRAND_NAME_CACHEへ格納する)はget_cached_brand内のDB読み込み経路と
+    完全に同一にしている。DB接続の使い方以外、get_cached_brand/save_brand_to_cache
+    自体は一切変更しない。
+
+    ここで解決できなかったキー(DB未登録・TTL超過・DB接続失敗)は単に
+    _BRAND_NAME_CACHEへ書き込まないだけなので、呼び出し元が従来どおり
+    infer_brand_from_title経由でget_cached_brandを呼べば、既存仕様どおりの
+    単発SELECTでの再チェック・Gemini再問い合わせに自然にフォールバックする。
+    """
+    # 既にメモリキャッシュ済みのキーはこのバッチ問い合わせ自体が不要
+    pending = [k for k in cache_keys if k not in _BRAND_NAME_CACHE]
+    if not pending:
+        return
+
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT cache_key, brand, saved_at FROM brand_name_cache WHERE cache_key = ANY(%s)",
+            (pending,)
+        )
+        rows = cur.fetchall()
+        _now = time.time()
+        hit_count = 0
+        for row_key, brand, saved_at in rows:
+            age = _now - saved_at.timestamp()
+            if age <= BRAND_CACHE_TTL_SECONDS:
+                _BRAND_NAME_CACHE[row_key] = brand
+                hit_count += 1
+        print(
+            f"[BRAND BATCH PREWARM] queried={len(pending)} hit={hit_count}",
+            flush=True
+        )
+    except Exception as e:
+        print(f"[BRAND BATCH PREWARM ERROR] {repr(e)}", flush=True)
+    finally:
+        if conn:
+            conn.close()
+
+
 def prewarm_brand_cache_for_all_steps(data, max_workers=4):
     """
     finalize_result_data(→finalize_step_data→preserve_ranked_top_candidates)が
@@ -4847,6 +4893,10 @@ def prewarm_brand_cache_for_all_steps(data, max_workers=4):
     同一cache_keyはこの関数内で重複排除してから1回だけ ThreadPoolExecutor に
     投げるため、並列実行下でも同一ブランドへの同時Gemini問い合わせは発生しない
     （Rakuten Phase-A prefetchの重複排除と同じ設計パターン）。
+
+    重複排除後、まず_batch_prewarm_brand_memory_cacheで全キーを1回のSELECTに
+    まとめて事前チェックし(DB接続1回)、それでも解決しなかったキーだけを
+    ThreadPoolExecutorへ渡す。DB接続回数を「キー数」から「1」に削減する狙い。
     """
     import concurrent.futures
 
@@ -4894,13 +4944,33 @@ def prewarm_brand_cache_for_all_steps(data, max_workers=4):
     if not targets:
         return
 
-    print(f"[BRAND PREWARM START] unique_targets={len(targets)} max_workers={max_workers}", flush=True)
+    # バッチSELECTで一括判定 → 解決済みキーは_BRAND_NAME_CACHEに反映済みになる
+    _batch_prewarm_brand_memory_cache(list(targets.keys()))
+
+    # バッチSELECTで解決したキーは、infer_brand_from_title側のget_cached_brand
+    # チェックで即時ヒットするため、Gemini呼び出しの対象から除外する
+    # (結果は変わらず、無駄なスレッド起動を避けるだけ)。
+    unresolved = {
+        key: value for key, value in targets.items()
+        if key not in _BRAND_NAME_CACHE
+    }
+
+    print(
+        f"[BRAND PREWARM START] unique_targets={len(targets)} "
+        f"batch_resolved={len(targets) - len(unresolved)} "
+        f"still_unresolved={len(unresolved)} max_workers={max_workers}",
+        flush=True
+    )
+
+    if not unresolved:
+        return
+
     _t0 = time.time()
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
             executor.submit(infer_brand_from_title, name, category)
-            for name, category in targets.values()
+            for name, category in unresolved.values()
         ]
         for future in concurrent.futures.as_completed(futures):
             try:
@@ -4908,7 +4978,7 @@ def prewarm_brand_cache_for_all_steps(data, max_workers=4):
             except Exception as e:
                 print(f"[BRAND PREWARM ERROR] {repr(e)}", flush=True)
 
-    print(f"[BRAND PREWARM DONE] {len(targets)}件 elapsed={time.time()-_t0:.2f}s", flush=True)
+    print(f"[BRAND PREWARM DONE] {len(unresolved)}件 elapsed={time.time()-_t0:.2f}s", flush=True)
 
 
 def attach_affiliate_links_to_step(step, affiliate_ai_db):
