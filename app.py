@@ -24,7 +24,8 @@ import re
 import copy
 import time
 import threading
-from psycopg2.pool import SimpleConnectionPool
+from psycopg2.pool import ThreadedConnectionPool
+from psycopg2.pool import PoolError as _Psycopg2PoolError
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
 ANALYSIS_CACHE_VERSION = "v17"  # 週間ルーティンの使用順でパックを化粧水後・美容液前に配置するルールをプロンプトに追加
@@ -50,20 +51,6 @@ CANDIDATE_MODEL = "gemini-2.5-flash"       # 候補選定（2.0-flash-lite 429�
 ROUTINE_MODEL = "gemini-2.5-flash"         # ルーティン生成（未使用・予備）
 DETAIL_MODEL = "gemini-3.1-flash-lite"     # 商品評価・名前整形
 
-#DB_POOL = SimpleConnectionPool(
-#   minconn=1,
-#    maxconn=5,
-#    dsn=DATABASE_URL
-#)
-
-
-#def get_db_conn():
-#    return DB_POOL.getconn()
-
-
-#def put_db_conn(conn):
-#    if conn:
-#        DB_POOL.putconn(conn)
 print("[APP START]", flush=True)
 
 def init_results_table():
@@ -146,16 +133,40 @@ def init_gemini_usage_table():
         if conn:
             conn.close()
 
-def increment_gemini_usage():
-    usage_key = get_gemini_usage_key()
+# ===== increment_gemini_usage() 専用の接続プール =====
+# 他のDB接続箇所には適用しない。SimpleConnectionPool(過去に導入後
+# 撤回済み、マルチスレッドから同時利用する場合スレッドセーフでない)は
+# 使わず、ThreadedConnectionPoolのみを使用する。
+_gemini_usage_pool = None
+_gemini_usage_pool_lock = threading.Lock()
+GEMINI_USAGE_POOL_MAXCONN = 8
 
-    conn = None
-    cur = None
+# 実測報告用のカウンタ(pool hit / fallback / dead-connection retry)。
+# 動作自体には影響しない計測専用のグローバル変数。
+_gemini_usage_pool_stats = {"pool_hit": 0, "fallback": 0, "retry": 0}
 
+
+def _get_gemini_usage_pool():
+    """
+    モジュールimport時には接続を作らず、初回利用時(=いずれかのworker
+    プロセス内でのリクエスト処理中)にthreading.Lockでガードした
+    lazy initializationを行う。
+    """
+    global _gemini_usage_pool
+    if _gemini_usage_pool is None:
+        with _gemini_usage_pool_lock:
+            if _gemini_usage_pool is None:
+                _gemini_usage_pool = ThreadedConnectionPool(
+                    minconn=1, maxconn=GEMINI_USAGE_POOL_MAXCONN, dsn=DATABASE_URL
+                )
+    return _gemini_usage_pool
+
+
+def _gemini_usage_upsert(conn, usage_key):
+    """increment_gemini_usage()の実体。プール経由・直接接続の両方から
+    共有することで、SQL・加算仕様・戻り値の意味を完全に一致させる。"""
+    cur = conn.cursor()
     try:
-        conn = psycopg2.connect(DATABASE_URL)
-        cur = conn.cursor()
-
         cur.execute("""
         INSERT INTO gemini_usage (usage_key, request_count, updated_at)
         VALUES (%s, 1, CURRENT_TIMESTAMP)
@@ -165,23 +176,96 @@ def increment_gemini_usage():
             updated_at = CURRENT_TIMESTAMP
         RETURNING request_count;
         """, (usage_key,))
-
         count = cur.fetchone()[0]
         conn.commit()
-
         return count
+    finally:
+        cur.close()
 
+
+def _increment_gemini_usage_direct(usage_key):
+    """プールが使えない(初期化失敗・枯渇等)場合のフォールバック。
+    従来のincrement_gemini_usage()と完全に同じ挙動(毎回psycopg2.connect)。"""
+    _gemini_usage_pool_stats["fallback"] += 1
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        return _gemini_usage_upsert(conn, usage_key)
     except Exception as e:
         if conn:
-            conn.rollback()
-        print("[GEMINI USAGE COUNT ERROR]", e, flush=True)
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+        print("[GEMINI USAGE COUNT ERROR]", repr(e), flush=True)
         return None
-
     finally:
-        if cur:
-            cur.close()
         if conn:
             conn.close()
+
+
+def _retry_gemini_usage_once(pool, usage_key):
+    """死んだpooled connectionを破棄した直後、新規にプールから取得した
+    接続で1回だけ同じUPSERTを再試行する。"""
+    _gemini_usage_pool_stats["retry"] += 1
+    try:
+        conn2 = pool.getconn()
+    except Exception as e:
+        print("[GEMINI USAGE POOL RETRY GETCONN ERROR]", repr(e), "-> フォールバック", flush=True)
+        return _increment_gemini_usage_direct(usage_key)
+
+    try:
+        return _gemini_usage_upsert(conn2, usage_key)
+    except Exception as e:
+        try:
+            conn2.rollback()
+        except Exception:
+            pass
+        print("[GEMINI USAGE COUNT ERROR]", repr(e), flush=True)
+        return None
+    finally:
+        pool.putconn(conn2)
+
+
+def increment_gemini_usage():
+    usage_key = get_gemini_usage_key()
+
+    try:
+        pool = _get_gemini_usage_pool()
+    except Exception as e:
+        print("[GEMINI USAGE POOL INIT ERROR]", repr(e), "-> フォールバック", flush=True)
+        return _increment_gemini_usage_direct(usage_key)
+
+    try:
+        conn = pool.getconn()
+    except _Psycopg2PoolError as e:
+        print("[GEMINI USAGE POOL EXHAUSTED]", repr(e), "-> フォールバック", flush=True)
+        return _increment_gemini_usage_direct(usage_key)
+    except Exception as e:
+        print("[GEMINI USAGE POOL GETCONN ERROR]", repr(e), "-> フォールバック", flush=True)
+        return _increment_gemini_usage_direct(usage_key)
+
+    dead = False
+    try:
+        result = _gemini_usage_upsert(conn, usage_key)
+        _gemini_usage_pool_stats["pool_hit"] += 1
+        return result
+    except (psycopg2.OperationalError, psycopg2.InterfaceError) as e:
+        dead = True
+        print("[GEMINI USAGE POOL DEAD CONNECTION]", repr(e), "-> 破棄して1回だけ再試行", flush=True)
+        return _retry_gemini_usage_once(pool, usage_key)
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        print("[GEMINI USAGE COUNT ERROR]", repr(e), flush=True)
+        return None
+    finally:
+        try:
+            pool.putconn(conn, close=dead)
+        except Exception:
+            pass
 
 
 def get_gemini_usage_status():
@@ -549,19 +633,19 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2, 
 
     max_retries = max(1, int(max_retries or 1))
 
-    # 呼び出し前にクォータ残数とプロンプト概算トークン数をログ出力
+    # 呼び出し前にプロンプト概算トークン数をログ出力。
+    # クォータ残数(get_gemini_usage_status()のDB SELECT)はここでは取得しない。
+    # [GEMINI PRE-CALL]ログ表示にしか使われておらず、Gemini呼び出し許可・
+    # 利用上限判定には一切使われていないため削除した(調査済み)。
+    # 呼び出し許可の判定自体もこの値には依存していない。最新の使用量は
+    # 呼び出し成功後にincrement_gemini_usage()の戻り値で
+    # [GEMINI REQUEST COUNT]としてログ出力される(こちらは変更なし)。
     try:
-        _usage_status = get_gemini_usage_status()
-        _quota_used = _usage_status.get("used", "?")
-        _quota_limit = _usage_status.get("limit", "?")
-        _quota_remaining = _usage_status.get("remaining", "?")
-        # テキスト部分のトークン概算（文字数÷3、日本語は1文字≒1トークン）
         _text_chars = sum(len(str(c)) for c in (contents if isinstance(contents, list) else [contents])
                           if isinstance(c, str))
         _approx_tokens = max(_text_chars // 3, _text_chars)  # 日本語重みで多めに見積もる
         print(
-            f"[GEMINI PRE-CALL] model={model} quota={_quota_used}/{_quota_limit}(remaining={_quota_remaining})"
-            f" prompt≈{_approx_tokens}tokens",
+            f"[GEMINI PRE-CALL] model={model} prompt≈{_approx_tokens}tokens",
             flush=True
         )
     except Exception:
