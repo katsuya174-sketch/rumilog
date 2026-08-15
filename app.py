@@ -11579,6 +11579,107 @@ def finalize_step_display_fields(step, best, user_data):
 
     return step
 
+def _compute_rakuten_q1_cache_key(step, improvement_plan):
+    """
+    search_rakuten_for_step内のmake_q1()と完全に同一のロジックでQ1キーワードを
+    算出し、_rakuten_criteria_search_singleが使うのと同じ(norm_cat, keyword)
+    メモリキャッシュキー、および"rakuten:{norm_cat}:{keyword}"形式のDB
+    キャッシュキーを返す。Q2はQ1の結果件数に依存し事前算出できないため対象外。
+    ロジック自体はここでもmake_q1()でも変更していない（同じ手順を2箇所で
+    実行しているだけ）。
+    """
+    category = str(step.get("category", "") or "").strip()
+    category_clean = clean_rakuten_keyword(category)
+    if not category_clean:
+        return None, None
+
+    ingredient_focus = str(step.get("ingredient_focus", "") or "").strip()
+    key_ingredients = list((improvement_plan or {}).get("key_ingredients", []) or []) if improvement_plan else []
+    top_from_plan = next(
+        (clean_rakuten_keyword(i) for i in key_ingredients if clean_rakuten_keyword(i)),
+        None
+    )
+
+    q1 = None
+    if ingredient_focus:
+        ing_clean = clean_rakuten_keyword(ingredient_focus)
+        if ing_clean:
+            q1 = f"{ing_clean} {category_clean}"
+    if q1 is None and top_from_plan:
+        q1 = f"{top_from_plan} {category_clean}"
+    if q1 is None:
+        q1 = category_clean
+
+    # _rakuten_criteria_search_single内で行われるのと同じ二重クリーニング
+    # (make_q1の戻り値はさらにclean_rakuten_keywordを通される)
+    keyword = clean_rakuten_keyword(q1)
+    if not keyword:
+        return None, None
+
+    norm_cat = normalize_candidate_category(category, fallback=category)
+    mem_cache_key = (norm_cat, keyword)
+    db_cache_key = f"rakuten:{norm_cat}:{keyword}"
+    return mem_cache_key, db_cache_key
+
+
+def _batch_prewarm_rakuten_search_cache(steps, improvement_plan):
+    """
+    Phase-A開始前に、重複排除済みの代表ステップ群についてQ1のcache_keyを
+    まとめて算出し、rakuten_search_cacheテーブルへの1回のバッチSELECT
+    (cache_key = ANY(%s))で有効なキャッシュ結果を_rakuten_criteria_cache
+    (メモリキャッシュ)へ反映する。TTL判定・キャッシュ値の形式はget_rakuten_search_from_db
+    と完全に同一。get_rakuten_search_from_db自体は無変更で、他の呼び出し元
+    (Q2や個別照会)には一切影響しない。
+
+    ここで解決できなかったキーは、既存のsearch_rakuten_for_step→
+    _rakuten_criteria_search_singleが従来どおり個別にDB照会・必要であれば
+    実HTTP検索を行う（挙動・結果は変わらない）。
+    """
+    global _rakuten_criteria_cache
+
+    targets = {}  # db_cache_key -> mem_cache_key
+    for step in steps:
+        mem_key, db_key = _compute_rakuten_q1_cache_key(step, improvement_plan)
+        if not db_key or db_key in targets:
+            continue
+        targets[db_key] = mem_key
+
+    pending = {
+        db_key: mem_key for db_key, mem_key in targets.items()
+        if mem_key not in _rakuten_criteria_cache
+    }
+    if not pending:
+        return
+
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT cache_key, payload, saved_at FROM rakuten_search_cache WHERE cache_key = ANY(%s)",
+            (list(pending.keys()),)
+        )
+        rows = cur.fetchall()
+        _now = time.time()
+        hit_count = 0
+        for db_key, payload, saved_at in rows:
+            age = _now - saved_at.timestamp()
+            if age <= RAKUTEN_SEARCH_CACHE_TTL_SECONDS:
+                mem_key = pending.get(db_key)
+                if mem_key is not None:
+                    _rakuten_criteria_cache[mem_key] = payload if isinstance(payload, list) else []
+                    hit_count += 1
+        print(
+            f"[RAKUTEN BATCH PREWARM] queried={len(pending)} hit={hit_count}",
+            flush=True
+        )
+    except Exception as e:
+        print(f"[RAKUTEN BATCH PREWARM ERROR] {repr(e)}", flush=True)
+    finally:
+        if conn:
+            conn.close()
+
+
 def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=3):
     """
     全ステップのRakuten検索を並列実行してキャッシュに載せる。
@@ -11645,6 +11746,12 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=3):
         f"[PREFETCH DEDUP] steps={len(all_steps)} unique_keys={len(representative_steps)}",
         flush=True
     )
+
+    # Q1のDBキャッシュ照会をバッチSELECT1回にまとめて事前に温めておく。
+    # 解決できたキーはsearch_rakuten_for_step→_rakuten_criteria_search_single
+    # が自然にメモリキャッシュヒットするため、以降のfetch()は個別DB接続なしで
+    # 完了する（結果・Q2の挙動は変わらない）。
+    _batch_prewarm_rakuten_search_cache(list(representative_steps.values()), improvement_plan)
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(fetch, step): step for step in representative_steps.values()}
