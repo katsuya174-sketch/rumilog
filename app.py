@@ -18227,6 +18227,478 @@ def debug_candidate_counts(data):
             flush=True
         )
     print("======================================================", flush=True)
+
+
+class DiagnosisError(Exception):
+    """
+    /lab(Web)とAPI(/api/v1/diagnoses)の両方が呼ぶrun_diagnosis_core()が
+    送出するエラー。Web側はcode別に既存のrender_template/jsonify分岐を
+    再現し、API側はcode/http_statusを使って統一JSONエラー形式を返す。
+    str(self)は常に元例外のstr()と一致させ、既存のbuild_user_friendly_error_message(str(e))
+    の呼び出し結果がWeb側で変わらないようにしている。
+    """
+    def __init__(self, code, message, http_status=500, original=None):
+        self.code = code
+        self.message = message
+        self.http_status = http_status
+        self.original = original
+        super().__init__(str(original) if original is not None else message)
+
+
+def classify_gemini_error(error_text):
+    """
+    analyze_skin_with_gemini失敗時のエラーメッセージ分類。
+    従来lab_test_function内にあった分類ロジックをそのまま移設したもので、
+    判定条件・日本語メッセージ文言は変更していない。
+    """
+    _quota_keywords = ["RESOURCE_EXHAUSTED", "quota", "RATE_LIMIT_EXCEEDED"]
+    _is_quota_error = (
+        any(kw.lower() in error_text.lower() for kw in _quota_keywords)
+        or ("429" in error_text and "RESOURCE_EXHAUSTED" in error_text)
+    )
+
+    message = "分析中にエラーが発生しました。時間をおいて再度お試しください。"
+
+    if _is_quota_error:
+        message = "現在、分析サービスを一時停止しています。ご不便をおかけして申し訳ありません。復旧までしばらくお待ちください。"
+    elif "503" in error_text or "UNAVAILABLE" in error_text:
+        message = "現在分析が混み合っています。少し時間をおいて再度お試しください。"
+    elif "429" in error_text:
+        message = "現在分析利用が集中しています。しばらくしてから再度お試しください。"
+
+    return message
+
+
+def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
+                        client_ip, is_creator_flag, is_premium_flag, premium_key):
+    """
+    /lab(Web)・/api/v1/diagnoses(iOS)共通の診断コア処理。
+    Gemini分析→Rakuten商品選定→仕上げ→利用回数カウント→履歴保存までを行い、
+    lightweight_result_payload・apply_result_i18n_for_displayを通した最終dataを返す。
+    以前lab_test_function内にあった処理をそのまま移設したもので、呼んでいる
+    関数・順序・パラメータ(診断ロジック本体)は変更していない。
+    画像取得・利用制限の事前チェック・表示形式(HTML/JSON)への変換は
+    呼び出し元(各エンドポイント)の責務とする。失敗時はDiagnosisErrorを送出する。
+    """
+    lab_t0 = time.time()
+    print("[LAB TIME] start 0.0", flush=True)
+
+    _lab_seg_state = {"prev": lab_t0}
+
+    def _lab_segment(label):
+        now = time.time()
+        elapsed = now - _lab_seg_state["prev"]
+        total = now - lab_t0
+        print(f"[LAB SEGMENT] {label} elapsed={elapsed:.2f}s total={total:.2f}s", flush=True)
+        _lab_seg_state["prev"] = now
+
+    if not can_use_global_diagnosis():
+        message = "現在、今月の分析上限に達しています。来月以降に再度お試しください。"
+        raise DiagnosisError("USAGE_LIMIT_EXCEEDED", message, http_status=429)
+
+    # =========================
+    # ③ AI分析
+    # =========================
+
+    # 診断ごとにセッションキャッシュをリセット（メモリリーク防止）
+    global _rakuten_criteria_cache, _rakuten_criteria_call_count, _step_rakuten_results
+    _rakuten_criteria_cache = {}
+    _rakuten_criteria_call_count = 0
+    _step_rakuten_results = {}
+
+    _log_mem("diag-start")
+
+    try:
+        print("[LAB CHECK] before Gemini", flush=True)
+
+        data = analyze_skin_with_gemini(
+            user_data,
+            front_img,
+            left_img,
+            right_img,
+            force_refresh=force_refresh
+        )
+
+        print("[LAB CHECK] after Gemini", flush=True)
+        _log_mem("after-gemini-analysis")
+        _lab_segment("gemini_analysis_phase1_2")
+
+    except Exception as e:
+        print("===== LAB ERROR =====")
+        print(e)
+        traceback.print_exc()
+        print("=====================")
+
+        message = classify_gemini_error(str(e))
+        raise DiagnosisError("GEMINI_ANALYSIS_ERROR", message, http_status=503, original=e)
+
+    if not isinstance(data, dict):
+        raise RuntimeError("analyze_skin_with_gemini の戻り値が dict ではありません")
+
+    data = ensure_result_structure(data)
+    data["skin_score"] = calculate_skin_score(data.get("scores", {}))
+
+    symmetry_analysis = data.get("symmetry_analysis", {})
+
+    if not isinstance(symmetry_analysis, dict):
+        symmetry_analysis = {}
+
+    # premium_scores/premium_improvement_priorityはanalyze_skin_with_gemini内
+    # (Phase1直後、Phase2がこのランキングを参照できるように)で既に計算済みで
+    # dataにマージ済み。ensure_result_structureはscores/symmetry_analysis/
+    # ai_improvement_strategyに触れないため入力は同一であり、再計算しても
+    # 結果は変わらない。ここでは未計算の場合(DEV_MODEダミーデータ等)の
+    # フォールバックとしてのみ計算する。
+    if not isinstance(data.get("premium_scores"), dict):
+        data["premium_scores"] = calculate_premium_scores(
+            data.get("scores", {})
+        )
+        data["premium_scores"]["symmetry"] = safe_int(
+            symmetry_analysis.get("score", 0)
+        )
+
+    data["symmetry_analysis"] = {
+        "score": safe_int(symmetry_analysis.get("score", 0)),
+        "summary": str(symmetry_analysis.get("summary", "") or ""),
+        "left_tendency": str(symmetry_analysis.get("left_tendency", "") or ""),
+        "right_tendency": str(symmetry_analysis.get("right_tendency", "") or "")
+    }
+
+    if not data.get("premium_improvement_priority"):
+        data["premium_improvement_priority"] = build_premium_improvement_priority(
+            data.get("scores", {}),
+            data["premium_scores"],
+            data.get("ai_improvement_strategy", [])
+        )
+    debug_log("AFTER ANALYZE", {
+        "skin_score": data.get("skin_score"),
+        "summary": data.get("skin_summary"),
+        "morning_steps": len(data.get("morning", {}).get("steps", [])),
+        "night_steps": len(data.get("night", {}).get("steps", [])),
+        "weekly_steps": len(data.get("weekly_care", [])),
+    })
+    # ===== DEV_MODE_START =====
+    if DEV_MODE:
+        debug_log("DEV MODE ACTIVE")
+    # ===== DEV_MODE_END =====
+
+    if "morning" not in data or not isinstance(data.get("morning"), dict):
+        data["morning"] = {"steps": []}
+
+    if "night" not in data or not isinstance(data.get("night"), dict):
+        data["night"] = {"steps": []}
+
+    if "weekly_care" not in data or not isinstance(data.get("weekly_care"), list):
+        data["weekly_care"] = []
+
+    if "steps" not in data["morning"] or not isinstance(data["morning"].get("steps"), list):
+        data["morning"]["steps"] = []
+
+    if "steps" not in data["night"] or not isinstance(data["night"].get("steps"), list):
+        data["night"]["steps"] = []
+
+    # =========================
+    # ④ AI候補拡張
+    # =========================
+    # 高速化のため、別Gemini呼び出しは停止。
+    # product_candidates は analyze_skin_with_gemini の1回目の診断結果で返させる。
+    debug_log("SKIP CANDIDATE ENRICH", "product_candidates are generated in analyze_skin_with_gemini")
+
+    debug_log("AFTER CANDIDATE ENRICH")
+    debug_step_summary("morning enriched", data.get("morning", {}).get("steps", []))
+    debug_step_summary("night enriched", data.get("night", {}).get("steps", []))
+    debug_step_summary("weekly enriched", data.get("weekly_care", []))
+
+    if not isinstance(data.get("morning", {}).get("steps"), list):
+        data["morning"]["steps"] = []
+
+    if not isinstance(data.get("night", {}).get("steps"), list):
+        data["night"]["steps"] = []
+
+    if not isinstance(data.get("weekly_care"), list):
+        data["weekly_care"] = []
+
+    # =========================
+    # ⑤ ラベル正規化・構成補正
+    # =========================
+    data = normalize_ai_labels(data)
+    data = normalize_serum_roles(data)
+    # 朝のブースター使用可否はプロンプト側の【ブースターの朝使用ルール】で
+    # AIが肌質・季節・メイクとの相性等を総合判断する設計に変更したため、
+    # 朝のブースターを一律削除していたenforce_booster_night_only()は廃止。
+    data["improvement_plan"] = build_score_based_improvement_plan(
+        data.get("scores", {}),
+        data.get("improvement_plan", {})
+    )
+    data = apply_moisture_plan(data)
+    data = ensure_required_routine_steps(data)
+
+    print("[FLOW AFTER ENSURE]", {
+        "night": [
+            {
+                "category": s.get("category", ""),
+                "product": s.get("product", ""),
+                "source": s.get("product_source", "")
+            }
+            for s in data.get("night", {}).get("steps", [])
+            if isinstance(s, dict) and s.get("category") in ["クリーム", "乳液"]
+        ],
+        "weekly": [
+            {
+                "category": s.get("category", ""),
+                "product": s.get("product", ""),
+                "source": s.get("product_source", "")
+            }
+            for s in data.get("weekly_care", [])
+            if isinstance(s, dict) and s.get("category") in ["パック", "ピーリング"]
+        ],
+    }, flush=True)
+    # serum制限は product選定後のほうが安全
+    # ここではまだやらない
+
+    # =========================
+    # ⑥ DB読み込み（Phase3: 固定DB廃止 → 空リストを渡し楽天+Geminiのみで選定）
+    # =========================
+    products = []
+
+    # =========================
+    # ⑦ 商品割当
+    # =========================
+    print(
+        "[IMPROVEMENT PLAN BEFORE ASSIGN]",
+        data.get("improvement_plan", {}),
+        flush=True
+    )
+    budget_value = parse_budget(user_data.get("budget", ""))
+    debug_log("BUDGET VALUE", budget_value)
+    _log_mem("before-assign-products")
+
+    try:
+        data = assign_products_to_all_steps(data, products, user_data, budget_value)
+    except Exception as e:
+        print("===== PRODUCT SELECTION ERROR =====")
+        print(e)
+        traceback.print_exc()
+        print("====================================")
+        raise DiagnosisError(
+            "PRODUCT_SELECTION_ERROR",
+            "商品選定中にエラーが発生しました。時間をおいて再度お試しください。",
+            http_status=500,
+            original=e,
+        )
+
+    _log_mem("after-assign-products")
+    _lab_segment("assign_products_to_all_steps_only")
+
+    # 美容機器: Geminiが選んだdevice_type(+reason)に検索用商品名・機能・頻度・優先度を補完
+    data = enrich_beauty_devices(data, user_data)
+
+    # サプリメント: Geminiが選んだsupplement_type(+reason)に検索用商品名・成分タグ・タイミング・注意点・優先度を補完
+    data = enrich_supplements(data, user_data)
+    _lab_segment("product_assign_rakuten")
+
+    print("[FLOW AFTER ASSIGN]", {
+        "night": [
+            {
+                "category": s.get("category", ""),
+                "product": s.get("product", ""),
+                "source": s.get("product_source", ""),
+                "reason": s.get("recommend_reason", "")
+            }
+            for s in data.get("night", {}).get("steps", [])
+            if isinstance(s, dict) and s.get("category") in ["クリーム", "乳液"]
+        ],
+        "weekly": [
+            {
+                "category": s.get("category", ""),
+                "product": s.get("product", ""),
+                "source": s.get("product_source", ""),
+                "reason": s.get("recommend_reason", "")
+            }
+            for s in data.get("weekly_care", [])
+            if isinstance(s, dict) and s.get("category") in ["パック", "ピーリング"]
+        ],
+    }, flush=True)
+
+    affiliate_ai_db = load_affiliate_links_ai()
+
+    debug_log("AFTER ASSIGN PRODUCTS")
+    debug_step_summary("morning assigned", data.get("morning", {}).get("steps", []))
+    debug_step_summary("night assigned", data.get("night", {}).get("steps", []))
+    debug_step_summary("weekly assigned", data.get("weekly_care", []))
+    _lab_segment("assign_flow_log_debug")
+
+    # =========================
+    # ⑧ 選定後の調整
+    # =========================
+    data = limit_serum_steps(data)
+    data = limit_booster_steps(data)
+    data = sort_steps(data)
+    _lab_segment("limit_and_sort_steps")
+
+    # =========================
+    # ⑨ 最終整形
+    # =========================
+    # finalize_result_data内で逐次呼ばれるinfer_brand_from_titleを
+    # 先回りで並列ウォームアップしておく(結果は変えず、待ち時間のみ短縮)。
+    prewarm_brand_cache_for_all_steps(data)
+    _lab_segment("brand_cache_prewarm")
+
+    data = finalize_result_data(data, user_data)
+    _lab_segment("post_assign_finalize_local")
+
+    print("[FLOW AFTER FINALIZE]", {
+        "night": [
+            {
+                "category": s.get("category", ""),
+                "product": s.get("product", ""),
+                "image": bool(s.get("image")),
+                "rakuten": bool(s.get("rakuten_link")),
+                "source": s.get("product_source", "")
+            }
+            for s in data.get("night", {}).get("steps", [])
+            if isinstance(s, dict) and s.get("category") in ["クリーム", "乳液"]
+        ],
+        "weekly": [
+            {
+                "category": s.get("category", ""),
+                "product": s.get("product", ""),
+                "image": bool(s.get("image")),
+                "rakuten": bool(s.get("rakuten_link")),
+                "source": s.get("product_source", "")
+            }
+            for s in data.get("weekly_care", [])
+            if isinstance(s, dict) and s.get("category") in ["パック", "ピーリング"]
+        ],
+    }, flush=True)
+
+    data = attach_affiliate_links_to_all_steps(data, affiliate_ai_db)
+    _lab_segment("affiliate_links")
+
+    # 化粧水・美容液がnight_stepsにない場合はmorning_stepsから補完
+    data = supplement_night_steps_from_morning(data)
+
+    # 週ケアとnight刺激成分の曜日衝突を強制解消
+    data = resolve_weekly_care_day_conflicts(data)
+    # 夜ルーティン内のレチノイド×BHA/SA洗顔料の曜日衝突を解消
+    data = resolve_night_irritant_conflicts(data)
+    # 美容機器×レチノール/ピーリングの併用可否を判定（use_days確定後に実行）
+    data = resolve_beauty_device_day_conflicts(data)
+    _lab_segment("day_conflict_resolution")
+
+    # 楽天商品名をGeminiで短く整形（rakuten_criteria / ai_rakuten_verified のみ対象）
+    data = gemini_clean_rakuten_product_names(data)
+    _lab_segment("gemini_name_clean")
+
+    # Geminiによる商品選定理由・1位vs2位比較文を生成
+    data = gemini_generate_selection_reasons(data, user_data)
+    _lab_segment("gemini_selection_reason")
+
+    print("[FLOW AFTER AFFILIATE]", {
+        "night": [
+            {
+                "category": s.get("category", ""),
+                "product": s.get("product", ""),
+                "image": bool(s.get("image")),
+                "rakuten": bool(s.get("rakuten_link")),
+                "source": s.get("product_source", "")
+            }
+            for s in data.get("night", {}).get("steps", [])
+            if isinstance(s, dict) and s.get("category") in ["クリーム", "乳液"]
+        ],
+        "weekly": [
+            {
+                "category": s.get("category", ""),
+                "product": s.get("product", ""),
+                "image": bool(s.get("image")),
+                "rakuten": bool(s.get("rakuten_link")),
+                "source": s.get("product_source", "")
+            }
+            for s in data.get("weekly_care", [])
+            if isinstance(s, dict) and s.get("category") in ["パック", "ピーリング"]
+        ],
+    }, flush=True)
+
+    debug_log("AFTER FINALIZE")
+    debug_step_summary("morning finalized", data.get("morning", {}).get("steps", []))
+    debug_step_summary("night finalized", data.get("night", {}).get("steps", []))
+    debug_step_summary("weekly finalized", data.get("weekly_care", []))
+
+    # =========================
+    # ⑩ 予算情報
+    # =========================
+    data = finalize_budget_info(data, budget_value)
+    data["weekly_usage_plan"] = build_weekly_usage_plan(data)
+    _lab_segment("budget_finalize")
+    print("[LAB TIME] after build_weekly_usage_plan", round(time.time() - lab_t0, 2), flush=True)
+    print(
+        "[WEEKLY USAGE PLAN]",
+        json.dumps(
+            data.get("weekly_usage_plan", []),
+            ensure_ascii=False
+        ),
+        flush=True
+    )
+
+    debug_log("PRICE SUMMARY", {
+        "total_price": data.get("total_price", 0),
+        "budget_fit_total": data.get("budget_fit_total", 0),
+        "budget_status": data.get("budget_status", "")
+    })
+
+    # =========================
+    # ⑪ 保存
+    # =========================
+    debug_log("SAVE READY", {
+        "skin_score": data.get("skin_score", 0),
+        "record_date": data.get("record_date", ""),
+        "analysis_date": data.get("analysis_date", "")
+    })
+
+    try:
+        if is_creator_flag:
+            pass  # 作成者はカウントしない
+        elif is_premium_flag:
+            increment_premium_usage(premium_key)
+        else:
+            increment_free_usage(client_ip)
+        increment_global_usage()
+    except Exception as e:
+        print("===== USAGE SAVE ERROR =====")
+        print(e)
+
+    data["client_ip"] = client_ip
+    data["user_id"] = get_or_create_user_id()
+    flask_session["client_ip"] = client_ip
+    saved_record = None
+    try:
+        saved_record = append_result(lightweight_result_payload(data), is_premium=bool(is_premium_flag or is_creator_flag))
+        if isinstance(saved_record, dict) and saved_record.get("id"):
+            data["id"] = saved_record["id"]
+    except Exception as e:
+        print("===== RESULT SAVE ERROR =====")
+        print(e)
+        traceback.print_exc()
+        print("=============================")
+        # 保存に失敗しても結果表示は止めない
+    _lab_segment("db_save")
+
+    # =========================
+    # ⑫ 表示
+    # =========================
+
+    data = lightweight_result_payload(data)
+    data["is_premium"] = is_premium_user()
+    data["is_dev_mode"] = DEV_MODE or DEV_PREMIUM_MODE
+    data = apply_result_i18n_for_display(data)
+    print("[LAB TIME] before render_template", round(time.time() - lab_t0, 2), flush=True)
+    _log_mem("before-render")
+    _lab_segment("core_complete")
+    print(f"[LAB TIME] TOTAL(core)={time.time() - lab_t0:.2f}s", flush=True)
+
+    return data
+
+
 # # AI肌診断ページ
 @app.route("/lab", methods=["GET", "POST"])
 def lab_test_function():
@@ -18235,18 +18707,6 @@ def lab_test_function():
         lab_t0 = time.time()
         print("[LAB TIME] start 0.0", flush=True)
         is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
-
-        # 区間別タイミング計測: 直前のチェックポイントからの経過時間と
-        # リクエスト開始からの累計を1区間1行で出力する。変更前後の
-        # 処理時間比較に使うため、既存ログは削除せずこのログを追加するのみ。
-        _lab_seg_state = {"prev": lab_t0}
-
-        def _lab_segment(label):
-            now = time.time()
-            elapsed = now - _lab_seg_state["prev"]
-            total = now - lab_t0
-            print(f"[LAB SEGMENT] {label} elapsed={elapsed:.2f}s total={total:.2f}s", flush=True)
-            _lab_seg_state["prev"] = now
         try:
             client_ip = get_client_ip()
             _is_creator = is_creator()
@@ -18303,445 +18763,54 @@ def lab_test_function():
             # ② 画像取得
             # =========================
             front_img, left_img, right_img = load_uploaded_images(request)
-            _lab_segment("image_load_resize")
-            if not can_use_global_diagnosis():
-                message = "現在、今月の分析上限に達しています。来月以降に再度お試しください。"
 
-                if is_ajax:
-                    return jsonify({
-                        "success": False,
-                        "message": message
-                    }), 429
-
-                return render_template(
-                    "error.html",
-                    error_message=message
-                )
-            global_used = get_global_usage_count()
-            global_remaining = GLOBAL_MONTHLY_LIMIT - global_used
             # =========================
-            # ③ AI分析
+            # ③〜⑫ 診断コア処理(Web/iOS API共通、run_diagnosis_core参照)
             # =========================
-
-            # 診断ごとにセッションキャッシュをリセット（メモリリーク防止）
-            global _rakuten_criteria_cache, _rakuten_criteria_call_count, _step_rakuten_results
-            _rakuten_criteria_cache = {}
-            _rakuten_criteria_call_count = 0
-            _step_rakuten_results = {}
-
-            _log_mem("diag-start")
-
             try:
-                print("[LAB CHECK] before Gemini", flush=True)
-
-                data = analyze_skin_with_gemini(
-                    user_data,
-                    front_img,
-                    left_img,
-                    right_img,
-                    force_refresh=(request.args.get("force_refresh") == "1")
+                data = run_diagnosis_core(
+                    user_data, front_img, left_img, right_img,
+                    force_refresh=(request.args.get("force_refresh") == "1"),
+                    client_ip=client_ip,
+                    is_creator_flag=_is_creator,
+                    is_premium_flag=_is_premium,
+                    premium_key=_premium_key,
                 )
+            except DiagnosisError as e:
+                if e.code == "USAGE_LIMIT_EXCEEDED":
+                    if is_ajax:
+                        return jsonify({
+                            "success": False,
+                            "message": e.message
+                        }), 429
+                    return render_template(
+                        "error.html",
+                        error_message=e.message
+                    )
+                if e.code == "GEMINI_ANALYSIS_ERROR":
+                    if is_ajax:
+                        return jsonify({
+                            "success": False,
+                            "message": e.message
+                        }), 503
 
-                print("[LAB CHECK] after Gemini", flush=True)
-                _log_mem("after-gemini-analysis")
-                _lab_segment("gemini_analysis_phase1_2")
+                    return render_template(
+                        "lab.html",
+                        error_message=str(e.original) if e.original is not None else e.message,
+                        remaining_free_count=get_remaining_free_count(get_client_ip()),
+                        global_used=get_global_usage_count(),
+                        global_remaining=GLOBAL_MONTHLY_LIMIT - get_global_usage_count(),
+                        DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT
+                      )
+                # PRODUCT_SELECTION_ERROR等、既存コードに個別分岐が無かったものは
+                # 従来どおり外側の汎用except Exceptionへ委ねる(同じ文言・応答形状)
+                raise
 
-            except Exception as e:
-                print("===== LAB ERROR =====")
-                print(e)
-                traceback.print_exc()
-                print("=====================")
-
-                error_text = str(e)
-
-                _quota_keywords = ["RESOURCE_EXHAUSTED", "quota", "RATE_LIMIT_EXCEEDED"]
-                _is_quota_error = (
-                    any(kw.lower() in error_text.lower() for kw in _quota_keywords)
-                    or ("429" in error_text and "RESOURCE_EXHAUSTED" in error_text)
-                )
-
-                message = "分析中にエラーが発生しました。時間をおいて再度お試しください。"
-
-                if _is_quota_error:
-                    message = "現在、分析サービスを一時停止しています。ご不便をおかけして申し訳ありません。復旧までしばらくお待ちください。"
-
-                elif "503" in error_text or "UNAVAILABLE" in error_text:
-                    message = "現在分析が混み合っています。少し時間をおいて再度お試しください。"
-
-                elif "429" in error_text:
-                    message = "現在分析利用が集中しています。しばらくしてから再度お試しください。"
-
-                if is_ajax:
-                    return jsonify({
-                        "success": False,
-                        "message": message
-                    }), 503
-                    
-                return render_template(
-                    "lab.html",
-                    error_message=str(e),
-                    remaining_free_count=get_remaining_free_count(get_client_ip()),
-                    global_used=get_global_usage_count(),
-                    global_remaining=GLOBAL_MONTHLY_LIMIT - get_global_usage_count(),
-                    DISABLE_USAGE_LIMIT=DISABLE_USAGE_LIMIT
-                  )
-
-            if not isinstance(data, dict):
-                raise RuntimeError("analyze_skin_with_gemini の戻り値が dict ではありません")
-
-            data = ensure_result_structure(data)
-            data["skin_score"] = calculate_skin_score(data.get("scores", {}))
-
-            symmetry_analysis = data.get("symmetry_analysis", {})
-
-            if not isinstance(symmetry_analysis, dict):
-                symmetry_analysis = {}
-
-            # premium_scores/premium_improvement_priorityはanalyze_skin_with_gemini内
-            # (Phase1直後、Phase2がこのランキングを参照できるように)で既に計算済みで
-            # dataにマージ済み。ensure_result_structureはscores/symmetry_analysis/
-            # ai_improvement_strategyに触れないため入力は同一であり、再計算しても
-            # 結果は変わらない。ここでは未計算の場合(DEV_MODEダミーデータ等)の
-            # フォールバックとしてのみ計算する。
-            if not isinstance(data.get("premium_scores"), dict):
-                data["premium_scores"] = calculate_premium_scores(
-                    data.get("scores", {})
-                )
-                data["premium_scores"]["symmetry"] = safe_int(
-                    symmetry_analysis.get("score", 0)
-                )
-
-            data["symmetry_analysis"] = {
-                "score": safe_int(symmetry_analysis.get("score", 0)),
-                "summary": str(symmetry_analysis.get("summary", "") or ""),
-                "left_tendency": str(symmetry_analysis.get("left_tendency", "") or ""),
-                "right_tendency": str(symmetry_analysis.get("right_tendency", "") or "")
-            }
-
-            if not data.get("premium_improvement_priority"):
-                data["premium_improvement_priority"] = build_premium_improvement_priority(
-                    data.get("scores", {}),
-                    data["premium_scores"],
-                    data.get("ai_improvement_strategy", [])
-                )
-            debug_log("AFTER ANALYZE", {
-                "skin_score": data.get("skin_score"),
-                "summary": data.get("skin_summary"),
-                "morning_steps": len(data.get("morning", {}).get("steps", [])),
-                "night_steps": len(data.get("night", {}).get("steps", [])),
-                "weekly_steps": len(data.get("weekly_care", [])),
-            })
-            # ===== DEV_MODE_START =====
-            if DEV_MODE:
-                debug_log("DEV MODE ACTIVE")
-            # ===== DEV_MODE_END =====
-
-           
-
-            if "morning" not in data or not isinstance(data.get("morning"), dict):
-                data["morning"] = {"steps": []}
-
-            if "night" not in data or not isinstance(data.get("night"), dict):
-                data["night"] = {"steps": []}
-
-            if "weekly_care" not in data or not isinstance(data.get("weekly_care"), list):
-                data["weekly_care"] = []
-
-            if "steps" not in data["morning"] or not isinstance(data["morning"].get("steps"), list):
-                data["morning"]["steps"] = []
-
-            if "steps" not in data["night"] or not isinstance(data["night"].get("steps"), list):
-                data["night"]["steps"] = []
-
-            # =========================
-            # ④ AI候補拡張
-            # =========================
-            # 高速化のため、別Gemini呼び出しは停止。
-            # product_candidates は analyze_skin_with_gemini の1回目の診断結果で返させる。
-            debug_log("SKIP CANDIDATE ENRICH", "product_candidates are generated in analyze_skin_with_gemini")
-
-            debug_log("AFTER CANDIDATE ENRICH")
-            debug_step_summary("morning enriched", data.get("morning", {}).get("steps", []))
-            debug_step_summary("night enriched", data.get("night", {}).get("steps", []))
-            debug_step_summary("weekly enriched", data.get("weekly_care", []))
-
-            if not isinstance(data.get("morning", {}).get("steps"), list):
-                data["morning"]["steps"] = []
-
-            if not isinstance(data.get("night", {}).get("steps"), list):
-                data["night"]["steps"] = []
-
-            if not isinstance(data.get("weekly_care"), list):
-                data["weekly_care"] = []
-
-            # =========================
-            # ⑤ ラベル正規化・構成補正
-            # =========================
-            data = normalize_ai_labels(data)
-            data = normalize_serum_roles(data)
-            # 朝のブースター使用可否はプロンプト側の【ブースターの朝使用ルール】で
-            # AIが肌質・季節・メイクとの相性等を総合判断する設計に変更したため、
-            # 朝のブースターを一律削除していたenforce_booster_night_only()は廃止。
-            data["improvement_plan"] = build_score_based_improvement_plan(
-                data.get("scores", {}),
-                data.get("improvement_plan", {})
-            )
-            data = apply_moisture_plan(data)
-            data = ensure_required_routine_steps(data)
-
-            print("[FLOW AFTER ENSURE]", {
-                "night": [
-                    {
-                        "category": s.get("category", ""),
-                        "product": s.get("product", ""),
-                        "source": s.get("product_source", "")
-                    }
-                    for s in data.get("night", {}).get("steps", [])
-                    if isinstance(s, dict) and s.get("category") in ["クリーム", "乳液"]
-                ],
-                "weekly": [
-                    {
-                        "category": s.get("category", ""),
-                        "product": s.get("product", ""),
-                        "source": s.get("product_source", "")
-                    }
-                    for s in data.get("weekly_care", [])
-                    if isinstance(s, dict) and s.get("category") in ["パック", "ピーリング"]
-                ],
-            }, flush=True)
-            # serum制限は product選定後のほうが安全
-            # ここではまだやらない
-
-            # =========================
-            # ⑥ DB読み込み（Phase3: 固定DB廃止 → 空リストを渡し楽天+Geminiのみで選定）
-            # =========================
-            products = []
-
-            # =========================
-            # ⑦ 商品割当
-            # =========================
-            print(
-                "[IMPROVEMENT PLAN BEFORE ASSIGN]",
-                data.get("improvement_plan", {}),
-                flush=True
-            )
-            budget_value = parse_budget(user_data.get("budget", ""))
-            debug_log("BUDGET VALUE", budget_value)
-            _log_mem("before-assign-products")
-
-            data = assign_products_to_all_steps(data, products, user_data, budget_value)
-            _log_mem("after-assign-products")
-            _lab_segment("assign_products_to_all_steps_only")
-
-            # 美容機器: Geminiが選んだdevice_type(+reason)に検索用商品名・機能・頻度・優先度を補完
-            data = enrich_beauty_devices(data, user_data)
-
-            # サプリメント: Geminiが選んだsupplement_type(+reason)に検索用商品名・成分タグ・タイミング・注意点・優先度を補完
-            data = enrich_supplements(data, user_data)
-            _lab_segment("product_assign_rakuten")
-
-            print("[FLOW AFTER ASSIGN]", {
-                "night": [
-                    {
-                        "category": s.get("category", ""),
-                        "product": s.get("product", ""),
-                        "source": s.get("product_source", ""),
-                        "reason": s.get("recommend_reason", "")
-                    }
-                    for s in data.get("night", {}).get("steps", [])
-                    if isinstance(s, dict) and s.get("category") in ["クリーム", "乳液"]
-                ],
-                "weekly": [
-                    {
-                        "category": s.get("category", ""),
-                        "product": s.get("product", ""),
-                        "source": s.get("product_source", ""),
-                        "reason": s.get("recommend_reason", "")
-                    }
-                    for s in data.get("weekly_care", [])
-                    if isinstance(s, dict) and s.get("category") in ["パック", "ピーリング"]
-                ],
-            }, flush=True)
-            
-            affiliate_ai_db = load_affiliate_links_ai()
-
-            debug_log("AFTER ASSIGN PRODUCTS")
-            debug_step_summary("morning assigned", data.get("morning", {}).get("steps", []))
-            debug_step_summary("night assigned", data.get("night", {}).get("steps", []))
-            debug_step_summary("weekly assigned", data.get("weekly_care", []))
-            _lab_segment("assign_flow_log_debug")
-
-            # =========================
-            # ⑧ 選定後の調整
-            # =========================
-            data = limit_serum_steps(data)
-            data = limit_booster_steps(data)
-            data = sort_steps(data)
-            _lab_segment("limit_and_sort_steps")
-
-            # =========================
-            # ⑨ 最終整形
-            # =========================
-            # finalize_result_data内で逐次呼ばれるinfer_brand_from_titleを
-            # 先回りで並列ウォームアップしておく(結果は変えず、待ち時間のみ短縮)。
-            prewarm_brand_cache_for_all_steps(data)
-            _lab_segment("brand_cache_prewarm")
-
-            data = finalize_result_data(data, user_data)
-            _lab_segment("post_assign_finalize_local")
-
-            print("[FLOW AFTER FINALIZE]", {
-                "night": [
-                    {
-                        "category": s.get("category", ""),
-                        "product": s.get("product", ""),
-                        "image": bool(s.get("image")),
-                        "rakuten": bool(s.get("rakuten_link")),
-                        "source": s.get("product_source", "")
-                    }
-                    for s in data.get("night", {}).get("steps", [])
-                    if isinstance(s, dict) and s.get("category") in ["クリーム", "乳液"]
-                ],
-                "weekly": [
-                    {
-                        "category": s.get("category", ""),
-                        "product": s.get("product", ""),
-                        "image": bool(s.get("image")),
-                        "rakuten": bool(s.get("rakuten_link")),
-                        "source": s.get("product_source", "")
-                    }
-                    for s in data.get("weekly_care", [])
-                    if isinstance(s, dict) and s.get("category") in ["パック", "ピーリング"]
-                ],
-            }, flush=True)
-
-            data = attach_affiliate_links_to_all_steps(data, affiliate_ai_db)
-            _lab_segment("affiliate_links")
-
-            # 化粧水・美容液がnight_stepsにない場合はmorning_stepsから補完
-            data = supplement_night_steps_from_morning(data)
-
-            # 週ケアとnight刺激成分の曜日衝突を強制解消
-            data = resolve_weekly_care_day_conflicts(data)
-            # 夜ルーティン内のレチノイド×BHA/SA洗顔料の曜日衝突を解消
-            data = resolve_night_irritant_conflicts(data)
-            # 美容機器×レチノール/ピーリングの併用可否を判定（use_days確定後に実行）
-            data = resolve_beauty_device_day_conflicts(data)
-            _lab_segment("day_conflict_resolution")
-
-            # 楽天商品名をGeminiで短く整形（rakuten_criteria / ai_rakuten_verified のみ対象）
-            data = gemini_clean_rakuten_product_names(data)
-            _lab_segment("gemini_name_clean")
-
-            # Geminiによる商品選定理由・1位vs2位比較文を生成
-            data = gemini_generate_selection_reasons(data, user_data)
-            _lab_segment("gemini_selection_reason")
-
-            print("[FLOW AFTER AFFILIATE]", {
-                "night": [
-                    {
-                        "category": s.get("category", ""),
-                        "product": s.get("product", ""),
-                        "image": bool(s.get("image")),
-                        "rakuten": bool(s.get("rakuten_link")),
-                        "source": s.get("product_source", "")
-                    }
-                    for s in data.get("night", {}).get("steps", [])
-                    if isinstance(s, dict) and s.get("category") in ["クリーム", "乳液"]
-                ],
-                "weekly": [
-                    {
-                        "category": s.get("category", ""),
-                        "product": s.get("product", ""),
-                        "image": bool(s.get("image")),
-                        "rakuten": bool(s.get("rakuten_link")),
-                        "source": s.get("product_source", "")
-                    }
-                    for s in data.get("weekly_care", [])
-                    if isinstance(s, dict) and s.get("category") in ["パック", "ピーリング"]
-                ],
-            }, flush=True)
-
-            debug_log("AFTER FINALIZE")
-            debug_step_summary("morning finalized", data.get("morning", {}).get("steps", []))
-            debug_step_summary("night finalized", data.get("night", {}).get("steps", []))
-            debug_step_summary("weekly finalized", data.get("weekly_care", []))
-
-            # =========================
-            # ⑩ 予算情報
-            # =========================
-            data = finalize_budget_info(data, budget_value)
-            data["weekly_usage_plan"] = build_weekly_usage_plan(data)
-            _lab_segment("budget_finalize")
-            print("[LAB TIME] after build_weekly_usage_plan", round(time.time() - lab_t0, 2), flush=True)
-            print(
-                "[WEEKLY USAGE PLAN]",
-                json.dumps(
-                    data.get("weekly_usage_plan", []),
-                    ensure_ascii=False
-                ),
-                flush=True
-            )
-
-            debug_log("PRICE SUMMARY", {
-                "total_price": data.get("total_price", 0),
-                "budget_fit_total": data.get("budget_fit_total", 0),
-                "budget_status": data.get("budget_status", "")
-            })
-
-            # =========================
-            # ⑪ 保存
-            # =========================
-            debug_log("SAVE READY", {
-                "skin_score": data.get("skin_score", 0),
-                "record_date": data.get("record_date", ""),
-                "analysis_date": data.get("analysis_date", "")
-            })
-
-            try:
-                if _is_creator:
-                    pass  # 作成者はカウントしない
-                elif _is_premium:
-                    increment_premium_usage(_premium_key)
-                else:
-                    increment_free_usage(client_ip)
-                increment_global_usage()
-            except Exception as e:
-                print("===== USAGE SAVE ERROR =====")
-                print(e)
-
-            data["client_ip"] = client_ip
-            data["user_id"] = get_or_create_user_id()
-            flask_session["client_ip"] = client_ip
-            saved_record = None
-            try:
-                saved_record = append_result(lightweight_result_payload(data), is_premium=bool(_is_premium or _is_creator))
-                if isinstance(saved_record, dict) and saved_record.get("id"):
-                    data["id"] = saved_record["id"]
-            except Exception as e:
-                print("===== RESULT SAVE ERROR =====")
-                print(e)
-                traceback.print_exc()
-                print("=============================")
-                # 保存に失敗しても結果表示は止めない
-            _lab_segment("db_save")
-
-            # =========================
-            # ⑫ 表示
-            # =========================
-
-            data = lightweight_result_payload(data)
-            data["is_premium"] = is_premium_user()
-            data["is_dev_mode"] = DEV_MODE or DEV_PREMIUM_MODE
-            data = apply_result_i18n_for_display(data)
-            print("[LAB TIME] before render_template", round(time.time() - lab_t0, 2), flush=True)
-            _log_mem("before-render")
             html = render_template(
                 "result.html",
                 data=data,
                 result_id=data.get("id", "")
             )
-            _lab_segment("render_template")
             print(f"[LAB TIME] TOTAL={time.time() - lab_t0:.2f}s", flush=True)
             if is_ajax:
                 return jsonify({
@@ -18795,6 +18864,108 @@ def lab_test_function():
         is_creator=_is_creator,
         premium_key=premium_key
     )
+
+
+# ==========================================
+# iOS版 Lumilog 用 JSON API
+# 診断ロジック(Gemini分析・Rakuten商品選定・ランキング・上位3商品選定・
+# 履歴保存)はWeb版(/lab, lab_test_function)と同一のrun_diagnosis_core()を
+# 共有しており、複製していない。利用制限判定(無料/有料回数・レート制限・
+# 全体上限)も既存のcan_use_free_diagnosis等をそのまま再利用する。
+# ==========================================
+
+def _api_error(code, message, http_status):
+    """iOS API共通のエラーJSON形式。"""
+    return jsonify({
+        "success": False,
+        "error": {
+            "code": code,
+            "message": message,
+        }
+    }), http_status
+
+
+@app.route("/api/v1/diagnoses", methods=["POST"])
+def api_create_diagnosis():
+    client_ip = get_client_ip()
+    _is_creator = is_creator()
+    _is_premium = is_premium_user()
+    _premium_key = request.args.get("premium_key", "")
+
+    # ===== 利用制限チェック(/lab と同一の判定関数を再利用、応答形式のみJSON化) =====
+    if _is_creator:
+        pass  # 作成者は制限なし
+    elif _is_premium:
+        if not can_use_premium_diagnosis(_premium_key):
+            return _api_error(
+                "USAGE_LIMIT_EXCEEDED",
+                gettext(
+                    "今月の分析回数（月%(limit)s回）に達しました。来月また利用できます。",
+                    limit=PREMIUM_MONTHLY_LIMIT,
+                ),
+                429,
+            )
+    elif not can_use_free_diagnosis(client_ip):
+        return _api_error(
+            "USAGE_LIMIT_EXCEEDED",
+            gettext(
+                "無料分析は月%(limit)s回までです。続けて利用するには有料プランをご利用ください。",
+                limit=FREE_MONTHLY_LIMIT,
+            ),
+            429,
+        )
+
+    ip = request.remote_addr
+    if not _is_creator and is_rate_limited(ip):
+        return _api_error(
+            "USAGE_LIMIT_EXCEEDED",
+            gettext("本日の分析回数の上限に達しました。明日またお試しください。"),
+            429,
+        )
+
+    # ===== 入力取得(/lab と同一のload_uploaded_images/extract_user_dataを再利用) =====
+    try:
+        validate_lab_dependencies()
+        user_data = extract_user_data(request)
+    except Exception as e:
+        traceback.print_exc()
+        return _api_error("INPUT_MISSING", str(e), 400)
+
+    try:
+        front_img, left_img, right_img = load_uploaded_images(request)
+    except ValueError as e:
+        # load_uploaded_imagesは「未選択」(入力不足)と「明るさ/ブレ等の
+        # 品質不良」(写真品質エラー)の両方をValueErrorで送出する。
+        # メッセージが「【○○画像】」で始まる方が品質エラー(既存の
+        # check_image_quality由来の文言形式、判定基準自体は変更していない)。
+        msg = str(e)
+        code = "IMAGE_QUALITY_ERROR" if msg.startswith("【") else "INPUT_MISSING"
+        return _api_error(code, msg, 400)
+
+    # ===== 診断コア処理(Web版と完全に同一のrun_diagnosis_coreを実行) =====
+    try:
+        data = run_diagnosis_core(
+            user_data, front_img, left_img, right_img,
+            force_refresh=(request.args.get("force_refresh") == "1"),
+            client_ip=client_ip,
+            is_creator_flag=_is_creator,
+            is_premium_flag=_is_premium,
+            premium_key=_premium_key,
+        )
+    except DiagnosisError as e:
+        return _api_error(e.code, e.message, e.http_status)
+    except Exception as e:
+        traceback.print_exc()
+        return _api_error(
+            "INTERNAL_ERROR",
+            build_user_friendly_error_message(str(e)),
+            500,
+        )
+
+    response_data = {"success": True, "diagnosis_id": data.get("id", "")}
+    response_data.update(data)
+    return jsonify(response_data), 200
+
 
 @app.route("/creator-auth")
 def creator_auth():
@@ -19977,6 +20148,62 @@ def history():
             streak=0,
             email=flask_session.get("email", "")
         )
+
+@app.route("/api/v1/history", methods=["GET"])
+def api_history():
+    """
+    /history(Web)と同じ保存データ(load_results)・匿名識別(lumilog_uid
+    Cookie経由のget_or_create_user_id)・無料ユーザー件数制限(FREE_HISTORY_LIMIT)
+    をそのまま再利用し、JSONで返す。履歴の保存方式・取得元は変更していない。
+    /historyルート自体には触れていない。
+    """
+    try:
+        user_id = get_or_create_user_id()
+        _is_premium = is_premium_user()
+        _is_cre = is_creator()
+
+        history_data = load_results(user_id=user_id)
+        if not isinstance(history_data, list):
+            history_data = []
+
+        if not _is_premium and not _is_cre:
+            history_data = history_data[:FREE_HISTORY_LIMIT]
+
+        items = []
+        for item in history_data:
+            if not isinstance(item, dict):
+                continue
+            items.append(apply_result_i18n_for_display({
+                "id": item.get("id", ""),
+                "record_date": item.get("record_date", ""),
+                "analysis_date": item.get("analysis_date", ""),
+                "saved_at": item.get("saved_at", ""),
+                "skin_score": item.get("skin_score", 0),
+                "skin_summary": item.get("skin_summary", ""),
+                "scores": item.get("scores", {}),
+                "input_budget": item.get("input_budget", 0),
+                "total_price": item.get("total_price", 0),
+                "budget_status": item.get("budget_status", ""),
+                "premium_scores": item.get("premium_scores", {}),
+                "symmetry_analysis": item.get("symmetry_analysis", {}),
+                "skin_age_estimate": item.get("skin_age_estimate", 0),
+                "input_age": item.get("input_age", 0),
+                "i18n_en": item.get("i18n_en", {}),
+            }))
+
+        return jsonify({
+            "success": True,
+            "is_premium": _is_premium,
+            "history": items,
+        }), 200
+
+    except Exception as e:
+        print("===== API HISTORY ROUTE ERROR =====")
+        print(e)
+        traceback.print_exc()
+        print("====================================")
+        return _api_error("INTERNAL_ERROR", build_user_friendly_error_message(str(e)), 500)
+
 
 @app.route("/history/<result_id>")
 def result_detail(result_id):
