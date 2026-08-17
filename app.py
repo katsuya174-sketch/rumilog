@@ -19958,18 +19958,17 @@ def logout():
 
 
 # 診断履歴ページ
-@app.route("/history")
-def history():
+def build_history_dashboard(history_data, is_premium, is_creator):
+    """
+    Web版 /history ルート(history())から抽出した処理そのもの。
+    履歴一覧の整形・スコア系列・改善サマリー・プレミアム全件グラフ用系列・
+    前回比スコア差分(score_diff/improvement_highlights/period_label)・
+    診断ストリーク・今月のレポート(monthly_report)を計算する。
+    計算ロジックは移動しただけで一切変更していない。
+    Web版(history())とiOS向けJSON API(api_history_dashboard)の両方から
+    呼ばれる共通関数。
+    """
     try:
-        user_id = get_or_create_user_id()
-        _is_premium = is_premium_user()
-        _is_cre = is_creator()
-
-        print(f"[HISTORY ROUTE] user_id={user_id!r}", flush=True)
-
-        # 自分のuser_idの診断結果のみ取得
-        history_data = load_results(user_id=user_id)
-
         if not isinstance(history_data, list):
             history_data = []
 
@@ -20008,7 +20007,7 @@ def history():
                 all_premium_score_series[key].append(safe_int(premium_scores_dict.get(key, 0)))
 
         # 無料ユーザーは表示を直近5件に制限
-        if not _is_premium and not _is_cre:
+        if not is_premium and not is_creator:
             history_data = history_data[:FREE_HISTORY_LIMIT]
 
         prepared = []
@@ -20116,7 +20115,7 @@ def history():
                 )
 
         # プレミアム・クリエイターは全件データでグラフを構築
-        if _is_premium or _is_cre:
+        if is_premium or is_creator:
             labels = all_labels
             skin_scores = all_skin_scores
             score_series = all_score_series
@@ -20292,6 +20291,60 @@ def history():
             print(f"monthly_report error: {_e}")
             monthly_report = None
 
+    except Exception as e:
+        print("===== HISTORY DASHBOARD BUILD ERROR =====")
+        print(e)
+        traceback.print_exc()
+        print("==========================================")
+        return {
+            "prepared": [],
+            "labels": [],
+            "skin_scores": [],
+            "score_series": {},
+            "premium_score_series": {},
+            "improvement_summary": [],
+            "skin_score_improvement": None,
+            "streak": 0,
+            "monthly_report": None,
+        }
+
+    return {
+        "prepared": prepared,
+        "labels": labels,
+        "skin_scores": skin_scores,
+        "score_series": score_series,
+        "premium_score_series": premium_score_series,
+        "improvement_summary": improvement_summary,
+        "skin_score_improvement": skin_score_improvement,
+        "streak": streak,
+        "monthly_report": monthly_report,
+    }
+
+
+@app.route("/history")
+def history():
+    try:
+        user_id = get_or_create_user_id()
+        _is_premium = is_premium_user()
+        _is_cre = is_creator()
+
+        print(f"[HISTORY ROUTE] user_id={user_id!r}", flush=True)
+
+        # 自分のuser_idの診断結果のみ取得
+        history_data = load_results(user_id=user_id)
+
+        dashboard = build_history_dashboard(history_data, _is_premium, _is_cre)
+        prepared = dashboard["prepared"]
+        labels = dashboard["labels"]
+        skin_scores = dashboard["skin_scores"]
+        score_series = dashboard["score_series"]
+        premium_score_series = dashboard["premium_score_series"]
+        improvement_summary = dashboard["improvement_summary"]
+        skin_score_improvement = dashboard["skin_score_improvement"]
+        streak = dashboard["streak"]
+        monthly_report = dashboard["monthly_report"]
+
+
         return render_template(
             "history.html",
             history=prepared,
@@ -20337,6 +20390,12 @@ def api_history():
     /historyルート自体には触れていない。
     remaining_free_countは/labが表示に使っているget_remaining_free_count()を
     そのまま再利用している(利用制限ロジックの複製はしていない)。
+
+    前回比スコア差分(score_diff/improvement_highlights/period_label)・
+    診断ストリーク(streak)・今月のレポート(monthly_report)・推移グラフ用系列
+    (labels/skin_scores/score_series/premium_score_series)は、/history(Web)
+    と共通のbuild_history_dashboard()から取得しており、計算ロジックの
+    複製はしていない。
     """
     try:
         user_id = get_or_create_user_id()
@@ -20345,17 +20404,11 @@ def api_history():
         client_ip = get_client_ip()
 
         history_data = load_results(user_id=user_id)
-        if not isinstance(history_data, list):
-            history_data = []
-
-        if not _is_premium and not _is_cre:
-            history_data = history_data[:FREE_HISTORY_LIMIT]
+        dashboard = build_history_dashboard(history_data, _is_premium, _is_cre)
 
         items = []
-        for item in history_data:
-            if not isinstance(item, dict):
-                continue
-            items.append(apply_result_i18n_for_display({
+        for item in dashboard["prepared"]:
+            items.append({
                 "id": item.get("id", ""),
                 "record_date": item.get("record_date", ""),
                 "analysis_date": item.get("analysis_date", ""),
@@ -20371,12 +20424,23 @@ def api_history():
                 "skin_age_estimate": item.get("skin_age_estimate", 0),
                 "input_age": item.get("input_age", 0),
                 "i18n_en": item.get("i18n_en", {}),
-            }))
+                "score_diff": item.get("score_diff", {}),
+                "improvement_highlights": item.get("improvement_highlights", []),
+                "period_label": item.get("period_label", ""),
+            })
 
         return jsonify({
             "success": True,
             "is_premium": _is_premium,
             "remaining_free_count": get_remaining_free_count(client_ip),
+            "streak": dashboard["streak"],
+            "monthly_report": dashboard["monthly_report"],
+            "improvement_summary": dashboard["improvement_summary"],
+            "skin_score_improvement": dashboard["skin_score_improvement"],
+            "labels": dashboard["labels"],
+            "skin_scores": dashboard["skin_scores"],
+            "score_series": dashboard["score_series"],
+            "premium_score_series": dashboard["premium_score_series"],
             "history": items,
         }), 200
 
@@ -20385,6 +20449,59 @@ def api_history():
         print(e)
         traceback.print_exc()
         print("====================================")
+        return _api_error("INTERNAL_ERROR", build_user_friendly_error_message(str(e)), 500)
+
+
+@app.route("/api/v1/history/<result_id>", methods=["GET"])
+def api_history_detail(result_id):
+    """
+    Web版 /history/<id> (result_detail())と全く同じデータ取得・整形処理
+    (load_results, prepare_result_for_view, is_premium_userによる無料/有料
+    判定, symmetry_analysisのデフォルト補完, apply_result_i18n_for_display)
+    をそのまま再利用し、JSONで返す。新たな商品検索・Gemini分析は一切行わず、
+    診断時に保存済みのmorning/night/weekly_care等をそのまま返すだけ。
+    レスポンス形式はapi_create_diagnosisの成功レスポンスと同じ
+    ({"success", "diagnosis_id", ...診断データ})にしており、iOS側は
+    DiagnosisResponseモデルをそのまま再利用できる。
+    is_premiumは(Web版のresult_detail()と同じく)閲覧時点の現在の会員状態を
+    毎回反映する。
+    """
+    try:
+        uid = get_or_create_user_id()
+        history_data = load_results(user_id=uid)
+        if not isinstance(history_data, list):
+            history_data = []
+
+        for item in history_data:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("id", "")) == str(result_id):
+                data = prepare_result_for_view(item)
+                if not isinstance(data, dict):
+                    data = item
+
+                data["is_premium"] = is_premium_user()
+
+                if not isinstance(data.get("symmetry_analysis"), dict):
+                    data["symmetry_analysis"] = {
+                        "summary": "",
+                        "left_tendency": "",
+                        "right_tendency": ""
+                    }
+
+                data = apply_result_i18n_for_display(data)
+
+                response_data = {"success": True, "diagnosis_id": data.get("id", "")}
+                response_data.update(data)
+                return jsonify(response_data), 200
+
+        return _api_error("NOT_FOUND", "指定された診断結果が見つかりません", 404)
+
+    except Exception as e:
+        print("===== API HISTORY DETAIL ROUTE ERROR =====")
+        print(e)
+        traceback.print_exc()
+        print("===========================================")
         return _api_error("INTERNAL_ERROR", build_user_friendly_error_message(str(e)), 500)
 
 
@@ -20425,6 +20542,38 @@ def api_auth_verify():
 
     resp = jsonify({"success": True, "email": email})
     resp.set_cookie(RUMILOG_UID_COOKIE, new_user_id, max_age=365 * 24 * 3600, httponly=True, samesite="Lax")
+    return resp
+
+
+@app.route("/api/v1/auth/session", methods=["GET"])
+def api_auth_session():
+    """
+    現在のセッションのログイン状態・プレミアム状態をJSONで返す。Web版が
+    history.html等のヘッダー表示に使っているflask_session.get("email")と、
+    is_premium_user()(既存のpremium_key検証ロジック)をそのまま再利用する
+    (新しい判定ロジックは作らない)。iOS側はアプリ起動時にこれを呼び、
+    Cookie上の実際のログイン状態・premium_keyの現在の有効性とUI表示を同期させる。
+    """
+    email = flask_session.get("email", "")
+    return jsonify({
+        "success": True,
+        "logged_in": bool(email),
+        "email": email,
+        "is_premium": is_premium_user(),
+    })
+
+
+@app.route("/api/v1/auth/logout", methods=["POST"])
+def api_auth_logout():
+    """
+    Web版の/logout(flask_session.clear() + lumilog_uidクッキー削除)と
+    完全に同じ処理を行う。ログアウト後は次回リクエストで新規の匿名UUIDが
+    発行される点もWeb版と同じ(匿名化されるだけで、その後もう一度同じ
+    メールでログインすれば同一アカウントの履歴に戻れる)。
+    """
+    flask_session.clear()
+    resp = jsonify({"success": True})
+    resp.delete_cookie(RUMILOG_UID_COOKIE)
     return resp
 
 
