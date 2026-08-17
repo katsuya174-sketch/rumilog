@@ -20233,11 +20233,14 @@ def api_history():
     Cookie経由のget_or_create_user_id)・無料ユーザー件数制限(FREE_HISTORY_LIMIT)
     をそのまま再利用し、JSONで返す。履歴の保存方式・取得元は変更していない。
     /historyルート自体には触れていない。
+    remaining_free_countは/labが表示に使っているget_remaining_free_count()を
+    そのまま再利用している(利用制限ロジックの複製はしていない)。
     """
     try:
         user_id = get_or_create_user_id()
         _is_premium = is_premium_user()
         _is_cre = is_creator()
+        client_ip = get_client_ip()
 
         history_data = load_results(user_id=user_id)
         if not isinstance(history_data, list):
@@ -20271,6 +20274,7 @@ def api_history():
         return jsonify({
             "success": True,
             "is_premium": _is_premium,
+            "remaining_free_count": get_remaining_free_count(client_ip),
             "history": items,
         }), 200
 
