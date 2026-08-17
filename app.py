@@ -19289,6 +19289,36 @@ def android_assetlinks():
     }])
 
 
+@app.route("/.well-known/apple-app-site-association")
+def apple_app_site_association():
+    """
+    iOS Universal LinksのApple App Site Association。
+    /auth/<token> (マジックリンクログイン)のみをiOSアプリで直接開けるよう
+    スコープする。それ以外のURL(/lab, /premium 等)は従来どおりブラウザで開く。
+
+    appID(Team ID + Bundle ID)は環境変数 APPLE_TEAM_ID から組み立てる。
+    Team ID未設定時は無効なappIDになりiOS側は関連付けを行わない
+    (＝設定するまでUniversal Linksは有効化されない、安全側のデフォルト)。
+    コード再デプロイ無しに値を差し替えられるよう環境変数から読む。
+    """
+    team_id = os.getenv("APPLE_TEAM_ID", "")
+    bundle_id = os.getenv("APPLE_BUNDLE_ID", "com.katsuya174.lumilog")
+    app_id = f"{team_id}.{bundle_id}" if team_id else ""
+
+    return jsonify({
+        "applinks": {
+            "apps": [],
+            "details": [
+                {
+                    "appID": app_id,
+                    "appIDs": [app_id],
+                    "paths": ["/auth/*"],
+                }
+            ],
+        }
+    })
+
+
 @app.route("/privacy-policy")
 def privacy_policy():
     return render_template("privacy_policy.html")
@@ -19785,14 +19815,18 @@ def login():
     return render_template("login.html")
 
 
-@app.route("/auth/<token>")
-def auth_verify(token):
+def _complete_magic_login(token):
+    """マジックトークンを検証してログインを完了する共通処理。
+    Web版(/auth/<token>)とiOS版(/api/v1/auth/verify)の両方から呼ばれる。
+    成功時は (email, new_user_id) を返す。失敗時は (None, None)。
+    トークン検証・匿名履歴移行のロジックはここに一本化し、複製しない。
+    """
     email = verify_magic_token(token)
     if not email:
-        return render_template("login.html", error=gettext("このリンクは無効または期限切れです。再度ログインしてください"))
+        return None, None
     new_user_id = get_or_create_user_for_email(email)
     if not new_user_id:
-        return render_template("login.html", error=gettext("ログインに失敗しました。再度お試しください"))
+        return None, None
     # 現在のデバイスに既存の診断結果があれば email アカウントに移行
     old_user_id = request.cookies.get(RUMILOG_UID_COOKIE, "") or flask_session.get("user_id", "")
     if old_user_id and old_user_id != new_user_id:
@@ -19800,6 +19834,14 @@ def auth_verify(token):
     flask_session["user_id"] = new_user_id
     flask_session["email"] = email
     flask_session.permanent = True
+    return email, new_user_id
+
+
+@app.route("/auth/<token>")
+def auth_verify(token):
+    email, new_user_id = _complete_magic_login(token)
+    if not email:
+        return render_template("login.html", error=gettext("このリンクは無効または期限切れです。再度ログインしてください"))
     resp = make_response(redirect("/history"))
     resp.set_cookie(RUMILOG_UID_COOKIE, new_user_id, max_age=365 * 24 * 3600, httponly=True, samesite="Lax")
     return resp
@@ -20238,6 +20280,46 @@ def api_history():
         traceback.print_exc()
         print("====================================")
         return _api_error("INTERNAL_ERROR", build_user_friendly_error_message(str(e)), 500)
+
+
+# ==========================================
+# iOS版 Lumilog 用 ログインAPI
+# Web版(/login, /auth/<token>)と同一のcreate_magic_token/verify_magic_token/
+# get_or_create_user_for_email/migrate_results_to_email_user/
+# _complete_magic_loginをそのまま再利用しており、認証ロジックの複製はしていない。
+# Web版のマジックリンクメールはHTMLページ(/auth/<token>)へのリンクのままで、
+# iOS版はUniversal Links経由でこのJSON APIを呼び出す想定(/auth/<token>と
+# 同じtokenをそのまま使う。トークンは1回限りのため、Web版のHTMLリンクをiOS版が
+# 横取りする形になり、両方から同時に消費することはできない)。
+# ==========================================
+
+@app.route("/api/v1/auth/request-link", methods=["POST"])
+def api_auth_request_link():
+    email = (request.form.get("email") or "").strip().lower()
+    if not email or "@" not in email or "." not in email.split("@")[-1]:
+        return _api_error("INVALID_INPUT_VALUE", gettext("メールアドレスを正しく入力してください"), 400)
+
+    token = create_magic_token(email)
+    if not token:
+        return _api_error("INTERNAL_ERROR", gettext("エラーが発生しました。しばらく後でお試しください"), 500)
+
+    send_magic_link_email(email, token)
+    return jsonify({"success": True})
+
+
+@app.route("/api/v1/auth/verify", methods=["POST"])
+def api_auth_verify():
+    token = (request.form.get("token") or "").strip()
+    if not token:
+        return _api_error("INPUT_MISSING", "token is required", 400)
+
+    email, new_user_id = _complete_magic_login(token)
+    if not email:
+        return _api_error("INVALID_TOKEN", gettext("このリンクは無効または期限切れです。再度ログインしてください"), 400)
+
+    resp = jsonify({"success": True, "email": email})
+    resp.set_cookie(RUMILOG_UID_COOKIE, new_user_id, max_age=365 * 24 * 3600, httponly=True, samesite="Lax")
+    return resp
 
 
 @app.route("/history/<result_id>")
