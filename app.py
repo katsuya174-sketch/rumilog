@@ -1339,7 +1339,11 @@ def _get_apple_signed_data_verifier():
     Apple公式のroot証明書(certs/AppleRootCA-G3.cer)のみで検証しており、
     App Store Server APIの認証情報(Issuer ID/Key ID)は不要
     (クライアント/Appleから受け取ったJWSをその場で検証するだけのため)。
-    APPLE_BUNDLE_ID未設定時はNoneを返し、呼び出し側は503を返す。
+    APPLE_BUNDLE_ID未設定時、または(Production環境でapp_apple_id未設定など)
+    ライブラリ側がコンストラクタで例外を送出する設定不備の場合はNoneを返し、
+    呼び出し側は503を返す。App Store Connectでの商品作成・APPLE_APP_APPLE_ID
+    設定が完了するまでは、デフォルトでSandbox環境として動作する
+    (Productionはapp_apple_id必須のためAPPLE_APP_APPLE_ID設定後に切り替える)。
     """
     bundle_id = os.getenv("APPLE_BUNDLE_ID", "com.katsuya174.lumilog")
     if not bundle_id:
@@ -1349,19 +1353,30 @@ def _get_apple_signed_data_verifier():
     if not root_certs:
         return None
 
-    env_name = os.getenv("APP_STORE_ENVIRONMENT", "Production")
-    environment = Environment.SANDBOX if env_name.strip().lower() == "sandbox" else Environment.PRODUCTION
-
     app_apple_id_raw = os.getenv("APPLE_APP_APPLE_ID", "").strip()
     app_apple_id = int(app_apple_id_raw) if app_apple_id_raw.isdigit() else None
 
-    return SignedDataVerifier(
-        root_certificates=root_certs,
-        enable_online_checks=True,
-        environment=environment,
-        bundle_id=bundle_id,
-        app_apple_id=app_apple_id,
-    )
+    env_name = os.getenv("APP_STORE_ENVIRONMENT", "").strip().lower()
+    if env_name == "production":
+        environment = Environment.PRODUCTION
+    elif env_name == "sandbox":
+        environment = Environment.SANDBOX
+    else:
+        # 未設定時: app_apple_id未設定ならSandbox(必須条件を満たせないため)、
+        # 設定済みならProduction。
+        environment = Environment.PRODUCTION if app_apple_id else Environment.SANDBOX
+
+    try:
+        return SignedDataVerifier(
+            root_certificates=root_certs,
+            enable_online_checks=True,
+            environment=environment,
+            bundle_id=bundle_id,
+            app_apple_id=app_apple_id,
+        )
+    except Exception as e:
+        print(f"[APPLE VERIFIER CONFIG ERROR] {e}", flush=True)
+        return None
 
 def cleanup_expired_premium_keys():
     """期限切れ・失効済みエントリをpremium_keys.jsonから削除する"""
