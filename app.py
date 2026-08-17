@@ -777,6 +777,9 @@ def call_gemini_with_retry(client, model, contents, config=None, max_retries=2, 
     raise last_error
 
 import stripe
+from appstoreserverlibrary.signed_data_verifier import SignedDataVerifier, VerificationException
+from appstoreserverlibrary.models.Environment import Environment
+from appstoreserverlibrary.models.NotificationTypeV2 import NotificationTypeV2
 import secrets
 import smtplib
 import ssl
@@ -1275,6 +1278,90 @@ def revoke_premium_key_direct(key):
         save_premium_keys(keys)
         return True
     return False
+
+
+def issue_premium_key_for_apple(original_transaction_id, valid_until_iso, email=None):
+    """
+    App Store購入(StoreKit)による発行。issue_premium_key()のStripe版と同じ
+    「既存キーがあれば延長・無ければ新規発行」パターンを、
+    apple_original_transaction_idをキーに踏襲している。
+    """
+    keys = load_premium_keys()
+    for key, entry in keys.items():
+        if entry.get("apple_original_transaction_id") == original_transaction_id and not entry.get("revoked", False):
+            entry["valid_until"] = valid_until_iso
+            if email:
+                entry["email"] = email
+            save_premium_keys(keys)
+            return key
+    new_key = generate_premium_key()
+    keys[new_key] = {
+        "email": email,
+        "apple_original_transaction_id": original_transaction_id,
+        "valid_until": valid_until_iso,
+        "revoked": False,
+        "created_at": datetime.now().isoformat(),
+    }
+    save_premium_keys(keys)
+    return new_key
+
+
+def revoke_premium_key_by_apple_transaction(original_transaction_id):
+    keys = load_premium_keys()
+    changed = False
+    for key, entry in keys.items():
+        if entry.get("apple_original_transaction_id") == original_transaction_id:
+            entry["revoked"] = True
+            changed = True
+    if changed:
+        save_premium_keys(keys)
+
+
+_apple_root_certificates_cache = None
+
+
+def _load_apple_root_certificates():
+    global _apple_root_certificates_cache
+    if _apple_root_certificates_cache is None:
+        cert_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "certs", "AppleRootCA-G3.cer")
+        try:
+            with open(cert_path, "rb") as f:
+                _apple_root_certificates_cache = [f.read()]
+        except Exception as e:
+            print(f"[APPLE CERT ERROR] {e}", flush=True)
+            _apple_root_certificates_cache = []
+    return _apple_root_certificates_cache
+
+
+def _get_apple_signed_data_verifier():
+    """
+    App Store購入の署名付きトランザクション(JWS)を検証するverifierを構築する。
+    Apple公式のroot証明書(certs/AppleRootCA-G3.cer)のみで検証しており、
+    App Store Server APIの認証情報(Issuer ID/Key ID)は不要
+    (クライアント/Appleから受け取ったJWSをその場で検証するだけのため)。
+    APPLE_BUNDLE_ID未設定時はNoneを返し、呼び出し側は503を返す。
+    """
+    bundle_id = os.getenv("APPLE_BUNDLE_ID", "com.katsuya174.lumilog")
+    if not bundle_id:
+        return None
+
+    root_certs = _load_apple_root_certificates()
+    if not root_certs:
+        return None
+
+    env_name = os.getenv("APP_STORE_ENVIRONMENT", "Production")
+    environment = Environment.SANDBOX if env_name.strip().lower() == "sandbox" else Environment.PRODUCTION
+
+    app_apple_id_raw = os.getenv("APPLE_APP_APPLE_ID", "").strip()
+    app_apple_id = int(app_apple_id_raw) if app_apple_id_raw.isdigit() else None
+
+    return SignedDataVerifier(
+        root_certificates=root_certs,
+        enable_online_checks=True,
+        environment=environment,
+        bundle_id=bundle_id,
+        app_apple_id=app_apple_id,
+    )
 
 def cleanup_expired_premium_keys():
     """期限切れ・失効済みエントリをpremium_keys.jsonから削除する"""
@@ -20324,6 +20411,101 @@ def api_auth_verify():
     resp = jsonify({"success": True, "email": email})
     resp.set_cookie(RUMILOG_UID_COOKIE, new_user_id, max_age=365 * 24 * 3600, httponly=True, samesite="Lax")
     return resp
+
+
+# ==========================================
+# iOS版 Lumilog 用 App Store課金API
+# 有料会員判定(is_premium_user())・利用制限(can_use_premium_diagnosis()等)は
+# 一切変更していない。App Store購入をWeb版のpremium_keyクエリパラメータ方式に
+# 橋渡しするだけ。Stripe版のissue_premium_key()と同じ「延長 or 新規発行」の
+# パターンをapple_original_transaction_idをキーに踏襲している(ロジック複製ではない)。
+# ==========================================
+
+@app.route("/api/v1/premium/verify-purchase", methods=["POST"])
+def api_premium_verify_purchase():
+    signed_transaction = (request.form.get("signed_transaction") or "").strip()
+    if not signed_transaction:
+        return _api_error("INPUT_MISSING", "signed_transaction is required", 400)
+
+    verifier = _get_apple_signed_data_verifier()
+    if verifier is None:
+        return _api_error("NOT_CONFIGURED", "App Store決済の検証設定が未完了です", 503)
+
+    try:
+        payload = verifier.verify_and_decode_signed_transaction(signed_transaction)
+    except VerificationException as e:
+        traceback.print_exc()
+        return _api_error("INVALID_TRANSACTION", f"購入情報を検証できませんでした: {e}", 400)
+
+    expected_product_id = os.getenv("APPLE_PREMIUM_PRODUCT_ID", "com.katsuya174.lumilog.premium.monthly")
+    if payload.productId != expected_product_id:
+        return _api_error("INVALID_TRANSACTION", "不明な商品IDです", 400)
+
+    if payload.revocationDate:
+        return _api_error("INVALID_TRANSACTION", "この購入は無効化されています", 400)
+
+    if not payload.expiresDate or payload.expiresDate < int(datetime.now().timestamp() * 1000):
+        return _api_error("INVALID_TRANSACTION", "このサブスクリプションは期限切れです", 400)
+
+    valid_until_iso = datetime.fromtimestamp(payload.expiresDate / 1000).isoformat()
+    email = flask_session.get("email")  # ログイン済みならメールアカウントに紐付ける(任意)
+
+    key = issue_premium_key_for_apple(payload.originalTransactionId, valid_until_iso, email=email)
+
+    return jsonify({
+        "success": True,
+        "premium_key": key,
+        "valid_until": valid_until_iso,
+    })
+
+
+@app.route("/api/v1/premium/apple-notifications", methods=["POST"])
+def api_premium_apple_notifications():
+    """
+    App Store Server Notifications V2用のwebhook。App Store Connectの
+    「App情報 > App Store Server通知」でこのURLを登録すると、更新・解約・
+    返金などをアプリが起動していなくても反映できる(既存のStripe webhookと
+    同じ役割)。未設定の間はApple側から呼ばれないため無害。
+    """
+    body = request.get_json(silent=True) or {}
+    signed_payload = body.get("signedPayload", "")
+    if not signed_payload:
+        return jsonify({"success": False}), 400
+
+    verifier = _get_apple_signed_data_verifier()
+    if verifier is None:
+        return jsonify({"success": False}), 503
+
+    try:
+        notification = verifier.verify_and_decode_notification(signed_payload)
+    except VerificationException as e:
+        print(f"[APPLE NOTIFICATION ERROR] {e}", flush=True)
+        return jsonify({"success": False}), 400
+
+    data = getattr(notification, "data", None)
+    signed_transaction_info = getattr(data, "signedTransactionInfo", None) if data else None
+
+    if signed_transaction_info:
+        try:
+            transaction = verifier.verify_and_decode_signed_transaction(signed_transaction_info)
+        except VerificationException:
+            transaction = None
+
+        if transaction:
+            if notification.notificationType in (
+                NotificationTypeV2.EXPIRED,
+                NotificationTypeV2.REVOKE,
+                NotificationTypeV2.GRACE_PERIOD_EXPIRED,
+            ):
+                revoke_premium_key_by_apple_transaction(transaction.originalTransactionId)
+            elif notification.notificationType in (
+                NotificationTypeV2.DID_RENEW,
+                NotificationTypeV2.SUBSCRIBED,
+            ) and transaction.expiresDate:
+                valid_until_iso = datetime.fromtimestamp(transaction.expiresDate / 1000).isoformat()
+                issue_premium_key_for_apple(transaction.originalTransactionId, valid_until_iso)
+
+    return jsonify({"success": True})
 
 
 @app.route("/history/<result_id>")
