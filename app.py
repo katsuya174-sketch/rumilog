@@ -15746,6 +15746,37 @@ def extract_user_data(request):
     }
 
 
+# lab.html の <select>/checkbox が実際に送信するvalueと完全に一致させる。
+# (肌質・敏感度は<select>にrequired属性が無いため空文字列を許容、
+#  レチノール使用経験のみrequired属性があるため空文字列は許容しない)
+QUESTIONNAIRE_VALID_OIL_STATUS = {"", "dry", "oily", "mixed", "normal"}
+QUESTIONNAIRE_VALID_SENSITIVITY = {"", "low", "middle", "high"}
+QUESTIONNAIRE_VALID_RETINOL_EXP = {"beginner", "middle", "high"}
+QUESTIONNAIRE_VALID_CONCERNS = {"acne", "pores", "spots", "aging", "dryness", "redness"}
+
+
+def validate_questionnaire_values(user_data):
+    """問診項目(oil_status/sensitivity/retinol_exp/concerns)がlab.htmlの
+    正式なvalueかどうかを検証する。不正な場合は (False, message) を返す。"""
+    oil = user_data.get("oil", "")
+    if oil not in QUESTIONNAIRE_VALID_OIL_STATUS:
+        return False, f"肌質(oil_status)の値が不正です: {oil!r}"
+
+    sens = user_data.get("sens", "")
+    if sens not in QUESTIONNAIRE_VALID_SENSITIVITY:
+        return False, f"敏感度(sensitivity)の値が不正です: {sens!r}"
+
+    exp = user_data.get("exp", "")
+    if exp not in QUESTIONNAIRE_VALID_RETINOL_EXP:
+        return False, f"レチノール使用経験(retinol_exp)の値が不正です: {exp!r}"
+
+    for concern in user_data.get("concerns", []):
+        if concern not in QUESTIONNAIRE_VALID_CONCERNS:
+            return False, f"肌の悩み(concerns)の値が不正です: {concern!r}"
+
+    return True, ""
+
+
 def resize_for_gemini(file, max_size=1024):
     img = Image.open(io.BytesIO(file.read()))
     img = ImageOps.exif_transpose(img)
@@ -18930,6 +18961,10 @@ def api_create_diagnosis():
     except Exception as e:
         traceback.print_exc()
         return _api_error("INPUT_MISSING", str(e), 400)
+
+    is_valid, validation_message = validate_questionnaire_values(user_data)
+    if not is_valid:
+        return _api_error("INVALID_INPUT_VALUE", validation_message, 400)
 
     try:
         front_img, left_img, right_img = load_uploaded_images(request)
