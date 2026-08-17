@@ -1150,6 +1150,92 @@ def migrate_results_to_email_user(old_user_id, new_user_id):
         if conn: conn.close()
 
 
+class AccountDeletionError(Exception):
+    """アカウント削除処理の失敗を表す。呼び出し側(APIルート)は500として扱う。"""
+    pass
+
+
+def delete_account_data(email, user_id):
+    """
+    アカウント削除。email/user_idは呼び出し側(api_delete_account)が
+    現在ログイン中のFlaskセッションから確定した値のみを受け取る想定で、
+    ここでは追加の権限チェックは行わない。
+
+    DB(Postgres)側は users・results・magic_tokens・user_feedback を
+    1トランザクションにまとめ、途中で失敗した場合は全てロールバックする
+    (usersだけ消えてresultsが残る、といった不整合を避けるため)。
+
+    premium_keys.jsonはDBトランザクションの外にあるファイルのため、
+    DB側のコミットが完全に成功した後にのみ更新する。DBコミット後に
+    ファイル更新が失敗した場合は、DB側のロールバックはもう出来ない
+    (アカウント・履歴は既に削除済み)ため、AccountDeletionErrorを送出して
+    呼び出し側にログ・エラー応答をさせるにとどめる
+    (孤立したpremium_keyエントリは次回のis_premium_user()判定に使われる
+    だけで、削除済みアカウントの復元には繋がらない)。
+    """
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+
+        cur.execute("DELETE FROM results WHERE payload->>'user_id' = %s", (user_id,))
+        results_deleted = cur.rowcount
+
+        cur.execute("DELETE FROM magic_tokens WHERE email = %s", (email,))
+        magic_tokens_deleted = cur.rowcount
+
+        cur.execute(
+            "DELETE FROM user_feedback WHERE user_id = %s OR email = %s",
+            (user_id, email)
+        )
+        user_feedback_deleted = cur.rowcount
+
+        cur.execute("DELETE FROM users WHERE email = %s AND user_id = %s", (email, user_id))
+        users_deleted = cur.rowcount
+
+        conn.commit()
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"[ACCOUNT DELETE ERROR] db phase failed for email={email!r}: {e}", flush=True)
+        raise AccountDeletionError(str(e))
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+    # ここに到達した時点でDB側は確定済み。premium_keys.jsonの無効化に失敗しても
+    # DBをロールバックすることはできないため、例外を送出してログに残す。
+    premium_keys_revoked = 0
+    try:
+        keys = load_premium_keys()
+        for entry in keys.values():
+            if entry.get("email") == email:
+                entry["revoked"] = True
+                premium_keys_revoked += 1
+        if premium_keys_revoked:
+            save_premium_keys(keys)
+    except Exception as e:
+        print(f"[ACCOUNT DELETE ERROR] premium_keys revoke failed after DB commit for email={email!r}: {e}", flush=True)
+        raise AccountDeletionError(
+            f"DB削除は完了しましたが、premium_keysの無効化に失敗しました: {e}"
+        )
+
+    print(
+        f"[ACCOUNT DELETE] email={email!r} user_id={user_id!r} "
+        f"results={results_deleted} magic_tokens={magic_tokens_deleted} "
+        f"user_feedback={user_feedback_deleted} users={users_deleted} "
+        f"premium_keys_revoked={premium_keys_revoked}",
+        flush=True
+    )
+    return {
+        "results_deleted": results_deleted,
+        "magic_tokens_deleted": magic_tokens_deleted,
+        "user_feedback_deleted": user_feedback_deleted,
+        "users_deleted": users_deleted,
+        "premium_keys_revoked": premium_keys_revoked,
+    }
+
+
 def send_magic_link_email(to_email, token):
     """マジックリンクメールを送信する"""
     if not SMTP_USER or not SMTP_PASSWORD:
@@ -20573,6 +20659,43 @@ def api_auth_logout():
     """
     flask_session.clear()
     resp = jsonify({"success": True})
+    resp.delete_cookie(RUMILOG_UID_COOKIE)
+    return resp
+
+
+@app.route("/api/v1/account", methods=["DELETE"])
+def api_delete_account():
+    """
+    ログイン中のアカウントを完全に削除する(Apple/Google Playの
+    「アプリ内アカウント削除」要件対応)。
+
+    削除対象を決めるのは常に現在のFlaskセッション(flask_session["email"]/
+    ["user_id"])のみ。リクエストボディで別のメールアドレス・user_idを
+    指定させる仕組みは一切用意していない(他ユーザーを削除できないようにする)。
+    未ログイン(email未設定)の場合は401を返す。
+
+    削除対象: users・results(診断履歴を匿名化ではなく完全削除)・
+    magic_tokens・premium_keys.json(該当emailのキーをrevoked=Trueで無効化)・
+    user_feedback(user_id/emailで紐付くもののみ。匿名フィードバックは対象外)。
+    Appleのサブスクリプション契約自体はここでは一切操作しない
+    (StoreKit側の解約はユーザー自身がApple ID設定から行う)。
+
+    削除完了後はWeb版の/logoutと同じくセッションをクリアし、
+    lumilog_uid Cookieも削除する(以降は新規の匿名UUIDになる)。
+    """
+    email = flask_session.get("email", "")
+    user_id = flask_session.get("user_id", "")
+
+    if not email or not user_id:
+        return _api_error("NOT_LOGGED_IN", "ログインが必要です", 401)
+
+    try:
+        deleted = delete_account_data(email, user_id)
+    except AccountDeletionError as e:
+        return _api_error("INTERNAL_ERROR", f"アカウント削除に失敗しました: {e}", 500)
+
+    flask_session.clear()
+    resp = jsonify({"success": True, "deleted": deleted})
     resp.delete_cookie(RUMILOG_UID_COOKIE)
     return resp
 
