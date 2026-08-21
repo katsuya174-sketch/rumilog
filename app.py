@@ -3930,6 +3930,119 @@ def select_best_beauty_device_candidate(scored_items, device_type, user_data, bu
     return best_item
 
 
+# _SUPPLEMENT_DEFAULTS の ingredient_focus タグ(内部識別子)を、楽天の
+# itemName/itemCaptionに実際に現れうる表記に対応付ける。ここに挙げた語が
+# 文字列として含まれるかどうかだけを見る(含有量・効果の推測はしない)。
+_SUPPLEMENT_INGREDIENT_KEYWORDS = {
+    "vitamin_c": ("ビタミンC", "ビタミンc", "vitamin c"),
+    "l_cysteine": ("Lシステイン", "エルシステイン", "システイン", "l-cysteine", "cysteine"),
+    "vitamin_b": ("ビタミンB", "ビタミンb", "vitamin b"),
+    "vitamin_d": ("ビタミンD", "ビタミンd", "vitamin d"),
+    "omega3": ("オメガ3", "オメガ-3", "omega-3", "omega3", "EPA", "DHA", "フィッシュオイル"),
+    "collagen": ("コラーゲン", "collagen"),
+    "ceramide": ("セラミド", "ceramide"),
+    "hyaluronic_acid": ("ヒアルロン酸", "hyaluronic"),
+    "probiotics": ("乳酸菌", "プロバイオティクス", "probiotics", "ビフィズス菌"),
+    "zinc": ("亜鉛", "zinc"),
+}
+
+
+def select_best_supplement_candidate(scored_items, supplement_type, ingredient_focus, user_data, budget_value):
+    """
+    fetch_rakuten_candidates()が返すスコア済み実在候補群から、この
+    supplement_type内でユーザーに最も合う1件を選ぶ。
+
+    評価軸(ユーザー指定): supplement_type/ingredient_focusとの一致(事実ベースの
+    補助評価。含有量・効果の推測はしない／キーワード数では加点しない)・予算適合・
+    レビュー数評価・score_rakuten_item由来の実在適合スコア(プール内相対値)。
+    敏感度・cautionは評価軸に含めない(美容機器と異なり、サプリメントの
+    cautionはsupplement_type単位の静的な注意事項であり商品ランキングには使わない)。
+
+    ランダム要素は一切ない。同じ候補群・同じuser_data/budget_valueであれば
+    常に同じ1件を返す。
+    """
+    if not scored_items:
+        return None
+
+    single_items = [
+        (sc, it) for sc, it in scored_items
+        if not _is_rakuten_set_item(str(it.get("itemName", "") or ""))
+    ]
+    pool = single_items if single_items else scored_items
+
+    _raw_scores = [sc for sc, _ in pool]
+    _score_min, _score_max = min(_raw_scores), max(_raw_scores)
+    _score_span = (_score_max - _score_min) or 1
+
+    def _normalized_relevance(score):
+        return (score - _score_min) / _score_span * 20  # 0〜20
+
+    focus_tags = ingredient_focus if isinstance(ingredient_focus, list) else []
+    keyword_variants = []
+    for tag in focus_tags:
+        keyword_variants.extend(_SUPPLEMENT_INGREDIENT_KEYWORDS.get(tag, ()))
+
+    def _fit_score(pair):
+        score, item = pair
+        title = str(item.get("itemName", "") or "")
+        caption = str(item.get("itemCaption", "") or "")
+        text_lower = f"{title} {caption}".lower()
+        price = safe_price(item.get("itemPrice", 0))
+        review_count = safe_price(item.get("reviewCount", 0))
+        review_avg = safe_price(item.get("reviewAverage", 0))
+
+        fit = _normalized_relevance(score)
+
+        # supplement_typeとの一致(文字列として含まれるか否かのみ。
+        # 繰り返し出現しても加点は増えない)。
+        if supplement_type and supplement_type.lower() in text_lower:
+            fit += 10
+
+        # ingredient_focusとの一致。事実として楽天のitemName/itemCaptionに
+        # 含まれる語だけを見る補助評価であり、一致しない候補は
+        # 「supplement_typeとして関係が確認できない」として明確に減点する
+        # (レビュー数だけで無関係な商品が1位に来ないようにするため)。
+        if keyword_variants:
+            if any(kw.lower() in text_lower for kw in keyword_variants):
+                fit += 25
+            else:
+                fit -= 25
+
+        # 予算適合: 大幅に超える場合のみ減点(美容機器と同じ考え方。
+        # budget_valueは月間スキンケア予算でサプリの一括価格とは単位が違うため
+        # 安いほど加点、という扱いはしない)。
+        if budget_value and price > 0:
+            ratio = price / budget_value
+            if ratio > 1.5:
+                fit -= min((ratio - 1.5) * 15, 40)
+
+        # レビュー数・評価は品質シグナルとして加点(上限あり)。
+        fit += min(review_count, 500) / 50
+        fit += review_avg * 2
+
+        return fit
+
+    def _sort_key(pair):
+        score, item = pair
+        return (
+            _fit_score(pair),
+            score,
+            safe_price(item.get("reviewCount", 0)),
+            -safe_price(item.get("itemPrice", 0)),
+            str(item.get("itemCode", "")),
+        )
+
+    pool_sorted = sorted(pool, key=_sort_key, reverse=True)
+    best_score, best_item = pool_sorted[0]
+    print(
+        f"[SUPPLEMENT SELECT] supplement_type={supplement_type} "
+        f"winner={best_item.get('itemName','')[:50]!r} "
+        f"base_score={best_score} fit={_fit_score((best_score, best_item)):.1f} "
+        f"price={best_item.get('itemPrice')} reviews={best_item.get('reviewCount')} "
+        f"candidates={len(pool)}",
+        flush=True
+    )
+    return best_item
 
 
 # === Phase 2: criteria-based Rakuten search ===
@@ -5522,6 +5635,25 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
         if best_raw_item:
             _cleaned_name = clean_ai_product_name(clean_display_product_name(product_name))
             rakuten_item = _build_rakuten_result(best_raw_item, _cleaned_name)
+    # サプリメントのみ: 美容機器と同じ考え方で複数の実在候補をユーザー適合度
+    # 評価する。カテゴリ固有の評価軸(ingredient_focus一致等)が違うため、
+    # 美容機器用のselect_best_beauty_device_candidate()とは明確に呼び分け、
+    # 共通ロジック(fetch_rakuten_candidates/_build_rakuten_result)だけを共有する。
+    elif category == "サプリメント" and isinstance(user_data, dict):
+        supplement_type = str(step.get("supplement_type", "") or "").strip()
+        ingredient_focus = step.get("ingredient_focus", [])
+        scored_candidates = fetch_rakuten_candidates(
+            product_name=product_name,
+            category=category,
+            brand=brand,
+        )
+        best_raw_item = select_best_supplement_candidate(
+            scored_candidates, supplement_type, ingredient_focus, user_data, budget_value
+        )
+        rakuten_item = None
+        if best_raw_item:
+            _cleaned_name = clean_ai_product_name(clean_display_product_name(product_name))
+            rakuten_item = _build_rakuten_result(best_raw_item, _cleaned_name)
     else:
         rakuten_item = fetch_rakuten_item(
             product_name=product_name,
@@ -5538,10 +5670,11 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
         if rakuten_item.get("image"):
             step["image"] = rakuten_item.get("image", "")
 
-        # 美容機器のみ: 表示名を検索用の総称語("RF美顔器"等)のままにせず、
-        # 適合度評価で選ばれた実在商品の実タイトルに差し替える。
-        # (他カテゴリはGemini出力の具体的な商品名をそのまま使うため対象外)
-        if category == "美容機器" and rakuten_item.get("rakuten_title"):
+        # 美容機器・サプリメントのみ: 表示名を検索用の総称語("RF美顔器"
+        # "ビタミンC サプリメント"等)のままにせず、適合度評価で選ばれた実在
+        # 商品の実タイトルに差し替える。(他カテゴリはGemini出力の具体的な
+        # 商品名をそのまま使うため対象外)
+        if category in ("美容機器", "サプリメント") and rakuten_item.get("rakuten_title"):
             _display_title = clean_display_product_name(rakuten_item["rakuten_title"])
             if _display_title:
                 step["product"] = _display_title
