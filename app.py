@@ -32,6 +32,11 @@ ANALYSIS_CACHE_VERSION = "v17"  # 週間ルーティンの使用順でパック�
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
+# fetch_rakuten_candidates()が返す「実在検証・スコア済みの複数候補」用キャッシュ。
+# fetch_rakuten_item()が最終1件を選ぶ前段の候補プールをキーごとに保持し、
+# 美容機器の select_best_beauty_device_candidate() もこのプールを再利用する
+# (ユーザーごとの最終順位はキャッシュせず、候補プールのみキャッシュする)。
+_rakuten_candidates_cache = {}
 _rakuten_criteria_cache = {}
 _rakuten_criteria_call_count = 0
 MAX_RAKUTEN_CRITERIA_CALLS = 50
@@ -3392,10 +3397,21 @@ def extract_rakuten_image_url(item):
 
     return ""
 
-def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="", purpose=""):
+def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_focus="", purpose=""):
+    """
+    楽天API検索→実在検証(score_rakuten_item)までを行う共通ヘルパー。
+    fetch_rakuten_item()はこれを使って従来通り最終1件を選ぶ。美容機器のみ
+    select_best_beauty_device_candidate()がここで返る候補プールをそのまま使い、
+    「どれを何件選ぶか」の判断をユーザーデータで行う。
+
+    戻り値: [(score, item), ...]（scoreはscore_rakuten_item由来）。
+    fetch_rakuten_item()と同じく、最初に候補が見つかったキーワードで打ち切る
+    （複数キーワードにまたがって候補を集約することはしない＝挙動は従来と同じ）。
+    1件も見つからなければ []。
+    """
     global RAKUTEN_COOLDOWN_UNTIL
 
-    cache_key = (
+    candidates_cache_key = (
         normalize_product_name(product_name),
         normalize_candidate_category(category, fallback=category),
         normalize_product_name(brand),
@@ -3403,11 +3419,9 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
         normalize_product_name(purpose),
     )
 
-    if cache_key in _rakuten_item_cache:
-        print("[RAKUTEN CACHE HIT]", product_name, flush=True)
-        return _rakuten_item_cache[cache_key]
-
-    print("[RAKUTEN CACHE MISS]", product_name, flush=True)
+    if candidates_cache_key in _rakuten_candidates_cache:
+        print("[RAKUTEN CANDIDATES CACHE HIT]", product_name, flush=True)
+        return _rakuten_candidates_cache[candidates_cache_key]
 
     if time.time() < RAKUTEN_COOLDOWN_UNTIL:
         print(
@@ -3416,7 +3430,7 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
             "seconds left",
             flush=True
         )
-        return None
+        return []
 
     # サプリ・美容機器のカテゴリ表記ゆれを正規化
     _cat_lower = category.lower()
@@ -3432,17 +3446,17 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
     if not product_name:
         print("[RAKUTEN API] product_name empty", flush=True)
-        return None
+        return []
 
     product_name = clean_ai_product_name(product_name)
 
     if not RAKUTEN_APP_ID:
         print("[RAKUTEN API] RAKUTEN_APP_ID is empty", flush=True)
-        return None
+        return []
 
     if not RAKUTEN_ACCESS_KEY:
         print("[RAKUTEN API] RAKUTEN_ACCESS_KEY is empty", flush=True)
-        return None
+        return []
 
     endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401"
 
@@ -3556,7 +3570,7 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                         print(f"[RAKUTEN RETRY ERROR] {_retry_e}", flush=True)
                         # ② リトライ自体が例外 → クールダウン設定して諦める
                         RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
-                        return None
+                        return []
 
                     if res.status_code == 429:
                         # ② リトライ後も429 → グローバルクールダウンを設定
@@ -3565,7 +3579,7 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                             f"[RAKUTEN 429 PERSISTENT] cooldown {retry_seconds}s",
                             flush=True
                         )
-                        return None
+                        return []
 
                     if res.status_code != 200:
                         print(f"[RAKUTEN RETRY NON-200] {res.status_code}", flush=True)
@@ -3675,71 +3689,8 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
                     )
                 continue
 
-            def _sort_key(pair):
-                """単品優先 → スコア → レビュー数 → 画像あり → 評価平均 → 価格(安い順)"""
-                _, it = pair
-                return (
-                    pair[0],
-                    safe_price(it.get("reviewCount", 0)),
-                    1 if (it.get("mediumImageUrls") or it.get("smallImageUrls")) else 0,
-                    safe_price(it.get("reviewAverage", 0)),
-                    -safe_price(it.get("itemPrice", 0)),
-                )
-
-            # パス1: 単品のみ（セット商品除外）
-            single_items = [
-                (sc, it) for sc, it in scored_items
-                if not _is_rakuten_set_item(str(it.get("itemName", "") or ""))
-            ]
-            if single_items:
-                single_items.sort(key=_sort_key, reverse=True)
-                best_score, best = single_items[0]
-                print(
-                    f"[RAKUTEN SELECT] single item: {best.get('itemName','')[:50]} "
-                    f"score={best_score} reviews={best.get('reviewCount',0)}",
-                    flush=True
-                )
-            else:
-                # パス2: 単品が見つからない場合はセット商品も許容
-                scored_items.sort(key=_sort_key, reverse=True)
-                best_score, best = scored_items[0]
-                print(
-                    f"[RAKUTEN SELECT] set item fallback: {best.get('itemName','')[:50]} "
-                    f"score={best_score} reviews={best.get('reviewCount',0)}",
-                    flush=True
-                )
-
-            
-
-            image_url = extract_rakuten_image_url(best)
-
-            best = normalize_rakuten_item_price(best)
-
-            raw_price = safe_price(
-                best.get("raw_price")
-                or best.get("itemPrice")
-                or 0
-            )
-
-            result = {
-                "name": clean_display_product_name(product_name),
-                "rakuten_title": best.get("itemName", ""),
-                "price": raw_price,
-                "normalized_price": raw_price,
-                "raw_price": raw_price,
-                "bundle_quantity": 1,
-                "rakuten_link": (
-                    best.get("affiliateUrl")
-                    or best.get("itemUrl")
-                    or "#"
-                ),
-                "image": image_url,
-                "item_code": best.get("itemCode", ""),
-                "shop_name": best.get("shopName", ""),
-            }
-
-            _rakuten_item_cache[cache_key] = result
-            return result
+            _rakuten_candidates_cache[candidates_cache_key] = scored_items
+            return scored_items
 
         except requests.exceptions.RequestException as e:
             print("[RAKUTEN API REQUEST ERROR]", e, flush=True)
@@ -3754,8 +3705,229 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
         flush=True
     )
 
-    _rakuten_item_cache[cache_key] = None
-    return None
+    _rakuten_candidates_cache[candidates_cache_key] = []
+    return []
+
+
+def _select_single_or_set_best(scored_items):
+    """
+    [(score, item), ...] から、単品優先→スコア→レビュー数→画像あり→評価平均→
+    価格(安い順)で最終1件を選ぶ。fetch_rakuten_item()の従来ロジックそのまま
+    (切り出しただけで判定基準は変更していない)。
+    """
+    def _sort_key(pair):
+        """単品優先 → スコア → レビュー数 → 画像あり → 評価平均 → 価格(安い順)"""
+        _, it = pair
+        return (
+            pair[0],
+            safe_price(it.get("reviewCount", 0)),
+            1 if (it.get("mediumImageUrls") or it.get("smallImageUrls")) else 0,
+            safe_price(it.get("reviewAverage", 0)),
+            -safe_price(it.get("itemPrice", 0)),
+        )
+
+    # パス1: 単品のみ（セット商品除外）
+    single_items = [
+        (sc, it) for sc, it in scored_items
+        if not _is_rakuten_set_item(str(it.get("itemName", "") or ""))
+    ]
+    if single_items:
+        single_items.sort(key=_sort_key, reverse=True)
+        best_score, best = single_items[0]
+        print(
+            f"[RAKUTEN SELECT] single item: {best.get('itemName','')[:50]} "
+            f"score={best_score} reviews={best.get('reviewCount',0)}",
+            flush=True
+        )
+    else:
+        # パス2: 単品が見つからない場合はセット商品も許容
+        scored_items.sort(key=_sort_key, reverse=True)
+        best_score, best = scored_items[0]
+        print(
+            f"[RAKUTEN SELECT] set item fallback: {best.get('itemName','')[:50]} "
+            f"score={best_score} reviews={best.get('reviewCount',0)}",
+            flush=True
+        )
+
+    return best
+
+
+def _build_rakuten_result(best, display_name):
+    """楽天の生item dictから、呼び出し元共通のresult dictを組み立てる。
+    fetch_rakuten_item()の従来のdict組み立てをそのまま切り出したもの。"""
+    image_url = extract_rakuten_image_url(best)
+
+    best = normalize_rakuten_item_price(best)
+
+    raw_price = safe_price(
+        best.get("raw_price")
+        or best.get("itemPrice")
+        or 0
+    )
+
+    return {
+        "name": clean_display_product_name(display_name),
+        "rakuten_title": best.get("itemName", ""),
+        "price": raw_price,
+        "normalized_price": raw_price,
+        "raw_price": raw_price,
+        "bundle_quantity": 1,
+        "rakuten_link": (
+            best.get("affiliateUrl")
+            or best.get("itemUrl")
+            or "#"
+        ),
+        "image": image_url,
+        "item_code": best.get("itemCode", ""),
+        "shop_name": best.get("shopName", ""),
+    }
+
+
+def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="", purpose=""):
+    """楽天から実在する1商品を検索して返す（契約は従来通り、カテゴリによらず
+    常に単一のdict/Noneを返す）。検索・実在検証・スコアリングはすべて
+    fetch_rakuten_candidates()に委譲し、ここでは候補から最終1件を選ぶだけ。"""
+    cache_key = (
+        normalize_product_name(product_name),
+        normalize_candidate_category(category, fallback=category),
+        normalize_product_name(brand),
+        normalize_product_name(ingredient_focus),
+        normalize_product_name(purpose),
+    )
+
+    if cache_key in _rakuten_item_cache:
+        print("[RAKUTEN CACHE HIT]", product_name, flush=True)
+        return _rakuten_item_cache[cache_key]
+
+    print("[RAKUTEN CACHE MISS]", product_name, flush=True)
+
+    scored_items = fetch_rakuten_candidates(
+        product_name=product_name,
+        category=category,
+        brand=brand,
+        ingredient_focus=ingredient_focus,
+        purpose=purpose,
+    )
+
+    if not scored_items:
+        _rakuten_item_cache[cache_key] = None
+        return None
+
+    best = _select_single_or_set_best(scored_items)
+    # fetch_rakuten_candidates内でproduct_nameはclean_display_product_name→
+    # clean_ai_product_name の順で正規化されているため、従来の
+    # `clean_display_product_name(product_name)`(この時点で二重クリーン済みの
+    # product_nameに対して呼ぶ)と同じ結果になるようここでも同じ順序で再現する。
+    _cleaned = clean_ai_product_name(clean_display_product_name(product_name))
+    result = _build_rakuten_result(best, _cleaned)
+
+    _rakuten_item_cache[cache_key] = result
+    return result
+
+
+_STIMULATING_DEVICE_TYPES = {"RF", "EMS", "超音波洗浄"}
+# 敏感肌向けの減点は「事実として書かれている強度の表現」のみに絞り、
+# ルールを増やしすぎない（楽天のitemName/itemCaptionから拾える最小限の語）。
+_DEVICE_INTENSITY_KEYWORDS = ("業務用", "高出力")
+
+
+def select_best_beauty_device_candidate(scored_items, device_type, user_data, budget_value):
+    """
+    fetch_rakuten_candidates()が返すスコア済み実在候補群から、この
+    device_type内でユーザーに最も合う1件を選ぶ。
+
+    device_type自体(RF/LED/EMS等のどの方式が合うか)はGeminiが肌状態・改善
+    優先順位から既に判断済みのため、ここではその目的適合を再評価しない。
+    「同じdevice_typeの中でどの実在商品がこのユーザーに合うか」＝予算適合・
+    敏感度・レビュー品質・score_rakuten_item由来の実在適合スコアのみで評価する。
+
+    ランダム要素は一切ない。同じ候補群・同じuser_data/budget_valueであれば
+    常に同じ1件を返す。
+    """
+    if not scored_items:
+        return None
+
+    # 単品優先(fetch_rakuten_itemの既存選定と同じ考え方)。
+    single_items = [
+        (sc, it) for sc, it in scored_items
+        if not _is_rakuten_set_item(str(it.get("itemName", "") or ""))
+    ]
+    pool = single_items if single_items else scored_items
+
+    sensitivity = str(
+        user_data.get("sens", "") or user_data.get("sensitivity", "") or ""
+    ).strip().lower()
+    is_high_sensitivity = sensitivity in ("high", "高い", "高")
+
+    # score_rakuten_item由来のスコアはタイトルの語数一致等でcandidateごとに
+    # 大きくばらつく（実測で100超の差が出ることもある）ため、そのまま使うと
+    # 予算・敏感度・レビュー等の他シグナルが埋もれてしまう。この関数の中でだけ
+    # プール内相対値に正規化し、あくまで複数シグナルの一つとして扱う
+    # (score_rakuten_item自体や他カテゴリでの使われ方は変更しない)。
+    _raw_scores = [sc for sc, _ in pool]
+    _score_min, _score_max = min(_raw_scores), max(_raw_scores)
+    _score_span = (_score_max - _score_min) or 1
+
+    def _normalized_relevance(score):
+        return (score - _score_min) / _score_span * 20  # 0〜20
+
+    def _fit_score(pair):
+        score, item = pair
+        title = str(item.get("itemName", "") or "")
+        caption = str(item.get("itemCaption", "") or "")
+        text = f"{title} {caption}"
+        price = safe_price(item.get("itemPrice", 0))
+        review_count = safe_price(item.get("reviewCount", 0))
+        review_avg = safe_price(item.get("reviewAverage", 0))
+
+        # 実在・検索適合スコア(score_rakuten_item)をプール内相対値として反映。
+        fit = _normalized_relevance(score)
+
+        # 予算適合: 大幅に予算を超える場合のみ減点する。budget_valueは月間
+        # スキンケア予算であり機器の一括価格とは単位が違うため、「安いほど良い」
+        # という加点はせず、あくまで「予算を大きく超えていないか」のみを見る
+        # (でなければ常に最安値が勝ってしまい、レビュー等の品質シグナルが
+        #  機能しなくなる)。
+        if budget_value and price > 0:
+            ratio = price / budget_value
+            if ratio > 1.5:
+                fit -= min((ratio - 1.5) * 15, 40)
+
+        # 敏感肌: 刺激を伴う方式(RF/EMS/超音波洗浄)で、商品名・説明文に
+        # 「業務用」「高出力」等の強度を示す語がある場合のみ減点する
+        # (肌質・悩みとの目的適合はdevice_type選定で既に判断済みのため
+        #  ここで再評価しない＝二重評価を避ける)。
+        if is_high_sensitivity and device_type in _STIMULATING_DEVICE_TYPES:
+            if any(w in text for w in _DEVICE_INTENSITY_KEYWORDS):
+                fit -= 20
+
+        # レビュー数・評価は品質シグナルとして加点(上限あり)。
+        fit += min(review_count, 500) / 50
+        fit += review_avg * 2
+
+        return fit
+
+    def _sort_key(pair):
+        score, item = pair
+        return (
+            _fit_score(pair),
+            score,
+            safe_price(item.get("reviewCount", 0)),
+            -safe_price(item.get("itemPrice", 0)),
+            str(item.get("itemCode", "")),
+        )
+
+    pool_sorted = sorted(pool, key=_sort_key, reverse=True)
+    best_score, best_item = pool_sorted[0]
+    print(
+        f"[DEVICE SELECT] device_type={device_type} "
+        f"winner={best_item.get('itemName','')[:50]!r} "
+        f"base_score={best_score} fit={_fit_score((best_score, best_item)):.1f} "
+        f"price={best_item.get('itemPrice')} reviews={best_item.get('reviewCount')} "
+        f"candidates={len(pool)}",
+        flush=True
+    )
+    return best_item
 
 
 
@@ -5253,7 +5425,7 @@ def prewarm_brand_cache_for_all_steps(data, max_workers=4):
     print(f"[BRAND PREWARM DONE] {len(unresolved)}件 elapsed={time.time()-_t0:.2f}s", flush=True)
 
 
-def attach_affiliate_links_to_step(step, affiliate_ai_db):
+def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget_value=0):
     if not isinstance(step, dict):
         return step
 
@@ -5331,11 +5503,31 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
                 step["amazon_link"] = build_amazon_link(product_name)
                 return normalize_step_price_fields(step)
 
-    rakuten_item = fetch_rakuten_item(
-        product_name=product_name,
-        category=category,
-        brand=brand
-    )
+    # 美容機器のみ: 固定検索語(product_name)で取れる複数の実在候補を
+    # ユーザーの予算・敏感度等でユーザー適合度評価し、1位を採用する。
+    # device_type(どの方式が合うか)自体はGemini/enrich_beauty_devices()側で
+    # 既に確定済みで、ここでは変更しない。他カテゴリはこの分岐を通らないため
+    # 挙動・戻り値・キャッシュ・スコアリングは一切変わらない。
+    if category == "美容機器" and isinstance(user_data, dict):
+        device_type = str(step.get("device_type", "") or "").strip()
+        scored_candidates = fetch_rakuten_candidates(
+            product_name=product_name,
+            category=category,
+            brand=brand,
+        )
+        best_raw_item = select_best_beauty_device_candidate(
+            scored_candidates, device_type, user_data, budget_value
+        )
+        rakuten_item = None
+        if best_raw_item:
+            _cleaned_name = clean_ai_product_name(clean_display_product_name(product_name))
+            rakuten_item = _build_rakuten_result(best_raw_item, _cleaned_name)
+    else:
+        rakuten_item = fetch_rakuten_item(
+            product_name=product_name,
+            category=category,
+            brand=brand
+        )
 
     if rakuten_item:
         new_rakuten_link = str(rakuten_item.get("rakuten_link", "") or "").strip()
@@ -5345,6 +5537,14 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db):
 
         if rakuten_item.get("image"):
             step["image"] = rakuten_item.get("image", "")
+
+        # 美容機器のみ: 表示名を検索用の総称語("RF美顔器"等)のままにせず、
+        # 適合度評価で選ばれた実在商品の実タイトルに差し替える。
+        # (他カテゴリはGemini出力の具体的な商品名をそのまま使うため対象外)
+        if category == "美容機器" and rakuten_item.get("rakuten_title"):
+            _display_title = clean_display_product_name(rakuten_item["rakuten_title"])
+            if _display_title:
+                step["product"] = _display_title
 
         # 楽天リンク取得後もブランドが不明なら画像から推測して補完
         if not str(step.get("brand", "") or "").strip() and step.get("image"):
@@ -5449,9 +5649,11 @@ def _try_rakuten_fallback_candidate(step, affiliate_ai_db):
     return False
 
 
-def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
+def attach_affiliate_links_to_all_steps(data, affiliate_ai_db, user_data=None, budget_value=0):
     """
     全ステップにアフィリエイトリンクを付与する。
+    user_data/budget_valueは美容機器のユーザー適合度評価(attach_affiliate_links_to_step
+    内のcategory=="美容機器"分岐)にのみ使われ、他カテゴリには影響しない。
 
     処理順:
     1. 全ステップを順次処理（fetch_rakuten_item 内で429時は待機+1回リトライ）
@@ -5491,7 +5693,7 @@ def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
 
     def _attach(step):
         link_before = str(step.get("rakuten_link", "") or "")
-        attach_affiliate_links_to_step(step, affiliate_ai_db)
+        attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=user_data, budget_value=budget_value)
         return link_before
 
     # prefetch_rakuten_for_all_steps（Phase-A）と同じレートリミッタ
@@ -5518,7 +5720,7 @@ def attach_affiliate_links_to_all_steps(data, affiliate_ai_db):
         time.sleep(wait_sec)
 
     for step in skipped:
-        attach_affiliate_links_to_step(step, affiliate_ai_db)
+        attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=user_data, budget_value=budget_value)
 
     # ③ リンクが無い全ステップ（クールダウン由来か否かを問わない）を対象に
     # クールダウンが解消されていれば次点候補へフォールバック
@@ -18791,7 +18993,7 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
         ],
     }, flush=True)
 
-    data = attach_affiliate_links_to_all_steps(data, affiliate_ai_db)
+    data = attach_affiliate_links_to_all_steps(data, affiliate_ai_db, user_data=user_data, budget_value=budget_value)
     _lab_segment("affiliate_links")
 
     # 化粧水・美容液がnight_stepsにない場合はmorning_stepsから補完
