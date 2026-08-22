@@ -581,6 +581,66 @@ def init_feedback_table():
         if cur: cur.close()
         if conn: conn.close()
 
+def init_premium_table():
+    """
+    プレミアム契約情報の正本テーブル。premium_keys.json(相対パスの作業ディレクトリ
+    ファイル、Renderに永続ディスクの設定が無く再デプロイで消え得る)を廃止し、
+    他のテーブルと同じPostgres(DATABASE_URL)に置き換える。
+    stripe_customer_id/stripe_subscription_id/apple_original_transaction_idを
+    契約の同一性判定に使い、emailは表示・検索補助専用(同一性判定には使わない)。
+    """
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS premium_subscriptions (
+            premium_key VARCHAR(64) PRIMARY KEY,
+            stripe_customer_id VARCHAR(255),
+            stripe_subscription_id VARCHAR(255),
+            apple_original_transaction_id VARCHAR(255),
+            email VARCHAR(320),
+            valid_until TIMESTAMP,
+            revoked BOOLEAN NOT NULL DEFAULT FALSE,
+            manual BOOLEAN NOT NULL DEFAULT FALSE,
+            monthly_usage JSONB NOT NULL DEFAULT '{}',
+            created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        );
+        CREATE INDEX IF NOT EXISTS idx_premium_sub_customer ON premium_subscriptions (stripe_customer_id);
+        CREATE INDEX IF NOT EXISTS idx_premium_sub_subscription ON premium_subscriptions (stripe_subscription_id);
+        CREATE INDEX IF NOT EXISTS idx_premium_sub_apple_txn ON premium_subscriptions (apple_original_transaction_id);
+        CREATE INDEX IF NOT EXISTS idx_premium_sub_email ON premium_subscriptions (email);
+        """)
+        # 有効(revoked=FALSE)な行に限った部分UNIQUE制約。Webhookの再送・並行リクエスト・
+        # ポータルの自己修復が競合しても、同一Stripe契約に複数の有効キーが作られない
+        # ようにするための最終防衛線(issue_premium_key側のadvisory lockと二重で守る)。
+        # NULLは複数行に存在してよい(手動発行キー等)ため、値がある行だけを対象にする。
+        cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_premium_sub_active_subscription
+            ON premium_subscriptions (stripe_subscription_id)
+            WHERE revoked = FALSE AND stripe_subscription_id IS NOT NULL AND stripe_subscription_id != '';
+        """)
+        cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_premium_sub_active_customer
+            ON premium_subscriptions (stripe_customer_id)
+            WHERE revoked = FALSE AND stripe_customer_id IS NOT NULL AND stripe_customer_id != '';
+        """)
+        cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_premium_sub_active_apple_txn
+            ON premium_subscriptions (apple_original_transaction_id)
+            WHERE revoked = FALSE AND apple_original_transaction_id IS NOT NULL;
+        """)
+        conn.commit()
+        print("[PREMIUM TABLE READY]", flush=True)
+    except Exception as e:
+        if conn: conn.rollback()
+        print("[PREMIUM TABLE ERROR]", e, flush=True)
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
 init_results_table()
 init_gemini_usage_table()
 init_analysis_cache_table()
@@ -588,6 +648,7 @@ init_rakuten_search_cache_table()
 init_brand_cache_table()
 init_auth_tables()
 init_feedback_table()
+init_premium_table()
 VERIFY_PRODUCT_CACHE = {}
 DEV_MODE = os.getenv("DEV_MODE", "false").lower() == "true"
 USE_RICH_CANDIDATE = False
@@ -1208,22 +1269,30 @@ def delete_account_data(email, user_id):
         if cur: cur.close()
         if conn: conn.close()
 
-    # ここに到達した時点でDB側は確定済み。premium_keys.jsonの無効化に失敗しても
+    # ここに到達した時点でDB側は確定済み。premium_subscriptionsの無効化に失敗しても
     # DBをロールバックすることはできないため、例外を送出してログに残す。
     premium_keys_revoked = 0
+    premium_conn = None
+    premium_cur = None
     try:
-        keys = load_premium_keys()
-        for entry in keys.values():
-            if entry.get("email") == email:
-                entry["revoked"] = True
-                premium_keys_revoked += 1
-        if premium_keys_revoked:
-            save_premium_keys(keys)
+        premium_conn = psycopg2.connect(DATABASE_URL)
+        premium_cur = premium_conn.cursor()
+        premium_cur.execute(
+            "UPDATE premium_subscriptions SET revoked = TRUE, updated_at = NOW() "
+            "WHERE email = %s AND revoked = FALSE",
+            (_normalize_email(email),),
+        )
+        premium_keys_revoked = premium_cur.rowcount
+        premium_conn.commit()
     except Exception as e:
+        if premium_conn: premium_conn.rollback()
         print(f"[ACCOUNT DELETE ERROR] premium_keys revoke failed after DB commit for email={email!r}: {e}", flush=True)
         raise AccountDeletionError(
             f"DB削除は完了しましたが、premium_keysの無効化に失敗しました: {e}"
         )
+    finally:
+        if premium_cur: premium_cur.close()
+        if premium_conn: premium_conn.close()
 
     print(
         f"[ACCOUNT DELETE] email={email!r} user_id={user_id!r} "
@@ -1278,11 +1347,59 @@ def send_magic_link_email(to_email, token):
         return False
 
 
+def send_portal_confirmation_email(to_email, token):
+    """
+    お支払い管理ページ(/portal-by-email)のメール所有確認リンクを送信する。
+    magic_tokens/create_magic_token()/verify_magic_token()という既存のログイン
+    マジックリンク機構をそのまま再利用し、専用の確認テーブルは作らない
+    (token検証・15分有効期限・使い捨てのセマンティクスは同一のため)。
+    ログインリンクと混同されないよう、件名・本文・リンク先パスのみ分ける。
+    """
+    if not SMTP_USER or not SMTP_PASSWORD:
+        print(f"[PORTAL CONFIRM EMAIL] SMTP未設定 token={token}", flush=True)
+        return False
+    base_url = SITE_URL.rstrip("/") if SITE_URL else ""
+    link = f"{base_url}/portal-by-email/confirm/{token}"
+    subject = "るみろぐ お支払い管理ページへのご案内"
+    body = f"""お支払い管理ページへのアクセスリクエストを受け付けました。
+
+以下のリンクをタップすると、サブスクリプションの解約・プラン変更ページに移動します。
+このリンクは15分間有効です。
+
+{link}
+
+━━━━━━━━━━━━━━━━━━━━
+このメールに心当たりがない場合は無視してください。
+るみろぐ
+"""
+    try:
+        msg = MIMEMultipart()
+        msg["From"] = SMTP_USER
+        msg["To"] = to_email
+        msg["Subject"] = subject
+        msg.attach(MIMEText(body, "plain", "utf-8"))
+        context = ssl.create_default_context()
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.starttls(context=context)
+            server.login(SMTP_USER, SMTP_PASSWORD)
+            server.sendmail(SMTP_USER, to_email, msg.as_string())
+        print(f"[PORTAL CONFIRM EMAIL] 送信成功: {to_email}", flush=True)
+        return True
+    except Exception as e:
+        print(f"[PORTAL CONFIRM EMAIL ERROR] {repr(e)}", flush=True)
+        return False
+
+
 # ==========================================
 # プレミアムキー管理
 # ==========================================
 
 def load_premium_keys():
+    """
+    旧premium_keys.json読み込み。/admin/migrate-premium-keysでの一回限りの
+    移行取り込み専用。通常の実行時ロジックはpremium_subscriptionsテーブル
+    (Postgres)を使うため、ここ以外から呼ばない。
+    """
     if not os.path.exists(PREMIUM_KEYS_FILE):
         return {}
     try:
@@ -1292,83 +1409,267 @@ def load_premium_keys():
     except Exception:
         return {}
 
-def save_premium_keys(data):
-    with open(PREMIUM_KEYS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
 def generate_premium_key():
     return secrets.token_urlsafe(32)
+
+def _normalize_email(email):
+    """emailは同一性判定に使わず表示・検索補助専用。書き込み時は必ず正規化する。"""
+    return (email or "").strip().lower() or None
+
+def _premium_row_to_dict(row, columns):
+    return dict(zip(columns, row))
+
+_PREMIUM_COLUMNS = [
+    "premium_key", "stripe_customer_id", "stripe_subscription_id",
+    "apple_original_transaction_id", "email", "valid_until", "revoked",
+    "manual", "monthly_usage", "created_at", "updated_at",
+]
+
+def _fetch_premium_row(where_clause, params):
+    """WHERE句 + パラメータで1件取得するSELECTの共通ヘルパー。"""
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT {', '.join(_PREMIUM_COLUMNS)} FROM premium_subscriptions "
+            f"WHERE {where_clause} ORDER BY created_at DESC LIMIT 1",
+            params,
+        )
+        row = cur.fetchone()
+        return _premium_row_to_dict(row, _PREMIUM_COLUMNS) if row else None
+    except Exception as e:
+        print(f"[PREMIUM DB FETCH ERROR] {repr(e)}", flush=True)
+        return None
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+def find_premium_by_key(premium_key):
+    if not premium_key:
+        return None
+    return _fetch_premium_row("premium_key = %s", (premium_key,))
+
+def find_premium_by_subscription_id(subscription_id):
+    if not subscription_id:
+        return None
+    return _fetch_premium_row(
+        "stripe_subscription_id = %s AND revoked = FALSE", (subscription_id,)
+    )
+
+def find_premium_by_customer_id(customer_id):
+    if not customer_id:
+        return None
+    return _fetch_premium_row(
+        "stripe_customer_id = %s AND revoked = FALSE", (customer_id,)
+    )
+
+def find_premium_by_apple_transaction(original_transaction_id):
+    if not original_transaction_id:
+        return None
+    return _fetch_premium_row(
+        "apple_original_transaction_id = %s AND revoked = FALSE", (original_transaction_id,)
+    )
+
+def find_premium_by_email(email):
+    """後方互換・入口用の検索のみに使う(契約の同一性判定には使わない)。"""
+    normalized = _normalize_email(email)
+    if not normalized:
+        return None
+    return _fetch_premium_row("email = %s AND revoked = FALSE", (normalized,))
+
+def _insert_premium_row(premium_key, email=None, stripe_customer_id=None,
+                         stripe_subscription_id=None, apple_original_transaction_id=None,
+                         valid_until=None, manual=False):
+    """
+    永続化に失敗したら例外をそのまま呼び出し元へ伝播させる(握りつぶさない)。
+    issue_premium_key_manual/issue_premium_key_for_apple等の呼び出し元は、
+    ここで例外が飛べば「発行できていない」ことを正しく検知できる。
+    Webhookハンドラの外側try/exceptはこれを受けて500を返し、Stripeの
+    自動リトライに委ねる(＝失敗を成功扱いにしないための意図的な挙動)。
+    """
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO premium_subscriptions
+                (premium_key, stripe_customer_id, stripe_subscription_id,
+                 apple_original_transaction_id, email, valid_until, revoked, manual)
+            VALUES (%s, %s, %s, %s, %s, %s, FALSE, %s)
+            ON CONFLICT (premium_key) DO NOTHING
+        """, (premium_key, stripe_customer_id, stripe_subscription_id,
+              apple_original_transaction_id, _normalize_email(email), valid_until, manual))
+        conn.commit()
+    except Exception:
+        if conn: conn.rollback()
+        raise
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+def _update_premium_row(premium_key, **fields):
+    """fields内のキーだけをUPDATEする(渡されなかった列は変更しない)。
+    失敗したら例外を伝播させる(_insert_premium_rowと同じ理由)。"""
+    if not fields:
+        return
+    set_clauses = []
+    params = []
+    for column, value in fields.items():
+        if column == "email":
+            value = _normalize_email(value)
+        set_clauses.append(f"{column} = %s")
+        params.append(value)
+    set_clauses.append("updated_at = NOW()")
+    params.append(premium_key)
+
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            f"UPDATE premium_subscriptions SET {', '.join(set_clauses)} WHERE premium_key = %s",
+            params,
+        )
+        conn.commit()
+    except Exception:
+        if conn: conn.rollback()
+        raise
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
 
 def validate_premium_key(key):
     if not key:
         return False
-    keys = load_premium_keys()
-    entry = keys.get(key)
+    entry = find_premium_by_key(key)
     if not entry:
         return False
     if entry.get("revoked", False):
         return False
-    valid_until = entry.get("valid_until", "")
-    if valid_until:
-        try:
-            expiry = datetime.fromisoformat(valid_until)
-            if datetime.now() > expiry:
-                return False
-        except Exception:
-            return False
+    valid_until = entry.get("valid_until")
+    if valid_until and datetime.now() > valid_until:
+        return False
     return True
 
 def issue_premium_key(email, stripe_customer_id, stripe_subscription_id):
-    keys = load_premium_keys()
-    # 既存キーがあれば延長
-    for key, entry in keys.items():
-        if entry.get("email") == email and not entry.get("revoked", False):
-            entry["valid_until"] = (datetime.now() + timedelta(days=35)).isoformat()
-            entry["stripe_subscription_id"] = stripe_subscription_id
-            save_premium_keys(keys)
-            return key
-    # 新規発行
-    new_key = generate_premium_key()
-    keys[new_key] = {
-        "email": email,
-        "stripe_customer_id": stripe_customer_id,
-        "stripe_subscription_id": stripe_subscription_id,
-        "valid_until": (datetime.now() + timedelta(days=35)).isoformat(),
-        "revoked": False,
-        "created_at": datetime.now().isoformat()
-    }
-    save_premium_keys(keys)
-    return new_key
+    """
+    契約の同一性判定はStripeの実IDのみで行う(email依存を廃止)。
+    stripe_customer_id/stripe_subscription_idの両方を必須の不変条件とする
+    (customer_idのみでの発行経路は将来にわたって作らない)。理由:
+    advisory lockを単一のID(subscription_idかcustomer_idかのどちらか)だけに
+    掛けると、「customer_idのみのイベント」と「同一customerのcustomer_id+
+    subscription_idを伴うイベント」が並行した場合に異なるロックキーとなり
+    直列化できず、部分UNIQUE制約(uq_premium_sub_active_customer)違反で
+    片方が失敗し得る。両方を必須にしてロックキーを両IDの組で固定することで、
+    この競合パターン自体を構造的に起こり得なくする。
+
+    優先順位: stripe_subscription_id → stripe_customer_id → 新規発行。
+    emailは表示・連絡・検索補助用に正規化して保存するのみ。
+
+    Webhookの再送・並行リクエストが同時に走っても同一契約に複数の有効キーが
+    できないよう、1トランザクション内でpg_advisory_xact_lock(customer_id+
+    subscription_idの組)による直列化 + SELECT ... FOR UPDATE +
+    init_premium_table()で作成した部分UNIQUE制約、の三重で守る。
+    永続化に失敗したら例外を伝播させる(呼び出し元を「成功扱い」にしない)。
+    """
+    if not stripe_customer_id or not stripe_subscription_id:
+        raise ValueError(
+            "issue_premium_key() requires both stripe_customer_id and "
+            "stripe_subscription_id (customer_id-only issuance is not supported "
+            "by design; see docstring)."
+        )
+
+    valid_until = datetime.now() + timedelta(days=35)
+    lock_key = f"{stripe_customer_id}:{stripe_subscription_id}"
+
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (lock_key,))
+
+        existing_key = None
+        if stripe_subscription_id:
+            cur.execute(
+                "SELECT premium_key FROM premium_subscriptions "
+                "WHERE stripe_subscription_id = %s AND revoked = FALSE FOR UPDATE",
+                (stripe_subscription_id,),
+            )
+            row = cur.fetchone()
+            if row:
+                existing_key = row[0]
+        if not existing_key and stripe_customer_id:
+            cur.execute(
+                "SELECT premium_key FROM premium_subscriptions "
+                "WHERE stripe_customer_id = %s AND revoked = FALSE FOR UPDATE",
+                (stripe_customer_id,),
+            )
+            row = cur.fetchone()
+            if row:
+                existing_key = row[0]
+
+        normalized_email = _normalize_email(email)
+
+        if existing_key:
+            cur.execute("""
+                UPDATE premium_subscriptions
+                SET stripe_customer_id = COALESCE(%s, stripe_customer_id),
+                    stripe_subscription_id = COALESCE(%s, stripe_subscription_id),
+                    email = COALESCE(%s, email),
+                    valid_until = %s,
+                    revoked = FALSE,
+                    updated_at = NOW()
+                WHERE premium_key = %s
+            """, (stripe_customer_id or None, stripe_subscription_id or None,
+                  normalized_email, valid_until, existing_key))
+            conn.commit()
+            return existing_key
+
+        new_key = generate_premium_key()
+        cur.execute("""
+            INSERT INTO premium_subscriptions
+                (premium_key, stripe_customer_id, stripe_subscription_id, email, valid_until, revoked)
+            VALUES (%s, %s, %s, %s, %s, FALSE)
+        """, (new_key, stripe_customer_id or None, stripe_subscription_id or None,
+              normalized_email, valid_until))
+        conn.commit()
+        return new_key
+    except Exception:
+        if conn: conn.rollback()
+        raise
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
 
 def issue_premium_key_manual(email, days=35):
-    """管理者によるStripe不経由の手動発行"""
-    keys = load_premium_keys()
-    for key, entry in keys.items():
-        if entry.get("email") == email and not entry.get("revoked", False):
-            entry["valid_until"] = (datetime.now() + timedelta(days=days)).isoformat()
-            entry["manual"] = True
-            save_premium_keys(keys)
-            return key
+    """管理者によるStripe不経由の手動発行。Stripe IDが無いためemailで既存判定する
+    (手動発行はもともとStripe契約と紐付かない特殊ケース)。"""
+    normalized = _normalize_email(email)
+    existing = find_premium_by_email(normalized) if normalized else None
+    if existing and not existing.get("stripe_customer_id") and not existing.get("apple_original_transaction_id"):
+        _update_premium_row(
+            existing["premium_key"],
+            valid_until=datetime.now() + timedelta(days=days),
+            manual=True,
+        )
+        return existing["premium_key"]
     new_key = generate_premium_key()
-    keys[new_key] = {
-        "email": email,
-        "stripe_customer_id": None,
-        "stripe_subscription_id": None,
-        "valid_until": (datetime.now() + timedelta(days=days)).isoformat(),
-        "revoked": False,
-        "manual": True,
-        "created_at": datetime.now().isoformat(),
-    }
-    save_premium_keys(keys)
+    _insert_premium_row(
+        new_key, email=email, valid_until=datetime.now() + timedelta(days=days), manual=True,
+    )
     return new_key
 
 def revoke_premium_key_direct(key):
-    keys = load_premium_keys()
-    if key in keys:
-        keys[key]["revoked"] = True
-        save_premium_keys(keys)
-        return True
-    return False
+    entry = find_premium_by_key(key)
+    if not entry:
+        return False
+    _update_premium_row(key, revoked=True)
+    return True
 
 
 def issue_premium_key_for_apple(original_transaction_id, valid_until_iso, email=None):
@@ -1376,36 +1677,81 @@ def issue_premium_key_for_apple(original_transaction_id, valid_until_iso, email=
     App Store購入(StoreKit)による発行。issue_premium_key()のStripe版と同じ
     「既存キーがあれば延長・無ければ新規発行」パターンを、
     apple_original_transaction_idをキーに踏襲している。
+
+    issue_premium_key()と同じくpg_advisory_xact_lock + SELECT ... FOR UPDATEで
+    同一original_transaction_idへの並行イベント(Server Notifications再送等)を
+    直列化し、部分UNIQUE制約(uq_premium_sub_active_apple_txn)と二重で守る。
+    永続化に失敗したら例外を伝播させる(呼び出し元を成功扱いにしない)。
     """
-    keys = load_premium_keys()
-    for key, entry in keys.items():
-        if entry.get("apple_original_transaction_id") == original_transaction_id and not entry.get("revoked", False):
-            entry["valid_until"] = valid_until_iso
-            if email:
-                entry["email"] = email
-            save_premium_keys(keys)
-            return key
-    new_key = generate_premium_key()
-    keys[new_key] = {
-        "email": email,
-        "apple_original_transaction_id": original_transaction_id,
-        "valid_until": valid_until_iso,
-        "revoked": False,
-        "created_at": datetime.now().isoformat(),
-    }
-    save_premium_keys(keys)
-    return new_key
+    valid_until = datetime.fromisoformat(valid_until_iso) if isinstance(valid_until_iso, str) else valid_until_iso
+    normalized_email = _normalize_email(email)
+
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (original_transaction_id,))
+
+        cur.execute(
+            "SELECT premium_key FROM premium_subscriptions "
+            "WHERE apple_original_transaction_id = %s AND revoked = FALSE FOR UPDATE",
+            (original_transaction_id,),
+        )
+        row = cur.fetchone()
+
+        if row:
+            existing_key = row[0]
+            cur.execute("""
+                UPDATE premium_subscriptions
+                SET valid_until = %s,
+                    email = COALESCE(%s, email),
+                    updated_at = NOW()
+                WHERE premium_key = %s
+            """, (valid_until, normalized_email, existing_key))
+            conn.commit()
+            return existing_key
+
+        new_key = generate_premium_key()
+        cur.execute("""
+            INSERT INTO premium_subscriptions
+                (premium_key, apple_original_transaction_id, email, valid_until, revoked)
+            VALUES (%s, %s, %s, %s, FALSE)
+        """, (new_key, original_transaction_id, normalized_email, valid_until))
+        conn.commit()
+        return new_key
+    except Exception:
+        if conn: conn.rollback()
+        raise
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
 
 
 def revoke_premium_key_by_apple_transaction(original_transaction_id):
-    keys = load_premium_keys()
-    changed = False
-    for key, entry in keys.items():
-        if entry.get("apple_original_transaction_id") == original_transaction_id:
-            entry["revoked"] = True
-            changed = True
-    if changed:
-        save_premium_keys(keys)
+    """該当するoriginal_transaction_idの行を全て失効させる
+    (revoke_premium_key_by_subscriptionと同じく、1件のみに限定しない)。
+    失敗したら例外を伝播させ、呼び出し元(Apple Server Notifications
+    ハンドラ)が失効の失敗を成功扱いにしないようにする。"""
+    if not original_transaction_id:
+        return
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE premium_subscriptions SET revoked = TRUE, updated_at = NOW() "
+            "WHERE apple_original_transaction_id = %s",
+            (original_transaction_id,),
+        )
+        conn.commit()
+    except Exception:
+        if conn: conn.rollback()
+        raise
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
 
 
 _apple_root_certificates_cache = None
@@ -1468,35 +1814,6 @@ def _get_apple_signed_data_verifier():
     except Exception as e:
         print(f"[APPLE VERIFIER CONFIG ERROR] {e}", flush=True)
         return None
-
-def cleanup_expired_premium_keys():
-    """期限切れ・失効済みエントリをpremium_keys.jsonから削除する"""
-    try:
-        keys = load_premium_keys()
-        now_iso = datetime.now().isoformat()
-        to_delete = [
-            k for k, entry in keys.items()
-            if entry.get("revoked", False) or (
-                entry.get("valid_until", "") and entry["valid_until"] < now_iso
-            )
-        ]
-        for k in to_delete:
-            del keys[k]
-        if to_delete:
-            save_premium_keys(keys)
-            print(f"[CLEANUP] 期限切れキーを{len(to_delete)}件削除しました", flush=True)
-    except Exception as e:
-        print(f"[CLEANUP ERROR] {repr(e)}", flush=True)
-
-def _start_cleanup_scheduler():
-    def loop():
-        while True:
-            time.sleep(24 * 3600)  # 24時間ごと
-            cleanup_expired_premium_keys()
-    t = threading.Thread(target=loop, daemon=True)
-    t.start()
-
-_start_cleanup_scheduler()
 
 
 def _enrich_db_products_images():
@@ -1599,11 +1916,56 @@ _start_image_enrichment()
 
 
 def revoke_premium_key_by_subscription(subscription_id):
-    keys = load_premium_keys()
-    for entry in keys.values():
-        if entry.get("stripe_subscription_id") == subscription_id:
-            entry["revoked"] = True
-    save_premium_keys(keys)
+    """
+    失敗したら例外を伝播させる。呼び出し元(stripe_webhookの
+    customer.subscription.deletedハンドラ)はこれを受けて非2xxを返し、
+    Stripeの自動リトライを受けられるようにする(失効の失敗を成功扱いにしない)。
+    """
+    if not subscription_id:
+        return
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE premium_subscriptions SET revoked = TRUE, updated_at = NOW() "
+            "WHERE stripe_subscription_id = %s",
+            (subscription_id,),
+        )
+        conn.commit()
+    except Exception:
+        if conn: conn.rollback()
+        raise
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+def sync_email_for_customer(customer_id, email):
+    """
+    customer.updatedイベント専用。契約の紐付け(customer_id/subscription_idの
+    書き換えや新規発行)には使わず、表示用emailの同期のみを行う。
+    """
+    normalized = _normalize_email(email)
+    if not customer_id or not normalized:
+        return
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE premium_subscriptions SET email = %s, updated_at = NOW() "
+            "WHERE stripe_customer_id = %s",
+            (normalized, customer_id),
+        )
+        conn.commit()
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"[PREMIUM DB EMAIL SYNC ERROR] {repr(e)}", flush=True)
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
 
 def send_premium_email(to_email, key):
     if not SMTP_USER or not SMTP_PASSWORD:
@@ -1842,35 +2204,52 @@ def get_remaining_free_count(ip):
 
 
 def get_premium_usage_count(key):
-    keys = load_premium_keys()
-    entry = keys.get(key)
+    entry = find_premium_by_key(key)
     if not entry:
         return 0
     month_key = get_current_month_key()
-    return int(entry.get("monthly_usage", {}).get(month_key, 0))
+    return int((entry.get("monthly_usage") or {}).get(month_key, 0))
 
 
 def increment_premium_usage(key):
     if DISABLE_USAGE_LIMIT:
         return 0
-    keys = load_premium_keys()
-    entry = keys.get(key)
+    entry = find_premium_by_key(key)
     if not entry:
         return 0
     if entry.get("revoked", False):
         return 0
-    valid_until = entry.get("valid_until", "")
-    if valid_until:
-        try:
-            if datetime.now() > datetime.fromisoformat(valid_until):
-                return 0
-        except Exception:
-            return 0
+    valid_until = entry.get("valid_until")
+    if valid_until and datetime.now() > valid_until:
+        return 0
+
     month_key = get_current_month_key()
-    monthly = entry.setdefault("monthly_usage", {})
-    monthly[month_key] = int(monthly.get(month_key, 0)) + 1
-    save_premium_keys(keys)
-    return monthly[month_key]
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE premium_subscriptions
+            SET monthly_usage = jsonb_set(
+                    COALESCE(monthly_usage, '{}'::jsonb),
+                    %s::text[],
+                    to_jsonb(COALESCE((monthly_usage->>%s)::int, 0) + 1)
+                ),
+                updated_at = NOW()
+            WHERE premium_key = %s
+            RETURNING (monthly_usage->>%s)::int
+        """, ([month_key], month_key, key, month_key))
+        row = cur.fetchone()
+        conn.commit()
+        return int(row[0]) if row and row[0] is not None else 0
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"[PREMIUM USAGE INCREMENT ERROR] {repr(e)}", flush=True)
+        return 0
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
 
 
 def can_use_premium_diagnosis(key):
@@ -19592,9 +19971,33 @@ def _admin_authorized():
 def admin_premium_keys():
     if not _admin_authorized():
         return "403 Forbidden", 403
-    keys = load_premium_keys()
     admin_key = request.args.get("key", "")
     from datetime import datetime
+
+    # admin_premium.html は{premium_key: entry}のdictを前提とし、
+    # entry.valid_until/created_atを文字列として[:10]スライス・比較するため、
+    # DBのdatetime列をisoformat()文字列に変換して渡す(テンプレートは変更しない)。
+    keys = {}
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(f"SELECT {', '.join(_PREMIUM_COLUMNS)} FROM premium_subscriptions ORDER BY created_at DESC")
+        for row in cur.fetchall():
+            entry = _premium_row_to_dict(row, _PREMIUM_COLUMNS)
+            premium_key = entry.pop("premium_key")
+            if entry.get("valid_until"):
+                entry["valid_until"] = entry["valid_until"].isoformat()
+            if entry.get("created_at"):
+                entry["created_at"] = entry["created_at"].isoformat()
+            keys[premium_key] = entry
+    except Exception as e:
+        print(f"[ADMIN PREMIUM KEYS ERROR] {repr(e)}", flush=True)
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
     return render_template("admin_premium.html", keys=keys, admin_key=admin_key,
                            site_url=SITE_URL.rstrip("/") if SITE_URL else request.host_url.rstrip("/"),
                            now_str=datetime.utcnow().isoformat())
@@ -19622,6 +20025,123 @@ def admin_revoke_key():
     admin_key  = request.args.get("key", "")
     revoke_premium_key_direct(target_key)
     return redirect(f"/admin/premium-keys?key={admin_key}&revoked=1")
+
+def _migrate_premium_keys_from_json():
+    """
+    旧premium_keys.json(相対パス、Renderの永続ディスク未設定で再デプロイ時に
+    消え得るファイル)からpremium_subscriptionsテーブルへの取り込み。
+    冪等(ON CONFLICT DO UPDATE)なので複数回・自動実行しても安全。
+    ファイルが存在しない/空なら何もしない(＝ファイル消失が実際の原因だったこと
+    の確認にもなる)。
+
+    アプリ起動のたびに自動実行する(既存ユーザーとの後方互換性を、管理者の
+    手動操作に依存させないため)。1行ごとの失敗は他行に影響させず、
+    (通常は既にDB側にある行のstripe_subscription_id等との重複によるものなので)
+    行単位でスキップしてログに残す。
+    """
+    old_keys = load_premium_keys()
+    if not old_keys:
+        return {"migrated": 0, "total_in_file": 0, "row_errors": []}
+
+    migrated = 0
+    errors = []
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        for premium_key, entry in old_keys.items():
+            try:
+                valid_until_raw = entry.get("valid_until") or None
+                json_valid_until = datetime.fromisoformat(valid_until_raw) if valid_until_raw else None
+                created_at_raw = entry.get("created_at") or None
+                created_at = datetime.fromisoformat(created_at_raw) if created_at_raw else None
+                json_monthly_usage = entry.get("monthly_usage") or {}
+                json_revoked = bool(entry.get("revoked", False))
+                json_manual = bool(entry.get("manual", False))
+
+                # 同一premium_keyが既にDBに存在する場合のマージ方針:
+                #   revoked/manual: どちらかがTrueならTrue(安全側に倒す。
+                #     stale JSONに引きずられてDB側の失効を巻き戻さない)。
+                #   monthly_usage: 月ごとにJSON/DBの大きい方を採用(利用量が
+                #     二重計上で減ることは無いようにする)。
+                #   valid_until: 大きい方(より遅い期限)を採用。
+                cur.execute(
+                    "SELECT revoked, manual, monthly_usage, valid_until "
+                    "FROM premium_subscriptions WHERE premium_key = %s FOR UPDATE",
+                    (premium_key,),
+                )
+                existing_row = cur.fetchone()
+
+                if existing_row:
+                    db_revoked, db_manual, db_monthly_usage, db_valid_until = existing_row
+                    revoked = bool(db_revoked) or json_revoked
+                    manual = bool(db_manual) or json_manual
+                    merged_usage = dict(db_monthly_usage or {})
+                    for month_key, count in json_monthly_usage.items():
+                        merged_usage[month_key] = max(int(merged_usage.get(month_key, 0)), int(count))
+                    if db_valid_until and json_valid_until:
+                        valid_until = max(db_valid_until, json_valid_until)
+                    else:
+                        valid_until = db_valid_until or json_valid_until
+                else:
+                    revoked = json_revoked
+                    manual = json_manual
+                    merged_usage = json_monthly_usage
+                    valid_until = json_valid_until
+
+                cur.execute("""
+                    INSERT INTO premium_subscriptions
+                        (premium_key, stripe_customer_id, stripe_subscription_id,
+                         apple_original_transaction_id, email, valid_until, revoked,
+                         manual, monthly_usage, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, COALESCE(%s, NOW()))
+                    ON CONFLICT (premium_key) DO UPDATE SET
+                        stripe_customer_id = COALESCE(premium_subscriptions.stripe_customer_id, EXCLUDED.stripe_customer_id),
+                        stripe_subscription_id = COALESCE(premium_subscriptions.stripe_subscription_id, EXCLUDED.stripe_subscription_id),
+                        apple_original_transaction_id = COALESCE(premium_subscriptions.apple_original_transaction_id, EXCLUDED.apple_original_transaction_id),
+                        email = COALESCE(premium_subscriptions.email, EXCLUDED.email),
+                        valid_until = EXCLUDED.valid_until,
+                        revoked = EXCLUDED.revoked,
+                        manual = EXCLUDED.manual,
+                        monthly_usage = EXCLUDED.monthly_usage,
+                        updated_at = NOW()
+                """, (
+                    premium_key, entry.get("stripe_customer_id"), entry.get("stripe_subscription_id"),
+                    entry.get("apple_original_transaction_id"), _normalize_email(entry.get("email")),
+                    valid_until, revoked, manual, json.dumps(merged_usage), created_at,
+                ))
+                migrated += 1
+                conn.commit()
+            except Exception as row_error:
+                # 部分UNIQUE制約(同一Stripe契約への複数有効行を防ぐ)との衝突等、
+                # 1行の失敗で他行の移行を止めない。行ごとにcommit/rollbackする。
+                conn.rollback()
+                errors.append(f"{premium_key}: {repr(row_error)}")
+    except Exception as e:
+        errors.append(f"connection error: {repr(e)}")
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+    result = {"migrated": migrated, "total_in_file": len(old_keys), "row_errors": errors}
+    print(f"[PREMIUM MIGRATE] {result}", flush=True)
+    return result
+
+
+# アプリ起動のたびに自動実行する(既存ユーザーとの後方互換性維持を管理者の手動操作に
+# 依存させないため)。premium_keys.jsonが無い/空なら即座に何もせず返るだけなので、
+# 通常運用時のコストは無視できる。
+_migrate_premium_keys_from_json()
+
+
+@app.route("/admin/migrate-premium-keys", methods=["POST"])
+def admin_migrate_premium_keys():
+    """手動での再実行用(通常は起動時に自動実行される。冪等なので都度実行しても安全)。"""
+    if request.args.get("key") != os.getenv("ADMIN_KEY", "") or not os.getenv("ADMIN_KEY", ""):
+        return "403 Forbidden", 403
+    result = _migrate_premium_keys_from_json()
+    return jsonify(result)
 
 @app.route("/admin/db-stats")
 def db_stats():
@@ -19725,9 +20245,15 @@ def stripe_webhook():
         obj = event["data"]["object"]
 
         def sg(o, key, default=""):
-            """StripeObject / dict 両対応の安全な値取得"""
+            """StripeObject / dict 両対応の安全な値取得。
+            値がNoneの場合もdefaultにフォールバックする(dict/属性アクセス両方で対称に)。
+            これが無いと、値がNoneのキーに対しdict.get()がNoneをそのまま返し、
+            呼び出し側のstr(...)で文字列"None"に化けて偽のemail等として扱われる。
+            """
+            if o is None:
+                return default
             if isinstance(o, dict):
-                return o.get(key, default)
+                return o.get(key, default) or default
             return getattr(o, key, default) or default
 
         # 支払い完了（新規）
@@ -19737,10 +20263,17 @@ def stripe_webhook():
             customer_id = str(sg(obj, "customer"))
             subscription_id = str(sg(obj, "subscription"))
             print(f"[STRIPE] checkout completed: email={email} sub={subscription_id}", flush=True)
-            if email:
+            # issue_premium_key()はcustomer_id/subscription_idの両方を必須とする
+            # (不変条件、advisory lockの直列化がこれに依存する)。mode="subscription"の
+            # checkoutが完了した時点でどちらも必ず入っているはずだが、念のため確認する。
+            if customer_id and subscription_id:
                 key = issue_premium_key(email, customer_id, subscription_id)
-                send_premium_email(email, key)
-                print(f"[STRIPE] キー発行完了: {email}", flush=True)
+                if email:
+                    send_premium_email(email, key)
+                    print(f"[STRIPE] キー発行完了: {email}", flush=True)
+            else:
+                print(f"[STRIPE] checkout completed だが customer/subscription が不足のためスキップ: "
+                      f"customer={customer_id!r} sub={subscription_id!r}", flush=True)
 
         # 請求成功（更新時のキー延長）
         elif event_type == "invoice.payment_succeeded":
@@ -19755,9 +20288,14 @@ def stripe_webhook():
             else:
                 subscription_id = str(sg(sub, "id"))
             print(f"[STRIPE] invoice succeeded: email={email} sub={subscription_id}", flush=True)
-            if email and subscription_id:
+            # emailはStripe側で一時的に欠落し得るため必須にしない。
+            # customer_id/subscription_idは両方必須(issue_premium_key()の不変条件)。
+            if customer_id and subscription_id:
                 issue_premium_key(email, customer_id, subscription_id)
-                print(f"[STRIPE] キー延長完了: {email}", flush=True)
+                print(f"[STRIPE] キー延長完了: sub={subscription_id}", flush=True)
+            else:
+                print(f"[STRIPE] invoice succeeded だが customer/subscription が不足のためスキップ: "
+                      f"customer={customer_id!r} sub={subscription_id!r}", flush=True)
 
         # サブスク解約
         elif event_type == "customer.subscription.deleted":
@@ -19766,6 +20304,16 @@ def stripe_webhook():
             if subscription_id:
                 revoke_premium_key_by_subscription(subscription_id)
                 print(f"[STRIPE] キー失効完了: sub={subscription_id}", flush=True)
+
+        # Customerの属性変更（email変更など）。契約の紐付けには使わず、
+        # 表示用emailの同期のみを行う(customer_id/subscription_idは変更しない)。
+        elif event_type == "customer.updated":
+            customer_id = str(sg(obj, "id"))
+            email = sg(obj, "email")
+            print(f"[STRIPE] customer updated: customer={customer_id} email={email}", flush=True)
+            if customer_id and email:
+                sync_email_for_customer(customer_id, email)
+                print(f"[STRIPE] メール同期完了: customer={customer_id}", flush=True)
 
         else:
             print(f"[STRIPE WEBHOOK] 未処理イベント: {event_type}", flush=True)
@@ -19888,22 +20436,84 @@ def feedback():
 
 @app.route("/portal-by-email", methods=["GET", "POST"])
 def portal_by_email():
+    """
+    課金管理(Stripe Customer Portal)への入口。メールアドレスを知っているだけで
+    Portal Sessionを発行できてしまわないよう、既存のmagic_tokens機構
+    (create_magic_token/verify_magic_token、ログインのマジックリンクと同じ
+    15分有効・使い捨てトークン)を再利用してメール所有を確認してから、
+    確認後のトークンでのみ/portal-by-email/confirm/<token>で実際の
+    Stripe Customer/Subscription解決とPortal Session発行を行う
+    (=このPOSTハンドラ自体はStripeへ問い合わせず、確認メールを送るだけ)。
+
+    メールが実際にStripe顧客と紐づいているかどうかに関わらず常に同じ
+    "確認メールを送信しました"を返す(ログインのrequest-linkと同じくメール
+    在否の列挙を防ぐため)。
+    """
     if request.method == "GET":
         return render_template("portal_by_email.html")
 
     email = (request.form.get("email") or "").strip().lower()
-    if not email:
+    if not email or "@" not in email:
         return render_template("portal_by_email.html", error=gettext("メールアドレスを入力してください。"))
 
-    # premium_keys からメールで一致するエントリを検索
-    keys = load_premium_keys()
-    customer_id = None
-    matched_key = None
-    for key, entry in keys.items():
-        if (entry.get("email") or "").strip().lower() == email and not entry.get("revoked", False):
-            customer_id = entry.get("stripe_customer_id", "")
-            matched_key = key
-            break
+    token = create_magic_token(email)
+    if token:
+        send_portal_confirmation_email(email, token)
+
+    return render_template("portal_by_email.html", sent=True, submitted_email=email)
+
+
+@app.route("/portal-by-email/confirm/<token>")
+def portal_by_email_confirm(token):
+    """
+    /portal-by-emailで送った確認メールのリンク先。verify_magic_token()で
+    確認済みのemailのみを使ってStripe Customer/Subscriptionを解決する
+    (ユーザー入力のemailをそのまま信頼しない)。
+    """
+    email = verify_magic_token(token)
+    if not email:
+        return render_template(
+            "portal_by_email.html",
+            error=gettext("このリンクは無効または期限切れです。もう一度お試しください。")
+        )
+
+    if not stripe.api_key:
+        return render_template("error.html", error_message=gettext("決済システムへの接続に失敗しました。"))
+
+    # emailは確認済みなので、Stripe側の実データ(Customer/Subscription)を
+    # 正本として契約確認する。ローカルDBのみのemail一致検索で完結させない
+    # (ローカルが古い/欠落していてもStripeに実在すればポータルへ到達できる
+    # ようにする＝今回の不具合の直接の修正箇所)。
+    #
+    # premium_keyの新規発行・延長はここでも行わない(issue_premium_key()は
+    # 呼ばない)。プレミアムキーの発行は必ずStripe Webhook経由のみで行う
+    # (メール確認ができても、それ自体はStripeの契約状態の正本にはならない
+    # ため、権限判定とキー発行は分離する)。
+    local_entry = find_premium_by_email(email)
+    customer_id = local_entry.get("stripe_customer_id") if local_entry else None
+    matched_key = local_entry.get("premium_key") if local_entry else None
+
+    try:
+        stripe_customers = stripe.Customer.list(email=email, limit=10).data
+    except Exception as e:
+        stripe_customers = []
+        print(f"[PORTAL BY EMAIL] Stripe customer list failed: {repr(e)}", flush=True)
+
+    if stripe_customers and customer_id is None:
+        # ローカルに記録が無い場合のみ、Stripeから解決したcustomer_idで
+        # ポータルへの到達経路を補う(アクティブなサブスクリプションを持つ
+        # Customerを優先し、無ければ最初のCustomerを使う)。
+        resolved_customer = None
+        for c in stripe_customers:
+            try:
+                active_subs = stripe.Subscription.list(customer=c.id, status="active", limit=1).data
+            except Exception as e:
+                active_subs = []
+                print(f"[PORTAL BY EMAIL] Stripe subscription list failed: {repr(e)}", flush=True)
+            if active_subs:
+                resolved_customer = c
+                break
+        customer_id = (resolved_customer or stripe_customers[0]).id
 
     if not customer_id:
         return render_template(
@@ -19911,9 +20521,6 @@ def portal_by_email():
             submitted_email=email,
             error=gettext("入力されたメールアドレスに紐づくプレミアム会員が見つかりませんでした。ご登録時のアドレスをご確認ください。")
         )
-
-    if not stripe.api_key:
-        return render_template("error.html", error_message=gettext("決済システムへの接続に失敗しました。"))
 
     try:
         base_url = SITE_URL.rstrip("/") if SITE_URL else request.host_url.rstrip("/")
@@ -19934,8 +20541,7 @@ def customer_portal():
     if not premium_key:
         return redirect("/premium")
 
-    keys = load_premium_keys()
-    entry = keys.get(premium_key)
+    entry = find_premium_by_key(premium_key)
     if not entry or entry.get("revoked", False):
         return redirect("/premium")
 
@@ -20089,36 +20695,35 @@ def admin_stats():
     # ① 有料会員数（revoked=False かつ valid_until が未来）
     premium_count = 0
     premium_detail = []
+    _stats_conn = None
+    _stats_cur = None
     try:
-        keys = load_premium_keys()
-        for key, entry in keys.items():
-            if not isinstance(entry, dict):
-                continue
-            if entry.get("revoked", False):
-                continue
-            valid_until = entry.get("valid_until", "")
+        _stats_conn = psycopg2.connect(DATABASE_URL)
+        _stats_cur = _stats_conn.cursor()
+        _stats_cur.execute(
+            "SELECT email, valid_until FROM premium_subscriptions WHERE revoked = FALSE"
+        )
+        for email, valid_until in _stats_cur.fetchall():
             if valid_until:
-                try:
-                    expiry = datetime.fromisoformat(valid_until)
-                    if expiry.tzinfo is None:
-                        expiry = expiry.replace(tzinfo=jst)
-                    if expiry > now_jst:
-                        premium_count += 1
-                        premium_detail.append({
-                            "email": entry.get("email", "—"),
-                            "valid_until": valid_until[:10],
-                        })
-                except Exception:
-                    pass
+                expiry = valid_until if valid_until.tzinfo else valid_until.replace(tzinfo=jst)
+                if expiry > now_jst:
+                    premium_count += 1
+                    premium_detail.append({
+                        "email": email or "—",
+                        "valid_until": valid_until.isoformat()[:10],
+                    })
             else:
                 # valid_until なし = 無期限扱い
                 premium_count += 1
                 premium_detail.append({
-                    "email": entry.get("email", "—"),
+                    "email": email or "—",
                     "valid_until": "無期限",
                 })
     except Exception as e:
-        errors.append(f"premium_keys 読み込みエラー: {e}")
+        errors.append(f"premium_subscriptions 読み込みエラー: {e}")
+    finally:
+        if _stats_cur: _stats_cur.close()
+        if _stats_conn: _stats_conn.close()
 
     # ② 無料会員数（ユニークな user_id）・本日／今月の診断回数
     free_user_count  = 0
@@ -21072,7 +21677,13 @@ def api_premium_verify_purchase():
     valid_until_iso = datetime.fromtimestamp(payload.expiresDate / 1000).isoformat()
     email = flask_session.get("email")  # ログイン済みならメールアカウントに紐付ける(任意)
 
-    key = issue_premium_key_for_apple(payload.originalTransactionId, valid_until_iso, email=email)
+    try:
+        key = issue_premium_key_for_apple(payload.originalTransactionId, valid_until_iso, email=email)
+    except Exception as e:
+        # DB書き込み失敗を"success": Trueとして返さない。クライアント(iOS)側で
+        # リトライ可能なエラーとして扱えるようにする。
+        print(f"[APPLE VERIFY PURCHASE DB ERROR] {repr(e)}", flush=True)
+        return _api_error("PERSIST_FAILED", "購入情報の保存に失敗しました。しばらくしてから再度お試しください。", 500)
 
     return jsonify({
         "success": True,
@@ -21114,18 +21725,23 @@ def api_premium_apple_notifications():
             transaction = None
 
         if transaction:
-            if notification.notificationType in (
-                NotificationTypeV2.EXPIRED,
-                NotificationTypeV2.REVOKE,
-                NotificationTypeV2.GRACE_PERIOD_EXPIRED,
-            ):
-                revoke_premium_key_by_apple_transaction(transaction.originalTransactionId)
-            elif notification.notificationType in (
-                NotificationTypeV2.DID_RENEW,
-                NotificationTypeV2.SUBSCRIBED,
-            ) and transaction.expiresDate:
-                valid_until_iso = datetime.fromtimestamp(transaction.expiresDate / 1000).isoformat()
-                issue_premium_key_for_apple(transaction.originalTransactionId, valid_until_iso)
+            try:
+                if notification.notificationType in (
+                    NotificationTypeV2.EXPIRED,
+                    NotificationTypeV2.REVOKE,
+                    NotificationTypeV2.GRACE_PERIOD_EXPIRED,
+                ):
+                    revoke_premium_key_by_apple_transaction(transaction.originalTransactionId)
+                elif notification.notificationType in (
+                    NotificationTypeV2.DID_RENEW,
+                    NotificationTypeV2.SUBSCRIBED,
+                ) and transaction.expiresDate:
+                    valid_until_iso = datetime.fromtimestamp(transaction.expiresDate / 1000).isoformat()
+                    issue_premium_key_for_apple(transaction.originalTransactionId, valid_until_iso)
+            except Exception as e:
+                # DB書き込み失敗を成功扱いにしない。非2xxを返し、Appleの再送に委ねる。
+                print(f"[APPLE NOTIFICATION DB ERROR] type={notification.notificationType} error={repr(e)}", flush=True)
+                return jsonify({"success": False}), 500
 
     return jsonify({"success": True})
 

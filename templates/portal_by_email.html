@@ -105,11 +105,20 @@
 </head>
 <body>
     <div class="card">
+        {% if sent %}
+        <div class="icon">📩</div>
+        <h1>{{ _("確認メールを送信しました") }}</h1>
+        <p>
+            {{ submitted_email }}{{ _(" 宛に確認メールを送信しました。") }}<br>
+            {{ _("メール内のリンクをタップすると、解約・プラン変更ページに移動します。") }}<br>
+            {{ _("リンクの有効期限は15分間です。") }}
+        </p>
+        {% else %}
         <div class="icon">✉️</div>
         <h1>{{ _("サブスクリプション管理") }}</h1>
         <p>
             {{ _("ご登録時のメールアドレスを入力すると、") }}<br>
-            {{ _("解約・プラン変更ページに移動します。") }}
+            {{ _("本人確認用のリンクをメールでお送りします。") }}
         </p>
 
         <form method="POST" action="/portal-by-email">
@@ -117,11 +126,12 @@
             <input type="email" id="email" name="email" placeholder="example@email.com"
                    required autocomplete="email"
                    value="{{ submitted_email or '' }}">
-            <button type="submit">{{ _("管理ページへ進む") }}</button>
+            <button type="submit">{{ _("確認メールを送信する") }}</button>
         </form>
 
         {% if error %}
         <div class="error-msg">{{ error }}</div>
+        {% endif %}
         {% endif %}
 
         <a class="back-link" href="/lab">← {{ _("分析ページに戻る") }}</a>
