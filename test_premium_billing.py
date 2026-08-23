@@ -16,7 +16,7 @@ localhost/rumilog_testを使う)。
 import json
 import os
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("DATABASE_URL", "postgresql://localhost/rumilog_test")
@@ -534,6 +534,310 @@ class AppleBillingTests(unittest.TestCase):
         cur.close()
         conn.close()
         self.assertEqual(count, 1, "並行発行しても行は1件だけであるべき")
+
+
+class GooglePlayBillingTests(unittest.TestCase):
+    """Google Play(Play Billing)経由の発行・延長。Apple/Stripe経路と同じ耐障害性を持つことを確認する。"""
+
+    def setUp(self):
+        _truncate_premium_table()
+
+    def test_new_purchase_token_creates_key(self):
+        key = app.issue_premium_key_for_google_play(
+            "token_1", "2099-01-01T00:00:00", email="android@example.com"
+        )
+        entry = app.find_premium_by_key(key)
+        self.assertEqual(entry["google_play_purchase_token"], "token_1")
+        self.assertEqual(entry["email"], "android@example.com")
+
+    def test_same_token_extends_same_key(self):
+        """重複検証: 同じpurchase_tokenで2回発行しても同一キーを返し、行は増えない。"""
+        k1 = app.issue_premium_key_for_google_play("token_1", "2099-01-01T00:00:00")
+        k2 = app.issue_premium_key_for_google_play("token_1", "2099-06-01T00:00:00")
+        self.assertEqual(k1, k2)
+        entry = app.find_premium_by_key(k1)
+        self.assertEqual(entry["valid_until"], datetime.fromisoformat("2099-06-01T00:00:00"))
+
+    def test_revoked_entry_is_not_extended(self):
+        k1 = app.issue_premium_key_for_google_play("token_1", "2099-01-01T00:00:00")
+        app._update_premium_row(k1, revoked=True)
+        k2 = app.issue_premium_key_for_google_play("token_1", "2099-01-01T00:00:00")
+        self.assertNotEqual(k1, k2, "revoked済み契約への再発行は新規キーになるべき")
+
+    def test_linked_purchase_token_extends_previous_row_instead_of_duplicating(self):
+        """Google Playは解約後の再登録で新しいpurchase_tokenを発行する。
+        linkedPurchaseTokenで前の契約に繋がっていれば、新規行ではなく既存契約を延長する。"""
+        k1 = app.issue_premium_key_for_google_play("token_old", "2099-01-01T00:00:00")
+        k2 = app.issue_premium_key_for_google_play(
+            "token_new", "2099-06-01T00:00:00", linked_purchase_token="token_old"
+        )
+        self.assertEqual(k1, k2, "再購読(linkedPurchaseToken)は既存契約を延長するべき")
+        entry = app.find_premium_by_key(k1)
+        self.assertEqual(entry["google_play_purchase_token"], "token_new")
+        self.assertIsNone(app.find_premium_by_google_play_token("token_old"))
+
+    def test_unrelated_linked_token_creates_new_key(self):
+        """linked_purchase_tokenに該当する既存行が無ければ、新規発行になる
+        (無関係なtokenを渡しても既存契約を勝手に横取りしない)。"""
+        key = app.issue_premium_key_for_google_play(
+            "token_fresh", "2099-01-01T00:00:00", linked_purchase_token="token_never_seen"
+        )
+        self.assertTrue(app.validate_premium_key(key))
+
+    def test_concurrent_issue_for_same_token_does_not_duplicate(self):
+        """同一purchase_tokenへの並行発行(クライアントの二重送信・検証の再試行等)で
+        重複行ができないことを確認する(advisory lock + 部分UNIQUE制約)。"""
+        import threading
+        results = []
+
+        def worker():
+            results.append(
+                app.issue_premium_key_for_google_play("token_concurrent", "2099-01-01T00:00:00")
+            )
+
+        threads = [threading.Thread(target=worker) for _ in range(5)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        self.assertEqual(len(set(results)), 1, f"全スレッドが同じキーを返すべき: {results}")
+        import psycopg2
+        conn = psycopg2.connect(app.DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM premium_subscriptions WHERE google_play_purchase_token = %s",
+            ("token_concurrent",),
+        )
+        count = cur.fetchone()[0]
+        cur.close()
+        conn.close()
+        self.assertEqual(count, 1, "並行発行しても行は1件だけであるべき")
+
+
+def _google_play_iso(delta_days):
+    """Google Play Developer APIが返すRFC3339(UTC, 'Z'終端)形式の時刻文字列を作る。"""
+    return (datetime.utcnow() + timedelta(days=delta_days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _google_play_purchase_payload(
+    product_id="premium_monthly",
+    state="SUBSCRIPTION_STATE_ACTIVE",
+    expiry_delta_days=30,
+    linked_purchase_token=None,
+):
+    """purchases.subscriptionsv2.get()のレスポンス形状を模したdict。"""
+    payload = {
+        "subscriptionState": state,
+        "lineItems": [{"productId": product_id, "expiryTime": _google_play_iso(expiry_delta_days)}],
+    }
+    if linked_purchase_token:
+        payload["linkedPurchaseToken"] = linked_purchase_token
+    return payload
+
+
+class _FakeGooglePlayExecutable:
+    def __init__(self, result=None, error=None):
+        self._result = result
+        self._error = error
+
+    def execute(self):
+        if self._error is not None:
+            raise self._error
+        return self._result
+
+
+class _FakeAndroidPublisherService:
+    """service.purchases().subscriptionsv2().get(...).execute() の呼び出し鎖を模す。"""
+
+    def __init__(self, result=None, error=None):
+        self._result = result
+        self._error = error
+        self.last_call = None
+
+    def purchases(self):
+        return self
+
+    def subscriptionsv2(self):
+        return self
+
+    def get(self, packageName=None, token=None):
+        self.last_call = {"packageName": packageName, "token": token}
+        return _FakeGooglePlayExecutable(self._result, self._error)
+
+
+class GooglePlayVerifyPurchaseEndpointTests(unittest.TestCase):
+    """POST /api/v1/premium/verify-purchase-android。Google Play Developer API自体は
+    _get_android_publisher_service()をモックして呼び出さず、レスポンス形状のみ模す
+    (Apple版がJWS実署名を要求するため実HTTPで検証しないのと同じ理由)。"""
+
+    def setUp(self):
+        _truncate_premium_table()
+        self.client = app.app.test_client()
+        self._env_patch = patch.dict(os.environ, {
+            "GOOGLE_PLAY_PACKAGE_NAME": "jp.lumilog.app",
+            "GOOGLE_PLAY_PREMIUM_PRODUCT_ID": "premium_monthly",
+        })
+        self._env_patch.start()
+        self.addCleanup(self._env_patch.stop)
+
+    def _post(self, purchase_token="tok_1", product_id="premium_monthly"):
+        return self.client.post(
+            "/api/v1/premium/verify-purchase-android",
+            data={"purchase_token": purchase_token, "product_id": product_id},
+        )
+
+    def test_missing_fields_returns_400(self):
+        resp = self.client.post("/api/v1/premium/verify-purchase-android", data={})
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.get_json()["error"]["code"], "INPUT_MISSING")
+
+    def test_wrong_product_id_returns_400_without_calling_google(self):
+        with patch("app._get_android_publisher_service") as mock_get_service:
+            resp = self._post(product_id="some_other_product")
+        mock_get_service.assert_not_called()
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.get_json()["error"]["code"], "INVALID_TRANSACTION")
+
+    def test_not_configured_returns_503(self):
+        with patch("app._get_android_publisher_service", return_value=None):
+            resp = self._post()
+        self.assertEqual(resp.status_code, 503)
+        self.assertEqual(resp.get_json()["error"]["code"], "NOT_CONFIGURED")
+
+    def test_valid_active_purchase_issues_premium_key(self):
+        fake_service = _FakeAndroidPublisherService(result=_google_play_purchase_payload())
+        with patch("app._get_android_publisher_service", return_value=fake_service):
+            resp = self._post(purchase_token="tok_valid")
+        self.assertEqual(resp.status_code, 200)
+        body = resp.get_json()
+        self.assertTrue(body["success"])
+        self.assertTrue(app.validate_premium_key(body["premium_key"]))
+        self.assertEqual(
+            fake_service.last_call, {"packageName": "jp.lumilog.app", "token": "tok_valid"}
+        )
+
+    def test_duplicate_verification_of_same_token_is_idempotent(self):
+        """重複検証: 同じpurchase_tokenで2回検証しても同一premium_keyを返し、行は1件のまま。"""
+        fake_service = _FakeAndroidPublisherService(result=_google_play_purchase_payload())
+        with patch("app._get_android_publisher_service", return_value=fake_service):
+            resp1 = self._post(purchase_token="tok_dup")
+            resp2 = self._post(purchase_token="tok_dup")
+        key1 = resp1.get_json()["premium_key"]
+        key2 = resp2.get_json()["premium_key"]
+        self.assertEqual(resp1.status_code, 200)
+        self.assertEqual(resp2.status_code, 200)
+        self.assertEqual(key1, key2)
+
+        import psycopg2
+        conn = psycopg2.connect(app.DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT COUNT(*) FROM premium_subscriptions WHERE google_play_purchase_token = %s",
+            ("tok_dup",),
+        )
+        self.assertEqual(cur.fetchone()[0], 1)
+        cur.close()
+        conn.close()
+
+    def test_unexpected_verification_error_returns_503(self):
+        """token自体の正当性とは無関係な失敗(ネットワーク断等)は、400ではなく
+        503(クライアントがリトライすべきエラー)として区別する。"""
+        fake_service = _FakeAndroidPublisherService(error=RuntimeError("network timeout"))
+        with patch("app._get_android_publisher_service", return_value=fake_service):
+            resp = self._post(purchase_token="tok_network_error")
+        self.assertEqual(resp.status_code, 503)
+        self.assertEqual(resp.get_json()["error"]["code"], "VERIFICATION_FAILED")
+        self.assertFalse(app.find_premium_by_google_play_token("tok_network_error"))
+
+    def test_google_api_http_error_returns_400(self):
+        from googleapiclient.errors import HttpError
+        fake_http_resp = MagicMock()
+        fake_http_resp.status = 400
+        fake_http_resp.get.return_value = "application/json"
+        error = HttpError(fake_http_resp, b'{"error": {"message": "Invalid Value"}}')
+        fake_service = _FakeAndroidPublisherService(error=error)
+        with patch("app._get_android_publisher_service", return_value=fake_service):
+            resp = self._post(purchase_token="tok_bad_request")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.get_json()["error"]["code"], "INVALID_TRANSACTION")
+
+    def test_expired_subscription_returns_400(self):
+        payload = _google_play_purchase_payload(
+            state="SUBSCRIPTION_STATE_EXPIRED", expiry_delta_days=-1
+        )
+        fake_service = _FakeAndroidPublisherService(result=payload)
+        with patch("app._get_android_publisher_service", return_value=fake_service):
+            resp = self._post(purchase_token="tok_expired")
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(resp.get_json()["error"]["code"], "INVALID_TRANSACTION")
+
+    def test_canceled_but_not_yet_expired_is_still_valid(self):
+        """キャンセル済み(自動更新オフ)でも有効期限内ならプレミアムを認める
+        (Apple版のrevocationDateなし・expiresDate未到来と同じ扱い)。"""
+        payload = _google_play_purchase_payload(
+            state="SUBSCRIPTION_STATE_CANCELED", expiry_delta_days=10
+        )
+        fake_service = _FakeAndroidPublisherService(result=payload)
+        with patch("app._get_android_publisher_service", return_value=fake_service):
+            resp = self._post(purchase_token="tok_canceled")
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.get_json()["success"])
+
+    def test_on_hold_state_returns_400(self):
+        payload = _google_play_purchase_payload(state="SUBSCRIPTION_STATE_ON_HOLD")
+        fake_service = _FakeAndroidPublisherService(result=payload)
+        with patch("app._get_android_publisher_service", return_value=fake_service):
+            resp = self._post(purchase_token="tok_on_hold")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_paused_state_returns_400(self):
+        payload = _google_play_purchase_payload(state="SUBSCRIPTION_STATE_PAUSED")
+        fake_service = _FakeAndroidPublisherService(result=payload)
+        with patch("app._get_android_publisher_service", return_value=fake_service):
+            resp = self._post(purchase_token="tok_paused")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_unknown_future_state_defaults_to_invalid(self):
+        """ホワイトリスト方式: 将来Googleが追加する未知のsubscriptionStateも
+        デフォルトで拒否する(デナイリストだと新状態を見落とし得るため)。"""
+        payload = _google_play_purchase_payload(state="SUBSCRIPTION_STATE_SOMETHING_NEW")
+        fake_service = _FakeAndroidPublisherService(result=payload)
+        with patch("app._get_android_publisher_service", return_value=fake_service):
+            resp = self._post(purchase_token="tok_unknown_state")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_product_id_not_in_line_items_returns_400(self):
+        payload = _google_play_purchase_payload(product_id="other_product")
+        fake_service = _FakeAndroidPublisherService(result=payload)
+        with patch("app._get_android_publisher_service", return_value=fake_service):
+            resp = self._post(purchase_token="tok_mismatch")
+        self.assertEqual(resp.status_code, 400)
+
+    def test_db_failure_returns_500_persist_failed(self):
+        fake_service = _FakeAndroidPublisherService(result=_google_play_purchase_payload())
+        with patch("app._get_android_publisher_service", return_value=fake_service), \
+             patch("app.psycopg2.connect", side_effect=RuntimeError("db down")):
+            resp = self._post(purchase_token="tok_db_fail")
+        self.assertEqual(resp.status_code, 500)
+        self.assertEqual(resp.get_json()["error"]["code"], "PERSIST_FAILED")
+
+    def test_linked_purchase_token_reuses_existing_premium_key_across_verify_calls(self):
+        """再購読でpurchase_tokenが変わっても、linkedPurchaseTokenで既存契約を
+        延長し、新規のpremium_keyを発行しない。"""
+        old_payload = _google_play_purchase_payload()
+        fake_service_old = _FakeAndroidPublisherService(result=old_payload)
+        with patch("app._get_android_publisher_service", return_value=fake_service_old):
+            resp_old = self._post(purchase_token="tok_before_resub")
+        key_old = resp_old.get_json()["premium_key"]
+
+        new_payload = _google_play_purchase_payload(linked_purchase_token="tok_before_resub")
+        fake_service_new = _FakeAndroidPublisherService(result=new_payload)
+        with patch("app._get_android_publisher_service", return_value=fake_service_new):
+            resp_new = self._post(purchase_token="tok_after_resub")
+        key_new = resp_new.get_json()["premium_key"]
+
+        self.assertEqual(key_old, key_new)
 
 
 class ConcurrentStripeIssueTests(unittest.TestCase):

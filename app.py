@@ -600,6 +600,7 @@ def init_premium_table():
             stripe_customer_id VARCHAR(255),
             stripe_subscription_id VARCHAR(255),
             apple_original_transaction_id VARCHAR(255),
+            google_play_purchase_token VARCHAR(255),
             email VARCHAR(320),
             valid_until TIMESTAMP,
             revoked BOOLEAN NOT NULL DEFAULT FALSE,
@@ -608,9 +609,19 @@ def init_premium_table():
             created_at TIMESTAMP NOT NULL DEFAULT NOW(),
             updated_at TIMESTAMP NOT NULL DEFAULT NOW()
         );
+        """)
+        # google_play_purchase_tokenはapple_original_transaction_id導入後に追加した列。
+        # CREATE TABLE IF NOT EXISTSは既存の本番テーブルには列を追加しないため、
+        # 起動のたびに実行しても安全なALTER TABLE ADD COLUMN IF NOT EXISTSで補う。
+        cur.execute("""
+        ALTER TABLE premium_subscriptions
+            ADD COLUMN IF NOT EXISTS google_play_purchase_token VARCHAR(255);
+        """)
+        cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_premium_sub_customer ON premium_subscriptions (stripe_customer_id);
         CREATE INDEX IF NOT EXISTS idx_premium_sub_subscription ON premium_subscriptions (stripe_subscription_id);
         CREATE INDEX IF NOT EXISTS idx_premium_sub_apple_txn ON premium_subscriptions (apple_original_transaction_id);
+        CREATE INDEX IF NOT EXISTS idx_premium_sub_google_play_token ON premium_subscriptions (google_play_purchase_token);
         CREATE INDEX IF NOT EXISTS idx_premium_sub_email ON premium_subscriptions (email);
         """)
         # 有効(revoked=FALSE)な行に限った部分UNIQUE制約。Webhookの再送・並行リクエスト・
@@ -631,6 +642,15 @@ def init_premium_table():
         CREATE UNIQUE INDEX IF NOT EXISTS uq_premium_sub_active_apple_txn
             ON premium_subscriptions (apple_original_transaction_id)
             WHERE revoked = FALSE AND apple_original_transaction_id IS NOT NULL;
+        """)
+        # Google Playは解約後の再登録で新しいpurchase_tokenが発行されるため、
+        # linkedPurchaseTokenを追跡して既存行を延長する(issue_premium_key_for_google_play
+        # 参照)。それでも同一tokenの並行検証で複数行ができないよう、Apple版と同じ
+        # 部分UNIQUE制約で最終防衛する。
+        cur.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_premium_sub_active_google_play_token
+            ON premium_subscriptions (google_play_purchase_token)
+            WHERE revoked = FALSE AND google_play_purchase_token IS NOT NULL;
         """)
         conn.commit()
         print("[PREMIUM TABLE READY]", flush=True)
@@ -846,6 +866,9 @@ import stripe
 from appstoreserverlibrary.signed_data_verifier import SignedDataVerifier, VerificationException
 from appstoreserverlibrary.models.Environment import Environment
 from appstoreserverlibrary.models.NotificationTypeV2 import NotificationTypeV2
+from google.oauth2 import service_account as google_service_account
+from googleapiclient.discovery import build as google_api_build
+from googleapiclient.errors import HttpError as GoogleApiHttpError
 import secrets
 import smtplib
 import ssl
@@ -1421,7 +1444,8 @@ def _premium_row_to_dict(row, columns):
 
 _PREMIUM_COLUMNS = [
     "premium_key", "stripe_customer_id", "stripe_subscription_id",
-    "apple_original_transaction_id", "email", "valid_until", "revoked",
+    "apple_original_transaction_id", "google_play_purchase_token",
+    "email", "valid_until", "revoked",
     "manual", "monthly_usage", "created_at", "updated_at",
 ]
 
@@ -1470,6 +1494,13 @@ def find_premium_by_apple_transaction(original_transaction_id):
         return None
     return _fetch_premium_row(
         "apple_original_transaction_id = %s AND revoked = FALSE", (original_transaction_id,)
+    )
+
+def find_premium_by_google_play_token(purchase_token):
+    if not purchase_token:
+        return None
+    return _fetch_premium_row(
+        "google_play_purchase_token = %s AND revoked = FALSE", (purchase_token,)
     )
 
 def find_premium_by_email(email):
@@ -1728,6 +1759,77 @@ def issue_premium_key_for_apple(original_transaction_id, valid_until_iso, email=
         if conn: conn.close()
 
 
+def issue_premium_key_for_google_play(purchase_token, valid_until_iso, email=None, linked_purchase_token=None):
+    """
+    Google Play購入(Play Billing)による発行。issue_premium_key_for_apple()と
+    同じ「既存キーがあれば延長・無ければ新規発行」パターンを、
+    google_play_purchase_tokenをキーに踏襲している。
+
+    Google Playはユーザーが解約後に再登録すると新しいpurchase_tokenが発行され、
+    Google Play Developer API(purchases.subscriptionsv2.get)のlinkedPurchaseToken
+    に直前のtokenが返る。これを渡すと、直前tokenの行を新tokenへ引き継いで延長する
+    (無関係な新規行を作らず、既存契約として扱う)。
+
+    issue_premium_key_for_apple()と同じくpg_advisory_xact_lock + SELECT ... FOR UPDATEで
+    同一purchase_tokenへの並行呼び出し(クライアントの二重送信・検証の再試行等)を
+    直列化し、部分UNIQUE制約(uq_premium_sub_active_google_play_token)と二重で守る。
+    同一tokenでの再検証(重複検証)は新規行を作らず、常に既存行を更新するだけなので
+    冪等。永続化に失敗したら例外を伝播させる(呼び出し元を成功扱いにしない)。
+    """
+    valid_until = datetime.fromisoformat(valid_until_iso) if isinstance(valid_until_iso, str) else valid_until_iso
+    normalized_email = _normalize_email(email)
+
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (purchase_token,))
+
+        cur.execute(
+            "SELECT premium_key FROM premium_subscriptions "
+            "WHERE google_play_purchase_token = %s AND revoked = FALSE FOR UPDATE",
+            (purchase_token,),
+        )
+        row = cur.fetchone()
+
+        if not row and linked_purchase_token:
+            cur.execute(
+                "SELECT premium_key FROM premium_subscriptions "
+                "WHERE google_play_purchase_token = %s AND revoked = FALSE FOR UPDATE",
+                (linked_purchase_token,),
+            )
+            row = cur.fetchone()
+
+        if row:
+            existing_key = row[0]
+            cur.execute("""
+                UPDATE premium_subscriptions
+                SET google_play_purchase_token = %s,
+                    valid_until = %s,
+                    email = COALESCE(%s, email),
+                    updated_at = NOW()
+                WHERE premium_key = %s
+            """, (purchase_token, valid_until, normalized_email, existing_key))
+            conn.commit()
+            return existing_key
+
+        new_key = generate_premium_key()
+        cur.execute("""
+            INSERT INTO premium_subscriptions
+                (premium_key, google_play_purchase_token, email, valid_until, revoked)
+            VALUES (%s, %s, %s, %s, FALSE)
+        """, (new_key, purchase_token, normalized_email, valid_until))
+        conn.commit()
+        return new_key
+    except Exception:
+        if conn: conn.rollback()
+        raise
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+
 def revoke_premium_key_by_apple_transaction(original_transaction_id):
     """該当するoriginal_transaction_idの行を全て失効させる
     (revoke_premium_key_by_subscriptionと同じく、1件のみに限定しない)。
@@ -1813,6 +1915,52 @@ def _get_apple_signed_data_verifier():
         )
     except Exception as e:
         print(f"[APPLE VERIFIER CONFIG ERROR] {e}", flush=True)
+        return None
+
+
+GOOGLE_PLAY_SCOPES = ["https://www.googleapis.com/auth/androidpublisher"]
+_google_play_credentials_cache = None
+
+
+def _load_google_play_credentials():
+    """
+    Google Play購入検証用サービスアカウントの認証情報。GOOGLE_PLAY_SERVICE_ACCOUNT_JSON
+    (Play Console「ユーザーと権限」でこのAPIプロジェクトのアクセス権を付与した
+    サービスアカウントの鍵、JSON文字列そのもの)から読み込む。Appleのcerts/配下と違い
+    秘密鍵のためリポジトリには含めず、環境変数のみで渡す。未設定/不正な場合はFalseを
+    キャッシュし、以後は毎回作り直さずNoneを返す(_apple_root_certificates_cacheと同じ方針)。
+    """
+    global _google_play_credentials_cache
+    if _google_play_credentials_cache is None:
+        raw_json = os.getenv("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON", "").strip()
+        if not raw_json:
+            _google_play_credentials_cache = False
+        else:
+            try:
+                info = json.loads(raw_json)
+                _google_play_credentials_cache = google_service_account.Credentials.from_service_account_info(
+                    info, scopes=GOOGLE_PLAY_SCOPES
+                )
+            except Exception as e:
+                print(f"[GOOGLE PLAY CREDENTIALS ERROR] {e}", flush=True)
+                _google_play_credentials_cache = False
+    return _google_play_credentials_cache or None
+
+
+def _get_android_publisher_service():
+    """
+    Google Play購入(購入トークン)の検証に使うAndroid Publisher APIクライアントを
+    _get_apple_signed_data_verifier()と同じ方針で毎回新規に構築する(認証情報のみ
+    キャッシュ済みのものを再利用する)。未設定/構築失敗時はNoneを返し、
+    呼び出し側は503を返す。
+    """
+    credentials = _load_google_play_credentials()
+    if credentials is None:
+        return None
+    try:
+        return google_api_build("androidpublisher", "v3", credentials=credentials, cache_discovery=False)
+    except Exception as e:
+        print(f"[GOOGLE PLAY VERIFIER CONFIG ERROR] {e}", flush=True)
         return None
 
 
@@ -21744,6 +21892,104 @@ def api_premium_apple_notifications():
                 return jsonify({"success": False}), 500
 
     return jsonify({"success": True})
+
+
+# ==========================================
+# Android版 Lumilog 用 Google Play課金API
+# 有料会員判定(is_premium_user())・利用制限(can_use_premium_diagnosis()等)は
+# 一切変更していない。Google Play購入をWeb版のpremium_keyクエリパラメータ方式に
+# 橋渡しするだけ。Apple版のissue_premium_key_for_apple()と同じ「延長 or 新規発行」の
+# パターンをgoogle_play_purchase_tokenをキーに踏襲している(ロジック複製ではない)。
+# ==========================================
+
+# Google Play購入時にアクセスを認めるsubscriptionState。ホワイトリスト方式にして
+# おり、ON_HOLD(決済失敗)・PAUSED(一時停止)・EXPIRED(期限切れ)・PENDING(保留中)や
+# 将来Googleが追加する未知の状態は、デフォルトで「アクセス不可」として扱う。
+# CANCELED(自動更新オフ)は期限までアクセスを認めるApple版と同じ扱いのため含める。
+_GOOGLE_PLAY_ACTIVE_SUBSCRIPTION_STATES = {
+    "SUBSCRIPTION_STATE_ACTIVE",
+    "SUBSCRIPTION_STATE_IN_GRACE_PERIOD",
+    "SUBSCRIPTION_STATE_CANCELED",
+}
+
+
+@app.route("/api/v1/premium/verify-purchase-android", methods=["POST"])
+def api_premium_verify_purchase_android():
+    purchase_token = (request.form.get("purchase_token") or "").strip()
+    product_id = (request.form.get("product_id") or "").strip()
+    if not purchase_token or not product_id:
+        return _api_error("INPUT_MISSING", "purchase_token and product_id are required", 400)
+
+    expected_product_id = os.getenv("GOOGLE_PLAY_PREMIUM_PRODUCT_ID", "premium_monthly")
+    if product_id != expected_product_id:
+        return _api_error("INVALID_TRANSACTION", "不明な商品IDです", 400)
+
+    service = _get_android_publisher_service()
+    if service is None:
+        return _api_error("NOT_CONFIGURED", "Google Play決済の検証設定が未完了です", 503)
+
+    package_name = os.getenv("GOOGLE_PLAY_PACKAGE_NAME", "jp.lumilog.app")
+
+    try:
+        purchase = service.purchases().subscriptionsv2().get(
+            packageName=package_name, token=purchase_token
+        ).execute()
+    except GoogleApiHttpError as e:
+        # 無効・偽装・失効済みのpurchase_token等、Google側がリクエスト自体を拒否した場合。
+        traceback.print_exc()
+        return _api_error("INVALID_TRANSACTION", f"購入情報を検証できませんでした: {e}", 400)
+    except Exception as e:
+        # ネットワーク断・Google側の一時的な障害等、tokenの正当性とは無関係な失敗。
+        # クライアント側でリトライ可能なエラーとして扱えるよう400ではなく503を返す。
+        traceback.print_exc()
+        return _api_error("VERIFICATION_FAILED", f"購入情報の検証中にエラーが発生しました: {e}", 503)
+
+    line_items = purchase.get("lineItems") or []
+    matching_item = next(
+        (item for item in line_items if item.get("productId") == expected_product_id), None
+    )
+    if matching_item is None:
+        return _api_error("INVALID_TRANSACTION", "不明な商品IDです", 400)
+
+    subscription_state = purchase.get("subscriptionState", "")
+    if subscription_state not in _GOOGLE_PLAY_ACTIVE_SUBSCRIPTION_STATES:
+        return _api_error("INVALID_TRANSACTION", "このサブスクリプションは有効ではありません", 400)
+
+    expiry_time_raw = matching_item.get("expiryTime", "")
+    try:
+        # Google Play Developer APIはRFC3339(UTC、末尾Z)で返す。Python 3.10以前の
+        # datetime.fromisoformat()は'Z'を受け付けないため、明示的に+00:00へ変換する。
+        expiry_dt_utc = datetime.fromisoformat(expiry_time_raw.replace("Z", "+00:00"))
+    except (ValueError, AttributeError):
+        traceback.print_exc()
+        return _api_error("INVALID_TRANSACTION", "購入情報を検証できませんでした", 400)
+
+    # 他の課金経路(validate_premium_key()のdatetime.now()比較、Apple版の
+    # datetime.fromtimestamp())と同じ「サーバーのローカル時刻基準・naive」の
+    # 値としてvalid_untilを保存するため、一度epoch秒を経由して変換する。
+    expiry_epoch = expiry_dt_utc.timestamp()
+    if expiry_epoch <= datetime.now().timestamp():
+        return _api_error("INVALID_TRANSACTION", "このサブスクリプションは期限切れです", 400)
+
+    valid_until_iso = datetime.fromtimestamp(expiry_epoch).isoformat()
+    linked_purchase_token = purchase.get("linkedPurchaseToken") or None
+    email = flask_session.get("email")  # ログイン済みならメールアカウントに紐付ける(任意)
+
+    try:
+        key = issue_premium_key_for_google_play(
+            purchase_token, valid_until_iso, email=email, linked_purchase_token=linked_purchase_token
+        )
+    except Exception as e:
+        # DB書き込み失敗を"success": Trueとして返さない。クライアント(Android)側で
+        # リトライ可能なエラーとして扱えるようにする。
+        print(f"[GOOGLE PLAY VERIFY PURCHASE DB ERROR] {repr(e)}", flush=True)
+        return _api_error("PERSIST_FAILED", "購入情報の保存に失敗しました。しばらくしてから再度お試しください。", 500)
+
+    return jsonify({
+        "success": True,
+        "premium_key": key,
+        "valid_until": valid_until_iso,
+    })
 
 
 @app.route("/history/<result_id>")
