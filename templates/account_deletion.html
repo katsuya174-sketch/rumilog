@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="{{ current_locale }}">
+<head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/png" href="/static/favicon.png?v=3">
+    <link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+    <link rel="manifest" href="/static/manifest.json">
+    <title>{{ _("アカウント削除 | るみろぐ") }}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: "Hiragino Sans", "Yu Gothic", sans-serif;
+            margin: 0;
+            padding: 40px 20px 60px;
+            background:
+                radial-gradient(circle at 20% 10%, #fff4f8 0, transparent 28%),
+                radial-gradient(circle at 90% 20%, #eef9ff 0, transparent 26%),
+                linear-gradient(180deg, #fffafd 0%, #f8fbff 100%);
+            color: #3f3a3a;
+        }
+        .page { max-width: 720px; margin: 0 auto; }
+        .header-card {
+            background: rgba(255,255,255,0.86);
+            border: 1px solid #f4dce6;
+            border-radius: 24px;
+            padding: 28px 24px 22px;
+            margin-bottom: 28px;
+            box-shadow: 0 10px 30px rgba(220,130,165,0.12);
+        }
+        h1 { font-size: 22px; color: #7a2942; margin: 0 0 6px; }
+        .updated { font-size: 12px; color: #a08090; margin: 0; }
+        .section {
+            background: rgba(255,255,255,0.92);
+            border: 1px solid #f1e3ea;
+            border-radius: 18px;
+            padding: 22px 24px;
+            margin-bottom: 16px;
+            box-shadow: 0 4px 14px rgba(120,90,110,0.07);
+        }
+        h2 {
+            font-size: 15px; color: #7a2942; margin: 0 0 12px;
+            display: flex; align-items: center; gap: 8px;
+        }
+        h2::before {
+            content: ""; display: inline-block; width: 4px; height: 16px;
+            background: linear-gradient(180deg, #f5a7c0, #c96a93);
+            border-radius: 3px; flex-shrink: 0;
+        }
+        p, li { font-size: 13px; color: #5a4a50; line-height: 1.85; margin: 0 0 8px; }
+        ul { margin: 4px 0 8px; padding-left: 20px; }
+        li { margin-bottom: 4px; }
+        .mail {
+            display: inline-block; margin-top: 6px; font-size: 15px; font-weight: bold;
+            color: #9b3156;
+        }
+        a { color: #c96a93; }
+        .back-link {
+            display: inline-block; margin-top: 24px; color: #9b3156;
+            text-decoration: none; font-weight: bold; font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="header-card">
+            <h1>{{ _("るみろぐ アカウント削除のご案内") }}</h1>
+            <p class="updated">{{ _("最終更新日：2026年9月4日") }}</p>
+        </div>
+
+        <div class="section">
+            <h2>{{ _("このページについて") }}</h2>
+            <p>{{ _("このページは、スキンケアAI分析アプリ「るみろぐ」のアカウントおよびデータの削除をリクエストするための案内です。アプリをインストールしていない方・ログインできない方でも、以下の方法でリクエストいただけます。") }}</p>
+        </div>
+
+        <div class="section">
+            <h2>{{ _("削除対象となるデータ") }}</h2>
+            <ul>
+                <li>{{ _("<strong>メールアドレス・アカウント情報</strong>") | safe }}</li>
+                <li>{{ _("<strong>診断履歴</strong>（スコア・商品提案を含む）") | safe }}</li>
+                <li>{{ _("<strong>premium_key</strong> など、アカウントに紐づく有効化情報") | safe }}</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h2>{{ _("削除のリクエスト方法") }}</h2>
+            <p>{{ _("以下のいずれかの方法で、「%(keyword)s」であることを明記のうえご連絡ください。", keyword='<strong>' ~ _("アカウント削除希望") ~ '</strong>') | safe }}</p>
+            <p class="mail">✉ <a href="mailto:lumilog.support@gmail.com?subject={{ _('アカウント削除希望') | urlencode }}">lumilog.support@gmail.com</a></p>
+            <p>{{ _("または") }} <a href="/feedback">{{ _("お問い合わせフォーム") }}</a></p>
+            <p>{{ _("本人確認のため、登録済みのメールアドレスからご連絡ください。アプリをお持ちの方は、アプリ内の「アカウント削除」機能からも同様に削除いただけます。") }}</p>
+        </div>
+
+        <div class="section">
+            <h2>{{ _("Google Playの定期購入について") }}</h2>
+            <p>{{ _("アカウントを削除しても、Google Playの定期購入（サブスクリプション）は自動的には解約されません。定期購入の解約は、Google Playの「定期購入」設定から別途行ってください。") }}</p>
+        </div>
+
+        <div class="section">
+            <h2>{{ _("削除にかかる期間") }}</h2>
+            <ul>
+                <li>{{ _("ご連絡を受けてから<strong>30日以内</strong>に、該当するデータをすべて削除します。") | safe }}</li>
+                <li>{{ _("削除後、premium_keyは無効化され、プレミアム機能は利用できなくなります。") }}</li>
+                <li>{{ _("法令上の保存義務がある情報（決済に関する記録など）を除き、削除後に保持するデータはありません。") }}</li>
+            </ul>
+        </div>
+
+        <div class="section">
+            <h2>{{ _("お問い合わせ") }}</h2>
+            <p>{{ _("アカウント削除やプライバシーに関するご質問は、上記メールアドレスまでお気軽にお問い合わせください。") }}</p>
+        </div>
+
+        <a class="back-link" href="/lab">← {{ _("トップに戻る") }}</a>
+    </div>
+</body>
+</html>

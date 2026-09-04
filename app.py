@@ -20548,6 +20548,11 @@ def data_deletion():
     return render_template("data_deletion.html")
 
 
+@app.route("/account-deletion")
+def account_deletion():
+    return render_template("account_deletion.html")
+
+
 @app.route("/terms-of-service")
 def terms_of_service():
     return render_template("terms_of_service.html")
