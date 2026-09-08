@@ -34,6 +34,43 @@ def _truncate_premium_table():
     conn.close()
 
 
+def _truncate_results_table():
+    import psycopg2
+    conn = psycopg2.connect(app.DATABASE_URL)
+    cur = conn.cursor()
+    cur.execute("TRUNCATE results")
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def _insert_test_result(result_id, user_id):
+    """resultsに最小限のpayloadで1件挿入する(履歴移行テスト用)。
+    normalize_result()等の診断本体処理は経由せず、user_id紐付けの
+    挙動だけを検証したいテストのための軽量ヘルパー。"""
+    import psycopg2
+    conn = psycopg2.connect(app.DATABASE_URL)
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO results (id, saved_at, payload) VALUES (%s, NOW(), %s::jsonb)",
+        (result_id, json.dumps({"id": result_id, "user_id": user_id, "skin_score": 80})),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+
+def _result_ids_for_user(user_id):
+    import psycopg2
+    conn = psycopg2.connect(app.DATABASE_URL)
+    cur = conn.cursor()
+    cur.execute("SELECT id FROM results WHERE payload->>'user_id' = %s ORDER BY id", (user_id,))
+    ids = [row[0] for row in cur.fetchall()]
+    cur.close()
+    conn.close()
+    return ids
+
+
 class IssuePremiumKeyTests(unittest.TestCase):
     """issue_premium_key(): 優先順位 subscription_id → customer_id → 新規発行。"""
 
@@ -898,6 +935,244 @@ class WriteFailurePropagationTests(unittest.TestCase):
             resp = self.client.post("/stripe-webhook", data=b"{}",
                                      headers={"Stripe-Signature": "x"})
         self.assertEqual(resp.status_code, 500)
+
+
+# ==========================================
+# Google Play購入検証/復元時のresults(診断履歴)引き継ぎ
+# premium_subscriptions.user_id列と、issue_premium_key_for_google_play()の
+# 履歴移行ロジックのテスト。無料3件トリム・メールログイン移行など既存の
+# 履歴ロジックには一切手を加えていないため、それらが壊れていないことも
+# あわせて確認する。
+# ==========================================
+
+USER_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+USER_B = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+
+
+class GooglePlayPurchaseHistoryMigrationTests(unittest.TestCase):
+    """issue_premium_key_for_google_play()のuser_id引数・履歴移行を関数単体で検証する
+    (HTTPエンドポイント経由のテストはGooglePlayRestoreHistoryEndpointTestsで行う)。"""
+
+    def setUp(self):
+        _truncate_premium_table()
+        _truncate_results_table()
+
+    def test_new_purchase_stores_user_id_without_migration(self):
+        """新規購入(既存行なし)では、渡したuser_idがそのまま保存されるだけで
+        移行対象の履歴も無いため何も移行しない。"""
+        _insert_test_result("res_a1", USER_A)
+        key = app.issue_premium_key_for_google_play(
+            "tok_new_a", "2099-01-01T00:00:00", user_id=USER_A
+        )
+        entry = app.find_premium_by_key(key)
+        self.assertEqual(entry["user_id"], USER_A)
+        self.assertEqual(_result_ids_for_user(USER_A), ["res_a1"])
+
+    def test_scenario_a_restore_on_new_user_id_migrates_history_without_duplication(self):
+        """シナリオA: 匿名user_id AでPremium購入+履歴あり→新user_id Bで
+        同じpurchase_tokenを復元→Premium復元成功→Aの履歴がBへ移行→
+        A側に履歴が残らない/重複しない。"""
+        _insert_test_result("res_a1", USER_A)
+        _insert_test_result("res_a2", USER_A)
+
+        key_first = app.issue_premium_key_for_google_play(
+            "tok_scenario_a", "2099-01-01T00:00:00", user_id=USER_A
+        )
+
+        key_restored = app.issue_premium_key_for_google_play(
+            "tok_scenario_a", "2099-06-01T00:00:00", user_id=USER_B
+        )
+
+        # Premium復元成功(同一契約として同じキーが延長される)
+        self.assertEqual(key_first, key_restored)
+        self.assertTrue(app.validate_premium_key(key_restored))
+
+        # Aの履歴がBへ移行し、Aには残らない/重複もしない
+        self.assertEqual(_result_ids_for_user(USER_A), [])
+        self.assertEqual(_result_ids_for_user(USER_B), ["res_a1", "res_a2"])
+
+        entry = app.find_premium_by_key(key_restored)
+        self.assertEqual(entry["user_id"], USER_B)
+
+    def test_email_account_history_is_not_stolen_by_new_anonymous_device_restore(self):
+        """禁止事項の回帰テスト: old_user_idがメールログイン済みアカウント
+        (usersテーブルに存在)の場合、ログイン前の新しい匿名端末から購入復元しても
+        そのメールアカウントの履歴を奪わない。
+        1. メールアカウントuser_id AでPremium購入+履歴あり
+        2. 新しい匿名user_id Bから同じpurchase tokenを復元
+        3. Premium復元成功
+        4. Aの履歴がAのまま全件残る
+        5. BへAの履歴が移動しない
+        6. premium_subscriptions.user_idもAのまま
+        7. その後Aのメールでログインすると元の履歴が正常表示される
+        """
+        email = "email-account@example.com"
+        email_user_id = app.get_or_create_user_for_email(email)
+        _insert_test_result("res_email1", email_user_id)
+        _insert_test_result("res_email2", email_user_id)
+
+        key_first = app.issue_premium_key_for_google_play(
+            "tok_scenario_email_guard", "2099-01-01T00:00:00",
+            email=email, user_id=email_user_id,
+        )
+
+        new_anonymous_user_id = "cccccccc-cccc-cccc-cccc-cccccccccccc"
+        key_restored = app.issue_premium_key_for_google_play(
+            "tok_scenario_email_guard", "2099-06-01T00:00:00",
+            user_id=new_anonymous_user_id,
+        )
+
+        # 3. Premium復元成功
+        self.assertEqual(key_first, key_restored)
+        self.assertTrue(app.validate_premium_key(key_restored))
+
+        # 4/5. Aの履歴はAのまま全件残り、Bへは移動しない
+        self.assertEqual(_result_ids_for_user(email_user_id), ["res_email1", "res_email2"])
+        self.assertEqual(_result_ids_for_user(new_anonymous_user_id), [])
+
+        # 6. premium_subscriptions.user_idもAのまま(匿名端末へ上書きされない)
+        entry = app.find_premium_by_key(key_restored)
+        self.assertEqual(entry["user_id"], email_user_id)
+
+        # 7. その後Aのメールでログインすると元の履歴が正常表示される
+        # (新端末側には匿名履歴が無いため、ログイン時の移行は0件のno-opで、
+        # email_user_id側の履歴はそのまま取得できる)
+        migrated_on_login = app.migrate_results_to_email_user(new_anonymous_user_id, email_user_id)
+        self.assertEqual(migrated_on_login, 0)
+        self.assertEqual(_result_ids_for_user(email_user_id), ["res_email1", "res_email2"])
+
+    def test_scenario_b_same_user_id_restore_does_not_touch_history(self):
+        """シナリオB: 同一user_idで購入復元→履歴変更なし。"""
+        _insert_test_result("res_a1", USER_A)
+        key_first = app.issue_premium_key_for_google_play(
+            "tok_scenario_b", "2099-01-01T00:00:00", user_id=USER_A
+        )
+        key_restored = app.issue_premium_key_for_google_play(
+            "tok_scenario_b", "2099-06-01T00:00:00", user_id=USER_A
+        )
+        self.assertEqual(key_first, key_restored)
+        self.assertEqual(_result_ids_for_user(USER_A), ["res_a1"])
+
+    def test_scenario_c_existing_row_with_null_user_id_adopts_current_user_id(self):
+        """シナリオC: 既存Premiumレコードのuser_id=NULL→現user_idが保存される→
+        Premium復元成功(user_id引数を渡さなかった過去の発行分を想定)。"""
+        key_first = app.issue_premium_key_for_google_play(
+            "tok_scenario_c", "2099-01-01T00:00:00"  # user_id未指定 = NULLのまま発行
+        )
+        entry_before = app.find_premium_by_key(key_first)
+        self.assertIsNone(entry_before["user_id"])
+
+        key_restored = app.issue_premium_key_for_google_play(
+            "tok_scenario_c", "2099-06-01T00:00:00", user_id=USER_A
+        )
+        self.assertEqual(key_first, key_restored)
+        self.assertTrue(app.validate_premium_key(key_restored))
+
+        entry_after = app.find_premium_by_key(key_restored)
+        self.assertEqual(entry_after["user_id"], USER_A)
+
+    def test_scenario_d_email_login_history_untouched_by_purchase_restore(self):
+        """シナリオD: メールログイン済みユーザー。既存のemail→user_id履歴移行
+        (migrate_results_to_email_user)で履歴を移した後、同じ(既にログイン済みの)
+        user_idで購入・復元しても履歴が壊れない/移動しないことを確認する。"""
+        email_user_id = app.get_or_create_user_for_email("premium-buyer@example.com")
+        _insert_test_result("res_anon1", USER_A)
+
+        migrated = app.migrate_results_to_email_user(USER_A, email_user_id)
+        self.assertEqual(migrated, 1)
+        self.assertEqual(_result_ids_for_user(email_user_id), ["res_anon1"])
+
+        key_first = app.issue_premium_key_for_google_play(
+            "tok_scenario_d", "2099-01-01T00:00:00",
+            email="premium-buyer@example.com", user_id=email_user_id,
+        )
+        key_restored = app.issue_premium_key_for_google_play(
+            "tok_scenario_d", "2099-06-01T00:00:00",
+            email="premium-buyer@example.com", user_id=email_user_id,
+        )
+        self.assertEqual(key_first, key_restored)
+
+        # ログイン済みアカウントの履歴は購入/復元を挟んでも変化しない
+        self.assertEqual(_result_ids_for_user(email_user_id), ["res_anon1"])
+        self.assertEqual(_result_ids_for_user(USER_A), [])
+
+    def test_free_history_trim_unaffected_by_migration_changes(self):
+        """シナリオE: 無料履歴3件制限ロジック(FREE_HISTORY_LIMIT/trim_results_by_user_id)
+        に今回の変更が影響していないことを確認する。"""
+        for _ in range(4):
+            app.append_result({"user_id": USER_A}, is_premium=False)
+        self.assertEqual(len(_result_ids_for_user(USER_A)), app.FREE_HISTORY_LIMIT)
+
+
+class GooglePlayRestoreHistoryEndpointTests(unittest.TestCase):
+    """POST /api/v1/premium/verify-purchase-android をHTTP経由で叩き、
+    lumilog_uid Cookie(get_or_create_user_id())が変わる「別端末での購入復元」を
+    再現した上で、シナリオAが実際のAPIエンドポイントでも成立することを確認する。"""
+
+    def setUp(self):
+        _truncate_premium_table()
+        _truncate_results_table()
+        self._env_patch = patch.dict(os.environ, {
+            "GOOGLE_PLAY_PACKAGE_NAME": "jp.lumilog.app",
+            "GOOGLE_PLAY_PREMIUM_PRODUCT_ID": "premium_monthly",
+        })
+        self._env_patch.start()
+        self.addCleanup(self._env_patch.stop)
+
+    def _post_as(self, user_id, purchase_token):
+        client = app.app.test_client()
+        client.set_cookie("lumilog_uid", user_id)
+        return client, client.post(
+            "/api/v1/premium/verify-purchase-android",
+            data={"purchase_token": purchase_token, "product_id": "premium_monthly"},
+        )
+
+    def test_restore_on_reinstalled_device_migrates_history_via_http(self):
+        _insert_test_result("res_http_a1", USER_A)
+
+        fake_service = _FakeAndroidPublisherService(result=_google_play_purchase_payload())
+        with patch("app._get_android_publisher_service", return_value=fake_service):
+            _, resp_a = self._post_as(USER_A, "tok_http_restore")
+        self.assertEqual(resp_a.status_code, 200)
+        key_a = resp_a.get_json()["premium_key"]
+
+        fake_service_2 = _FakeAndroidPublisherService(result=_google_play_purchase_payload())
+        with patch("app._get_android_publisher_service", return_value=fake_service_2):
+            _, resp_b = self._post_as(USER_B, "tok_http_restore")
+        self.assertEqual(resp_b.status_code, 200)
+        body_b = resp_b.get_json()
+
+        self.assertTrue(body_b["success"])
+        self.assertEqual(body_b["premium_key"], key_a)
+        self.assertEqual(_result_ids_for_user(USER_A), [])
+        self.assertEqual(_result_ids_for_user(USER_B), ["res_http_a1"])
+
+    def test_restore_from_new_anonymous_device_does_not_steal_email_account_history_via_http(self):
+        """新しい匿名端末(ログイン前)からの購入復元がメールアカウントの履歴を
+        奪わないことを、実際のAPIエンドポイント経由でも確認する。"""
+        email = "email-account-http@example.com"
+        email_user_id = app.get_or_create_user_for_email(email)
+        _insert_test_result("res_http_email1", email_user_id)
+
+        fake_service = _FakeAndroidPublisherService(result=_google_play_purchase_payload())
+        with patch("app._get_android_publisher_service", return_value=fake_service):
+            _, resp_a = self._post_as(email_user_id, "tok_http_email_guard")
+        self.assertEqual(resp_a.status_code, 200)
+        key_a = resp_a.get_json()["premium_key"]
+
+        new_anonymous_user_id = "dddddddd-dddd-dddd-dddd-dddddddddddd"
+        fake_service_2 = _FakeAndroidPublisherService(result=_google_play_purchase_payload())
+        with patch("app._get_android_publisher_service", return_value=fake_service_2):
+            _, resp_b = self._post_as(new_anonymous_user_id, "tok_http_email_guard")
+        self.assertEqual(resp_b.status_code, 200)
+        body_b = resp_b.get_json()
+
+        self.assertTrue(body_b["success"])
+        self.assertEqual(body_b["premium_key"], key_a)
+        self.assertEqual(_result_ids_for_user(email_user_id), ["res_http_email1"])
+        self.assertEqual(_result_ids_for_user(new_anonymous_user_id), [])
+        entry = app.find_premium_by_key(key_a)
+        self.assertEqual(entry["user_id"], email_user_id)
 
 
 if __name__ == "__main__":

@@ -617,6 +617,15 @@ def init_premium_table():
         ALTER TABLE premium_subscriptions
             ADD COLUMN IF NOT EXISTS google_play_purchase_token VARCHAR(255);
         """)
+        # user_idはGoogle Play購入復元時に診断履歴(results.payload.user_id)との
+        # 紐付けに使う追加列。nullable(既存行はNULLのまま)で、上と同じ
+        # ADD COLUMN IF NOT EXISTSパターンで安全に追加する。同一性判定(契約の
+        # 一意性)には引き続きpurchase_token/subscription_id/transaction_idのみを
+        # 使い、user_idは履歴移行のためだけに使う付随情報という位置づけ。
+        cur.execute("""
+        ALTER TABLE premium_subscriptions
+            ADD COLUMN IF NOT EXISTS user_id VARCHAR(36);
+        """)
         cur.execute("""
         CREATE INDEX IF NOT EXISTS idx_premium_sub_customer ON premium_subscriptions (stripe_customer_id);
         CREATE INDEX IF NOT EXISTS idx_premium_sub_subscription ON premium_subscriptions (stripe_subscription_id);
@@ -1212,8 +1221,25 @@ def verify_magic_token(token):
         if conn: conn.close()
 
 
+def _migrate_results_user_id(cur, old_user_id, new_user_id):
+    """resultsのuser_idをold_user_idからnew_user_idへ書き換える共通処理。
+    呼び出し側が開いた既存のカーソル/トランザクション上で実行し、コミットは
+    呼び出し側の責務とする(メールログイン移行・Google Play購入復元移行の
+    両方から共有し、UPDATE文の複製をしない)。"""
+    if not old_user_id or not new_user_id or old_user_id == new_user_id:
+        return 0
+    cur.execute("""
+        UPDATE results
+        SET payload = jsonb_set(payload, '{user_id}', to_jsonb(%s::text))
+        WHERE payload->>'user_id' = %s
+    """, (new_user_id, old_user_id))
+    return cur.rowcount
+
+
 def migrate_results_to_email_user(old_user_id, new_user_id):
-    """旧UUIDの診断結果を新user_idに移行する（デバイス引き継ぎ）"""
+    """旧UUIDの診断結果を新user_idに移行する（デバイス引き継ぎ）。
+    _complete_magic_login()専用の単体トランザクション版。実際のUPDATE文は
+    _migrate_results_user_id()を共有する。"""
     if not old_user_id or not new_user_id or old_user_id == new_user_id:
         return 0
     conn = None
@@ -1221,12 +1247,7 @@ def migrate_results_to_email_user(old_user_id, new_user_id):
     try:
         conn = psycopg2.connect(DATABASE_URL)
         cur = conn.cursor()
-        cur.execute("""
-            UPDATE results
-            SET payload = jsonb_set(payload, '{user_id}', to_jsonb(%s::text))
-            WHERE payload->>'user_id' = %s
-        """, (new_user_id, old_user_id))
-        count = cur.rowcount
+        count = _migrate_results_user_id(cur, old_user_id, new_user_id)
         conn.commit()
         print(f"[AUTH MIGRATE] {old_user_id} -> {new_user_id}: {count} records", flush=True)
         return count
@@ -1446,7 +1467,7 @@ _PREMIUM_COLUMNS = [
     "premium_key", "stripe_customer_id", "stripe_subscription_id",
     "apple_original_transaction_id", "google_play_purchase_token",
     "email", "valid_until", "revoked",
-    "manual", "monthly_usage", "created_at", "updated_at",
+    "manual", "monthly_usage", "created_at", "updated_at", "user_id",
 ]
 
 def _fetch_premium_row(where_clause, params):
@@ -1759,7 +1780,7 @@ def issue_premium_key_for_apple(original_transaction_id, valid_until_iso, email=
         if conn: conn.close()
 
 
-def issue_premium_key_for_google_play(purchase_token, valid_until_iso, email=None, linked_purchase_token=None):
+def issue_premium_key_for_google_play(purchase_token, valid_until_iso, email=None, linked_purchase_token=None, user_id=None):
     """
     Google Play購入(Play Billing)による発行。issue_premium_key_for_apple()と
     同じ「既存キーがあれば延長・無ければ新規発行」パターンを、
@@ -1775,6 +1796,26 @@ def issue_premium_key_for_google_play(purchase_token, valid_until_iso, email=Non
     直列化し、部分UNIQUE制約(uq_premium_sub_active_google_play_token)と二重で守る。
     同一tokenでの再検証(重複検証)は新規行を作らず、常に既存行を更新するだけなので
     冪等。永続化に失敗したら例外を伝播させる(呼び出し元を成功扱いにしない)。
+
+    user_id: 呼び出し時点のセッションuser_id(get_or_create_user_id())。
+    アプリ再インストール等で端末のuser_idが変わった後に同じpurchase_tokenで
+    「購入を復元」した場合、この関数が診断履歴(results)の引き継ぎも行う:
+      - 既存行のuser_id(old_user_id)が無い(NULL) → 履歴移行はせず、
+        premium_subscriptions.user_idにuser_idを保存するだけ。
+      - old_user_idがあり、かつuser_idと異なる:
+          - old_user_idがusersテーブルに存在する(メールログイン済みアカウントの
+            正本user_id) → 履歴移行しない・premium_subscriptions.user_idも
+            上書きしない(禁止事項: ログイン前の匿名端末からの購入復元だけで
+            メールアカウントの履歴を奪わない)。ユーザーが後で同じメールに
+            ログインすれば、既存のmigrate_results_to_email_user経由で
+            従来通り履歴を取得できる状態を維持する。
+          - old_user_idがusersテーブルに存在しない(匿名ユーザー) →
+            _migrate_results_user_id()でresultsのuser_idをold_user_id→user_idへ
+            書き換えてからuser_id列を更新する(従来通り)。
+        Premiumキーの延長・履歴移行有無の判定・user_id列の更新は同一トランザクション
+        (このconn)でコミットし、途中失敗時は全てロールバックする。
+      - old_user_idがuser_idと同じ → 何もしない(通常の延長のみ)。
+    user_idを渡さない呼び出し(既存の他経路)ではuser_id列を変更しない。
     """
     valid_until = datetime.fromisoformat(valid_until_iso) if isinstance(valid_until_iso, str) else valid_until_iso
     normalized_email = _normalize_email(email)
@@ -1787,7 +1828,7 @@ def issue_premium_key_for_google_play(purchase_token, valid_until_iso, email=Non
         cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (purchase_token,))
 
         cur.execute(
-            "SELECT premium_key FROM premium_subscriptions "
+            "SELECT premium_key, user_id FROM premium_subscriptions "
             "WHERE google_play_purchase_token = %s AND revoked = FALSE FOR UPDATE",
             (purchase_token,),
         )
@@ -1795,31 +1836,57 @@ def issue_premium_key_for_google_play(purchase_token, valid_until_iso, email=Non
 
         if not row and linked_purchase_token:
             cur.execute(
-                "SELECT premium_key FROM premium_subscriptions "
+                "SELECT premium_key, user_id FROM premium_subscriptions "
                 "WHERE google_play_purchase_token = %s AND revoked = FALSE FOR UPDATE",
                 (linked_purchase_token,),
             )
             row = cur.fetchone()
 
         if row:
-            existing_key = row[0]
+            existing_key, old_user_id = row
+
+            migrated_count = 0
+            stored_user_id = old_user_id
+
+            if not user_id:
+                pass  # user_id引数が無い呼び出し(既存の他経路)ではuser_id列を変更しない
+            elif not old_user_id:
+                stored_user_id = user_id
+            elif old_user_id == user_id:
+                pass  # 通常の延長のみ
+            else:
+                cur.execute("SELECT 1 FROM users WHERE user_id = %s", (old_user_id,))
+                old_user_id_is_email_account = cur.fetchone() is not None
+                if old_user_id_is_email_account:
+                    print(
+                        f"[GOOGLE PLAY RESTORE SKIP MIGRATE] old_user_id={old_user_id} is an "
+                        f"email-linked account, not migrating to {user_id}",
+                        flush=True,
+                    )
+                else:
+                    migrated_count = _migrate_results_user_id(cur, old_user_id, user_id)
+                    stored_user_id = user_id
+
             cur.execute("""
                 UPDATE premium_subscriptions
                 SET google_play_purchase_token = %s,
                     valid_until = %s,
                     email = COALESCE(%s, email),
+                    user_id = %s,
                     updated_at = NOW()
                 WHERE premium_key = %s
-            """, (purchase_token, valid_until, normalized_email, existing_key))
+            """, (purchase_token, valid_until, normalized_email, stored_user_id, existing_key))
             conn.commit()
+            if migrated_count:
+                print(f"[GOOGLE PLAY RESTORE MIGRATE] {old_user_id} -> {user_id}: {migrated_count} records", flush=True)
             return existing_key
 
         new_key = generate_premium_key()
         cur.execute("""
             INSERT INTO premium_subscriptions
-                (premium_key, google_play_purchase_token, email, valid_until, revoked)
-            VALUES (%s, %s, %s, %s, FALSE)
-        """, (new_key, purchase_token, normalized_email, valid_until))
+                (premium_key, google_play_purchase_token, email, valid_until, revoked, user_id)
+            VALUES (%s, %s, %s, %s, FALSE, %s)
+        """, (new_key, purchase_token, normalized_email, valid_until, user_id))
         conn.commit()
         return new_key
     except Exception:
@@ -21979,10 +22046,12 @@ def api_premium_verify_purchase_android():
     valid_until_iso = datetime.fromtimestamp(expiry_epoch).isoformat()
     linked_purchase_token = purchase.get("linkedPurchaseToken") or None
     email = flask_session.get("email")  # ログイン済みならメールアカウントに紐付ける(任意)
+    current_user_id = get_or_create_user_id()  # 端末再インストール後の購入復元時、診断履歴の引き継ぎ先を特定するため
 
     try:
         key = issue_premium_key_for_google_play(
-            purchase_token, valid_until_iso, email=email, linked_purchase_token=linked_purchase_token
+            purchase_token, valid_until_iso, email=email, linked_purchase_token=linked_purchase_token,
+            user_id=current_user_id,
         )
     except Exception as e:
         # DB書き込み失敗を"success": Trueとして返さない。クライアント(Android)側で
