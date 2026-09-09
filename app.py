@@ -2290,6 +2290,36 @@ def notify_admin_of_feedback(category, message, email, result_id, page):
 _gemini_near_limit_notified_keys: set = set()
 
 
+def _reviewer_access_fingerprint(reviewer_key):
+    """REVIEWER_ACCESS_KEYそのものではなく、そのSHA-256指紋をセッションに
+    保存するためのヘルパー。生のキーをCookie/セッションに残さない。"""
+    return hashlib.sha256(reviewer_key.encode()).hexdigest()
+
+
+def _is_reviewer_access_session():
+    """
+    Google Play審査専用キー(REVIEWER_ACCESS_KEY)によるPremium判定。
+    メールアドレス・アカウントは一切使わない。/api/v1/reviewer/verify で
+    検証済みのセッションだけがFlaskセッションに「その時点のキーのSHA-256
+    指紋」を保持しており、ここで**現在の**REVIEWER_ACCESS_KEYから指紋を
+    再計算して照合する。単なるbool保存ではなく毎回再計算することで、
+    REVIEWER_ACCESS_KEYを変更/削除するだけで、既に発行済みのセッションも
+    含めて即座に無効化できる(コード再デプロイ・DB操作不要)。
+    premium_key・購入記録(premium_subscriptions)・users/emailは一切参照
+    しない。DEV_PREMIUM_MODE/is_creator/premium_key/PREMIUM_PREVIEW_KEYと
+    いった既存のpremium判定ロジックには一切手を加えず、それらに並ぶ追加の
+    OR条件として独立させている。REVIEWER_ACCESS_KEY未設定時は無条件で
+    Falseを返すため、この環境変数を設定しない限り一般環境には何の影響もない。
+    """
+    reviewer_key = os.getenv("REVIEWER_ACCESS_KEY", "")
+    if not reviewer_key:
+        return False
+    session_fingerprint = flask_session.get("reviewer_access_fingerprint", "")
+    if not session_fingerprint:
+        return False
+    return hmac.compare_digest(session_fingerprint, _reviewer_access_fingerprint(reviewer_key))
+
+
 def is_premium_user():
     """
     有料会員判定をここに集約する。
@@ -2299,6 +2329,8 @@ def is_premium_user():
     if DEV_PREMIUM_MODE:
         return True
     if is_creator():
+        return True
+    if _is_reviewer_access_session():
         return True
 
     premium_key = request.args.get("premium_key", "")
@@ -21789,6 +21821,36 @@ def api_auth_verify():
     resp = jsonify({"success": True, "email": email})
     resp.set_cookie(RUMILOG_UID_COOKIE, new_user_id, max_age=365 * 24 * 3600, httponly=True, samesite="Lax")
     return resp
+
+
+@app.route("/api/v1/reviewer/verify", methods=["POST"])
+def api_reviewer_verify():
+    """
+    Google Play審査専用キー(REVIEWER_ACCESS_KEY環境変数)の検証。
+    Android版の審査専用ディープリンク(/reviewer-access/<key>)からのみ
+    呼ばれる想定で、一般UIには一切導線を出さない。
+
+    - keyはURLクエリではなくPOSTボディで受け取る(premium_keyクエリ方式は使わない)
+    - 生のREVIEWER_ACCESS_KEYはこの検証の瞬間にしか比較に使わず、
+      レスポンス・セッションのどちらにも生の値を残さない
+      (セッションにはSHA-256指紋のみを保存する)
+    - email/users/premium_subscriptionsは一切参照・作成しない
+      (審査専用のアカウント・メールアドレスを一切使わない設計)
+    - 以後のPremium判定はis_premium_user()内の_is_reviewer_access_session()が
+      毎リクエスト現在のREVIEWER_ACCESS_KEYから指紋を再計算して照合するため、
+      このエンドポイントの成功レスポンス自体にはPremiumかどうかの情報を含めない
+    """
+    key = (request.form.get("key") or "").strip()
+    if not key:
+        return _api_error("INPUT_MISSING", "key is required", 400)
+
+    reviewer_key = os.getenv("REVIEWER_ACCESS_KEY", "")
+    if not reviewer_key or not hmac.compare_digest(key, reviewer_key):
+        return _api_error("INVALID_TOKEN", "無効なキーです", 400)
+
+    flask_session["reviewer_access_fingerprint"] = _reviewer_access_fingerprint(reviewer_key)
+    flask_session.permanent = True
+    return jsonify({"success": True})
 
 
 @app.route("/api/v1/auth/session", methods=["GET"])
