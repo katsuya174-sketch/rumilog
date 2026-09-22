@@ -2031,6 +2031,54 @@ def _get_android_publisher_service():
         return None
 
 
+# ===== Testing Mode (Google Playクローズドテスト参加者向け) 用 Play Integrity API 認証情報 =====
+# androidpublisher(購入検証)とはOAuthスコープが異なるため、
+# _load_google_play_credentials()とは別の認証情報として分離する。
+# PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON未設定時は、androidpublisher用の
+# GOOGLE_PLAY_SERVICE_ACCOUNT_JSONを流用する(同一サービスアカウントに
+# 両スコープを付与している運用を想定した フォールバック)。
+PLAY_INTEGRITY_SCOPES = ["https://www.googleapis.com/auth/playintegrity"]
+_play_integrity_credentials_cache = None
+
+
+def _load_play_integrity_credentials():
+    global _play_integrity_credentials_cache
+    if _play_integrity_credentials_cache is None:
+        raw_json = (
+            os.getenv("PLAY_INTEGRITY_SERVICE_ACCOUNT_JSON", "").strip()
+            or os.getenv("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON", "").strip()
+        )
+        if not raw_json:
+            _play_integrity_credentials_cache = False
+        else:
+            try:
+                info = json.loads(raw_json)
+                _play_integrity_credentials_cache = google_service_account.Credentials.from_service_account_info(
+                    info, scopes=PLAY_INTEGRITY_SCOPES
+                )
+            except Exception as e:
+                print(f"[PLAY INTEGRITY CREDENTIALS ERROR] {e}", flush=True)
+                _play_integrity_credentials_cache = False
+    return _play_integrity_credentials_cache or None
+
+
+def _get_play_integrity_service():
+    """
+    Testing Mode検証(/api/v1/testing-mode/verify)専用。
+    _get_android_publisher_service()と同じ方針で毎回新規にクライアントを
+    構築する(認証情報のみキャッシュ済みのものを再利用する)。
+    未設定/構築失敗時はNoneを返し、呼び出し側は503を返す。
+    """
+    credentials = _load_play_integrity_credentials()
+    if credentials is None:
+        return None
+    try:
+        return google_api_build("playintegrity", "v1", credentials=credentials, cache_discovery=False)
+    except Exception as e:
+        print(f"[PLAY INTEGRITY SERVICE BUILD ERROR] {e}", flush=True)
+        return None
+
+
 def _enrich_db_products_images():
     """起動時バックグラウンド: 商品名・ブランドでキーワード検索し画像URLを products.json に永続保存する。
     image フィールドが空の商品のみ対象。一度保存すれば次回起動から API 呼び出し不要。
@@ -2346,6 +2394,74 @@ def is_premium_user():
 
     return False
 
+
+# ===== Testing Mode (Google Playクローズドテスト参加者向け) =====
+# premium_key・premium_subscriptions・users/emailは一切参照しない、
+# is_premium_user()とは独立した別entitlement。
+# TESTING_MODE環境変数はここで毎リクエスト再評価するため、これをfalseに
+# するだけで発行済みの全Testing Modeセッションが即座に無効になる
+# (_is_reviewer_access_sessionと同じ設計)。
+def _testing_mode_enabled():
+    """
+    TESTING_MODE環境変数を毎回このタイミングで読み直す。DEV_PREMIUM_MODE等と
+    違いモジュールレベルの定数にキャッシュしないのは、Renderの環境変数を
+    書き換えただけで(再デプロイ・プロセス再起動なしに)即座にON/OFFを
+    反映させるため("_is_reviewer_access_session"がREVIEWER_ACCESS_KEYを
+    毎回os.getenvし直しているのと同じ方針)。
+    """
+    return os.getenv("TESTING_MODE", "false").lower() == "true"
+
+
+TESTING_MODE_PACKAGE_NAME = "jp.lumilog.app"
+TESTING_MODE_MONTHLY_LIMIT = PREMIUM_MONTHLY_LIMIT
+TESTING_MODE_NONCE_TTL_SECONDS = 300
+
+
+def _testing_mode_allowed_version_codes():
+    """
+    TESTING_MODE_VERSION_CODES(カンマ区切りのversionCode)をパースする。
+    未設定/空の場合は空集合を返し、is_testing_mode_session()は必ずFalseに
+    なる(fail-closed。REVIEWER_ACCESS_KEY未設定時と同じ方針)。
+    クローズドテスト用に登録したversionCodeは、Production申請時に採番する
+    新しいversionCodeには絶対に含めないこと(昇格後の本番ユーザーが誤って
+    Testing Mode対象になるのを防ぐため)。
+    """
+    raw = os.getenv("TESTING_MODE_VERSION_CODES", "")
+    codes = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if part.isdigit():
+            codes.add(int(part))
+    return codes
+
+
+def is_testing_mode_user():
+    """
+    Play Integrity検証済み(/api/v1/testing-mode/verify)セッションかどうかの
+    判定。Play Integrity APIはAndroid(Google Play Services)専用のため、
+    iOS/Webからこの状態が成立することは構造的にない。
+    """
+    if not _testing_mode_enabled():
+        return False
+    version_code = flask_session.get("testing_mode_version_code")
+    if version_code is None:
+        return False
+    if version_code not in _testing_mode_allowed_version_codes():
+        return False
+    return True
+
+
+def has_premium_features():
+    """
+    画面表示・機能開放(商品推薦・履歴詳細・月次レポート等)の一元判定。
+    is_premium_user()とis_testing_mode_user()のOR。
+    診断回数のカウント判定には使わないこと
+    (api_create_diagnosisは_is_premium/_is_testing_modeを個別に見て、
+    premium_key="" 経由のcan_use_premium_diagnosisに絶対に流さない)。
+    """
+    return is_premium_user() or is_testing_mode_user()
+
+
 def load_free_usage():
     if not os.path.exists(FREE_LIMIT_FILE):
         return {}
@@ -2507,6 +2623,74 @@ def get_remaining_premium_count(key):
     if DISABLE_USAGE_LIMIT:
         return 999
     return max(0, PREMIUM_MONTHLY_LIMIT - get_premium_usage_count(key))
+
+
+# ===== Testing Mode 専用の月次利用回数カウンター =====
+# premium_subscriptionsは一切使わず、既存のgemini_usageテーブル
+# (usage_key TEXT PRIMARY KEY, request_count INTEGER, updated_at TIMESTAMP)
+# をキー空間を分けて再利用する(DBスキーマ変更なし)。
+def _testing_mode_usage_key(user_id):
+    return f"testing_mode:{user_id}:{get_current_month_key()}"
+
+
+def get_testing_mode_usage_count(user_id):
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT request_count FROM gemini_usage WHERE usage_key = %s;",
+            (_testing_mode_usage_key(user_id),),
+        )
+        row = cur.fetchone()
+        return int(row[0]) if row else 0
+    except Exception as e:
+        print("[TESTING MODE USAGE READ ERROR]", repr(e), flush=True)
+        return 0
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+
+def can_use_testing_mode_diagnosis(user_id):
+    return get_testing_mode_usage_count(user_id) < TESTING_MODE_MONTHLY_LIMIT
+
+
+def increment_testing_mode_usage(user_id):
+    if DISABLE_USAGE_LIMIT:
+        return 0
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        usage_key = _testing_mode_usage_key(user_id)
+        cur.execute("""
+            INSERT INTO gemini_usage (usage_key, request_count, updated_at)
+            VALUES (%s, 1, CURRENT_TIMESTAMP)
+            ON CONFLICT (usage_key)
+            DO UPDATE SET
+                request_count = gemini_usage.request_count + 1,
+                updated_at = CURRENT_TIMESTAMP
+            RETURNING request_count;
+        """, (usage_key,))
+        row = cur.fetchone()
+        conn.commit()
+        return int(row[0]) if row and row[0] is not None else 0
+    except Exception as e:
+        if conn: conn.rollback()
+        print("[TESTING MODE USAGE INCREMENT ERROR]", repr(e), flush=True)
+        return 0
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+
+def get_remaining_testing_mode_count(user_id):
+    if DISABLE_USAGE_LIMIT:
+        return 999
+    return max(0, TESTING_MODE_MONTHLY_LIMIT - get_testing_mode_usage_count(user_id))
 
 
 def load_products():
@@ -19450,15 +19634,20 @@ def classify_gemini_error(error_text):
 
 
 def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
-                        client_ip, is_creator_flag, is_premium_flag, premium_key):
+                        client_ip, is_creator_flag, is_premium_flag, premium_key,
+                        is_testing_mode_flag=False, testing_mode_user_id=None):
     """
-    /lab(Web)・/api/v1/diagnoses(iOS)共通の診断コア処理。
+    /lab(Web)・/api/v1/diagnoses(Android/iOS)共通の診断コア処理。
     Gemini分析→Rakuten商品選定→仕上げ→利用回数カウント→履歴保存までを行い、
     lightweight_result_payload・apply_result_i18n_for_displayを通した最終dataを返す。
     以前lab_test_function内にあった処理をそのまま移設したもので、呼んでいる
     関数・順序・パラメータ(診断ロジック本体)は変更していない。
     画像取得・利用制限の事前チェック・表示形式(HTML/JSON)への変換は
     呼び出し元(各エンドポイント)の責務とする。失敗時はDiagnosisErrorを送出する。
+
+    is_testing_mode_flag/testing_mode_user_idはapi_create_diagnosis(Android)
+    からのみ渡される(デフォルトFalse/None)。/lab(Web)は一切渡さないため、
+    Testing ModeがWeb側の表示・カウントに影響することはない。
     """
     lab_t0 = time.time()
     print("[LAB TIME] start 0.0", flush=True)
@@ -19840,6 +20029,8 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
             pass  # 作成者はカウントしない
         elif is_premium_flag:
             increment_premium_usage(premium_key)
+        elif is_testing_mode_flag:
+            increment_testing_mode_usage(testing_mode_user_id)
         else:
             increment_free_usage(client_ip)
         increment_global_usage()
@@ -19852,7 +20043,10 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
     flask_session["client_ip"] = client_ip
     saved_record = None
     try:
-        saved_record = append_result(lightweight_result_payload(data), is_premium=bool(is_premium_flag or is_creator_flag))
+        saved_record = append_result(
+            lightweight_result_payload(data),
+            is_premium=bool(is_premium_flag or is_creator_flag or is_testing_mode_flag),
+        )
         if isinstance(saved_record, dict) and saved_record.get("id"):
             data["id"] = saved_record["id"]
     except Exception as e:
@@ -19868,7 +20062,9 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
     # =========================
 
     data = lightweight_result_payload(data)
-    data["is_premium"] = is_premium_user()
+    # is_testing_mode_flagは/lab(Web)からは渡されない(常にFalse)ため、
+    # Testing ModeがWeb側の表示に影響することはない。
+    data["is_premium"] = is_premium_user() or is_testing_mode_flag
     data["is_dev_mode"] = DEV_MODE or DEV_PREMIUM_MODE
     data = apply_result_i18n_for_display(data)
     print("[LAB TIME] before render_template", round(time.time() - lab_t0, 2), flush=True)
@@ -20070,7 +20266,12 @@ def api_create_diagnosis():
     client_ip = get_client_ip()
     _is_creator = is_creator()
     _is_premium = is_premium_user()
+    # is_testing_mode_user()はPlay Integrity検証済み(Android専用)セッション
+    # でしか成立しないため、正規Premium(_is_premium)を優先させたうえで
+    # 独立した第三の分岐として扱う(premium_keyには一切触れない)。
+    _is_testing_mode = (not _is_creator) and (not _is_premium) and is_testing_mode_user()
     _premium_key = request.args.get("premium_key", "")
+    _testing_mode_user_id = get_or_create_user_id() if _is_testing_mode else None
 
     # ===== 利用制限チェック(/lab と同一の判定関数を再利用、応答形式のみJSON化) =====
     if _is_creator:
@@ -20082,6 +20283,16 @@ def api_create_diagnosis():
                 gettext(
                     "今月の分析回数（月%(limit)s回）に達しました。来月また利用できます。",
                     limit=PREMIUM_MONTHLY_LIMIT,
+                ),
+                429,
+            )
+    elif _is_testing_mode:
+        if not can_use_testing_mode_diagnosis(_testing_mode_user_id):
+            return _api_error(
+                "USAGE_LIMIT_EXCEEDED",
+                gettext(
+                    "今月の分析回数（月%(limit)s回）に達しました。来月また利用できます。",
+                    limit=TESTING_MODE_MONTHLY_LIMIT,
                 ),
                 429,
             )
@@ -20135,6 +20346,8 @@ def api_create_diagnosis():
             is_creator_flag=_is_creator,
             is_premium_flag=_is_premium,
             premium_key=_premium_key,
+            is_testing_mode_flag=_is_testing_mode,
+            testing_mode_user_id=_testing_mode_user_id,
         )
     except DiagnosisError as e:
         return _api_error(e.code, e.message, e.http_status)
@@ -21677,7 +21890,10 @@ def api_history():
     """
     try:
         user_id = get_or_create_user_id()
-        _is_premium = is_premium_user()
+        # has_premium_features()はis_premium_user() or is_testing_mode_user()。
+        # is_testing_mode_user()はAndroid専用のPlay Integrity検証済み
+        # セッションでしか成立しないため、この置き換えはiOS/Webに影響しない。
+        _is_premium = has_premium_features()
         _is_cre = is_creator()
         client_ip = get_client_ip()
 
@@ -21758,7 +21974,9 @@ def api_history_detail(result_id):
                 if not isinstance(data, dict):
                     data = item
 
-                data["is_premium"] = is_premium_user()
+                # has_premium_features(): is_testing_mode_user()はAndroid専用の
+                # Play Integrity検証済みセッションでしか成立しないためiOSに影響しない
+                data["is_premium"] = has_premium_features()
 
                 if not isinstance(data.get("symmetry_analysis"), dict):
                     data["symmetry_analysis"] = {
@@ -21853,6 +22071,117 @@ def api_reviewer_verify():
     return jsonify({"success": True})
 
 
+@app.route("/api/v1/testing-mode/nonce", methods=["POST"])
+def api_testing_mode_nonce():
+    """
+    Testing Mode検証(Play Integrity Standard API)用の使い捨てnonce発行。
+    Android版のクローズドテスト対象ビルドからのみ呼ばれる想定で、
+    一般UIには一切導線を出さない。
+
+    発行したnonceはFlaskセッションに保存し、/api/v1/testing-mode/verify で
+    一度だけ使用後に破棄する(TESTING_MODE_NONCE_TTL_SECONDS経過後は無効)。
+    これはGoogleが同一integrity tokenの再デコードを自動的に失効させる
+    仕組みに加え、「別セッションで取得したトークンの横流し」を防ぐための
+    追加防御として requestHash の照合に使う。
+    """
+    if not _testing_mode_enabled():
+        return _api_error("TESTING_MODE_DISABLED", gettext("この機能は現在利用できません"), 404)
+
+    nonce = secrets.token_urlsafe(32)
+    flask_session["testing_mode_nonce"] = nonce
+    flask_session["testing_mode_nonce_issued_at"] = time.time()
+    flask_session.permanent = True
+    return jsonify({"success": True, "nonce": nonce})
+
+
+@app.route("/api/v1/testing-mode/verify", methods=["POST"])
+def api_testing_mode_verify():
+    """
+    Play Integrity API(Standard request)によるTesting Mode検証。
+    Android版のクローズドテスト対象ビルドからのみ呼ばれる想定で、
+    一般UIには一切導線を出さない。
+
+    「クローズドテスター本人の識別」には使わない。あくまで
+    「Google Playから配布された、サーバー側で許可した特定のAndroid
+    ビルドからの正規リクエストであること」をGoogleに暗号学的に
+    証明してもらうためだけに使う。
+
+    検証条件(すべてAND):
+    1. TESTING_MODE環境変数がtrue
+    2. requestHashが、直前にこのセッションへ発行したnonceのSHA-256と一致
+       (トークンの横流し対策。Google側でも同一トークンの再デコードは
+       自動的に失効する)
+    3. appIntegrity.appRecognitionVerdict == PLAY_RECOGNIZED
+       (改ざんなし・Play配布の正規署名であることの証明)
+    4. appIntegrity.packageName == jp.lumilog.app
+    5. accountDetails.appLicensingVerdict == LICENSED
+       (Google Play経由での正規入手)
+    6. appIntegrity.versionCode が TESTING_MODE_VERSION_CODES に含まれる
+       (「対象ビルド」の絞り込み。versionCode単体では判定しない
+       ―― 1〜5の暗号学的検証と組み合わせて初めて使う)
+
+    成功時、生のintegrity tokenは一切保存せず、検証済みversionCodeのみを
+    セッションに保存する。premium_key・premium_subscriptions・users/email
+    は一切参照・作成しない。以後の判定はis_testing_mode_user()が毎リクエスト
+    現在のTESTING_MODE環境変数とTESTING_MODE_VERSION_CODESを再評価するため、
+    これらをOFF/変更するだけで発行済みの全セッションが即座に無効になる。
+    """
+    if not _testing_mode_enabled():
+        return _api_error("TESTING_MODE_DISABLED", gettext("この機能は現在利用できません"), 404)
+
+    integrity_token = (request.get_json(silent=True) or {}).get("integrity_token", "")
+    if not integrity_token:
+        return _api_error("INPUT_MISSING", gettext("integrity_tokenが必要です"), 400)
+
+    nonce = flask_session.pop("testing_mode_nonce", None)
+    nonce_issued_at = flask_session.pop("testing_mode_nonce_issued_at", None)
+    if not nonce or not nonce_issued_at or (time.time() - nonce_issued_at) > TESTING_MODE_NONCE_TTL_SECONDS:
+        return _api_error("INVALID_TOKEN", gettext("検証の有効期限が切れました。もう一度お試しください"), 400)
+
+    service = _get_play_integrity_service()
+    if service is None:
+        return _api_error("SERVICE_UNAVAILABLE", gettext("現在この機能は利用できません"), 503)
+
+    try:
+        response = service.v1().decodeIntegrityToken(
+            packageName=TESTING_MODE_PACKAGE_NAME,
+            body={"integrityToken": integrity_token},
+        ).execute()
+    except Exception as e:
+        print(f"[TESTING MODE VERIFY ERROR] {repr(e)}", flush=True)
+        return _api_error("INVALID_TOKEN", gettext("検証に失敗しました"), 400)
+
+    token_payload = response.get("tokenPayloadExternal", {}) if isinstance(response, dict) else {}
+    request_details = token_payload.get("requestDetails", {}) or {}
+    app_integrity = token_payload.get("appIntegrity", {}) or {}
+    account_details = token_payload.get("accountDetails", {}) or {}
+
+    expected_hash = hashlib.sha256(nonce.encode()).hexdigest()
+    if not hmac.compare_digest(str(request_details.get("requestHash", "")), expected_hash):
+        return _api_error("INVALID_TOKEN", gettext("検証に失敗しました"), 400)
+
+    if app_integrity.get("appRecognitionVerdict") != "PLAY_RECOGNIZED":
+        return _api_error("INVALID_TOKEN", gettext("検証に失敗しました"), 400)
+
+    if app_integrity.get("packageName") != TESTING_MODE_PACKAGE_NAME:
+        return _api_error("INVALID_TOKEN", gettext("検証に失敗しました"), 400)
+
+    if account_details.get("appLicensingVerdict") != "LICENSED":
+        return _api_error("INVALID_TOKEN", gettext("検証に失敗しました"), 400)
+
+    try:
+        version_code = int(app_integrity.get("versionCode"))
+    except (TypeError, ValueError):
+        return _api_error("INVALID_TOKEN", gettext("検証に失敗しました"), 400)
+
+    if version_code not in _testing_mode_allowed_version_codes():
+        return _api_error("INVALID_TOKEN", gettext("対象のテストビルドではありません"), 400)
+
+    flask_session["testing_mode_version_code"] = version_code
+    flask_session.permanent = True
+    return jsonify({"success": True})
+
+
 @app.route("/api/v1/auth/session", methods=["GET"])
 def api_auth_session():
     """
@@ -21861,13 +22190,17 @@ def api_auth_session():
     is_premium_user()(既存のpremium_key検証ロジック)をそのまま再利用する
     (新しい判定ロジックは作らない)。iOS側はアプリ起動時にこれを呼び、
     Cookie上の実際のログイン状態・premium_keyの現在の有効性とUI表示を同期させる。
+    is_premiumはhas_premium_features()(is_premium_user() or
+    is_testing_mode_user())を返す。is_testing_mode_user()はAndroid専用の
+    Play Integrity検証済みセッションでしか成立しないため、iOS/Webの挙動は
+    従来と変わらない。
     """
     email = flask_session.get("email", "")
     return jsonify({
         "success": True,
         "logged_in": bool(email),
         "email": email,
-        "is_premium": is_premium_user(),
+        "is_premium": has_premium_features(),
     })
 
 
