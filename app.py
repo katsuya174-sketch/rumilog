@@ -22135,7 +22135,13 @@ def api_testing_mode_verify():
 
     nonce = flask_session.pop("testing_mode_nonce", None)
     nonce_issued_at = flask_session.pop("testing_mode_nonce_issued_at", None)
-    if not nonce or not nonce_issued_at or (time.time() - nonce_issued_at) > TESTING_MODE_NONCE_TTL_SECONDS:
+    nonce_present_and_fresh = bool(
+        nonce and nonce_issued_at and (time.time() - nonce_issued_at) <= TESTING_MODE_NONCE_TTL_SECONDS,
+    )
+    if not nonce_present_and_fresh:
+        # 安全な診断ログ: nonce値自体は出力せず、PASS/FAILのみ。
+        print("[TESTING MODE VERIFY] requestHash check: FAIL (no fresh nonce in session)", flush=True)
+        print("[TESTING MODE VERIFY] final result: FAIL", flush=True)
         return _api_error("INVALID_TOKEN", gettext("検証の有効期限が切れました。もう一度お試しください"), 400)
 
     service = _get_play_integrity_service()
@@ -22148,7 +22154,10 @@ def api_testing_mode_verify():
             body={"integrityToken": integrity_token},
         ).execute()
     except Exception as e:
-        print(f"[TESTING MODE VERIFY ERROR] {repr(e)}", flush=True)
+        # 安全な診断ログ: HTTPステータスと例外の型のみ(トークン本体・
+        # サービスアカウント情報・生の例外詳細は一切出力しない)。
+        http_status = getattr(getattr(e, "resp", None), "status", None)
+        print(f"[TESTING MODE VERIFY] decodeIntegrityToken failed: http_status={http_status} error_type={type(e).__name__}", flush=True)
         return _api_error("INVALID_TOKEN", gettext("検証に失敗しました"), 400)
 
     token_payload = response.get("tokenPayloadExternal", {}) if isinstance(response, dict) else {}
@@ -22156,29 +22165,54 @@ def api_testing_mode_verify():
     app_integrity = token_payload.get("appIntegrity", {}) or {}
     account_details = token_payload.get("accountDetails", {}) or {}
 
+    # 安全な診断ログ: 各判定の結果(PASS/FAIL)とverdictの値のみを出力する。
+    # integrity token本体・nonce値・requestHash値・Cookie/セッションID・
+    # サービスアカウント/秘密鍵/アクセストークン等は一切出力しない。
     expected_hash = hashlib.sha256(nonce.encode()).hexdigest()
-    if not hmac.compare_digest(str(request_details.get("requestHash", "")), expected_hash):
+    request_hash_passed = hmac.compare_digest(str(request_details.get("requestHash", "")), expected_hash)
+    print(f"[TESTING MODE VERIFY] requestHash check: {'PASS' if request_hash_passed else 'FAIL'}", flush=True)
+    if not request_hash_passed:
+        print("[TESTING MODE VERIFY] final result: FAIL", flush=True)
         return _api_error("INVALID_TOKEN", gettext("検証に失敗しました"), 400)
 
-    if app_integrity.get("appRecognitionVerdict") != "PLAY_RECOGNIZED":
+    app_recognition_verdict = app_integrity.get("appRecognitionVerdict")
+    print(f"[TESTING MODE VERIFY] appRecognitionVerdict={app_recognition_verdict}", flush=True)
+    if app_recognition_verdict != "PLAY_RECOGNIZED":
+        print("[TESTING MODE VERIFY] final result: FAIL", flush=True)
         return _api_error("INVALID_TOKEN", gettext("検証に失敗しました"), 400)
 
-    if app_integrity.get("packageName") != TESTING_MODE_PACKAGE_NAME:
+    package_name_passed = app_integrity.get("packageName") == TESTING_MODE_PACKAGE_NAME
+    print(f"[TESTING MODE VERIFY] packageName check: {'PASS' if package_name_passed else 'FAIL'}", flush=True)
+    if not package_name_passed:
+        print("[TESTING MODE VERIFY] final result: FAIL", flush=True)
         return _api_error("INVALID_TOKEN", gettext("検証に失敗しました"), 400)
 
-    if account_details.get("appLicensingVerdict") != "LICENSED":
+    account_licensing_verdict = account_details.get("appLicensingVerdict")
+    print(f"[TESTING MODE VERIFY] appLicensingVerdict={account_licensing_verdict}", flush=True)
+    if account_licensing_verdict != "LICENSED":
+        print("[TESTING MODE VERIFY] final result: FAIL", flush=True)
         return _api_error("INVALID_TOKEN", gettext("検証に失敗しました"), 400)
 
     try:
         version_code = int(app_integrity.get("versionCode"))
     except (TypeError, ValueError):
+        print("[TESTING MODE VERIFY] versionCode: unparsable", flush=True)
+        print("[TESTING MODE VERIFY] final result: FAIL", flush=True)
         return _api_error("INVALID_TOKEN", gettext("検証に失敗しました"), 400)
 
-    if version_code not in _testing_mode_allowed_version_codes():
+    version_code_allowed = version_code in _testing_mode_allowed_version_codes()
+    print(
+        f"[TESTING MODE VERIFY] versionCode={version_code} allowlist check: "
+        f"{'PASS' if version_code_allowed else 'FAIL'}",
+        flush=True,
+    )
+    if not version_code_allowed:
+        print("[TESTING MODE VERIFY] final result: FAIL", flush=True)
         return _api_error("INVALID_TOKEN", gettext("対象のテストビルドではありません"), 400)
 
     flask_session["testing_mode_version_code"] = version_code
     flask_session.permanent = True
+    print("[TESTING MODE VERIFY] final result: PASS", flush=True)
     return jsonify({"success": True})
 
 
