@@ -22087,10 +22087,15 @@ def api_testing_mode_nonce():
     if not _testing_mode_enabled():
         return _api_error("TESTING_MODE_DISABLED", gettext("この機能は現在利用できません"), 404)
 
+    # 安全な診断ログ: nonce値そのものは出力しない。
+    had_existing_nonce = "testing_mode_nonce" in flask_session
+    print(f"[TESTING MODE NONCE] existing testing_mode_nonce in session before issue: {had_existing_nonce}", flush=True)
+
     nonce = secrets.token_urlsafe(32)
     flask_session["testing_mode_nonce"] = nonce
     flask_session["testing_mode_nonce_issued_at"] = time.time()
     flask_session.permanent = True
+    print(f"[TESTING MODE NONCE] session.modified before response: {flask_session.modified}", flush=True)
     return jsonify({"success": True, "nonce": nonce})
 
 
@@ -22133,8 +22138,19 @@ def api_testing_mode_verify():
     if not integrity_token:
         return _api_error("INPUT_MISSING", gettext("integrity_tokenが必要です"), 400)
 
+    # 安全な診断ログ: Cookie/nonce値そのものは出力せず、有無(boolean)のみ。
+    session_cookie_present = bool(request.cookies.get(app.config.get("SESSION_COOKIE_NAME", "session")))
+    nonce_present_in_session = "testing_mode_nonce" in flask_session
+    print(
+        f"[TESTING MODE VERIFY] session cookie present in request: {session_cookie_present}, "
+        f"testing_mode_nonce present in session: {nonce_present_in_session}",
+        flush=True,
+    )
+
     nonce = flask_session.pop("testing_mode_nonce", None)
     nonce_issued_at = flask_session.pop("testing_mode_nonce_issued_at", None)
+    if nonce_issued_at:
+        print(f"[TESTING MODE VERIFY] nonce age seconds: {time.time() - nonce_issued_at:.1f}", flush=True)
     nonce_present_and_fresh = bool(
         nonce and nonce_issued_at and (time.time() - nonce_issued_at) <= TESTING_MODE_NONCE_TTL_SECONDS,
     )
