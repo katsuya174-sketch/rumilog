@@ -10748,39 +10748,46 @@ def build_improvement_reason_details(product, improvement_plan=None):
 
     terms = collect_product_terms(product)
 
-    def _first_matching_term(keywords):
+    def _best_displayable_matching_keyword(keywords):
         """
-        termsのいずれかにkeywordsのいずれかが部分一致した場合、その
-        「一致したキーワード自体」を返す(一致を含んでいた側のterm全体は
-        返さない)。collect_product_terms()は採点のため商品名・ブランド名も
-        termsに含めており、一致したtermがそのまま商品名(例:「ヒアルロン酸
-        美容液」)だと、表示用のmatched_product_featureに商品名がそのまま
-        出てしまう不具合があったため、常にkeywordを返すよう修正している。
-        """
-        for term in terms:
-            for keyword in keywords:
-                norm_kw = normalize_text_value(keyword)
-                if norm_kw and norm_kw in term:
-                    return keyword
-        return ""
+        keywords(IMPROVEMENT_KEYWORDS由来の順序が固定されたリスト)のうち、
+        実際にterms(collect_product_terms()の集合。採点用でスコアリングの
+        走査集合性自体は変更しない)のいずれかと部分一致したものだけを集め、
+        表示に適した優先順で1つ選ぶ。
 
-    def _display_safe_feature(raw_keyword):
+        非決定性対策: termsは集合のため走査順が実行ごとに変わり得るが、
+        外側ループをkeywords(順序固定のリスト)にし、「一致したkeyword一覧」
+        を先に確定させてから優先順位で選ぶことで、同じ入力なら常に同じ結果
+        になるようにしている。
+
+        優先順位:
+        1. ingredient_map(内部タグ→日本語ラベル)で変換できるもの
+        2. 元から日本語等、表示に適した語(英数字・アンダースコアのみの
+           内部識別子ではないもの)
+        3. 上記が無ければ、表示可能な一致が無いとみなし空文字
+           (情報を捏造しない。呼び出し側はlabelのみで表示する)
         """
-        一致したキーワードをユーザー表示に使ってよい形へ変換する。
-        ingredient_map(内部タグ→日本語ラベル)に存在すればそれを使い、
-        存在せず、かつ英数字・アンダースコアのみの内部識別子らしい語
-        (例: "salicylic_acid"のような未登録タグ)は表示に適さないと判断し、
-        情報を捏造せず空文字を返す(呼び出し側はlabelのみで表示する)。
-        日本語を含む語(例:「アゼライン酸」)はそのまま表示してよい。
-        """
-        if not raw_keyword:
+        matched_keywords = []
+        for keyword in keywords:
+            norm_kw = normalize_text_value(keyword)
+            if not norm_kw:
+                continue
+            if any(norm_kw in term for term in terms):
+                matched_keywords.append(keyword)
+
+        if not matched_keywords:
             return ""
-        mapped = ingredient_map.get(raw_keyword)
-        if mapped:
-            return mapped
-        if re.fullmatch(r"[a-z0-9_]+", raw_keyword):
-            return ""
-        return raw_keyword
+
+        for kw in matched_keywords:
+            mapped = ingredient_map.get(kw)
+            if mapped:
+                return mapped
+
+        for kw in matched_keywords:
+            if not re.fullmatch(r"[a-z0-9_]+", kw):
+                return kw
+
+        return ""
 
     targets = infer_improvement_targets(improvement_plan or {})
     category = str(product.get("category", "")).strip()
@@ -10811,7 +10818,7 @@ def build_improvement_reason_details(product, improvement_plan=None):
                 "axis": "improve",
                 "rule": f"improvement_target_strong:{target}",
                 "label": f"{label}に合う主成分を含む",
-                "matched_product_feature": _display_safe_feature(_first_matching_term(strong_keywords)),
+                "matched_product_feature": _best_displayable_matching_keyword(strong_keywords),
                 "matched_user_condition": label,
                 "points": 28,
             })
@@ -10820,7 +10827,7 @@ def build_improvement_reason_details(product, improvement_plan=None):
                 "axis": "improve",
                 "rule": f"improvement_target_support:{target}",
                 "label": f"{label}を支える補助成分を含む",
-                "matched_product_feature": _display_safe_feature(_first_matching_term(support_keywords)),
+                "matched_product_feature": _best_displayable_matching_keyword(support_keywords),
                 "matched_user_condition": label,
                 "points": 14,
             })
@@ -15874,6 +15881,61 @@ def _merge_duplicate_reason_phrases(decisive):
     return result
 
 
+def _merge_presence_absence_pairs(decisive):
+    """
+    「1位が成分/条件Xを満たすことによる加点(kind="gain")」と
+    「比較対象が同じX不足による減点を1位が受けなかったこと(kind="avoidance")」
+    は、score_product本体とapply_common_score_rulesのように採点箇所が
+    分かれているだけで、同じ事実(Xの有無)の表裏を別々に記録しているに
+    過ぎない。同一のmatched_user_condition(例: "niacinamide"のような
+    成分タグ自体)を共有するgain/avoidanceのペアが見つかった場合、
+    why_best表示では1つの事実として統合する。
+
+    matched_user_conditionが空、または一致するペアが無いものは統合しない
+    (「異なる理由の減点回避は従来どおり別理由として表示可能」)。
+    統合後のgapは両者の合計にし、採点差情報を失わない。
+    candidate_score_reasons・_merge_duplicate_reason_phrases適用前後の
+    リスト自体は変更しない(この関数は表示直前のみで作用する)。
+    """
+    gains = [d for d in decisive if d["kind"] == "gain"]
+    avoidances = [d for d in decisive if d["kind"] == "avoidance"]
+    other_kinds = [d for d in decisive if d["kind"] not in ("gain", "avoidance")]
+
+    used_avoidance_idx = set()
+    result = []
+    for g in gains:
+        condition = g["matched_user_condition"]
+        pair_idx = None
+        if condition:
+            for i, a in enumerate(avoidances):
+                if i in used_avoidance_idx:
+                    continue
+                if a["matched_user_condition"] == condition:
+                    pair_idx = i
+                    break
+        if pair_idx is not None:
+            a = avoidances[pair_idx]
+            used_avoidance_idx.add(pair_idx)
+            result.append({
+                "label": g["label"],
+                "feature": g["feature"] or a["feature"],
+                "matched_user_condition": condition,
+                "kind": "gain",  # 統合後は加点として(肯定的に)説明する
+                "gap": g["gap"] + a["gap"],
+                "rules": g["rules"] + a["rules"],
+            })
+        else:
+            result.append(g)
+
+    for i, a in enumerate(avoidances):
+        if i not in used_avoidance_idx:
+            result.append(a)
+
+    result.extend(other_kinds)
+    result.sort(key=lambda d: d["gap"], reverse=True)
+    return result
+
+
 def _build_why_best_text(best, others, step, best_label):
     """
     why_bestの本文を、1位(best)と比較対象(others=2位・3位)の
@@ -15891,9 +15953,12 @@ def _build_why_best_text(best, others, step, best_label):
           小さいrule(kind="avoidance", _find_penalty_avoidance_reasons)。
     いずれも同点・全候補共通・一部候補にしか優位でないケースは決め手にしない
     (「全候補を上回った」と誤表現しない)。同じ意味の理由が複数ruleに
-    分かれている場合は_merge_duplicate_reason_phrasesで1つの説明へ統合する
-    (寄与量=gapは合算し、失わない)。決め手が複数見つかった場合は差(gap)が
-    大きい順に、実際の該当成分・機能・条件(matched_product_feature/
+    分かれている場合は_merge_duplicate_reason_phrasesで1つの説明へ統合し、
+    さらに「1位が成分Xを含む加点」と「他候補がXを含まない減点を1位が
+    受けなかった」のような同一事実の表裏(gain/avoidance)は
+    _merge_presence_absence_pairsで1つの事実として統合する
+    (いずれも寄与量=gapは合算し、失わない)。決め手が複数見つかった場合は
+    差(gap)が大きい順に、実際の該当成分・機能・条件(matched_product_feature/
     matched_user_condition)を添えて説明する。
 
     1位にも他候補にも共通して見られる加点は、全候補が一律に持っている場合
@@ -15913,6 +15978,7 @@ def _build_why_best_text(best, others, step, best_label):
     gains = _find_decisive_score_reasons(best_agg, others_agg_list)
     avoidances = _find_penalty_avoidance_reasons(best_agg, others_agg_list)
     decisive = _merge_duplicate_reason_phrases(gains + avoidances)
+    decisive = _merge_presence_absence_pairs(decisive)
 
     if decisive:
         # 決め手ではないが、一部の比較対象にも見られる加点を最大1つ、
