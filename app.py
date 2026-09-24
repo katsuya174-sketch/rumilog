@@ -8309,9 +8309,14 @@ def get_availability_score(values):
     return score
 
 
-def score_goal_fit(product, step):
+def score_goal_fit(product, step, reasons=None):
     """
     stepの目的とDB商品の concerns / main_functions / ingredient_focus の一致を点数化
+
+    reasons(任意): 渡された場合、実際に加点した箇所の副産物として
+    {"axis","rule","label","matched_product_feature","matched_user_condition","points"}
+    を追記する(採点根拠トレース)。reasons=Noneなら従来と完全に同じ挙動・
+    戻り値(score)のみで、この関数のスコア計算は一切変更していない。
     """
     score = 0
 
@@ -8324,11 +8329,23 @@ def score_goal_fit(product, step):
 
    # score_goal_fit 内の concerns 加点をこれに置換
     match_count = 0
+    matched_concern_tags = []
     for tag in product.get("concerns", []):
         if tag in concern_tags:
             match_count += 1
+            matched_concern_tags.append(tag)
 
-    score += min(match_count * 12, 24)  # 上限24（=最大2つ分）
+    concern_points = min(match_count * 12, 24)  # 上限24（=最大2つ分）
+    score += concern_points
+    if reasons is not None and matched_concern_tags:
+        reasons.append({
+            "axis": "base",
+            "rule": "goal_fit_concern_match",
+            "label": "今回の悩みに合う",
+            "matched_product_feature": "、".join(matched_concern_tags),
+            "matched_user_condition": "、".join(concern_tags),
+            "points": concern_points,
+        })
 
     # main_functions一致
     for f in product_functions:
@@ -8337,6 +8354,15 @@ def score_goal_fit(product, step):
             continue
         if f_norm in purpose or purpose in f_norm:
             score += 8
+            if reasons is not None:
+                reasons.append({
+                    "axis": "base",
+                    "rule": "goal_fit_main_function_match",
+                    "label": "今回の目的に合う機能を持つ",
+                    "matched_product_feature": f,
+                    "matched_user_condition": step.get("purpose", ""),
+                    "points": 8,
+                })
 
     # ingredient_focus一致
     for focus in product_focuses:
@@ -8345,6 +8371,15 @@ def score_goal_fit(product, step):
             continue
         if focus_norm in purpose or purpose in focus_norm:
             score += 8
+            if reasons is not None:
+                reasons.append({
+                    "axis": "base",
+                    "rule": "goal_fit_ingredient_focus_match",
+                    "label": "今回の目的に合う成分を意図している",
+                    "matched_product_feature": focus,
+                    "matched_user_condition": step.get("purpose", ""),
+                    "points": 8,
+                })
 
     # 「目的キーワード補正」は削除した。
     # concern_tags は purpose_to_concern_tags(purpose) から生成されており、
@@ -8356,10 +8391,13 @@ def score_goal_fit(product, step):
     return score
 
 
-def score_signature_ingredients(product, step):
+def score_signature_ingredients(product, step, reasons=None):
     """
     signature_ingredients の加点
     signature_ingredient_effects が上で定義されている前提
+
+    reasons(任意): score_goal_fit()と同じ意味(採点根拠トレース)。
+    reasons=Noneならスコア計算は一切変更しない。
     """
     score = 0
 
@@ -8372,14 +8410,32 @@ def score_signature_ingredients(product, step):
         for c in concern_tags:
             if c in effects:
                 score += 10
+                if reasons is not None:
+                    reasons.append({
+                        "axis": "base",
+                        "rule": "signature_ingredient_effect_match",
+                        "label": "特徴成分が今回の悩みに効く",
+                        "matched_product_feature": sig,
+                        "matched_user_condition": c,
+                        "points": 10,
+                    })
 
         if len(effects) >= 2:
             score += 2
+            if reasons is not None:
+                reasons.append({
+                    "axis": "base",
+                    "rule": "signature_ingredient_multi_effect",
+                    "label": "特徴成分が複数の効果を持つ",
+                    "matched_product_feature": sig,
+                    "matched_user_condition": "",
+                    "points": 2,
+                })
 
     return score
 
 
-def apply_common_score_rules(product, step, user_data, budget_value, concern_tags, ingredient_tag):
+def apply_common_score_rules(product, step, user_data, budget_value, concern_tags, ingredient_tag, reasons=None):
     """
     カテゴリ共通スコア
     このDB項目に対応:
@@ -8400,8 +8456,22 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     - technology
     - texture
     - contraindications
+
+    reasons(任意): score_goal_fit()と同じ意味(採点根拠トレース)。
+    reasons=Noneならスコア計算は一切変更しない。
     """
     score = 0
+
+    def _record(rule, label, feature, condition, points):
+        if reasons is not None:
+            reasons.append({
+                "axis": "base",
+                "rule": rule,
+                "label": label,
+                "matched_product_feature": feature,
+                "matched_user_condition": condition,
+                "points": points,
+            })
 
     product_concerns = list(product.get("concerns", []) or [])
     product_actives = list(product.get("active_ingredients", []) or [])
@@ -8449,14 +8519,24 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     if ingredient_tag:
         if ingredient_tag in product_actives:
             score += 25
-            score += get_strength_score(ingredient_strength_map.get(ingredient_tag))
+            _record("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                    ingredient_tag, ingredient_tag, 25)
+            strength_points = get_strength_score(ingredient_strength_map.get(ingredient_tag))
+            score += strength_points
+            if strength_points:
+                _record("ingredient_focus_active_strength", "その成分の配合強度が評価された",
+                        f"{ingredient_tag}:{ingredient_strength_map.get(ingredient_tag)}", ingredient_tag, strength_points)
 
         elif ingredient_tag in product_support:
             score += 10
+            _record("ingredient_focus_support_match", "今回重視する成分を補助成分として含む",
+                    ingredient_tag, ingredient_tag, 10)
 
         else:
             # stepのfocus成分を一切持たない商品は選定優先度を下げる
             score -= 15
+            _record("ingredient_focus_missing_penalty", "今回重視する成分を含んでいない",
+                    "", ingredient_tag, -15)
 
     # -------------------------------------------------
     # 2. concerns一致
@@ -8464,6 +8544,7 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     for c in concern_tags:
         if c in product_concerns:
             score += 8
+            _record("common_concern_match", "今回の悩みタグに一致する", c, c, 8)
 
     # -------------------------------------------------
     # 3. DBのingredient_focus一致
@@ -8475,6 +8556,8 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
             continue
         if focus_norm in purpose or purpose in focus_norm:
             score += 6
+            _record("common_ingredient_focus_purpose_match", "商品のingredient_focusが今回の目的と一致する",
+                    focus, step.get("purpose", ""), 6)
 
     # -------------------------------------------------
     # 4. skin_types一致
@@ -8482,9 +8565,12 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     for st in user_skin_types:
         if st in product_skin_types:
             score += 6
+            _record("common_skin_type_match", "今回の肌質に合う", st, st, 6)
 
     if "normal" in product_skin_types and not any(st in product_skin_types for st in user_skin_types):
         score += 2
+        _record("common_skin_type_normal_fallback", "普通肌向けとして幅広く合う",
+                "normal", "、".join(user_skin_types), 2)
 
     # -------------------------------------------------
     # 5. sensitive_ok
@@ -8492,8 +8578,10 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     if sens == "high":
         if sensitive_ok == "yes":
             score += 12
+            _record("common_sensitive_ok_yes", "敏感肌向けとして確認されている", "sensitive_ok=yes", "sens=high", 12)
         elif sensitive_ok == "no":
             score -= 15
+            _record("common_sensitive_ok_no_penalty", "敏感肌には合わないとされている", "sensitive_ok=no", "sens=high", -15)
         else:
             score += 0
 
@@ -8503,10 +8591,16 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     if retinol_level > 0:
         if retinol_limit == 0:
             score -= 20
+            _record("common_retinol_beginner_penalty", "レチノール未経験者には濃度が高すぎる",
+                    f"retinol_level={retinol_level}", "exp=beginner", -20)
         elif retinol_level > retinol_limit:
             score -= 12
+            _record("common_retinol_over_limit_penalty", "ユーザーの経験レベルよりレチノール濃度が高い",
+                    f"retinol_level={retinol_level}", f"retinol_limit={retinol_limit}", -12)
         elif retinol_level == retinol_limit:
             score += 4
+            _record("common_retinol_level_match", "ユーザーの経験レベルとレチノール濃度が合う",
+                    f"retinol_level={retinol_level}", f"retinol_limit={retinol_limit}", 4)
 
     # -------------------------------------------------
     # 7. contraindications
@@ -8514,21 +8608,31 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     if sens == "high":
         if "sensitive_skin" in product_contra:
             score -= 12
+            _record("common_contra_sensitive_skin", "敏感肌に注意とされている成分・処方",
+                    "sensitive_skin", "sens=high", -12)
         if "high_irritation_risk" in product_contra:
             score -= 15
+            _record("common_contra_high_irritation", "刺激リスクが高いとされている成分・処方",
+                    "high_irritation_risk", "sens=high", -15)
         if "redness_prone" in product_contra:
             score -= 10
+            _record("common_contra_redness_prone", "赤みが出やすいとされている成分・処方",
+                    "redness_prone", "sens=high", -10)
 
     if "acid_same_routine" in product_contra and ingredient_tag in [
         "aha", "bha", "pha", "lha",
         "glycolic_acid", "lactic_acid", "mandelic_acid", "salicylic_acid"
     ]:
         score -= 8
+        _record("common_contra_acid_same_routine", "酸系成分の同時使用に注意とされている",
+                "acid_same_routine", ingredient_tag, -8)
 
     if "retinol_same_routine" in product_contra and ingredient_tag in [
         "retinol", "retinal", "retinoid"
     ]:
         score -= 10
+        _record("common_contra_retinol_same_routine", "レチノール系の同時使用に注意とされている",
+                "retinol_same_routine", ingredient_tag, -10)
 
     # morning_use_caution / photosensitivity は score_product で -9999 除外済みのため
     # ここでの追加ペナルティは不要
@@ -8539,40 +8643,57 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     if sens == "high":
         if "low_irritation" in product_formulation:
             score += 8
+            _record("common_formulation_low_irritation", "低刺激処方", "low_irritation", "sens=high", 8)
         if "mild_formula" in product_formulation:
             score += 6
+            _record("common_formulation_mild", "マイルド処方", "mild_formula", "sens=high", 6)
         if "barrier_formula" in product_formulation:
             score += 5
+            _record("common_formulation_barrier_sensitive", "バリア重視処方(敏感肌向け)", "barrier_formula", "sens=high", 5)
 
     if "dryness" in concern_tags or "barrier" in concern_tags:
+        matched_concern = "dryness" if "dryness" in concern_tags else "barrier"
         if "barrier_formula" in product_formulation:
             score += 8
+            _record("common_formulation_barrier_concern", "バリア重視処方", "barrier_formula", matched_concern, 8)
         if "ceramide" in product_support:
             score += 6
+            _record("common_support_ceramide", "セラミド配合", "ceramide", matched_concern, 6)
         if "cholesterol" in product_support:
             score += 5
+            _record("common_support_cholesterol", "コレステロール配合", "cholesterol", matched_concern, 5)
         if "fatty_acid" in product_support:
             score += 4
+            _record("common_support_fatty_acid", "脂肪酸配合", "fatty_acid", matched_concern, 4)
         if product_texture in ["cream", "rich"]:
             score += 5
+            _record("common_texture_rich", "こっくりしたテクスチャ", product_texture, matched_concern, 5)
 
     if "oil_control" in concern_tags or "pores" in concern_tags or "acne" in concern_tags:
+        matched_concern = next(c for c in ["oil_control", "pores", "acne"] if c in concern_tags)
         if product_texture in ["light", "watery", "gel", "essence", "foam"]:
             score += 6
+            _record("common_texture_light", "軽いテクスチャ", product_texture, matched_concern, 6)
         if "low_ph" in product_formulation:
             score += 3
+            _record("common_formulation_low_ph", "低pH処方", "low_ph", matched_concern, 3)
 
     if "whitening" in concern_tags or "dullness" in concern_tags:
+        matched_concern = "whitening" if "whitening" in concern_tags else "dullness"
         if "tone_up" in product_formulation:
             score += 6
+            _record("common_formulation_tone_up", "トーンアップ処方", "tone_up", matched_concern, 6)
         if "stabilized_vitamin_c" in product_technology:
             score += 8
+            _record("common_technology_stabilized_vc", "安定化ビタミンC技術", "stabilized_vitamin_c", matched_concern, 8)
 
     if "aging" in concern_tags:
         if "liposome" in product_formulation:
             score += 12
+            _record("common_formulation_liposome", "リポソーム処方", "liposome", "aging", 12)
         if "nano_capsule" in product_technology:
             score += 8
+            _record("common_technology_nano_capsule", "ナノカプセル技術", "nano_capsule", "aging", 8)
 
     # -------------------------------------------------
     # 9. main_functions 一致
@@ -8581,6 +8702,8 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
         f_norm = normalize_text(f)
         if f_norm and (f_norm in purpose or purpose in f_norm):
             score += 6
+            _record("common_main_function_purpose_match", "商品の機能が今回の目的と一致する",
+                    f, step.get("purpose", ""), 6)
 
     # -------------------------------------------------
     # 10. availability_japan
@@ -8588,13 +8711,22 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     # ai_virtual は Gemini が生成した架空商品のため availability_japan は実在を保証しない
     # 加点をゼロにすることで実在商品（rakuten_criteria / verified_cache）との公平性を確保する
     if product.get("_source_hint") != "ai_virtual":
-        score += get_availability_score(availability)
+        availability_points = get_availability_score(availability)
+        score += availability_points
+        if availability_points:
+            _record("common_availability", "日本での入手性が確認されている",
+                    "、".join(availability) if isinstance(availability, list) else str(availability),
+                    "", availability_points)
 
     # -------------------------------------------------
     # 11. 予算適合
     # -------------------------------------------------
     if isinstance(price_ref, (int, float)) and budget_value > 0:
-        score += get_budget_fit_score(price_ref, budget_value)
+        budget_points = get_budget_fit_score(price_ref, budget_value)
+        score += budget_points
+        if budget_points:
+            _record("common_budget_fit", "今回の予算に合う価格帯", f"price_ref={price_ref}",
+                    f"budget={budget_value}", budget_points)
 
     # -------------------------------------------------
     # 12. brand軽補正（任意）
@@ -8605,11 +8737,25 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     return score
 
 
-def apply_cleansing_score_rules(product, user_data, concern_tags):
+def apply_cleansing_score_rules(product, user_data, concern_tags, reasons=None):
     """
     クレンジング向けスコア
+
+    reasons(任意): score_goal_fit()と同じ意味(採点根拠トレース)。
+    reasons=Noneならスコア計算は一切変更しない。
     """
     score = 0
+
+    def _record(rule, label, feature, condition, points):
+        if reasons is not None:
+            reasons.append({
+                "axis": "base",
+                "rule": rule,
+                "label": label,
+                "matched_product_feature": feature,
+                "matched_user_condition": condition,
+                "points": points,
+            })
 
     product_actives = product.get("active_ingredients", [])
     product_support = list(product.get("support_ingredients", []) or [])
@@ -8643,97 +8789,133 @@ def apply_cleansing_score_rules(product, user_data, concern_tags):
     if sens == "high":
         if sensitive_ok == "yes":
             score += 12
+            _record("cleansing_sensitive_ok_yes", "敏感肌向けとして確認されている", "sensitive_ok=yes", "sens=high", 12)
         elif sensitive_ok == "unknown":
             score += 4
+            _record("cleansing_sensitive_ok_unknown", "敏感肌適性は不明だが減点対象ではない", "sensitive_ok=unknown", "sens=high", 4)
         elif sensitive_ok == "no":
             score -= 12
+            _record("cleansing_sensitive_ok_no_penalty", "敏感肌には合わないとされている", "sensitive_ok=no", "sens=high", -12)
 
         if "low_irritation" in formulation:
             score += 8
+            _record("cleansing_low_irritation", "低刺激処方", "low_irritation", "sens=high", 8)
 
         if "low_friction" in functions or "low_friction_system" in technology:
             score += 8
+            _record("cleansing_low_friction", "低摩擦設計", "low_friction", "sens=high", 8)
 
         if "non_stripping" in functions:
             score += 8
+            _record("cleansing_non_stripping_sensitive", "肌に必要な油分を奪いにくい", "non_stripping", "sens=high", 8)
 
         if "barrier_preserving" in functions or "barrier_preserving" in formulation:
             score += 8
+            _record("cleansing_barrier_preserving_sensitive", "バリア機能を守る設計", "barrier_preserving", "sens=high", 8)
 
         if "essential_oil_caution" in contraindications:
             score -= 8
+            _record("cleansing_essential_oil_caution", "精油配合で刺激注意とされている", "essential_oil_caution", "sens=high", -8)
 
     # =========================
     # 乾燥・バリア
     # =========================
     if "dryness" in concern_tags or "barrier" in concern_tags:
+        matched_concern = "dryness" if "dryness" in concern_tags else "barrier"
         if "ceramide" in product_support:
             score += 8
+            _record("cleansing_support_ceramide", "セラミド配合", "ceramide", matched_concern, 8)
         if "panthenol" in product_support:
             score += 6
+            _record("cleansing_support_panthenol", "パンテノール配合", "panthenol", matched_concern, 6)
         if "beta_glucan" in product_support:
             score += 5
+            _record("cleansing_support_beta_glucan", "ベータグルカン配合", "beta_glucan", matched_concern, 5)
         if "glycerin" in product_support:
             score += 4
+            _record("cleansing_support_glycerin", "グリセリン配合", "glycerin", matched_concern, 4)
         if "squalane" in product_support:
             score += 4
+            _record("cleansing_support_squalane", "スクワラン配合", "squalane", matched_concern, 4)
 
         if "mild_formula" in formulation or "low_irritation" in formulation:
             score += 6
+            _record("cleansing_mild_formula_dryness", "マイルド処方", "mild_formula", matched_concern, 6)
 
         if "non_stripping" in functions:
             score += 10
+            _record("cleansing_non_stripping_dryness", "肌に必要な油分を奪いにくい", "non_stripping", matched_concern, 10)
 
         if "barrier_preserving" in functions or "barrier_preserving" in formulation:
             score += 10
+            _record("cleansing_barrier_preserving_dryness", "バリア機能を守る設計", "barrier_preserving", matched_concern, 10)
 
     # =========================
     # 赤み・ニキビ
     # =========================
     if "acne" in concern_tags or "redness" in concern_tags:
+        matched_concern = "acne" if "acne" in concern_tags else "redness"
         if "cica" in product_support:
             score += 6
+            _record("cleansing_support_cica", "シカ配合", "cica", matched_concern, 6)
         if "heartleaf" in product_support:
             score += 5
+            _record("cleansing_support_heartleaf", "ドクダミ(heartleaf)配合", "heartleaf", matched_concern, 5)
         if "dipotassium_glycyrrhizate" in product_support:
             score += 5
+            _record("cleansing_support_glycyrrhizate", "グリチルリチン酸ジカリウム配合", "dipotassium_glycyrrhizate", matched_concern, 5)
         if "low_irritation" in formulation:
             score += 6
+            _record("cleansing_low_irritation_acne", "低刺激処方", "low_irritation", matched_concern, 6)
         if "pore_preventive" in functions:
             score += 6
+            _record("cleansing_pore_preventive_acne", "毛穴悪化を防ぐ機能", "pore_preventive", matched_concern, 6)
 
     # =========================
     # 毛穴・皮脂
     # =========================
     if "oil_control" in concern_tags or "pores" in concern_tags:
+        matched_concern = "oil_control" if "oil_control" in concern_tags else "pores"
         if texture in ["light", "gel", "watery", "foam"]:
             score += 5
+            _record("cleansing_texture_light_oily", "軽いテクスチャ", texture, matched_concern, 5)
         if "clay" in product_actives or "clay" in product_support:
             score += 4
+            _record("cleansing_clay", "クレイ配合", "clay", matched_concern, 4)
         if "enzyme" in product_actives or "enzyme" in product_support:
             score += 4
+            _record("cleansing_enzyme", "酵素配合", "enzyme", matched_concern, 4)
         if "charcoal" in product_actives or "charcoal" in product_support:
             score += 3
+            _record("cleansing_charcoal", "炭配合", "charcoal", matched_concern, 3)
         if "sebum_cleansing" in functions:
             score += 7
+            _record("cleansing_sebum_cleansing", "皮脂洗浄機能", "sebum_cleansing", matched_concern, 7)
         if "pore_preventive" in functions:
             score += 8
+            _record("cleansing_pore_preventive_pores", "毛穴悪化を防ぐ機能", "pore_preventive", matched_concern, 8)
         if "blackhead_prevention" in functions:
             score += 6
+            _record("cleansing_blackhead_prevention", "黒ずみ予防機能", "blackhead_prevention", matched_concern, 6)
 
     # =========================
     # 基本機能
     # =========================
     if "makeup_removal" in functions:
         score += 10
+        _record("cleansing_makeup_removal", "メイク落とし機能", "makeup_removal", "", 10)
     if "sunscreen_removal" in functions:
         score += 6
+        _record("cleansing_sunscreen_removal", "日焼け止め落とし機能", "sunscreen_removal", "", 6)
     if "daily_use_friendly" in functions:
         score += 4
+        _record("cleansing_daily_use_friendly", "毎日使いやすい処方", "daily_use_friendly", "", 4)
     if "easy_rinse" in functions or "easy_rinse_system" in technology:
         score += 4
+        _record("cleansing_easy_rinse", "すすぎやすい設計", "easy_rinse", "", 4)
     if "residue_free" in functions:
         score += 4
+        _record("cleansing_residue_free", "洗い残りしにくい", "residue_free", "", 4)
 
     # =========================
     # メイク濃さとの相性
@@ -8741,16 +8923,22 @@ def apply_cleansing_score_rules(product, user_data, concern_tags):
     if makeup_level == "heavy":
         if "heavy_makeup_ok" in functions:
             score += 10
+            _record("cleansing_heavy_makeup_ok", "濃いメイクに対応", "heavy_makeup_ok", "makeup_level=heavy", 10)
         elif "light_makeup_ok" in functions:
             score -= 6
+            _record("cleansing_heavy_makeup_mismatch", "薄いメイク向けで今回のメイクの濃さに合わない",
+                    "light_makeup_ok", "makeup_level=heavy", -6)
         else:
             score -= 3
+            _record("cleansing_heavy_makeup_unknown_penalty", "メイクの濃さへの対応が不明", "", "makeup_level=heavy", -3)
 
     elif makeup_level == "light":
         if "light_makeup_ok" in functions:
             score += 5
+            _record("cleansing_light_makeup_ok", "薄いメイクに対応", "light_makeup_ok", "makeup_level=light", 5)
         if "low_friction" in functions or "low_friction_system" in technology:
             score += 3
+            _record("cleansing_low_friction_light", "低摩擦設計", "low_friction", "makeup_level=light", 3)
 
     # =========================
     # 朝洗顔兼用適性
@@ -8758,10 +8946,13 @@ def apply_cleansing_score_rules(product, user_data, concern_tags):
     if morning_cleanse == "yes":
         if "morning_cleanse_ok" in functions:
             score += 5
+            _record("cleansing_morning_ok", "朝洗顔兼用に対応", "morning_cleanse_ok", "morning_cleanse=yes", 5)
         if "daily_use_friendly" in functions:
             score += 4
+            _record("cleansing_daily_use_friendly_morning", "毎日使いやすい処方", "daily_use_friendly", "morning_cleanse=yes", 4)
         if "non_stripping" in functions:
             score += 4
+            _record("cleansing_non_stripping_morning", "肌に必要な油分を奪いにくい", "non_stripping", "morning_cleanse=yes", 4)
 
     # =========================
     # 肌質との相性
@@ -8769,20 +8960,28 @@ def apply_cleansing_score_rules(product, user_data, concern_tags):
     if skin == "dry":
         if "non_stripping" in functions:
             score += 6
+            _record("cleansing_non_stripping_dry_skin", "肌に必要な油分を奪いにくい", "non_stripping", "oil=dry", 6)
         if "barrier_preserving" in functions or "barrier_preserving" in formulation:
             score += 6
+            _record("cleansing_barrier_preserving_dry_skin", "バリア機能を守る設計", "barrier_preserving", "oil=dry", 6)
         if texture in ["gel", "milk", "balm"]:
             score += 3
+            _record("cleansing_texture_dry_skin", "乾燥肌向けのテクスチャ", texture, "oil=dry", 3)
 
     if skin in ["oily", "mixed"]:
         if "sebum_cleansing" in functions:
             score += 6
+            _record("cleansing_sebum_cleansing_oily_skin", "皮脂洗浄機能", "sebum_cleansing", f"oil={skin}", 6)
         if "pore_preventive" in functions:
             score += 5
+            _record("cleansing_pore_preventive_oily_skin", "毛穴悪化を防ぐ機能", "pore_preventive", f"oil={skin}", 5)
         if texture in ["gel", "watery", "foam"]:
             score += 4
+            _record("cleansing_texture_oily_skin", "オイリー肌向けのテクスチャ", texture, f"oil={skin}", 4)
         if texture in ["oil", "balm"] and "easy_rinse" not in functions and "easy_rinse_system" not in technology:
             score -= 3
+            _record("cleansing_oily_texture_penalty", "オイル/バーム系でオイリー肌にはすすぎ負担になりやすい",
+                    texture, f"oil={skin}", -3)
 
     return score
 
@@ -8875,11 +9074,25 @@ def build_cleansing_subscores(product, user_data, concern_tags):
         "pore_score": max(0, min(pore_score, 100)),
     }
 
-def apply_sunscreen_score_rules(product, step, user_data, concern_tags):
+def apply_sunscreen_score_rules(product, step, user_data, concern_tags, reasons=None):
     """
     日焼け止め向け
+
+    reasons(任意): score_goal_fit()と同じ意味(採点根拠トレース)。
+    reasons=Noneならスコア計算は一切変更しない。
     """
     score = 0
+
+    def _record(rule, label, feature, condition, points):
+        if reasons is not None:
+            reasons.append({
+                "axis": "base",
+                "rule": rule,
+                "label": label,
+                "matched_product_feature": feature,
+                "matched_user_condition": condition,
+                "points": points,
+            })
 
     product_actives = product.get("active_ingredients", [])
     product_support = product.get("support_ingredients", [])
@@ -8894,44 +9107,61 @@ def apply_sunscreen_score_rules(product, step, user_data, concern_tags):
     if sens == "high":
         if sensitive_ok == "yes":
             score += 12
+            _record("sunscreen_sensitive_ok_yes", "敏感肌向けとして確認されている", "sensitive_ok=yes", "sens=high", 12)
         elif sensitive_ok == "no":
             score -= 15
+            _record("sunscreen_sensitive_ok_no_penalty", "敏感肌には合わないとされている", "sensitive_ok=no", "sens=high", -15)
 
     if "acne" in concern_tags or "redness" in concern_tags:
+        matched_concern = "acne" if "acne" in concern_tags else "redness"
         if "low_irritation" in product_formulation:
             score += 8
+            _record("sunscreen_low_irritation", "低刺激処方", "low_irritation", matched_concern, 8)
         if "cica" in product_support:
             score += 6
+            _record("sunscreen_support_cica", "シカ配合", "cica", matched_concern, 6)
 
     if skin == "oily":
         if product_texture in ["light", "watery", "gel", "essence"]:
             score += 8
+            _record("sunscreen_texture_oily", "オイリー肌向けの軽いテクスチャ", product_texture, "oil=oily", 8)
         if "waterproof" in product_formulation:
             score += 6
+            _record("sunscreen_waterproof", "ウォータープルーフ処方", "waterproof", "oil=oily", 6)
 
     if skin == "dry":
         if product_texture in ["cream", "rich"]:
             score += 8
+            _record("sunscreen_texture_dry", "乾燥肌向けのこっくりしたテクスチャ", product_texture, "oil=dry", 8)
         if "hyaluronic_acid" in product_support:
             score += 6
+            _record("sunscreen_support_hyaluronic", "ヒアルロン酸配合", "hyaluronic_acid", "oil=dry", 6)
         if "ceramide" in product_support:
             score += 6
+            _record("sunscreen_support_ceramide", "セラミド配合", "ceramide", "oil=dry", 6)
 
     if "whitening" in concern_tags or "dullness" in concern_tags:
+        matched_concern = "whitening" if "whitening" in concern_tags else "dullness"
         if "tone_up" in product_formulation:
             score += 6
+            _record("sunscreen_tone_up", "トーンアップ処方", "tone_up", matched_concern, 6)
 
     if "uv_filter" in product_actives:
         score += 5
+        _record("sunscreen_uv_filter", "UVフィルター配合", "uv_filter", "", 5)
     if "zinc_oxide" in product_actives:
         score += 4
+        _record("sunscreen_zinc_oxide", "酸化亜鉛配合", "zinc_oxide", "", 4)
     if "titanium_dioxide" in product_actives:
         score += 4
+        _record("sunscreen_titanium_dioxide", "酸化チタン配合", "titanium_dioxide", "", 4)
 
     if "紫外線防御" in functions:
         score += 8
+        _record("sunscreen_uv_defense_function", "紫外線防御機能", "紫外線防御", "", 8)
     if "光ダメージケア" in functions:
         score += 4
+        _record("sunscreen_photo_damage_care", "光ダメージケア機能", "光ダメージケア", "", 4)
 
     uv_info = product.get("uv_level") or {}
     spf_raw = str(uv_info.get("spf", 0) or "0").strip()
@@ -8950,17 +9180,23 @@ def apply_sunscreen_score_rules(product, step, user_data, concern_tags):
 
     if spf >= 50:
         score += 10
+        _record("sunscreen_spf_50", "SPF50以上", f"spf={spf}", "", 10)
     elif spf >= 30:
         score += 6
+        _record("sunscreen_spf_30", "SPF30以上", f"spf={spf}", "", 6)
     elif spf >= 15:
         score += 3
+        _record("sunscreen_spf_15", "SPF15以上", f"spf={spf}", "", 3)
 
     if pa == "++++":
         score += 8
+        _record("sunscreen_pa_4plus", "PA++++", f"pa={pa}", "", 8)
     elif pa == "+++":
         score += 5
+        _record("sunscreen_pa_3plus", "PA+++", f"pa={pa}", "", 5)
     elif pa == "++":
         score += 2
+        _record("sunscreen_pa_2plus", "PA++", f"pa={pa}", "", 2)
 
     return score
 
@@ -9349,10 +9585,19 @@ def score_product_combination(
 
     return score
 
-def score_product(product, step, user_data, budget_value):
+def _first_matching_keyword(text, keywords):
+    """textに含まれるkeywordsの先頭一致語を返す(無ければ空文字)。
+    採点根拠の記録専用のヘルパーで、スコア計算には一切関与しない。"""
+    for w in keywords:
+        if w in text:
+            return w
+    return ""
+
+
+def score_product(product, step, user_data, budget_value, reasons=None):
     if is_wrong_cleanser_candidate(product,step):
         return -9999
-    
+
     """
     DB商品のベーススコア
     このDB項目に対応:
@@ -9376,8 +9621,26 @@ def score_product(product, step, user_data, budget_value):
     - technology
     - texture
     - contraindications
+
+    reasons(任意): 渡された場合、score_product自身および内部で呼ぶ
+    score_goal_fit/score_signature_ingredients/apply_common_score_rules/
+    apply_cleansing_score_rules/apply_sunscreen_score_rules が実際に
+    加点/減点した箇所の副産物として理由を追記する(採点根拠トレース)。
+    reasons=Noneなら従来と完全に同じ挙動・戻り値(score)のみ
+    (このリストが無ければ一切のオーバーヘッドも追加処理も発生しない)。
     """
-    
+
+    def _record(rule, label, feature, condition, points):
+        if reasons is not None:
+            reasons.append({
+                "axis": "base",
+                "rule": rule,
+                "label": label,
+                "matched_product_feature": feature,
+                "matched_user_condition": condition,
+                "points": points,
+            })
+
     score = 0
 
     if is_non_cosmetic(product):
@@ -9540,12 +9803,13 @@ def score_product(product, step, user_data, budget_value):
         ]):
             return -9999
     score += 40
+    _record("product_category_base_fit", "カテゴリに合致する基礎候補", step_category, step_category, 40)
 
     concern_tags = purpose_to_concern_tags(purpose)
     ingredient_tag = normalize_ingredient_tag(ingredient_focus)
 
-    score += score_goal_fit(product, step)
-    score += score_signature_ingredients(product, step)
+    score += score_goal_fit(product, step, reasons=reasons)
+    score += score_signature_ingredients(product, step, reasons=reasons)
 
     score += apply_common_score_rules(
         product=product,
@@ -9553,7 +9817,8 @@ def score_product(product, step, user_data, budget_value):
         user_data=user_data,
         budget_value=budget_value,
         concern_tags=concern_tags,
-        ingredient_tag=ingredient_tag
+        ingredient_tag=ingredient_tag,
+        reasons=reasons
     )
 
         # カテゴリ別補正
@@ -9561,7 +9826,8 @@ def score_product(product, step, user_data, budget_value):
         score += apply_cleansing_score_rules(
             product=product,
             user_data=user_data,
-            concern_tags=concern_tags
+            concern_tags=concern_tags,
+            reasons=reasons
         )
 
     elif step_category == "日焼け止め":
@@ -9569,7 +9835,8 @@ def score_product(product, step, user_data, budget_value):
             product=product,
             step=step,
             user_data=user_data,
-            concern_tags=concern_tags
+            concern_tags=concern_tags,
+            reasons=reasons
         )
 
     elif step_category in ["クリーム", "乳液"]:
@@ -9581,24 +9848,28 @@ def score_product(product, step, user_data, budget_value):
             " ".join([str(x) for x in product.get("main_functions", []) or []]),
         ]))
 
-        if any(w in product_text for w in [
-            "セラミド",
-            "ヒアルロン酸",
-            "ナイアシンアミド",
-            "パンテノール",
-            "cica",
-            "シカ",
-            "バリア",
-            "保湿",
-            "鎮静"
-        ]):
+        _moisture_keywords = [
+            "セラミド", "ヒアルロン酸", "ナイアシンアミド", "パンテノール",
+            "cica", "シカ", "バリア", "保湿", "鎮静",
+        ]
+        if any(w in product_text for w in _moisture_keywords):
             score += 18
+            _record("moisturizer_keyword_match", "保湿・鎮静系の記述を含む",
+                    _first_matching_keyword(product_text, _moisture_keywords), "", 18)
 
-        if any(tag in concern_tags for tag in ["dryness", "barrier", "redness"]):
+        _matched_moisturizer_concern = next(
+            (tag for tag in ["dryness", "barrier", "redness"] if tag in concern_tags), ""
+        )
+        if _matched_moisturizer_concern:
             score += 12
+            _record("moisturizer_concern_match", "今回の悩みに合うカテゴリ",
+                    step_category, _matched_moisturizer_concern, 12)
 
-        if any(w in product_text for w in ["重い", "こってり", "高保湿"]) and normalize_text(user_data.get("oil", "")) == "oily":
+        _heavy_keywords = ["重い", "こってり", "高保湿"]
+        if any(w in product_text for w in _heavy_keywords) and normalize_text(user_data.get("oil", "")) == "oily":
             score -= 6
+            _record("moisturizer_heavy_texture_oily_penalty", "オイリー肌には重いテクスチャの可能性",
+                    _first_matching_keyword(product_text, _heavy_keywords), "oil=oily", -6)
 
     elif step_category == "パック":
         product_text = normalize_text(" ".join([
@@ -9609,24 +9880,22 @@ def score_product(product, step, user_data, budget_value):
             " ".join([str(x) for x in product.get("main_functions", []) or []]),
         ]))
 
-        if any(w in product_text for w in [
-            "パック",
-            "マスク",
-            "シートマスク",
-            "フェイスマスク",
-            "cica",
-            "シカ",
-            "ヒアルロン酸",
-            "セラミド",
-            "パンテノール",
-            "鎮静",
-            "保湿",
-            "バリア"
-        ]):
+        _pack_keywords = [
+            "パック", "マスク", "シートマスク", "フェイスマスク", "cica", "シカ",
+            "ヒアルロン酸", "セラミド", "パンテノール", "鎮静", "保湿", "バリア",
+        ]
+        if any(w in product_text for w in _pack_keywords):
             score += 20
+            _record("pack_keyword_match", "パック・集中ケア系の記述を含む",
+                    _first_matching_keyword(product_text, _pack_keywords), "", 20)
 
-        if any(tag in concern_tags for tag in ["dryness", "barrier", "redness", "dullness"]):
+        _matched_pack_concern = next(
+            (tag for tag in ["dryness", "barrier", "redness", "dullness"] if tag in concern_tags), ""
+        )
+        if _matched_pack_concern:
             score += 12
+            _record("pack_concern_match", "今回の悩みに合うカテゴリ",
+                    step_category, _matched_pack_concern, 12)
 
     elif step_category == "ピーリング":
         product_text = normalize_text(" ".join([
@@ -9635,35 +9904,37 @@ def score_product(product, step, user_data, budget_value):
             " ".join([str(x) for x in product.get("main_functions", []) or []]),
         ]))
 
-        if any(w in product_text for w in [
-            "aha",
-            "bha",
-            "pha",
-            "lha",
-            "グリコール酸",
-            "乳酸",
-            "サリチル酸",
-            "マンデル酸",
-            "ピーリング",
-            "ピール",
-            "角質",
-            "ゴマージュ"
-        ]):
+        _peeling_keywords = [
+            "aha", "bha", "pha", "lha", "グリコール酸", "乳酸", "サリチル酸",
+            "マンデル酸", "ピーリング", "ピール", "角質", "ゴマージュ",
+        ]
+        if any(w in product_text for w in _peeling_keywords):
             score += 18
+            _record("peeling_keyword_match", "角質ケア・ピーリング系の記述を含む",
+                    _first_matching_keyword(product_text, _peeling_keywords), "", 18)
 
-        if any(tag in concern_tags for tag in ["pores", "texture", "dullness"]):
+        _matched_peeling_concern = next(
+            (tag for tag in ["pores", "texture", "dullness"] if tag in concern_tags), ""
+        )
+        if _matched_peeling_concern:
             score += 10
+            _record("peeling_concern_match", "今回の悩みに合うカテゴリ",
+                    step_category, _matched_peeling_concern, 10)
 
- 
+
     product_actives = product.get("active_ingredients", [])
     if ingredient_tag and ingredient_tag in product_actives:
         score += 15  # ←強めにする（10〜20調整可）
+        _record("product_ingredient_focus_match", "今回重視する成分を主成分として含む",
+                ingredient_tag, ingredient_tag, 15)
 
     product_skin_types = product.get("skin_types") or []
     if user_skin in product_skin_types:
         score += 5
+        _record("product_skin_type_match", "今回の肌質に合う", user_skin, user_skin, 5)
     elif "normal" in product_skin_types:
         score += 2
+        _record("product_skin_type_normal_fallback", "普通肌向けとして幅広く合う", "normal", user_skin, 2)
 
     # ユーザーが明示した肌悩みと商品 concerns の一致ボーナス
     user_concern_tags = get_user_concern_tags(user_data)
@@ -9672,6 +9943,7 @@ def score_product(product, step, user_data, budget_value):
         for tag in user_concern_tags:
             if tag in product_concerns:
                 score += 8
+                _record("product_user_concern_match", "ユーザーが明示した悩みに合う", tag, tag, 8)
 
     return score
 
@@ -10453,11 +10725,37 @@ def score_improvement(product, improvement_plan=None, premium_improvement_priori
 # =========================================================
 # SCORE BLOCK END
 # =========================================================
-def build_improvement_reason(product, improvement_plan=None):
+def build_improvement_reason_details(product, improvement_plan=None):
+    """
+    score_improvement()が実際に評価している改善目標(IMPROVEMENT_KEYWORDS)・
+    カテゴリ・sensitive_okと同じ判定条件を用いて、「何が」「ユーザーの
+    どの改善目標に」「どう評価されたか」を構造化データとして記録する。
+    score_improvement()自体の点数・条件分岐は一切参照・変更しない
+    (このリストは表示用の記録のみで、ランキングには使われない)。
+
+    戻り値: [{"axis": "improve", "rule": str, "label": str,
+              "matched_product_feature": str, "matched_user_condition": str,
+              "points": float|None}, ...]
+    pointsはscore_improvement()の対応する加点箇所と1対1で対応が明確な
+    項目(target一致・日焼け止め/ピーリングカテゴリ・sensitive_ok)のみ設定し、
+    対応が一意に確認できない項目(洗顔/乳液/パック等の一般カテゴリ文言。
+    score_improvement側はCATEGORY_IMPROVEMENT_BONUSという全カテゴリ共通の
+    別加点を使っており、これらの文言と1対1対応しないため)はNoneのまま
+    にする(存在しない対応を捏造しない)。
+    """
     if not isinstance(product, dict):
-        return ""
+        return []
 
     terms = collect_product_terms(product)
+
+    def _first_matching_term(keywords):
+        for term in terms:
+            for keyword in keywords:
+                norm_kw = normalize_text_value(keyword)
+                if norm_kw and norm_kw in term:
+                    return term
+        return ""
+
     targets = infer_improvement_targets(improvement_plan or {})
     category = str(product.get("category", "")).strip()
     sensitive_ok = str(product.get("sensitive_ok", "")).lower()
@@ -10474,41 +10772,119 @@ def build_improvement_reason(product, improvement_plan=None):
         "soothing": "鎮静"
     }
 
-    reasons = []
+    details = []
 
     for target in targets:
         rule = IMPROVEMENT_KEYWORDS.get(target, {})
         label = target_labels.get(target, target)
+        strong_keywords = rule.get("strong", [])
+        support_keywords = rule.get("support", [])
 
-        if term_matches(terms, rule.get("strong", [])):
-            reasons.append(f"{label}に合う主成分を含む")
-        elif term_matches(terms, rule.get("support", [])):
-            reasons.append(f"{label}を支える補助成分を含む")
+        if term_matches(terms, strong_keywords):
+            details.append({
+                "axis": "improve",
+                "rule": f"improvement_target_strong:{target}",
+                "label": f"{label}に合う主成分を含む",
+                "matched_product_feature": _first_matching_term(strong_keywords),
+                "matched_user_condition": label,
+                "points": 28,
+            })
+        elif term_matches(terms, support_keywords):
+            details.append({
+                "axis": "improve",
+                "rule": f"improvement_target_support:{target}",
+                "label": f"{label}を支える補助成分を含む",
+                "matched_product_feature": _first_matching_term(support_keywords),
+                "matched_user_condition": label,
+                "points": 14,
+            })
 
     if category == "日焼け止め":
-        reasons.append("紫外線対策で赤み・色素沈着の悪化を防ぐ")
+        details.append({
+            "axis": "improve",
+            "rule": "improvement_category_sunscreen",
+            "label": "紫外線対策で赤み・色素沈着の悪化を防ぐ",
+            "matched_product_feature": category,
+            "matched_user_condition": "",
+            "points": 16,
+        })
 
     elif category == "ピーリング":
-        reasons.append("角質ケアでくすみ・毛穴目立ちを支える")
+        details.append({
+            "axis": "improve",
+            "rule": "improvement_category_peeling",
+            "label": "角質ケアでくすみ・毛穴目立ちを支える",
+            "matched_product_feature": category,
+            "matched_user_condition": "",
+            "points": 15,
+        })
 
     elif category in ["洗顔", "洗顔料", "クレンジング"]:
-        reasons.append("皮脂や汚れを落とし、ニキビ・毛穴悪化を防ぐ")
+        details.append({
+            "axis": "improve",
+            "rule": "improvement_category_cleansing",
+            "label": "皮脂や汚れを落とし、ニキビ・毛穴悪化を防ぐ",
+            "matched_product_feature": category,
+            "matched_user_condition": "",
+            "points": None,
+        })
 
     elif category in ["乳液", "クリーム"]:
-        reasons.append("バリアを守り、攻め成分を続けやすくする")
+        details.append({
+            "axis": "improve",
+            "rule": "improvement_category_moisturizer",
+            "label": "バリアを守り、攻め成分を続けやすくする",
+            "matched_product_feature": category,
+            "matched_user_condition": "",
+            "points": None,
+        })
 
     elif category == "パック":
-        reasons.append("集中ケアとして保湿・鎮静を補いやすい")
+        details.append({
+            "axis": "improve",
+            "rule": "improvement_category_pack",
+            "label": "集中ケアとして保湿・鎮静を補いやすい",
+            "matched_product_feature": category,
+            "matched_user_condition": "",
+            "points": None,
+        })
 
     if sensitive_ok == "yes":
-        reasons.append("低刺激で継続しやすい")
+        details.append({
+            "axis": "improve",
+            "rule": "improvement_sensitive_friendly",
+            "label": "低刺激で継続しやすい",
+            "matched_product_feature": "sensitive_ok=yes",
+            "matched_user_condition": "",
+            "points": 8,
+        })
 
+    return details
+
+
+def _join_reason_labels(details, limit=3):
+    """reasons詳細リストのlabelを重複除去して先頭limit件だけ" / "で連結する。
+    build_improvement_reason()と、ranking側での文字列生成が同じロジックを
+    共有するための小さな共通ヘルパー(判定ロジックとは無関係)。"""
     unique = []
-    for reason in reasons:
-        if reason not in unique:
-            unique.append(reason)
+    for d in details:
+        label = d.get("label", "") if isinstance(d, dict) else str(d)
+        if label and label not in unique:
+            unique.append(label)
+    return " / ".join(unique[:limit])
 
-    return " / ".join(unique[:3])
+
+def build_improvement_reason(product, improvement_plan=None):
+    """
+    既存呼び出し元向けの後方互換ラッパー。判定ロジックは
+    build_improvement_reason_details()の1箇所にのみ存在し(二重実装しない)、
+    ここではそのlabelを重複除去して先頭3件だけ" / "で連結するだけ
+    (従来の戻り値と完全に同一の文字列を返す)。
+    """
+    if not isinstance(product, dict):
+        return ""
+
+    return _join_reason_labels(build_improvement_reason_details(product, improvement_plan))
 def db_has_matching_ingredient(products, ingredient_focus):
     ingredient_tag = normalize_ingredient_tag(ingredient_focus)
 
@@ -11191,10 +11567,26 @@ def is_discontinued_or_suspicious_product(product):
     return False
 
 
-def score_routine_balance(step, product, routine_context=None):
+def score_routine_balance(step, product, routine_context=None, reasons=None):
+    """
+    reasons(任意): score_goal_fit()と同じ意味(採点根拠トレース)。
+    相乗効果・成分重複・併用評価・ルーティン内での役割等、実際にroutine_scoreへ
+    影響した理由を記録する。reasons=Noneならスコア計算は一切変更しない。
+    """
     profile = infer_active_profile(product)
 
     score = 0
+
+    def _record(rule, label, feature, condition, points):
+        if reasons is not None:
+            reasons.append({
+                "axis": "routine",
+                "rule": rule,
+                "label": label,
+                "matched_product_feature": feature,
+                "matched_user_condition": condition,
+                "points": points,
+            })
 
     families = set(profile.get("families", []))
     strength = profile.get("strength", "low")
@@ -11205,28 +11597,45 @@ def score_routine_balance(step, product, routine_context=None):
     if "ニキビ跡" in purpose or "色素沈着" in purpose:
         if "vitamin_c" in families:
             score += 10
+            _record("routine_purpose_vitamin_c", "ニキビ跡・色素沈着に合うビタミンC系成分",
+                    "vitamin_c", "purpose=ニキビ跡/色素沈着", 10)
         if "retinoid" in families and strength != "high":
             score += 10
+            _record("routine_purpose_retinoid_moderate", "ニキビ跡・色素沈着に合うレチノイド系成分(高強度でない)",
+                    "retinoid", "purpose=ニキビ跡/色素沈着", 10)
         if "azelaic" in families:
             score += 8
+            _record("routine_purpose_azelaic", "ニキビ跡・色素沈着に合うアゼライン酸系成分",
+                    "azelaic", "purpose=ニキビ跡/色素沈着", 8)
         if "niacinamide" in families:
             score += 6
+            _record("routine_purpose_niacinamide_pigment", "ニキビ跡・色素沈着に合うナイアシンアミド",
+                    "niacinamide", "purpose=ニキビ跡/色素沈着", 6)
 
     if "毛穴" in purpose or "ハリ" in purpose:
         if "retinoid" in families:
             score += 12
+            _record("routine_purpose_retinoid_pores", "毛穴・ハリに合うレチノイド系成分",
+                    "retinoid", "purpose=毛穴/ハリ", 12)
         if "peptide" in families:
             score += 10
+            _record("routine_purpose_peptide", "毛穴・ハリに合うペプチド系成分",
+                    "peptide", "purpose=毛穴/ハリ", 10)
         if "niacinamide" in families:
             score += 6
+            _record("routine_purpose_niacinamide_pores", "毛穴・ハリに合うナイアシンアミド",
+                    "niacinamide", "purpose=毛穴/ハリ", 6)
 
     if "barrier" in families:
         score += 6
+        _record("routine_barrier_family", "バリア系の役割を持つ", "barrier", "", 6)
 
     if irritation_risk == "high":
         score -= 10
+        _record("routine_irritation_high_penalty", "刺激リスクが高いとされている", f"irritation_risk={irritation_risk}", "", -10)
     elif irritation_risk == "medium":
         score -= 4
+        _record("routine_irritation_medium_penalty", "刺激リスクが中程度とされている", f"irritation_risk={irritation_risk}", "", -4)
 
     if routine_context and families:
         existing_families = set(routine_context.get("families", []))
@@ -11243,20 +11652,26 @@ def score_routine_balance(step, product, routine_context=None):
             # scope:"any" → 前セクション含む全成分で衝突判定、それ以外は同セッション内のみ
             check_against = (global_families | existing_families) if scope == "any" else existing_families
             conflict = False
+            conflict_pair = ("", "")
             for i, fa in enumerate(rule_fams):
                 for j, fb in enumerate(rule_fams):
                     if i == j:
                         continue
                     if fa in families and fb in check_against:
                         conflict = True
+                        conflict_pair = (fa, fb)
                         break
                 if conflict:
                     break
             if conflict:
                 if severity == "hard":
+                    _record("routine_conflict_hard_block", "他ステップの成分と併用禁忌のため除外",
+                            f"{conflict_pair[0]}×{conflict_pair[1]}", "routine_context.avoid_rules", None)
                     return -9999  # hard block: remove from selection entirely
                 else:
                     score -= 40  # ① soft 衝突ペナルティ（選定を強く抑制するが除外はしない）
+                    _record("routine_conflict_soft_penalty", "他ステップの成分と相性が悪い組み合わせ",
+                            f"{conflict_pair[0]}×{conflict_pair[1]}", "routine_context.avoid_rules", -40)
 
     # -------------------------------------------------------
     # Non-focus active ingredient overlap penalty
@@ -11280,7 +11695,10 @@ def score_routine_balance(step, product, routine_context=None):
             # 他ステップがすでにカバーしている成分との重複
             overlap = non_focus_actives & assigned_focus_tags
             if overlap:
-                score -= len(overlap) * 15
+                overlap_points = -(len(overlap) * 15)
+                score += overlap_points
+                _record("routine_non_focus_overlap_penalty", "今回の主目的ではない成分が他ステップと重複している",
+                        "、".join(sorted(overlap)), "routine_context.assigned_focus_tags", overlap_points)
 
     # -------------------------------------------------------
     # Gemini 由来の相乗効果ボーナス
@@ -11297,17 +11715,21 @@ def score_routine_balance(step, product, routine_context=None):
             if not bonus_val:
                 continue
             synergy_found = False
+            synergy_pair = ("", "")
             for fa in rule_fams:
                 for fb in rule_fams:
                     if fa == fb:
                         continue
                     if fa in families and fb in existing_families:
                         synergy_found = True
+                        synergy_pair = (fa, fb)
                         break
                 if synergy_found:
                     break
             if synergy_found:
                 score += bonus_val
+                _record("routine_synergy_bonus", "他ステップの成分と相乗効果が期待できる組み合わせ",
+                        f"{synergy_pair[0]}×{synergy_pair[1]}", "routine_context.synergy_rules", bonus_val)
 
     return score
 
@@ -11477,7 +11899,8 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
                 flush=True
             )
 
-        base_score = score_product(product, step, user_data, budget_value)
+        base_reasons = []
+        base_score = score_product(product, step, user_data, budget_value, reasons=base_reasons)
 
         if base_score <= -9000:
             if product.get("_source_hint") == "verified_cache":
@@ -11496,14 +11919,17 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             continue
 
         improve_score = score_improvement(product, improvement_plan or {}, premium_improvement_priority)
-        improvement_reason = build_improvement_reason(product, improvement_plan or {})
+        improvement_reason_details = build_improvement_reason_details(product, improvement_plan or {})
+        improvement_reason = _join_reason_labels(improvement_reason_details)
 
         base_weight, improve_weight = get_dynamic_score_weights(step, user_data)
 
+        routine_reasons = []
         routine_score = score_routine_balance(
             step,
             product,
-            routine_context
+            routine_context,
+            reasons=routine_reasons
         )
 
         routine_weight = get_routine_score_weight(step)
@@ -11521,6 +11947,9 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         product["_improve_score"] = round(improve_score, 1)
         product["_routine_score"] = round(routine_score, 1)
         product["_improvement_reason"] = improvement_reason
+        product["_improvement_reason_details"] = improvement_reason_details
+        product["_base_reasons"] = base_reasons
+        product["_routine_reasons"] = routine_reasons
         product["_source"] = product.get("_source_hint", "db")
 
         if product.get("_source_hint") == "rakuten_criteria":
@@ -11608,11 +12037,13 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
                 product["brand"] = brand
 
             enrich_product_metadata_from_ingredients(product)
+            base_reasons = []
             base_score = score_product(
                 product,
                 step,
                 user_data,
-                budget_value
+                budget_value,
+                reasons=base_reasons
             )
 
             if base_score <= -9000:
@@ -11629,10 +12060,12 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
                 user_data
             )
 
+            routine_reasons = []
             routine_score = score_routine_balance(
                 step,
                 product,
-                routine_context
+                routine_context,
+                reasons=routine_reasons
             )
 
             routine_weight = get_routine_score_weight(step)
@@ -11649,10 +12082,13 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             product["_base_score"] = round(base_score, 1)
             product["_improve_score"] = round(improve_score, 1)
             product["_routine_score"] = round(routine_score, 1)
-            product["_improvement_reason"] = build_improvement_reason(
+            product["_improvement_reason_details"] = build_improvement_reason_details(
                 product,
                 improvement_plan or {}
             )
+            product["_improvement_reason"] = _join_reason_labels(product["_improvement_reason_details"])
+            product["_base_reasons"] = base_reasons
+            product["_routine_reasons"] = routine_reasons
             product["_source"] = "ai+db"
 
             all_candidates.append(product)
@@ -11682,11 +12118,13 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             continue
 
         enrich_product_metadata_from_ingredients(virtual)
+        base_reasons = []
         base_score = score_product(
             virtual,
             step,
             user_data,
-            budget_value
+            budget_value,
+            reasons=base_reasons
         )
 
         if base_score <= -9000:
@@ -11703,10 +12141,12 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             user_data
         )
 
+        routine_reasons = []
         routine_score = score_routine_balance(
             step,
             virtual,
-            routine_context
+            routine_context,
+            reasons=routine_reasons
         )
 
         routine_weight = get_routine_score_weight(step)
@@ -11723,10 +12163,13 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         virtual["_base_score"] = round(base_score, 1)
         virtual["_improve_score"] = round(improve_score, 1)
         virtual["_routine_score"] = round(routine_score, 1)
-        virtual["_improvement_reason"] = build_improvement_reason(
+        virtual["_improvement_reason_details"] = build_improvement_reason_details(
             virtual,
             improvement_plan or {}
         )
+        virtual["_improvement_reason"] = _join_reason_labels(virtual["_improvement_reason_details"])
+        virtual["_base_reasons"] = base_reasons
+        virtual["_routine_reasons"] = routine_reasons
 
         all_candidates.append(virtual)
 
@@ -15211,27 +15654,66 @@ _SCORE_COMPONENT_LABELS = {
 }
 
 
-def _unique_structural_differentiator(field, label_fn, best, others):
+def _aggregate_reasons_by_rule(candidate_score_reasons):
     """
-    fieldに指定したリスト型フィールド(main_functions/active_ingredients/
-    support_ingredients等、score_product()/score_goal_fit()/
-    apply_common_score_rules()が実際に評価に使っているフィールドのみを
-    呼び出し側で渡すこと)について、bestには存在し、比較対象othersの
-    全員には一切存在しない値を先頭から1つ返す(無ければNone)。
+    candidate_score_reasons(score_product()/score_routine_balance()/
+    build_improvement_reason_details()が実際の採点箇所の副産物として記録した
+    {"axis","rule","label","matched_product_feature","matched_user_condition","points"}
+    のリスト)をrule単位で集約する。
 
-    「全候補が共通して持つ属性を決め手にしない」「同点(=他候補も持つ)を
-    優位と扱わない」をこの一致チェックで保証する。
+    同じruleが複数回記録された場合(例: concern一致ループで複数タグが一致)は
+    pointsを合計し、matched_product_featureは重複除去して結合する。
+    points=None(score_improvement側でscore_improvement()の対応加点箇所と
+    1対1対応が確認できないと判断した項目)はここで比較対象から除外する
+    (存在しない対応を捏造して比較しない)。
     """
-    best_items = [x for x in (best.get(field) or []) if x]
-    if not best_items:
-        return None
-    others_union = set()
-    for o in others:
-        others_union.update(x for x in (o.get(field) or []) if x)
-    for item in best_items:
-        if item not in others_union:
-            return label_fn(item)
-    return None
+    agg = {}
+    for r in candidate_score_reasons or []:
+        if not isinstance(r, dict):
+            continue
+        rule = r.get("rule", "")
+        points = r.get("points")
+        if not rule or points is None:
+            continue
+        if rule not in agg:
+            agg[rule] = {
+                "points": 0,
+                "label": r.get("label", ""),
+                "feature": [],
+                "matched_user_condition": r.get("matched_user_condition", ""),
+            }
+        agg[rule]["points"] += points
+        feature = r.get("matched_product_feature", "")
+        if feature and feature not in agg[rule]["feature"]:
+            agg[rule]["feature"].append(feature)
+    return agg
+
+
+def _find_decisive_score_reasons(best_agg, others_agg_list):
+    """
+    best_aggの各ruleについて、比較対象othersの全員に対して実際に(同点でなく)
+    合計pointsが上回っているものだけを「順位差に実際に寄与した根拠」として
+    抽出する。othersのうち1件でも同点以上なら、そのruleは決め手として使わない
+    (「全候補共通の加点を決め手にしない」「同点を上回ったと表現しない」を
+    ここで保証する)。gap(bestと他候補最良値との差)が大きい順に返す。
+    """
+    decisive = []
+    for rule, info in best_agg.items():
+        other_points = [oa.get(rule, {}).get("points", 0) for oa in others_agg_list]
+        if not other_points:
+            continue
+        best_other = max(other_points)
+        if info["points"] > best_other:
+            decisive.append({
+                "rule": rule,
+                "label": info["label"],
+                "feature": info["feature"],
+                "matched_user_condition": info["matched_user_condition"],
+                "points": info["points"],
+                "gap": round(info["points"] - best_other, 1),
+            })
+    decisive.sort(key=lambda d: d["gap"], reverse=True)
+    return decisive
 
 
 def _score_axis_advantage(best, others):
@@ -15265,71 +15747,65 @@ def _score_axis_advantage(best, others):
 
 def _build_why_best_text(best, others, step, best_label):
     """
-    why_bestの本文を、1位(best)と比較対象(others=2位・3位)の実データ比較
-    のみから組み立てる。othersは呼び出し側で少なくとも1件以上ある前提
-    (比較対象が無い場合の文言は呼び出し側で別途処理する)。
+    why_bestの本文を、1位(best)と比較対象(others=2位・3位)の
+    「実際の採点理由」(candidate_score_reasons。score_product()/
+    score_routine_balance()/build_improvement_reason_details()が実際に
+    score += / -= した箇所の副産物として記録したもの)の比較のみから
+    組み立てる。othersは呼び出し側で少なくとも1件以上ある前提。
 
-    優先順位: (1)今回のpurpose/concernsとの一致差(build_concern_tags。
-    2位・3位が対応しない悩みにbestだけが対応している) → (2)main_functions
-    固有差 → (3)active_ingredients固有差 → (4)support_ingredients固有差。
-    いずれも「bestには存在し、比較したothers全員には存在しない」場合のみ
-    採用する。見つかった場合のみ、実際に優位なスコア軸(あれば)を補足として
-    添える。構造的な差もスコア優位も一つも無ければ、架空の理由を作らず
-    中立的な文言にする(テンプレートへの機械的な値埋め込みを避けるため、
-    ケースごとに文の骨格自体が変わる設計にしている)。
+    1位商品を単独で解析して理由を推測するのではなく、1位・2位・3位が
+    実際に評価された根拠(rule単位のpoints)を突き合わせ、
+    「1位がothers全員に対して実際に上回っているrule」だけを決め手として使う
+    (同点・全候補共通の加点は決め手にしない)。決め手が複数見つかった場合は
+    差(gap)が大きい順に、実際の該当成分・機能・条件(matched_product_feature/
+    matched_user_condition)を添えて説明する。1位にも他候補にも共通して
+    見られる加点は「共有点」として触れてよいが、決め手としては使わない。
+
+    決定的な採点根拠差が一つも見つからない場合のみ、axis単位のスコア差
+    (_score_axis_advantage、これも同点は使わない)を補助的に使う。
+    それも無ければ、架空の理由を作らず中立的な文言にする。
+    ケースごとに文の骨格自体が変わるため、固定テンプレートへの機械的な
+    値埋め込みにはならない。
     """
-    best_concerns = build_concern_tags(best, step)
-    others_concern_union = set()
-    for o in others:
-        others_concern_union.update(build_concern_tags(o, step))
-    unique_concern = next((c for c in best_concerns if c not in others_concern_union), None)
+    best_agg = _aggregate_reasons_by_rule(best.get("candidate_score_reasons"))
+    others_agg_list = [_aggregate_reasons_by_rule(o.get("candidate_score_reasons")) for o in others]
 
-    unique_function = None
-    unique_active = None
-    unique_support = None
-    if not unique_concern:
-        unique_function = _unique_structural_differentiator("main_functions", lambda x: x, best, others)
-    if not unique_concern and not unique_function:
-        unique_active = _unique_structural_differentiator(
-            "active_ingredients", lambda x: ingredient_map.get(x, x), best, others
-        )
-    if not unique_concern and not unique_function and not unique_active:
-        unique_support = _unique_structural_differentiator(
-            "support_ingredients", lambda x: ingredient_map.get(x, x), best, others
-        )
+    decisive = _find_decisive_score_reasons(best_agg, others_agg_list)
+
+    if decisive:
+        # 決め手ではないが、比較した候補にも見られる加点を最大1つ、
+        # 「共有点」として文脈に添える(ユーザー例「毛穴ケアへの適合は他候補にも
+        # ありつつ〜」に相当)。
+        shared_label = None
+        decisive_rules = {d["rule"] for d in decisive}
+        for rule, info in best_agg.items():
+            if rule in decisive_rules or info["points"] <= 0:
+                continue
+            if any(oa.get(rule, {}).get("points", 0) > 0 for oa in others_agg_list):
+                shared_label = info["label"]
+                break
+
+        phrases = []
+        for d in decisive[:2]:
+            feature_text = "・".join(d["feature"][:2])
+            if feature_text and feature_text != d["label"]:
+                phrases.append(f"{d['label']}({feature_text})")
+            else:
+                phrases.append(d["label"])
+        decisive_text = "、".join(phrases)
+
+        if shared_label:
+            return f"{shared_label}は比較した候補にも見られますが、{best_label}は{decisive_text}で比較した候補より優位だったため選ばれました。"
+        return f"{best_label}は{decisive_text}で比較した候補より優位だったため選ばれました。"
 
     score_adv = _score_axis_advantage(best, others)
-    score_clause = ""
-    if score_adv:
-        axis, gap = score_adv
-        score_clause = f"{_SCORE_COMPONENT_LABELS[axis]}でも比較した候補より{gap}点上回っており、"
-
-    if unique_concern:
-        return (
-            f"今回優先度の高い{unique_concern}に対して、比較した候補の中では{best_label}だけが対応しており、"
-            f"{score_clause}この点が選ばれた理由です。"
-        )
-    if unique_function:
-        return (
-            f"{best_label}は比較した候補には無い「{unique_function}」という特徴を持ち、"
-            f"{score_clause}この点が選ばれた理由です。"
-        )
-    if unique_active:
-        return (
-            f"{best_label}は比較した候補が含まない{unique_active}を含み、"
-            f"{score_clause}この点が選ばれた理由です。"
-        )
-    if unique_support:
-        return (
-            f"{best_label}は比較した候補が含まない{unique_support}を含み、"
-            f"{score_clause}この点が選ばれた理由です。"
-        )
     if score_adv:
         axis, gap = score_adv
         return (
-            f"主要な成分・機能では比較した候補と大きな差はありませんでしたが、"
+            f"{best_label}は個々の採点根拠では比較した候補と大きな差はありませんでしたが、"
             f"{_SCORE_COMPONENT_LABELS[axis]}で比較した候補より{gap}点上回っていたことが選ばれた理由です。"
         )
+
     return "比較した候補との間に明確な優位点は確認できませんでした。総合スコアの僅差で選ばれています。"
 
 
@@ -15343,17 +15819,15 @@ def build_candidate_comparison_notes(top_candidates, step=None, user_data=None):
     ユーザーに適しているか」)とは明確に異なり、あくまで「2位・3位候補と比較
     して、なぜこの商品を1位にしたのか」という比較説明に限定する。
 
-    why_bestは1位商品を単独で解析して理由を推測するのではなく、必ず
-    top_candidates[1:3](2位・3位)との実データ比較(_build_why_best_text)
-    から組み立てる。比較対象が無い、または実際の優位点(構造的な差・
-    スコアの有意差のどちらも)が一つも見つからない場合は、存在しない理由を
+    why_bestは1位商品を単独で解析して理由を後付けで推測するのではなく、
+    normalize_candidate()が保持したcandidate_score_reasons(score_product()/
+    score_routine_balance()/build_improvement_reason_details()が実際に
+    score += / -= した箇所の副産物として記録した採点根拠)を使い、
+    1位・2位・3位の実際の採点根拠そのものを比較して組み立てる
+    (_build_why_best_text)。比較対象が無い、または実際に1位が全候補に対して
+    上回っているrule(決定的な採点根拠差)が一つも見つからない場合は、
+    axis単位のスコア差を補助的に使い、それも無ければ存在しない理由を
     作らず中立的な文言にする。
-
-    normalize_candidate()が保持した実データ(active_ingredients/
-    support_ingredients/main_functions/concerns等、いずれもscore_product()/
-    score_goal_fit()/apply_common_score_rules()が実際に評価へ使っている
-    フィールド)にある値だけを使い、商品データに存在しない成分・機能・効果は
-    一切補完しない。
     戻り値: {"why_best": str, "diffs": [{"label": "2位"|"3位", "text": str}]}
     """
     if not isinstance(top_candidates, list) or not top_candidates:
@@ -15553,6 +16027,20 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
             "concerns": as_tag_list(c.get("concerns")),
             "texture": clean_text(c.get("texture", "")),
             "formulation": as_tag_list(c.get("formulation")),
+            # 採点根拠トレース: select_best_market_candidate()が実際にscore+=/-=
+            # した箇所の副産物として記録したreasons(axis/rule/label/
+            # matched_product_feature/matched_user_condition/points)。
+            # why_best側で1位・2位・3位の実際の採点根拠を比較するために使う。
+            # improve軸は既存のbuild_improvement_reason_details()を、base/routine軸は
+            # score_product()/score_routine_balance()以下のreasons=引数を
+            # そのまま再利用している(二重実装しない)。
+            # 名前は既存のdata["score_reasons"](Gemini肌診断の各スコア根拠、
+            # 完全に別概念)と紛らわしいため、意図的に別名にしている。
+            "candidate_score_reasons": (
+                list(c.get("_improvement_reason_details") or [])
+                + list(c.get("_base_reasons") or [])
+                + list(c.get("_routine_reasons") or [])
+            ),
         }
 
     def build_candidate_identity_keys(candidate):
@@ -15748,7 +16236,9 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
 
     step["top_candidates"] = preserve_ranked_top_candidates(step)
     step["candidate_comparison"] = build_candidate_comparison_notes(step["top_candidates"], step, user_data)
-    step["candidate_comparison_table"] = build_candidate_comparison_table(step["top_candidates"])
+    step["candidate_comparison_table"] = build_candidate_comparison_table(
+        step["top_candidates"], step["candidate_comparison"].get("diffs")
+    )
 
     if step["top_candidates"]:
         best = step["top_candidates"][0]

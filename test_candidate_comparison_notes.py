@@ -37,8 +37,12 @@ def _candidate(
     main_functions=None,
     concerns=None,
     source="db",
+    candidate_score_reasons=None,
 ):
-    """normalize_candidate()通過後の形(必要フィールドのみ)を模したdict。"""
+    """normalize_candidate()通過後の形(必要フィールドのみ)を模したdict。
+    candidate_score_reasonsは採点根拠トレース(score_product()等の副産物)を
+    模したリスト。[{"axis","rule","label","matched_product_feature",
+    "matched_user_condition","points"}, ...]。"""
     return {
         "brand": brand,
         "name": name,
@@ -55,6 +59,19 @@ def _candidate(
         "concerns": concerns or [],
         "texture": "",
         "formulation": [],
+        "candidate_score_reasons": candidate_score_reasons or [],
+    }
+
+
+def _reason(rule, label, feature="", condition="", points=10, axis="base"):
+    """テスト用candidate_score_reasonsエントリを作る小さなヘルパー。"""
+    return {
+        "axis": axis,
+        "rule": rule,
+        "label": label,
+        "matched_product_feature": feature,
+        "matched_user_condition": condition,
+        "points": points,
     }
 
 
@@ -63,8 +80,14 @@ class BuildCandidateComparisonNotesTests(unittest.TestCase):
     # 特徴)から理由を組み立てること
     def test_why_best_cites_feature_absent_from_comparison_candidates(self):
         candidates = [
-            _candidate("モイストローション", main_functions=["高保湿ケア"], concerns=["dryness"], base_score=90),
-            _candidate("競合A", main_functions=["毛穴引き締め"], concerns=[], base_score=60),
+            _candidate(
+                "モイストローション", base_score=90,
+                candidate_score_reasons=[
+                    _reason("common_main_function_purpose_match", "商品の機能が今回の目的と一致する",
+                            feature="高保湿ケア", condition="乾燥対策", points=6),
+                ],
+            ),
+            _candidate("競合A", base_score=60, candidate_score_reasons=[]),
         ]
         step = {"category": "化粧水", "purpose": "乾燥対策"}
         user_data = {"oil": "dry", "concerns": ["dryness"]}
@@ -130,20 +153,23 @@ class BuildCandidateComparisonNotesTests(unittest.TestCase):
 
         result_a = app.build_candidate_comparison_notes(
             [
-                _candidate("商品A", main_functions=["毛穴引き締め"], base_score=90),
-                _candidate("競合1", main_functions=["美白ケア"], base_score=60),
+                _candidate("商品A", base_score=90, candidate_score_reasons=[
+                    _reason("common_main_function_purpose_match", "商品の機能が今回の目的と一致する",
+                            feature="毛穴引き締め", points=6),
+                ]),
+                _candidate("競合1", base_score=60, candidate_score_reasons=[]),
             ],
             step, user_data,
         )
         result_b = app.build_candidate_comparison_notes(
             [
-                _candidate("商品B", main_functions=[], improve_score=90, base_score=10),
-                _candidate("競合2", main_functions=[], improve_score=20, base_score=10),
+                _candidate("商品B", improve_score=90, base_score=10, candidate_score_reasons=[]),
+                _candidate("競合2", improve_score=20, base_score=10, candidate_score_reasons=[]),
             ],
             step, user_data,
         )
         self.assertNotEqual(result_a["why_best"], result_b["why_best"])
-        # 文の骨格自体が異なること(片方は成分/機能由来、もう片方はスコア由来)
+        # 文の骨格自体が異なること(片方は採点根拠(reasons)由来、もう片方はスコア軸由来)
         self.assertIn("毛穴引き締め", result_a["why_best"])
         self.assertIn("改善適合スコア", result_b["why_best"])
 
@@ -152,8 +178,11 @@ class BuildCandidateComparisonNotesTests(unittest.TestCase):
     def test_different_reason_kinds_produce_structurally_different_sentences(self):
         structural = app.build_candidate_comparison_notes(
             [
-                _candidate("商品A", active_ingredients=["niacinamide"], base_score=80),
-                _candidate("競合A", active_ingredients=[], base_score=80),
+                _candidate("商品A", base_score=80, candidate_score_reasons=[
+                    _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                            feature="ナイアシンアミド", points=25),
+                ]),
+                _candidate("競合A", base_score=80, candidate_score_reasons=[]),
             ],
             {}, {},
         )
@@ -330,7 +359,7 @@ class NormalizeCandidateFieldRetentionTests(unittest.TestCase):
     落とさずに保持することを、公開関数finalize_step_data経由で確認する。
     """
 
-    def test_finalize_step_data_preserves_active_ingredients_into_candidate_comparison(self):
+    def test_finalize_step_data_preserves_score_reasons_into_candidate_comparison(self):
         step = {
             "category": "美容液",
             "purpose": "",
@@ -345,10 +374,11 @@ class NormalizeCandidateFieldRetentionTests(unittest.TestCase):
                     "improve_score": 0,
                     "routine_score": 0,
                     "price_ref": 2500,
-                    "active_ingredients": ["niacinamide"],
-                    "main_functions": ["毛穴ケア"],
-                    "concerns": ["pores"],
                     "source": "db",
+                    "_base_reasons": [
+                        _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                                feature="ナイアシンアミド", points=25),
+                    ],
                 },
                 {
                     "brand": "競合ブランド",
@@ -358,22 +388,52 @@ class NormalizeCandidateFieldRetentionTests(unittest.TestCase):
                     "improve_score": 0,
                     "routine_score": 0,
                     "price_ref": 2000,
-                    "active_ingredients": [],
-                    "main_functions": [],
-                    "concerns": [],
                     "source": "db",
+                    "_base_reasons": [],
                 },
             ],
         }
         result_step = app.finalize_step_data(dict(step), {"oil": "oily", "concerns": []})
         why_best = result_step.get("candidate_comparison", {}).get("why_best", "")
-        # active_ingredients/main_functionsがnormalize_candidate通過後も保持されて
-        # いなければ、この特徴語は理由文に一切現れないはず。比較対象(競合美容液)は
-        # どちらも持たないため、real差分として採用されるはず。
-        self.assertTrue(
-            ("毛穴ケア" in why_best) or ("ナイアシンアミド" in why_best),
-            f"商品固有データがwhy_bestへ反映されていません: {why_best!r}",
-        )
+        # _base_reasons(score_product()の副産物)がnormalize_candidate通過後も
+        # candidate_score_reasonsとして保持されていなければ、この特徴語は
+        # why_bestに一切現れないはず。比較対象(競合美容液)は持たないため、
+        # 実際の差分として採用されるはず。
+        self.assertIn("ナイアシンアミド", why_best, f"採点根拠がwhy_bestへ反映されていません: {why_best!r}")
+
+    def test_finalize_step_data_passes_diffs_into_candidate_comparison_table(self):
+        """
+        回帰テスト: finalize_step_data()の通常経路(楽天フォールバックの
+        _refresh_candidate_comparison_after_swap()とは別)でも、
+        build_candidate_comparison_table()へdiffsが渡り、2位・3位の行に
+        diff_from_bestが入ること。
+
+        9bdcbde/e3ce516のいずれのコミットでも、finalize_step_data内の
+        この呼び出し箇所だけdiffsを渡すよう更新されておらず、商品比較表の
+        「1位との違い」列が本番では常に空になっていた(hunk分割時の
+        マーカー不一致により、複数ラウンドにわたり未コミットのまま
+        作業ツリーにだけ残っていた不具合)。今回のセッションで発見・修正した。
+        """
+        step = {
+            "category": "美容液",
+            "purpose": "",
+            "product": "1位美容液",
+            "brand": "ブランドA",
+            "top_candidates": [
+                {"brand": "ブランドA", "name": "1位美容液", "score": 90, "base_score": 90,
+                 "improve_score": 0, "routine_score": 0, "price_ref": 3000, "source": "db"},
+                {"brand": "ブランドB", "name": "2位美容液", "score": 70, "base_score": 70,
+                 "improve_score": 0, "routine_score": 0, "price_ref": 2000, "source": "db"},
+            ],
+        }
+        result_step = app.finalize_step_data(dict(step), {"oil": "oily", "concerns": []})
+        table = result_step.get("candidate_comparison_table", [])
+        diffs = result_step.get("candidate_comparison", {}).get("diffs", [])
+        self.assertTrue(diffs, "diffsが生成されていません(テスト前提が崩れています)")
+        rank2_row = next((r for r in table if r["rank"] == 2), None)
+        self.assertIsNotNone(rank2_row)
+        self.assertNotEqual(rank2_row.get("diff_from_best", ""), "")
+        self.assertEqual(rank2_row["diff_from_best"], diffs[0]["text"])
 
 
 class RakutenFallbackCandidateComparisonRefreshTests(unittest.TestCase):
@@ -387,8 +447,18 @@ class RakutenFallbackCandidateComparisonRefreshTests(unittest.TestCase):
 
     def test_refresh_recomputes_why_best_to_match_new_top_candidate(self):
         old_top = [
-            _candidate("旧1位商品", active_ingredients=["retinol"], base_score=90),
-            _candidate("新1位商品", active_ingredients=["niacinamide"], base_score=70),
+            _candidate("旧1位商品", base_score=90, candidate_score_reasons=[
+                _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                        feature="レチノール", points=25),
+                _reason("common_availability", "日本での入手性が確認されている",
+                        feature="amazon", points=5),
+            ]),
+            _candidate("新1位商品", base_score=90, candidate_score_reasons=[
+                _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                        feature="ナイアシンアミド", points=25),
+                _reason("common_sensitive_ok_yes", "敏感肌向けとして確認されている",
+                        feature="sensitive_ok=yes", points=12),
+            ]),
         ]
         step = {"category": "美容液", "purpose": "", "top_candidates": old_top}
         # フォールバック前: 古いtop_candidatesを基準にcandidate_comparisonが
@@ -418,10 +488,12 @@ class RakutenFallbackCandidateComparisonRefreshTests(unittest.TestCase):
     # して新1位になったケースでも、古い上位3商品の比較情報が残らないこと
     def test_refresh_handles_fallback_from_beyond_top_three(self):
         pool = [
-            _candidate("1位", active_ingredients=["a1"], base_score=90),
-            _candidate("2位", active_ingredients=["a2"], base_score=85),
-            _candidate("3位", active_ingredients=["a3"], base_score=80),
-            _candidate("4位からの繰り上げ", active_ingredients=["a4"], base_score=50),
+            _candidate("1位", base_score=90),
+            _candidate("2位", base_score=85),
+            _candidate("3位", base_score=80),
+            _candidate("4位からの繰り上げ", base_score=50, candidate_score_reasons=[
+                _reason("common_sensitive_ok_yes", "敏感肌向けとして確認されている", feature="sensitive_ok=yes", points=12),
+            ]),
         ]
         step = {"category": "美容液", "purpose": "", "top_candidates": pool}
         step["candidate_comparison"] = app.build_candidate_comparison_notes(pool, step, {})
