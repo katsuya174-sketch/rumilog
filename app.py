@@ -4640,6 +4640,70 @@ _STIMULATING_DEVICE_TYPES = {"RF", "EMS", "超音波洗浄"}
 # ルールを増やしすぎない（楽天のitemName/itemCaptionから拾える最小限の語）。
 _DEVICE_INTENSITY_KEYWORDS = ("業務用", "高出力")
 
+_DEVICE_SELECTION_REASON_FALLBACK = "今回の検索条件に一致する候補の中から、総合的な評価が最も高い商品を選びました。"
+
+
+def _build_device_selection_reason(pool_sorted, device_type, is_high_sensitivity, budget_value):
+    """
+    select_best_beauty_device_candidate()が実際に計算している評価軸
+    (検索適合度／予算適合／価格／レビュー評価／レビュー件数／敏感肌刺激語
+    ペナルティ)のうち、勝者が「取得した候補全体」に対して本当に優位だった
+    項目だけを事実として述べる（同点は優位と書かない）。楽天のitemName/
+    itemCaptionから機能・性能を自由に推測・抽出することはしない。
+    候補が1件しかない場合は比較そのものができないため、中立的な文言を返す。
+
+    device_typeそのものの選定理由(なぜRF/LED等の方式が合うか)は
+    enrich_beauty_devices()側のcategory-level reasonが別に保持しており、
+    この関数はそれを上書きしない。
+    """
+    if len(pool_sorted) < 2:
+        return _DEVICE_SELECTION_REASON_FALLBACK
+
+    _, winner = pool_sorted[0]
+    others = [item for _, item in pool_sorted[1:]]
+
+    parts = []
+
+    winner_review_avg = safe_price(winner.get("reviewAverage", 0))
+    other_review_avgs = [safe_price(o.get("reviewAverage", 0)) for o in others]
+    if other_review_avgs and winner_review_avg > max(other_review_avgs):
+        parts.append(f"レビュー評価が{winner_review_avg}と他候補より高い")
+
+    winner_review_count = safe_price(winner.get("reviewCount", 0))
+    other_review_counts = [safe_price(o.get("reviewCount", 0)) for o in others]
+    if other_review_counts and winner_review_count > max(other_review_counts):
+        parts.append(f"レビュー件数が{winner_review_count}件と他候補より多い")
+
+    winner_price = safe_price(winner.get("itemPrice", 0))
+    other_prices = [
+        safe_price(o.get("itemPrice", 0)) for o in others
+        if safe_price(o.get("itemPrice", 0)) > 0
+    ]
+    if winner_price > 0 and other_prices and winner_price < min(other_prices):
+        parts.append("価格が候補内で最も抑えられている")
+
+    if budget_value and winner_price > 0:
+        winner_ratio = winner_price / budget_value
+        other_over_budget = any(
+            (safe_price(o.get("itemPrice", 0)) / budget_value) > 1.5
+            for o in others if safe_price(o.get("itemPrice", 0)) > 0
+        )
+        if winner_ratio <= 1.5 and other_over_budget:
+            parts.append("予算の範囲内に収まっている")
+
+    if is_high_sensitivity and device_type in _STIMULATING_DEVICE_TYPES:
+        def _has_intensity_keyword(item):
+            text = f"{item.get('itemName', '')} {item.get('itemCaption', '')}"
+            return any(w in text for w in _DEVICE_INTENSITY_KEYWORDS)
+
+        if not _has_intensity_keyword(winner) and any(_has_intensity_keyword(o) for o in others):
+            parts.append("「業務用」「高出力」等の強い表現がなく、敏感肌向けの条件に合っている")
+
+    if not parts:
+        return _DEVICE_SELECTION_REASON_FALLBACK
+
+    return "今回取得した候補の中で、" + "、".join(parts) + "点が他候補より優位だったため、この製品を選びました。"
+
 
 def select_best_beauty_device_candidate(scored_items, device_type, user_data, budget_value):
     """
@@ -4653,9 +4717,13 @@ def select_best_beauty_device_candidate(scored_items, device_type, user_data, bu
 
     ランダム要素は一切ない。同じ候補群・同じuser_data/budget_valueであれば
     常に同じ1件を返す。
+
+    戻り値: (winner_item_or_None, selection_reason)。selection_reasonは
+    「なぜ候補の中からこの商品を選んだか」を示す新規の比較理由で、
+    device_type自体の選定理由(category-level reason)とは別物。
     """
     if not scored_items:
-        return None
+        return None, ""
 
     # 単品優先(fetch_rakuten_itemの既存選定と同じ考え方)。
     single_items = [
@@ -4729,6 +4797,9 @@ def select_best_beauty_device_candidate(scored_items, device_type, user_data, bu
 
     pool_sorted = sorted(pool, key=_sort_key, reverse=True)
     best_score, best_item = pool_sorted[0]
+    selection_reason = _build_device_selection_reason(
+        pool_sorted, device_type, is_high_sensitivity, budget_value
+    )
     print(
         f"[DEVICE SELECT] device_type={device_type} "
         f"winner={best_item.get('itemName','')[:50]!r} "
@@ -4737,7 +4808,7 @@ def select_best_beauty_device_candidate(scored_items, device_type, user_data, bu
         f"candidates={len(pool)}",
         flush=True
     )
-    return best_item
+    return best_item, selection_reason
 
 
 # _SUPPLEMENT_DEFAULTS の ingredient_focus タグ(内部識別子)を、楽天の
@@ -6438,13 +6509,14 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
             category=category,
             brand=brand,
         )
-        best_raw_item = select_best_beauty_device_candidate(
+        best_raw_item, device_selection_reason = select_best_beauty_device_candidate(
             scored_candidates, device_type, user_data, budget_value
         )
         rakuten_item = None
         if best_raw_item:
             _cleaned_name = clean_ai_product_name(clean_display_product_name(product_name))
             rakuten_item = _build_rakuten_result(best_raw_item, _cleaned_name)
+            step["device_selection_reason"] = device_selection_reason
     # サプリメントのみ: 美容機器と同じ考え方で複数の実在候補をユーザー適合度
     # 評価する。カテゴリ固有の評価軸(ingredient_focus一致等)が違うため、
     # 美容機器用のselect_best_beauty_device_candidate()とは明確に呼び分け、
@@ -15226,14 +15298,29 @@ def build_candidate_comparison_notes(top_candidates, step=None, user_data=None):
     return {"why_best": why_best, "diffs": diffs}
 
 
-def build_candidate_comparison_table(top_candidates):
+def build_candidate_comparison_table(top_candidates, diffs=None):
     """
     1〜3位候補の価格・スコア・コスパを並べた比較表を作る（プレミアム機能
     「商品比較」用）。コスパは「1000円あたりのスコア」（score/price*1000）で
     表し、価格が不明な候補は比較対象から除外してNoneにする。
+
+    diffsはbuild_candidate_comparison_notes()が返す
+    [{"label": "2位"|"3位", "text": ...}]。独立した「次点候補」セクションを
+    廃止し、その情報をこの比較表へ統合するために、2位・3位の行へ
+    diff_from_best(1位との違い)として付与する。1位の行は空文字のまま
+    (1位には「1位との違い」は無い)。diffsが渡されない場合は従来通り
+    diff_from_bestは全行空文字になる(後方互換)。
     """
     if not isinstance(top_candidates, list) or not top_candidates:
         return []
+
+    diff_by_label = {}
+    if isinstance(diffs, list):
+        for d in diffs:
+            if isinstance(d, dict) and d.get("label"):
+                diff_by_label[d["label"]] = str(d.get("text", "") or "")
+
+    rank_to_diff_label = {2: "2位", 3: "3位"}
 
     rows = []
     for idx, cand in enumerate(top_candidates[:3], start=1):
@@ -15250,6 +15337,7 @@ def build_candidate_comparison_table(top_candidates):
             "score": round(score, 1),
             "cost_perf": cost_perf,
             "is_best_value": False,
+            "diff_from_best": diff_by_label.get(rank_to_diff_label.get(idx, ""), ""),
         })
 
     valid_cost_perf = [r["cost_perf"] for r in rows if r["cost_perf"] is not None]

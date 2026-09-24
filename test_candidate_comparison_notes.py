@@ -152,6 +152,67 @@ class BuildCandidateComparisonNotesTests(unittest.TestCase):
         self.assertNotIn("基本適合スコア", result["why_best"])
 
 
+class BuildCandidateComparisonTableDiffIntegrationTests(unittest.TestCase):
+    """
+    独立した「次点候補」セクションを廃止し、build_candidate_comparison_notes()の
+    diffsを商品比較テーブル(build_candidate_comparison_table)へ統合したことの
+    テスト。
+    """
+
+    def test_table_keeps_rank_name_price_score_cost_perf_and_best_value(self):
+        candidates = [
+            _candidate("1位商品", score=90, base_score=90, price_ref=3000),
+            _candidate("2位商品", score=70, base_score=70, price_ref=1000),
+            _candidate("3位商品", score=60, base_score=60, price_ref=5000),
+        ]
+        rows = app.build_candidate_comparison_table(candidates)
+        self.assertEqual([r["rank"] for r in rows], [1, 2, 3])
+        for row in rows:
+            self.assertIn("name", row)
+            self.assertIn("price", row)
+            self.assertIn("score", row)
+            self.assertIn("cost_perf", row)
+            self.assertIn("is_best_value", row)
+        # 2位商品(価格1000, score70)が最もコスパが良い
+        self.assertTrue(rows[1]["is_best_value"])
+
+    def test_existing_diffs_are_not_lost_when_merged_into_table(self):
+        candidates = [
+            _candidate("1位商品", score=90, base_score=90, active_ingredients=["niacinamide"], price_ref=3000),
+            _candidate("2位商品", score=70, base_score=70, active_ingredients=["retinol"], price_ref=2000),
+            _candidate("3位商品", score=60, base_score=60, active_ingredients=[], price_ref=5000),
+        ]
+        notes = app.build_candidate_comparison_notes(candidates, {}, {})
+        rows = app.build_candidate_comparison_table(candidates, notes["diffs"])
+
+        rank2_row = next(r for r in rows if r["rank"] == 2)
+        rank3_row = next(r for r in rows if r["rank"] == 3)
+        # diffs(次点候補が持っていた情報)がそのままdiff_from_bestへ残っていること
+        self.assertEqual(rank2_row["diff_from_best"], notes["diffs"][0]["text"])
+        self.assertEqual(rank3_row["diff_from_best"], notes["diffs"][1]["text"])
+        self.assertNotEqual(rank2_row["diff_from_best"], "")
+
+    def test_rank_1_has_no_diff_from_best(self):
+        """1位には「1位との違い」は不要(空文字のまま)。"""
+        candidates = [
+            _candidate("1位商品", score=90, base_score=90, price_ref=3000),
+            _candidate("2位商品", score=70, base_score=70, price_ref=2000),
+        ]
+        notes = app.build_candidate_comparison_notes(candidates, {}, {})
+        rows = app.build_candidate_comparison_table(candidates, notes["diffs"])
+        rank1_row = next(r for r in rows if r["rank"] == 1)
+        self.assertEqual(rank1_row["diff_from_best"], "")
+
+    def test_table_without_diffs_argument_still_works(self):
+        """diffsを渡さない呼び出しでも従来通り動作すること(後方互換)。"""
+        candidates = [
+            _candidate("1位商品", score=90, base_score=90, price_ref=3000),
+            _candidate("2位商品", score=70, base_score=70, price_ref=2000),
+        ]
+        rows = app.build_candidate_comparison_table(candidates)
+        self.assertTrue(all(r["diff_from_best"] == "" for r in rows))
+
+
 class NormalizeCandidateFieldRetentionTests(unittest.TestCase):
     """
     normalize_candidate()(finalize_step_data内のクロージャ)が商品固有データを
