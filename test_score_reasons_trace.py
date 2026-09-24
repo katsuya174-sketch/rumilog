@@ -320,6 +320,64 @@ class SelectBestMarketCandidateRankingStabilityTests(unittest.TestCase):
         self.assertIn("_base_reasons", result1)
         self.assertTrue(result1["_base_reasons"])
 
+        # 回帰テスト(2026-09発見の不具合): best["_top_candidates"]の各要素
+        # (1位・2位・3位すべて)にも_base_reasons等が保持されていること。
+        # 以前はここが欠落しており、キー不存在をスキップする書き方の
+        # テストでは検知できなかった。ここでは「キーが存在する」ことを
+        # 明示的にassertし、スキップしない。
+        top_candidates = result1.get("_top_candidates", [])
+        self.assertGreaterEqual(len(top_candidates), 3, "この検証には最低3候補が必要")
+        for i, c in enumerate(top_candidates[:3]):
+            self.assertIn("_base_reasons", c, f"top_candidates[{i}]に_base_reasonsキーが無い")
+            self.assertIn("_improvement_reason_details", c, f"top_candidates[{i}]に_improvement_reason_detailsキーが無い")
+            self.assertIn("_routine_reasons", c, f"top_candidates[{i}]に_routine_reasonsキーが無い")
+            combined = (
+                c["_base_reasons"] + c["_improvement_reason_details"] + c["_routine_reasons"]
+            )
+            self.assertTrue(combined, f"top_candidates[{i}]の採点根拠が実際には空(何らかの理由が記録されているはず)")
+
+    def test_real_pipeline_propagates_reasons_into_candidate_score_reasons_and_why_best(self):
+        """
+        select_best_market_candidate() → best["_top_candidates"] →
+        step["top_candidates"](実際のパイプラインと同じ代入)→
+        finalize_step_data() → normalize_candidate() →
+        candidate_score_reasons → build_candidate_comparison_notes() → why_best
+        の一連の流れを、実パイプラインの関数のみで(手組みfixtureを介さず)検証する。
+        """
+        step = {
+            "category": "美容液",
+            "purpose": "毛穴ケア",
+            "ingredient_focus": "niacinamide",
+            "product_candidates": [
+                {"brand": "A社", "name": "ナイアシンアミド美容液プロ"},
+                {"brand": "B社", "name": "ヒアルロン酸美容液"},
+                {"brand": "C社", "name": "毛穴集中ケア美容液"},
+            ],
+        }
+        user_data = {"oil": "oily", "sens": "middle", "exp": "middle"}
+
+        best = app.select_best_market_candidate(
+            step, db_products=[], user_data=user_data, budget_value=3000, verified_products=[],
+        )
+        self.assertIsNotNone(best)
+
+        # 実際のパイプライン(app.py:13557/13919)と同じ代入
+        step["top_candidates"] = best.get("_top_candidates", [])
+        result_step = app.finalize_step_data(dict(step), user_data)
+
+        top = result_step.get("top_candidates", [])
+        self.assertGreaterEqual(len(top), 1)
+
+        final_reasons = top[0].get("candidate_score_reasons", [])
+        self.assertTrue(final_reasons, "最終stepのcandidate_score_reasonsが空(データが途中で失われている)")
+
+        why_best = result_step.get("candidate_comparison", {}).get("why_best", "")
+        self.assertNotEqual(why_best, "")
+        # 決定的な採点根拠が使えるケースでは、axisの点差だけを説明する
+        # fallback文言(「個々の採点根拠では...大きな差はありませんでしたが」)
+        # になっていないこと。
+        self.assertNotIn("個々の採点根拠では比較した候補と大きな差はありませんでした", why_best)
+
 
 # =========================================================
 # STEP 3: routine軸 (score_routine_balance)
@@ -485,9 +543,14 @@ class WhyBestUsesRealScoreReasonsTests(unittest.TestCase):
             )
             self.assertIsNotNone(result)
             top_candidates = result.get("_top_candidates", [])
-            self.assertGreaterEqual(len(top_candidates), 1)
+            self.assertGreaterEqual(len(top_candidates), 2)
+            # キーが実際に存在することを明示的に確認する(存在しない場合を
+            # スキップして合格させない。過去にこの書き方の不備で
+            # best["_top_candidates"]のreasons欠落を見逃していた)。
+            for i, c in enumerate(top_candidates):
+                self.assertIn("_base_reasons", c, f"top_candidates[{i}]に_base_reasonsキーが無い")
             # 各候補のreasonsが、他候補のreasonsオブジェクトと同一(混在)でないこと
-            reasons_lists = [c.get("_base_reasons") for c in top_candidates if "_base_reasons" in c]
+            reasons_lists = [c["_base_reasons"] for c in top_candidates]
             for i in range(len(reasons_lists)):
                 for j in range(i + 1, len(reasons_lists)):
                     self.assertIsNot(reasons_lists[i], reasons_lists[j])

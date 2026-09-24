@@ -176,3 +176,108 @@ def test_category_level_reason_and_selection_reason_are_independent_fields():
     assert step["reason"] == "毛穴・たるみ改善に有効なため"
     assert step["device_selection_reason"] != step["reason"]
     assert step["device_selection_reason"]
+
+
+# =========================================================
+# 美容機器の商品固有特徴抽出(_extract_device_appeal_features)
+# ランキング(_fit_score)には未反映。説明文のみで使用する。
+# =========================================================
+
+def test_extracts_feature_from_item_caption():
+    item = make_item("RF美顔器X", 8000, 100, 4.0, "X", caption="毛穴の黒ずみが気になる方に")
+    features = app_module._extract_device_appeal_features(item)
+    assert "毛穴ケア" in features
+
+
+def test_extracts_feature_from_item_name():
+    item = make_item("ハリ・たるみ改善 RF美顔器Y", 8000, 100, 4.0, "Y")
+    features = app_module._extract_device_appeal_features(item)
+    assert "ハリ補給" in features
+
+
+def test_synonyms_normalize_to_same_label():
+    """「うるおい」「潤い」「保湿」はいずれも同じラベル(乾燥対策)へ正規化されること。"""
+    for word in ["うるおい", "潤い", "保湿", "乾燥"]:
+        item = make_item("美顔器", 8000, 100, 4.0, "Z", caption=f"{word}ケアに")
+        features = app_module._extract_device_appeal_features(item)
+        assert features == ["乾燥対策"], f"{word!r} が正規化されていない: {features}"
+
+
+def test_does_not_fabricate_feature_not_in_description():
+    item = make_item("シンプル美顔器", 8000, 100, 4.0, "W", caption="毎日のケアに")
+    features = app_module._extract_device_appeal_features(item)
+    assert features == []
+
+
+def test_unrelated_beauty_marketing_terms_are_not_extracted():
+    """「小顔」等、現在の肌診断項目に対応しない訴求語は抽出対象にしないこと。"""
+    item = make_item("小顔美顔器プレミアム", 8000, 100, 4.0, "V", caption="小顔効果・美肌効果")
+    features = app_module._extract_device_appeal_features(item)
+    assert features == []
+
+
+def test_extraction_is_deterministic_for_same_input():
+    item = make_item("毛穴・くすみケア RF美顔器", 8000, 100, 4.0, "U", caption="ハリも意識した処方")
+    results = {tuple(app_module._extract_device_appeal_features(item)) for _ in range(20)}
+    assert len(results) == 1
+
+
+def test_device_selection_reason_includes_confirmed_feature_wording():
+    """特徴を含める場合、断定的な効果表現ではなく「記載を確認できます」という
+    範囲を超えない表現になること。"""
+    scored_items = [
+        (50, make_item("毛穴ケアRF美顔器", 8000, 200, 4.9, "A", caption="毛穴の目立ちが気になる方に")),
+        (40, make_item("シンプルRF美顔器", 7000, 50, 3.5, "B")),
+    ]
+    best_item, reason = app_module.select_best_beauty_device_candidate(
+        scored_items, "RF", {"sensitivity": "low"}, budget_value=10000,
+    )
+    assert best_item["itemCode"] == "A"
+    assert "毛穴ケア" in reason
+    assert "記載を確認できます" in reason
+    assert "効果がある" not in reason
+    assert "改善します" not in reason
+
+
+def test_device_selection_reason_cites_category_context_without_overriding_it():
+    """category_purpose/category_reasonを渡した場合、既存のcategory-level
+    reasonをそのまま引用し、新たな判定を行わないこと。"""
+    scored_items = [
+        (50, make_item("RF美顔器A", 8000, 100, 4.0, "A")),
+        (40, make_item("RF美顔器B", 7000, 50, 3.0, "B")),
+    ]
+    best_item, reason = app_module.select_best_beauty_device_candidate(
+        scored_items, "RF", {"sensitivity": "low"}, budget_value=0,
+        category_purpose="ハリ・たるみの引き締めケア",
+        category_reason="たるみ・ハリ不足の改善に有効なため",
+    )
+    assert "たるみ・ハリ不足の改善に有効なため" in reason
+
+
+def test_review_and_price_logic_unchanged_when_features_present():
+    """特徴抽出を追加しても、既存のレビュー/価格比較ロジック自体(_fit_scoreの
+    ランキング)は変更されていないこと(勝者・比較文の同時共存を確認)。"""
+    scored_items = [
+        (50, make_item("毛穴ケアRF美顔器A", 8000, 300, 4.9, "A", caption="毛穴ケアに")),
+        (40, make_item("毛穴ケアRF美顔器B", 9000, 50, 3.0, "B", caption="毛穴ケアに")),
+    ]
+    best_item, reason = app_module.select_best_beauty_device_candidate(
+        scored_items, "RF", {"sensitivity": "low"}, budget_value=0,
+    )
+    assert best_item["itemCode"] == "A"
+    assert "レビュー評価" in reason
+    assert "レビュー件数" in reason
+
+
+def test_extraction_does_not_affect_ranking_winner():
+    """特徴抽出は勝者選定(_fit_score/_sort_key)に一切影響しないこと。
+    レビュー・価格で劣るが特徴語が多い候補が不当に繰り上がらないこと。"""
+    scored_items = [
+        (50, make_item("シンプルRF美顔器A", 8000, 300, 4.9, "A")),
+        (40, make_item("毛穴・ハリ・乾燥・皮脂・赤み・ニキビ・キメ・くすみ全部入りRF美顔器B", 8000, 10, 2.0, "B",
+                        caption="毛穴 ハリ 乾燥 皮脂 赤み ニキビ キメ くすみ")),
+    ]
+    best_item, reason = app_module.select_best_beauty_device_candidate(
+        scored_items, "RF", {"sensitivity": "low"}, budget_value=0,
+    )
+    assert best_item["itemCode"] == "A"

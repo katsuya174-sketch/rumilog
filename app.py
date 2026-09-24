@@ -4642,8 +4642,53 @@ _DEVICE_INTENSITY_KEYWORDS = ("業務用", "高出力")
 
 _DEVICE_SELECTION_REASON_FALLBACK = "今回の検索条件に一致する候補の中から、総合的な評価が最も高い商品を選びました。"
 
+# 美容機器のitemName/itemCaptionから安全に抽出してよい肌悩み関連の訴求語。
+# 既存のスキンケア側の統制語彙(_CONCERN_LABEL_MAP/_PURPOSE_KEYWORD_LABELS)と
+# 同じ正規ラベルへ正規化することで、アプリ全体で悩みの呼び方を統一する
+# (美容機器専用の新しいタグ体系は作らない)。「小顔」等、現在の肌診断項目に
+# 対応しないマーケティング表現は意図的に含めていない(採点根拠として
+# 使わないだけでなく、そもそも抽出対象にもしない)。
+# 同義語(例:「うるおい」「潤い」)は同じラベルへ正規化される。
+_DEVICE_FEATURE_KEYWORDS = [
+    ("毛穴", "毛穴ケア"), ("黒ずみ", "毛穴ケア"), ("角栓", "毛穴ケア"),
+    ("ハリ", "ハリ補給"), ("弾力", "ハリ補給"), ("たるみ", "ハリ補給"),
+    ("リフトアップ", "ハリ補給"), ("引き締め", "ハリ補給"),
+    ("乾燥", "乾燥対策"), ("保湿", "乾燥対策"), ("うるおい", "乾燥対策"), ("潤い", "乾燥対策"),
+    ("皮脂", "皮脂コントロール"), ("テカリ", "皮脂コントロール"),
+    ("赤み", "赤み鎮静"), ("鎮静", "赤み鎮静"),
+    ("ニキビ", "ニキビ対策"), ("にきび", "ニキビ対策"), ("吹き出物", "ニキビ対策"),
+    ("キメ", "質感改善"), ("肌質改善", "質感改善"), ("ざらつき", "質感改善"),
+    ("くすみ", "くすみ改善"), ("透明感", "くすみ改善"), ("トーンアップ", "くすみ改善"),
+]
 
-def _build_device_selection_reason(pool_sorted, device_type, is_high_sensitivity, budget_value):
+
+def _extract_device_appeal_features(item):
+    """
+    美容機器候補のitemName/itemCaptionから、_DEVICE_FEATURE_KEYWORDS
+    (既存のスキンケア用統制語彙と同じ正規ラベル体系)に一致する訴求語だけを
+    抽出する。商品説明に実際に書かれている語だけを対象にし、記載のない
+    効果・機能は一切推測・補完しない。同じラベルへ正規化される同義語は
+    重複除去する。戻り値はキーワードリストの出現順に一致したラベルの
+    リスト(空なら[])。
+
+    重要: この関数の戻り値は現時点では_fit_score()のランキング計算には
+    一切使われない(あくまでdevice_selection_reasonの説明文用)。ランキング
+    への反映は別途承認のうえで実装する。
+    """
+    if not isinstance(item, dict):
+        return []
+    text = f"{item.get('itemName', '') or ''} {item.get('itemCaption', '') or ''}"
+    labels = []
+    for keyword, label in _DEVICE_FEATURE_KEYWORDS:
+        if keyword in text and label not in labels:
+            labels.append(label)
+    return labels
+
+
+def _build_device_selection_reason(
+    pool_sorted, device_type, is_high_sensitivity, budget_value,
+    category_purpose="", category_reason="",
+):
     """
     select_best_beauty_device_candidate()が実際に計算している評価軸
     (検索適合度／予算適合／価格／レビュー評価／レビュー件数／敏感肌刺激語
@@ -4654,10 +4699,29 @@ def _build_device_selection_reason(pool_sorted, device_type, is_high_sensitivity
 
     device_typeそのものの選定理由(なぜRF/LED等の方式が合うか)は
     enrich_beauty_devices()側のcategory-level reasonが別に保持しており、
-    この関数はそれを上書きしない。
+    この関数はそれを上書きしない(category_purpose/category_reasonは
+    その内容をそのまま引用するだけで、再判定・上書きはしない)。
+
+    説明の優先順位: (1)今回の肌悩み・選ばれた方式の関係(category_purpose/
+    category_reason、Step1がすでに判断済みの内容をそのまま引用) →
+    (2)この商品の説明で確認できる関連特徴(_extract_device_appeal_features、
+    商品説明に実在する記載のみ。「〜に関する記載を確認できます」という
+    範囲を超えない表現に留め、「効果がある」とは断定しない) →
+    (3)刺激・安全面／レビュー・評価／価格・予算(既存の候補間比較ロジック、
+    parts)。(2)の特徴は現時点では_fit_score()のランキングには反映されて
+    いないため、「この商品が1位になった理由」として断定的には使わず、
+    あくまで商品情報として併記する。
     """
     if len(pool_sorted) < 2:
-        return _DEVICE_SELECTION_REASON_FALLBACK
+        winner_only = pool_sorted[0][1] if pool_sorted else None
+        context_sentence = _device_context_sentence(category_purpose, category_reason, device_type)
+        feature_sentence = _device_feature_sentence(_extract_device_appeal_features(winner_only)) if winner_only else ""
+        if not context_sentence and not feature_sentence:
+            return _DEVICE_SELECTION_REASON_FALLBACK
+        return (
+            context_sentence + feature_sentence
+            + "今回の検索条件に一致する候補がこの1件のみだったため、他候補との比較はできません。"
+        )
 
     _, winner = pool_sorted[0]
     others = [item for _, item in pool_sorted[1:]]
@@ -4699,13 +4763,47 @@ def _build_device_selection_reason(pool_sorted, device_type, is_high_sensitivity
         if not _has_intensity_keyword(winner) and any(_has_intensity_keyword(o) for o in others):
             parts.append("「業務用」「高出力」等の強い表現がなく、敏感肌向けの条件に合っている")
 
-    if not parts:
+    context_sentence = _device_context_sentence(category_purpose, category_reason, device_type)
+    feature_sentence = _device_feature_sentence(_extract_device_appeal_features(winner))
+    comparison_sentence = ""
+    if parts:
+        comparison_sentence = "今回取得した候補の中で、" + "、".join(parts) + "点が他候補より優位だったため、この製品を選びました。"
+
+    if not context_sentence and not feature_sentence and not comparison_sentence:
         return _DEVICE_SELECTION_REASON_FALLBACK
 
-    return "今回取得した候補の中で、" + "、".join(parts) + "点が他候補より優位だったため、この製品を選びました。"
+    if not comparison_sentence:
+        comparison_sentence = "レビュー・価格等では他候補との明確な優位差は確認できませんでした。"
+
+    return context_sentence + feature_sentence + comparison_sentence
 
 
-def select_best_beauty_device_candidate(scored_items, device_type, user_data, budget_value):
+def _device_context_sentence(category_purpose, category_reason, device_type):
+    """
+    Step1(enrich_beauty_devices/Geminiのdevice_type選定)が既に判断済みの
+    「今回の肌悩み・なぜこの方式か」をそのまま引用する。ここでは新たな
+    判定は一切行わない(既存のcategory-level reasonを上書きしない)。
+    """
+    context = str(category_reason or "").strip() or str(category_purpose or "").strip()
+    if not context:
+        return ""
+    return f"今回選ばれた{device_type}の方式について: {context}。"
+
+
+def _device_feature_sentence(features):
+    """
+    商品説明(itemName/itemCaption)から実際に確認できた訴求語を、断定的な
+    効果表現ではなく「記載を確認できます」という事実の範囲に留めて記述する。
+    """
+    if not features:
+        return ""
+    return f"この商品は商品説明で{'・'.join(features[:3])}に関する記載を確認できます。"
+
+
+def select_best_beauty_device_candidate(
+    scored_items, device_type, user_data, budget_value,
+    category_purpose="", category_reason="",
+):
     """
     fetch_rakuten_candidates()が返すスコア済み実在候補群から、この
     device_type内でユーザーに最も合う1件を選ぶ。
@@ -4713,7 +4811,12 @@ def select_best_beauty_device_candidate(scored_items, device_type, user_data, bu
     device_type自体(RF/LED/EMS等のどの方式が合うか)はGeminiが肌状態・改善
     優先順位から既に判断済みのため、ここではその目的適合を再評価しない。
     「同じdevice_typeの中でどの実在商品がこのユーザーに合うか」＝予算適合・
-    敏感度・レビュー品質・score_rakuten_item由来の実在適合スコアのみで評価する。
+    敏感度・レビュー品質・score_rakuten_item由来の実在適合スコアのみで評価する
+    (_fit_scoreのランキング計算式・重みは今回変更していない)。
+
+    category_purpose/category_reason: enrich_beauty_devices()が既に確定
+    させたcategory-level(方式選定)の目的・理由をそのまま引用し、
+    selection_reasonの説明文脈として使う(新たな肌適合判定はしない)。
 
     ランダム要素は一切ない。同じ候補群・同じuser_data/budget_valueであれば
     常に同じ1件を返す。
@@ -4798,7 +4901,8 @@ def select_best_beauty_device_candidate(scored_items, device_type, user_data, bu
     pool_sorted = sorted(pool, key=_sort_key, reverse=True)
     best_score, best_item = pool_sorted[0]
     selection_reason = _build_device_selection_reason(
-        pool_sorted, device_type, is_high_sensitivity, budget_value
+        pool_sorted, device_type, is_high_sensitivity, budget_value,
+        category_purpose=category_purpose, category_reason=category_reason,
     )
     print(
         f"[DEVICE SELECT] device_type={device_type} "
@@ -6515,7 +6619,9 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
             brand=brand,
         )
         best_raw_item, device_selection_reason = select_best_beauty_device_candidate(
-            scored_candidates, device_type, user_data, budget_value
+            scored_candidates, device_type, user_data, budget_value,
+            category_purpose=str(step.get("purpose", "") or ""),
+            category_reason=str(step.get("reason", "") or ""),
         )
         rakuten_item = None
         if best_raw_item:
@@ -12296,6 +12402,16 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             "concerns": c.get("concerns", []),
             "sensitive_ok": c.get("sensitive_ok", "unknown"),
             "texture": c.get("texture", ""),
+            # 採点根拠トレース: このフィールドが無いと、normalize_candidate()の
+            # candidate_score_reasonsが1位・2位・3位すべてで常に空になり、
+            # why_bestが実際の採点根拠を一切使えずaxis/中立fallbackへ
+            # 毎回落ちてしまう(2026-09、実機診断で確認した不具合)。
+            # score_product()/score_routine_balance()/
+            # build_improvement_reason_details()がこのcの元候補dictに
+            # 既に記録済みのものをそのまま保持するだけで、再計算はしない。
+            "_base_reasons": list(c.get("_base_reasons") or []),
+            "_improvement_reason_details": list(c.get("_improvement_reason_details") or []),
+            "_routine_reasons": list(c.get("_routine_reasons") or []),
         }
         for c in top_candidates
     ]
