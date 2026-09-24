@@ -10749,12 +10749,38 @@ def build_improvement_reason_details(product, improvement_plan=None):
     terms = collect_product_terms(product)
 
     def _first_matching_term(keywords):
+        """
+        termsのいずれかにkeywordsのいずれかが部分一致した場合、その
+        「一致したキーワード自体」を返す(一致を含んでいた側のterm全体は
+        返さない)。collect_product_terms()は採点のため商品名・ブランド名も
+        termsに含めており、一致したtermがそのまま商品名(例:「ヒアルロン酸
+        美容液」)だと、表示用のmatched_product_featureに商品名がそのまま
+        出てしまう不具合があったため、常にkeywordを返すよう修正している。
+        """
         for term in terms:
             for keyword in keywords:
                 norm_kw = normalize_text_value(keyword)
                 if norm_kw and norm_kw in term:
-                    return term
+                    return keyword
         return ""
+
+    def _display_safe_feature(raw_keyword):
+        """
+        一致したキーワードをユーザー表示に使ってよい形へ変換する。
+        ingredient_map(内部タグ→日本語ラベル)に存在すればそれを使い、
+        存在せず、かつ英数字・アンダースコアのみの内部識別子らしい語
+        (例: "salicylic_acid"のような未登録タグ)は表示に適さないと判断し、
+        情報を捏造せず空文字を返す(呼び出し側はlabelのみで表示する)。
+        日本語を含む語(例:「アゼライン酸」)はそのまま表示してよい。
+        """
+        if not raw_keyword:
+            return ""
+        mapped = ingredient_map.get(raw_keyword)
+        if mapped:
+            return mapped
+        if re.fullmatch(r"[a-z0-9_]+", raw_keyword):
+            return ""
+        return raw_keyword
 
     targets = infer_improvement_targets(improvement_plan or {})
     category = str(product.get("category", "")).strip()
@@ -10785,7 +10811,7 @@ def build_improvement_reason_details(product, improvement_plan=None):
                 "axis": "improve",
                 "rule": f"improvement_target_strong:{target}",
                 "label": f"{label}に合う主成分を含む",
-                "matched_product_feature": _first_matching_term(strong_keywords),
+                "matched_product_feature": _display_safe_feature(_first_matching_term(strong_keywords)),
                 "matched_user_condition": label,
                 "points": 28,
             })
@@ -10794,7 +10820,7 @@ def build_improvement_reason_details(product, improvement_plan=None):
                 "axis": "improve",
                 "rule": f"improvement_target_support:{target}",
                 "label": f"{label}を支える補助成分を含む",
-                "matched_product_feature": _first_matching_term(support_keywords),
+                "matched_product_feature": _display_safe_feature(_first_matching_term(support_keywords)),
                 "matched_user_condition": label,
                 "points": 14,
             })
@@ -15808,6 +15834,46 @@ def _score_axis_advantage(best, others):
     return best_axis, round(best_gap, 1)
 
 
+# カテゴリが一致していれば同一カテゴリの全候補が定義上必ず得る加点。
+# 順位差の説明には決して使わない(candidate_score_reasons自体には残す)。
+_UNIVERSAL_SHARED_RULES = {"product_category_base_fit"}
+
+
+def _merge_duplicate_reason_phrases(decisive):
+    """
+    label・matched_product_feature・matched_user_condition・kindが完全に
+    一致する(=意味的に同一の理由を説明している)複数のruleを、why_best
+    表示用に1つへ統合する。score_product本体とapply_common_score_rulesが
+    別々のruleとして同じ成分一致等を加点する既存のランキング仕様は変更せず、
+    candidate_score_reasons自体にも両ruleを残したまま、あくまで表示直前の
+    このリストでのみ統合する。
+
+    統合後のgapは元のgapの合計にする(重複除去によって順位差への寄与量を
+    失わないため。単純に先頭1件を残すだけだと、他方のruleが持っていた
+    寄与分が説明から消えてしまう)。
+    """
+    merged = {}
+    order = []
+    for d in decisive:
+        key = (d["label"], tuple(sorted(d["feature"])), d["matched_user_condition"], d["kind"])
+        if key not in merged:
+            merged[key] = {
+                "label": d["label"],
+                "feature": d["feature"],
+                "matched_user_condition": d["matched_user_condition"],
+                "kind": d["kind"],
+                "gap": 0.0,
+                "rules": [],
+            }
+            order.append(key)
+        merged[key]["gap"] += d["gap"]
+        merged[key]["rules"].append(d["rule"])
+
+    result = [merged[k] for k in order]
+    result.sort(key=lambda d: d["gap"], reverse=True)
+    return result
+
+
 def _build_why_best_text(best, others, step, best_label):
     """
     why_bestの本文を、1位(best)と比較対象(others=2位・3位)の
@@ -15824,10 +15890,16 @@ def _build_why_best_text(best, others, step, best_label):
       (B) others全員が実際に受けた減点を1位が受けていない、または減点幅が
           小さいrule(kind="avoidance", _find_penalty_avoidance_reasons)。
     いずれも同点・全候補共通・一部候補にしか優位でないケースは決め手にしない
-    (「全候補を上回った」と誤表現しない)。決め手が複数見つかった場合は
-    差(gap)が大きい順に、実際の該当成分・機能・条件(matched_product_feature/
-    matched_user_condition)を添えて説明する。1位にも他候補にも共通して
-    見られる加点は「共有点」として触れてよいが、決め手としては使わない。
+    (「全候補を上回った」と誤表現しない)。同じ意味の理由が複数ruleに
+    分かれている場合は_merge_duplicate_reason_phrasesで1つの説明へ統合する
+    (寄与量=gapは合算し、失わない)。決め手が複数見つかった場合は差(gap)が
+    大きい順に、実際の該当成分・機能・条件(matched_product_feature/
+    matched_user_condition)を添えて説明する。
+
+    1位にも他候補にも共通して見られる加点は、全候補が一律に持っている場合
+    (_UNIVERSAL_SHARED_RULES、または比較した候補全員が同じ点を持つ場合)は
+    「順位差を生んでいない」ため、why_bestの導入句として機械的には使わない。
+    一部の候補とだけ共通している場合に限り、補助的な文脈として添えてよい。
 
     決定的な採点根拠差が一つも見つからない場合のみ、axis単位のスコア差
     (_score_axis_advantage、これも同点は使わない)を補助的に使う。
@@ -15840,18 +15912,28 @@ def _build_why_best_text(best, others, step, best_label):
 
     gains = _find_decisive_score_reasons(best_agg, others_agg_list)
     avoidances = _find_penalty_avoidance_reasons(best_agg, others_agg_list)
-    decisive = sorted(gains + avoidances, key=lambda d: d["gap"], reverse=True)
+    decisive = _merge_duplicate_reason_phrases(gains + avoidances)
 
     if decisive:
-        # 決め手ではないが、比較した候補にも見られる加点を最大1つ、
+        # 決め手ではないが、一部の比較対象にも見られる加点を最大1つ、
         # 「共有点」として文脈に添える(ユーザー例「毛穴ケアへの適合は他候補にも
-        # ありつつ〜」に相当)。
+        # ありつつ〜」に相当)。全候補が一律に持つ加点(_UNIVERSAL_SHARED_RULES
+        # や、比較した候補全員が同じく持つ加点)は順位差を生んでいないため
+        # 対象外にする(毎回の導入句として機械的に表示しない)。
         shared_label = None
-        decisive_rules = {d["rule"] for d in decisive}
+        decisive_rules = {r for d in decisive for r in d["rules"]}
         for rule, info in best_agg.items():
             if rule in decisive_rules or info["points"] <= 0:
                 continue
-            if any(oa.get(rule, {}).get("points", 0) > 0 for oa in others_agg_list):
+            if rule in _UNIVERSAL_SHARED_RULES:
+                continue
+            other_points_for_rule = [oa.get(rule, {}).get("points", 0) for oa in others_agg_list]
+            if not other_points_for_rule:
+                continue
+            if all(p > 0 for p in other_points_for_rule):
+                # 比較した候補全員が同じく持っている = 順位差を生んでいない
+                continue
+            if any(p > 0 for p in other_points_for_rule):
                 shared_label = info["label"]
                 break
 

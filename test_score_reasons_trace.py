@@ -66,19 +66,26 @@ class ImprovementReasonDetailsTests(unittest.TestCase):
         entry = next(d for d in details if d["rule"] == "improvement_category_cleansing")
         self.assertIsNone(entry["points"])
 
-    def test_matched_product_feature_is_an_actual_term_from_the_product(self):
+    def test_matched_product_feature_is_a_clean_keyword_not_the_raw_product_name(self):
+        """
+        matched_product_featureは、一致判定に使われたterm全体(商品名等を
+        含みうる)ではなく、一致したキーワード自体(可能ならingredient_mapで
+        日本語化)を返すこと。商品名「サリチル酸ジェル」まるごとが
+        featureに出てはならない。
+        """
         product = {
             "name": "サリチル酸ジェル",
             "category": "美容液",
             "active_ingredients": ["salicylic_acid"],
         }
-        # improvement_plan未指定でもtargetsが空になり得るため、明示的にtargetを誘発する
         improvement_plan = {"priority_concerns": ["acne"]}
         details = app.build_improvement_reason_details(product, improvement_plan)
         target_entries = [d for d in details if d["rule"].startswith("improvement_target_")]
+        self.assertTrue(target_entries)
         for entry in target_entries:
             self.assertTrue(entry["matched_product_feature"])
-            self.assertIn(entry["matched_product_feature"], app.collect_product_terms(product))
+            self.assertNotEqual(entry["matched_product_feature"], product["name"])
+            self.assertEqual(entry["matched_product_feature"], "サリチル酸")
 
 
 class NormalizeCandidateRetainsScoreReasonsTests(unittest.TestCase):
@@ -487,7 +494,27 @@ class WhyBestUsesRealScoreReasonsTests(unittest.TestCase):
         finally:
             app.search_rakuten_for_step = orig
 
-    def test_shared_reason_is_mentioned_as_context_not_sole_decisive_point(self):
+    def test_shared_reason_is_mentioned_as_context_when_only_partially_shared(self):
+        """
+        一部の比較対象(2位のみ)とだけ共通する加点は、補助的な文脈として
+        添えてよい(全候補共通の場合とは区別する)。
+        """
+        shared = _reason("common_main_function_purpose_match", "今回の目的に合う機能を持つ", feature="毛穴ケア", points=6)
+        best = self._candidate("1位商品", 90, [
+            dict(shared),
+            _reason("common_sensitive_ok_yes", "敏感肌向けとして確認されている", feature="sensitive_ok=yes", points=12),
+        ])
+        second = self._candidate("2位商品", 80, [dict(shared)])
+        third = self._candidate("3位商品", 75, [])  # 3位はsharedを持たない(一部共有のみ)
+        result = app.build_candidate_comparison_notes([best, second, third], {}, {})
+        why_best = result["why_best"]
+        self.assertIn("は比較した候補にも見られますが", why_best)
+
+    def test_universally_shared_reason_is_not_mentioned_even_as_context(self):
+        """
+        比較した候補全員が共通して持つ加点は、順位差を生んでいないため
+        「共有点」としても導入句に機械的に使わないこと。
+        """
         shared = _reason("common_main_function_purpose_match", "今回の目的に合う機能を持つ", feature="毛穴ケア", points=6)
         best = self._candidate("1位商品", 90, [
             dict(shared),
@@ -496,7 +523,8 @@ class WhyBestUsesRealScoreReasonsTests(unittest.TestCase):
         other = self._candidate("2位商品", 80, [dict(shared)])
         result = app.build_candidate_comparison_notes([best, other], {}, {})
         why_best = result["why_best"]
-        self.assertIn("は比較した候補にも見られますが", why_best)
+        self.assertNotIn("は比較した候補にも見られますが", why_best)
+        self.assertIn("敏感肌向け", why_best)
         self.assertIn("敏感肌向け", why_best)
 
 
@@ -616,6 +644,165 @@ class PenaltyAvoidanceReasonTests(unittest.TestCase):
         ]
         avoidance = app._find_penalty_avoidance_reasons(best_agg, others_agg_list)
         self.assertEqual(avoidance, [])  # gain側(_find_decisive_score_reasons)の担当
+
+
+# =========================================================
+# STEP 6: 表示品質修正(重複理由の統合/商品名・ブランド名の非露出/
+# 全候補共通点の除外)
+# =========================================================
+
+class DuplicateReasonMergeTests(unittest.TestCase):
+    def _candidate(self, name, base_score, reasons):
+        return {
+            "brand": "", "name": name, "score": base_score, "base_score": base_score,
+            "improve_score": 0, "routine_score": 0, "source": "db", "price_ref": 2000,
+            "active_ingredients": [], "support_ingredients": [], "main_functions": [],
+            "skin_types": [], "concerns": [], "texture": "", "formulation": [],
+            "candidate_score_reasons": reasons,
+        }
+
+    def test_same_meaning_different_rules_shown_once_in_why_best(self):
+        """
+        score_product本体のingredient_focus一致(+15)とapply_common_score_rules
+        側の一致(+25)のように、label/feature/matched_user_conditionが完全に
+        同じ別ruleが2件あっても、why_bestでは1回だけ表示すること。
+        """
+        best = self._candidate("1位商品", 90, [
+            _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む", feature="ナイアシンアミド", condition="ナイアシンアミド", points=25),
+            _reason("product_ingredient_focus_match", "今回重視する成分を主成分として含む", feature="ナイアシンアミド", condition="ナイアシンアミド", points=15),
+        ])
+        other = self._candidate("2位商品", 60, [])
+        result = app.build_candidate_comparison_notes([best, other], {}, {})
+        why_best = result["why_best"]
+        self.assertEqual(why_best.count("今回重視する成分を主成分として含む"), 1)
+        self.assertEqual(why_best.count("ナイアシンアミド"), 1)
+
+    def test_internal_candidate_score_reasons_still_holds_both_rules(self):
+        """why_best表示の重複統合は、内部のcandidate_score_reasons自体には影響しないこと。"""
+        reasons = [
+            _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む", feature="ナイアシンアミド", points=25),
+            _reason("product_ingredient_focus_match", "今回重視する成分を主成分として含む", feature="ナイアシンアミド", points=15),
+        ]
+        best = self._candidate("1位商品", 90, reasons)
+        # candidate_score_reasons自体は変更されていないこと(参照している元のリストがそのまま)
+        self.assertEqual(len(best["candidate_score_reasons"]), 2)
+        self.assertEqual(
+            [r["rule"] for r in best["candidate_score_reasons"]],
+            ["ingredient_focus_active_match", "product_ingredient_focus_match"],
+        )
+
+    def test_merged_gap_sums_contributions_not_just_first_rule(self):
+        """統合後の差分計算(gap)は、両ruleの寄与を合算すること(先頭1件だけを
+        残して他方の寄与を失わない)。"""
+        best_agg = app._aggregate_reasons_by_rule([
+            _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む", feature="ナイアシンアミド", points=25),
+            _reason("product_ingredient_focus_match", "今回重視する成分を主成分として含む", feature="ナイアシンアミド", points=15),
+        ])
+        others_agg_list = [app._aggregate_reasons_by_rule([])]
+        gains = app._find_decisive_score_reasons(best_agg, others_agg_list)
+        merged = app._merge_duplicate_reason_phrases(gains)
+        self.assertEqual(len(merged), 1)
+        self.assertEqual(merged[0]["gap"], 40.0)  # 25 + 15
+        self.assertEqual(set(merged[0]["rules"]), {"ingredient_focus_active_match", "product_ingredient_focus_match"})
+
+    def test_different_meaning_reasons_are_not_merged(self):
+        """label/feature/matched_user_conditionが異なる場合は統合しないこと。"""
+        best = self._candidate("1位商品", 90, [
+            _reason("common_support_ceramide", "セラミド配合", feature="セラミド", points=6),
+            _reason("common_support_glycerin", "グリセリン配合", feature="グリセリン", points=4),
+        ])
+        other = self._candidate("2位商品", 70, [])
+        result = app.build_candidate_comparison_notes([best, other], {}, {})
+        why_best = result["why_best"]
+        self.assertIn("セラミド配合", why_best)
+        self.assertIn("グリセリン配合", why_best)
+
+
+class MatchedFeatureDoesNotLeakProductOrBrandNameTests(unittest.TestCase):
+    def test_product_name_containing_keyword_shows_keyword_not_full_name(self):
+        """
+        実出力確認で発見: 商品名「ヒアルロン酸美容液」が改善目標キーワード
+        「ヒアルロン酸」を含む場合、matched_product_featureは「ヒアルロン酸」
+        (ingredient_mapで変換された日本語ラベル)であり、商品名全体
+        「ヒアルロン酸美容液」ではないこと。
+        """
+        product = {"name": "ヒアルロン酸美容液", "category": "美容液", "active_ingredients": []}
+        details = app.build_improvement_reason_details(product, {})
+        dryness_entries = [d for d in details if "dryness" in d["rule"]]
+        self.assertTrue(dryness_entries)
+        for entry in dryness_entries:
+            self.assertEqual(entry["matched_product_feature"], "ヒアルロン酸")
+            self.assertNotEqual(entry["matched_product_feature"], product["name"])
+            self.assertNotIn("美容液", entry["matched_product_feature"])
+
+    def test_brand_name_containing_keyword_does_not_leak_as_feature(self):
+        """ブランド名から一致した場合も、ブランド名全体を成分名として表示しないこと。"""
+        product = {"name": "デイリーケアミルク", "brand": "ヒアルロン酸コスメティクス", "category": "乳液", "active_ingredients": []}
+        details = app.build_improvement_reason_details(product, {})
+        dryness_entries = [d for d in details if "dryness" in d["rule"]]
+        self.assertTrue(dryness_entries)
+        for entry in dryness_entries:
+            self.assertNotIn("コスメティクス", entry["matched_product_feature"])
+            self.assertEqual(entry["matched_product_feature"], "ヒアルロン酸")
+
+    def test_internal_only_keyword_without_mapping_is_omitted_not_fabricated(self):
+        """
+        ingredient_mapに無い、かつ英数字スネークケースのみの内部識別子
+        (例: IMPROVEMENT_KEYWORDS["acne"]["strong"]の"tea_tree")が一致した
+        場合は、表示に不適切な内部語と判断して空文字にする(labelのみで表示、
+        情報を捏造しない)。
+        """
+        product = {"name": "薬用ニキビケアジェル", "category": "美容液", "active_ingredients": ["tea_tree"]}
+        improvement_plan = {"priority_concerns": ["acne"]}
+        details = app.build_improvement_reason_details(product, improvement_plan)
+        acne_entries = [d for d in details if "acne" in d["rule"] and "acne_marks" not in d["rule"]]
+        self.assertTrue(acne_entries)
+        for entry in acne_entries:
+            self.assertEqual(entry["matched_product_feature"], "")
+            self.assertTrue(entry["label"])  # labelのみでも文が成立すること
+
+
+class UniversalSharedReasonExcludedFromWhyBestTests(unittest.TestCase):
+    """
+    実際のscore_product()を使い、全候補共通の「カテゴリに合致する基礎候補」
+    (+40)がwhy_bestの導入句として表示されないことを確認する。
+    """
+
+    def test_category_base_fit_never_appears_in_why_best(self):
+        step = {"category": "美容液", "purpose": "毛穴ケア", "ingredient_focus": "niacinamide"}
+        user_data = {"oil": "oily", "sens": "middle", "exp": "middle"}
+
+        def build(name, actives, concerns):
+            product = {
+                "name": name, "brand": "", "category": "美容液",
+                "active_ingredients": actives, "support_ingredients": [],
+                "concerns": concerns, "skin_types": [], "sensitive_ok": "unknown",
+                "main_functions": [], "ingredient_focus": [], "formulation": [],
+                "technology": [], "texture": "", "contraindications": [],
+                "signature_ingredients": [], "retinol_level": 0, "price_ref": 2500,
+                "availability_japan": [],
+            }
+            base_reasons = []
+            base_score = app.score_product(product, step, user_data, 3000, reasons=base_reasons)
+            product["score"] = base_score
+            product["base_score"] = base_score
+            product["improve_score"] = 0
+            product["routine_score"] = 0
+            product["_base_reasons"] = base_reasons
+            product["_improvement_reason_details"] = []
+            return product
+
+        candidates = [
+            build("1位美容液", ["niacinamide"], ["pores"]),
+            build("2位美容液", [], []),
+        ]
+        candidates.sort(key=lambda c: c["score"], reverse=True)
+        fake_step = dict(step)
+        fake_step["top_candidates"] = candidates
+        result_step = app.finalize_step_data(dict(fake_step), user_data)
+        why_best = result_step["candidate_comparison"]["why_best"]
+        self.assertNotIn("カテゴリに合致する基礎候補", why_best)
+        self.assertNotIn("は比較した候補にも見られますが", why_best)
 
 
 if __name__ == "__main__":
