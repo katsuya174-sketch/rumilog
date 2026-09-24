@@ -59,14 +59,12 @@ def _candidate(
 
 
 class BuildCandidateComparisonNotesTests(unittest.TestCase):
-    def test_why_best_uses_products_own_main_function_and_user_concern(self):
+    # why_bestは1位単独の属性ではなく、2位・3位との実比較(比較対象に無い
+    # 特徴)から理由を組み立てること
+    def test_why_best_cites_feature_absent_from_comparison_candidates(self):
         candidates = [
-            _candidate(
-                "モイストローション",
-                main_functions=["高保湿ケア"],
-                concerns=["dryness"],
-                base_score=90,
-            ),
+            _candidate("モイストローション", main_functions=["高保湿ケア"], concerns=["dryness"], base_score=90),
+            _candidate("競合A", main_functions=["毛穴引き締め"], concerns=[], base_score=60),
         ]
         step = {"category": "化粧水", "purpose": "乾燥対策"}
         user_data = {"oil": "dry", "concerns": ["dryness"]}
@@ -75,21 +73,111 @@ class BuildCandidateComparisonNotesTests(unittest.TestCase):
         self.assertIn("高保湿ケア", result["why_best"])
         self.assertIn("モイストローション", result["why_best"])
 
+    # 全候補が共通して持つ特徴を「1位の決め手」として扱わないこと
+    def test_shared_feature_across_all_candidates_is_not_cited_as_reason(self):
+        candidates = [
+            _candidate("商品A", main_functions=["高保湿ケア"], active_ingredients=["niacinamide"], base_score=80),
+            _candidate("商品B", main_functions=["高保湿ケア"], active_ingredients=["niacinamide"], base_score=80),
+            _candidate("商品C", main_functions=["高保湿ケア"], active_ingredients=["niacinamide"], base_score=80),
+        ]
+        result = app.build_candidate_comparison_notes(candidates, {}, {})
+        self.assertNotIn("高保湿ケア", result["why_best"])
+        self.assertNotIn("ナイアシンアミド", result["why_best"])
+        # 構造的な差もスコア差(同点)も無いため、根拠の無い断定はしない
+        self.assertIn("明確な優位点は確認できません", result["why_best"])
+
+    # スコアが完全に同点の場合、「上回った」等の優位表現を使わないこと
+    def test_tied_scores_are_not_described_as_superior(self):
+        candidates = [
+            _candidate("商品A", base_score=80, improve_score=10, routine_score=5),
+            _candidate("商品B", base_score=80, improve_score=10, routine_score=5),
+        ]
+        result = app.build_candidate_comparison_notes(candidates, {}, {})
+        self.assertNotIn("上回っ", result["why_best"])
+        self.assertNotIn("優位だった", result["why_best"])
+        self.assertIn("明確な優位点は確認できません", result["why_best"])
+
+    # 1位と2位・3位で実際にスコア差がある軸のみを理由に使い、
+    # 単純に1位自身の3スコアの最大値(この例ではroutine=5がbase=10等より小さく
+    # 最大にならない)を機械的に選ばないこと。improve軸で他候補より本当に
+    # 優位な場合にimprove適合スコアが理由として使われることを確認する。
+    def test_score_axis_reason_reflects_actual_gap_not_own_max_value(self):
+        candidates = [
+            _candidate("改善重視商品", base_score=10, improve_score=90, routine_score=5),
+            _candidate("競合A", base_score=10, improve_score=20, routine_score=5),
+        ]
+        result = app.build_candidate_comparison_notes(candidates, {}, {})
+        self.assertIn("改善適合スコア", result["why_best"])
+        self.assertNotIn("基本適合スコア", result["why_best"])
+
+    # ランキング評価に使われていない属性(main_functions/active_ingredients/
+    # support_ingredients/concerns以外、例: textureのような未対応フィールド)は
+    # 1位だけが持つ値でも理由に使わないこと
+    def test_non_ranked_field_is_never_used_as_reason(self):
+        candidates = [
+            _candidate("商品A", base_score=80),
+            _candidate("商品B", base_score=80),
+        ]
+        candidates[0]["texture"] = "とろみのある珍しいテクスチャー"
+        result = app.build_candidate_comparison_notes(candidates, {}, {})
+        self.assertNotIn("とろみのある珍しいテクスチャー", result["why_best"])
+
     # 異なる商品データを渡せば、why_bestが実質的に異なる文章になること
-    # (同一の定型文が繰り返されない)
+    # (同一テンプレートへの機械的な値埋め込みではないことの確認)
     def test_why_best_differs_for_different_products(self):
         step = {"category": "美容液", "purpose": ""}
         user_data = {"oil": "oily", "concerns": []}
 
         result_a = app.build_candidate_comparison_notes(
-            [_candidate("商品A", main_functions=["毛穴引き締め"], base_score=90)],
+            [
+                _candidate("商品A", main_functions=["毛穴引き締め"], base_score=90),
+                _candidate("競合1", main_functions=["美白ケア"], base_score=60),
+            ],
             step, user_data,
         )
         result_b = app.build_candidate_comparison_notes(
-            [_candidate("商品B", main_functions=["美白ケア"], improve_score=90, base_score=10)],
+            [
+                _candidate("商品B", main_functions=[], improve_score=90, base_score=10),
+                _candidate("競合2", main_functions=[], improve_score=20, base_score=10),
+            ],
             step, user_data,
         )
         self.assertNotEqual(result_a["why_best"], result_b["why_best"])
+        # 文の骨格自体が異なること(片方は成分/機能由来、もう片方はスコア由来)
+        self.assertIn("毛穴引き締め", result_a["why_best"])
+        self.assertIn("改善適合スコア", result_b["why_best"])
+
+    # 比較根拠の種類(構造的差/スコアのみ/根拠なし)ごとに文の骨格自体が変わること
+    # (語尾や単語だけを変えた見せかけの個別化になっていないことの確認)
+    def test_different_reason_kinds_produce_structurally_different_sentences(self):
+        structural = app.build_candidate_comparison_notes(
+            [
+                _candidate("商品A", active_ingredients=["niacinamide"], base_score=80),
+                _candidate("競合A", active_ingredients=[], base_score=80),
+            ],
+            {}, {},
+        )
+        score_only = app.build_candidate_comparison_notes(
+            [
+                _candidate("商品B", base_score=80),
+                _candidate("競合B", base_score=50),
+            ],
+            {}, {},
+        )
+        no_evidence = app.build_candidate_comparison_notes(
+            [
+                _candidate("商品C", base_score=80),
+                _candidate("競合C", base_score=80),
+            ],
+            {}, {},
+        )
+        self.assertIn("ナイアシンアミド", structural["why_best"])
+        self.assertNotIn("ナイアシンアミド", score_only["why_best"])
+        self.assertIn("基本適合スコア", score_only["why_best"])
+        self.assertIn("明確な優位点は確認できません", no_evidence["why_best"])
+        # 3者とも文構造が異なること
+        self.assertNotEqual(structural["why_best"], score_only["why_best"])
+        self.assertNotEqual(score_only["why_best"], no_evidence["why_best"])
 
     # 成分・機能データが無い商品でもクラッシュせず、価格・スコアのみで説明すること
     def test_why_best_falls_back_to_price_and_score_when_no_ingredient_data(self):
@@ -97,6 +185,14 @@ class BuildCandidateComparisonNotesTests(unittest.TestCase):
         result = app.build_candidate_comparison_notes(candidates, {"category": "乳液", "purpose": ""}, {})
         self.assertNotEqual(result["why_best"], "")
         self.assertNotIn("None", result["why_best"])
+
+    # 比較対象(2位・3位)が存在しない場合は優位性を一切主張しないこと
+    def test_no_comparison_candidates_does_not_claim_superiority(self):
+        candidates = [_candidate("単独商品", base_score=80, main_functions=["何か"])]
+        result = app.build_candidate_comparison_notes(candidates, {}, {})
+        self.assertNotIn("上回っ", result["why_best"])
+        self.assertNotIn("優位", result["why_best"])
+        self.assertIn("唯一の選択肢", result["why_best"])
 
     # 空リストでもクラッシュしない
     def test_empty_candidates_returns_empty_notes(self):
@@ -113,10 +209,21 @@ class BuildCandidateComparisonNotesTests(unittest.TestCase):
     def test_does_not_mention_ingredients_absent_from_product_data(self):
         candidates = [
             _candidate("無成分商品", active_ingredients=[], support_ingredients=[], main_functions=[], base_score=80),
+            _candidate("競合", active_ingredients=[], support_ingredients=[], main_functions=[], base_score=50),
         ]
         result = app.build_candidate_comparison_notes(candidates, {}, {})
         for fake_ingredient_label in ["レチノール", "ビタミンC", "ナイアシンアミド"]:
             self.assertNotIn(fake_ingredient_label, result["why_best"])
+
+    # 根拠が弱い(構造差もスコア差も無い)場合、存在しない差を作らず
+    # 中立的な文言になること
+    def test_weak_evidence_falls_back_to_neutral_text_without_fabrication(self):
+        candidates = [
+            _candidate("商品A", base_score=80, improve_score=0, routine_score=0),
+            _candidate("商品B", base_score=80, improve_score=0, routine_score=0),
+        ]
+        result = app.build_candidate_comparison_notes(candidates, {}, {})
+        self.assertEqual(result["why_best"], "比較した候補との間に明確な優位点は確認できませんでした。総合スコアの僅差で選ばれています。")
 
     # diffs: 2位・3位それぞれの説明が、商品固有データにより実質的に異なること
     def test_diffs_are_distinct_for_different_runner_up_products(self):
@@ -143,10 +250,14 @@ class BuildCandidateComparisonNotesTests(unittest.TestCase):
         self.assertNotIn("優れている", text)
         self.assertNotIn("優位", text)
 
-    # 実際のスコア関係と説明内容が矛盾しない: improve_scoreが支配的なら
-    # 「改善適合スコア」に言及し、base_scoreが支配的な場合の文言(基本適合)は使わない
+    # 実際のスコア関係と説明内容が矛盾しない: improve_scoreで他候補より
+    # 実際に優位な場合のみ「改善適合スコア」に言及すること
+    # (test_score_axis_reason_reflects_actual_gap_not_own_max_valueで詳細確認)
     def test_dominant_score_component_matches_actual_scores(self):
-        candidates = [_candidate("改善重視商品", base_score=10, improve_score=90, routine_score=5, main_functions=["集中改善ケア"])]
+        candidates = [
+            _candidate("改善重視商品", base_score=10, improve_score=90, routine_score=5),
+            _candidate("競合", base_score=10, improve_score=20, routine_score=5),
+        ]
         result = app.build_candidate_comparison_notes(candidates, {}, {})
         self.assertIn("改善適合スコア", result["why_best"])
         self.assertNotIn("基本適合スコア", result["why_best"])
@@ -239,16 +350,105 @@ class NormalizeCandidateFieldRetentionTests(unittest.TestCase):
                     "concerns": ["pores"],
                     "source": "db",
                 },
+                {
+                    "brand": "競合ブランド",
+                    "name": "競合美容液",
+                    "score": 60,
+                    "base_score": 60,
+                    "improve_score": 0,
+                    "routine_score": 0,
+                    "price_ref": 2000,
+                    "active_ingredients": [],
+                    "main_functions": [],
+                    "concerns": [],
+                    "source": "db",
+                },
             ],
         }
         result_step = app.finalize_step_data(dict(step), {"oil": "oily", "concerns": []})
         why_best = result_step.get("candidate_comparison", {}).get("why_best", "")
         # active_ingredients/main_functionsがnormalize_candidate通過後も保持されて
-        # いなければ、この特徴語は理由文に一切現れないはず。
+        # いなければ、この特徴語は理由文に一切現れないはず。比較対象(競合美容液)は
+        # どちらも持たないため、real差分として採用されるはず。
         self.assertTrue(
             ("毛穴ケア" in why_best) or ("ナイアシンアミド" in why_best),
             f"商品固有データがwhy_bestへ反映されていません: {why_best!r}",
         )
+
+
+class RakutenFallbackCandidateComparisonRefreshTests(unittest.TestCase):
+    """
+    楽天フォールバックで1位商品(top_candidates[0])が差し替わった後、
+    _refresh_candidate_comparison_after_swap()がcandidate_comparison/
+    candidate_comparison_tableを最新のtop_candidatesで再計算し、
+    表示中の商品(step.product/top_candidates[0])とwhy_best/商品比較表の
+    1位が一致することの確認。
+    """
+
+    def test_refresh_recomputes_why_best_to_match_new_top_candidate(self):
+        old_top = [
+            _candidate("旧1位商品", active_ingredients=["retinol"], base_score=90),
+            _candidate("新1位商品", active_ingredients=["niacinamide"], base_score=70),
+        ]
+        step = {"category": "美容液", "purpose": "", "top_candidates": old_top}
+        # フォールバック前: 古いtop_candidatesを基準にcandidate_comparisonが
+        # finalize_result_data()で確定済み、という状態を再現する。
+        step["candidate_comparison"] = app.build_candidate_comparison_notes(old_top, step, {})
+        step["candidate_comparison_table"] = app.build_candidate_comparison_table(
+            old_top, step["candidate_comparison"]["diffs"]
+        )
+        self.assertIn("旧1位商品", step["candidate_comparison"]["why_best"])
+
+        # _try_rakuten_fallback_candidate()が実際に行うのと同じ並び替え
+        # (楽天リンク取得成功candidateを先頭に繰り上げ)を再現する。
+        new_winner = old_top[1]
+        step["product"] = new_winner["name"]
+        step["brand"] = new_winner["brand"]
+        step["top_candidates"] = [new_winner] + [c for c in old_top if c is not new_winner]
+
+        app._refresh_candidate_comparison_after_swap(step, {})
+
+        self.assertIn(step["product"], step["candidate_comparison"]["why_best"])
+        self.assertNotIn("旧1位商品", step["candidate_comparison"]["why_best"])
+        self.assertEqual(step["top_candidates"][0]["name"], step["product"])
+        self.assertEqual(step["candidate_comparison_table"][0]["name"], step["product"])
+        self.assertEqual(step["candidate_comparison_table"][0]["brand"], step["brand"])
+
+    # 4位以下(=既存の商品比較表・次点候補の対象=上位3件の外)からフォールバック
+    # して新1位になったケースでも、古い上位3商品の比較情報が残らないこと
+    def test_refresh_handles_fallback_from_beyond_top_three(self):
+        pool = [
+            _candidate("1位", active_ingredients=["a1"], base_score=90),
+            _candidate("2位", active_ingredients=["a2"], base_score=85),
+            _candidate("3位", active_ingredients=["a3"], base_score=80),
+            _candidate("4位からの繰り上げ", active_ingredients=["a4"], base_score=50),
+        ]
+        step = {"category": "美容液", "purpose": "", "top_candidates": pool}
+        step["candidate_comparison"] = app.build_candidate_comparison_notes(pool, step, {})
+        step["candidate_comparison_table"] = app.build_candidate_comparison_table(
+            pool, step["candidate_comparison"]["diffs"]
+        )
+        self.assertEqual(
+            [r["name"] for r in step["candidate_comparison_table"]],
+            ["1位", "2位", "3位"],
+        )
+
+        fourth = pool[3]
+        step["product"] = fourth["name"]
+        step["brand"] = fourth["brand"]
+        step["top_candidates"] = [fourth] + [c for c in pool if c is not fourth]
+
+        app._refresh_candidate_comparison_after_swap(step, {})
+
+        table_names = [r["name"] for r in step["candidate_comparison_table"]]
+        self.assertEqual(table_names[0], "4位からの繰り上げ")
+        self.assertIn(fourth["name"], step["candidate_comparison"]["why_best"])
+
+    # top_candidatesを持たないstep(美容機器・サプリメント)は何もしない
+    def test_refresh_noop_for_step_without_top_candidates(self):
+        step = {"category": "美容機器", "product": "RF美顔器"}
+        app._refresh_candidate_comparison_after_swap(step, {})
+        self.assertNotIn("candidate_comparison", step)
 
 
 if __name__ == "__main__":

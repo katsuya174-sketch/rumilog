@@ -6664,6 +6664,33 @@ def _try_rakuten_fallback_candidate(step, affiliate_ai_db):
     return False
 
 
+def _refresh_candidate_comparison_after_swap(step, user_data):
+    """
+    _try_rakuten_fallback_candidate()がstep["top_candidates"]の並び
+    (=1位)を差し替えた後、そのstep自身のcandidate_comparison(why_best/
+    diffs)とcandidate_comparison_tableを最新のtop_candidatesで再計算する。
+
+    finalize_result_data()は楽天リンク確定より前にcandidate_comparisonを
+    確定させるため、フォールバックで1位商品が入れ替わった場合そのまま
+    放置すると、表示中の商品(step["product"]/top_candidates[0])と
+    why_best/商品比較表が別々の商品を指してしまう。この関数はその
+    stepが持つtop_candidatesだけを参照して再計算し、他stepのデータは
+    一切参照・変更しない。
+
+    top_candidatesを持たないstep(美容機器・サプリメント。これらは
+    finalize_step_data()を経由せずcandidate_comparisonという概念自体が
+    無い)は何もしない。
+    """
+    if not step.get("top_candidates"):
+        return
+    step["candidate_comparison"] = build_candidate_comparison_notes(
+        step["top_candidates"], step, user_data
+    )
+    step["candidate_comparison_table"] = build_candidate_comparison_table(
+        step["top_candidates"], step["candidate_comparison"].get("diffs")
+    )
+
+
 def attach_affiliate_links_to_all_steps(data, affiliate_ai_db, user_data=None, budget_value=0):
     """
     全ステップにアフィリエイトリンクを付与する。
@@ -6747,7 +6774,9 @@ def attach_affiliate_links_to_all_steps(data, affiliate_ai_db, user_data=None, b
         cooldown_cleared = time.time() >= RAKUTEN_COOLDOWN_UNTIL
         for step in still_no_link:
             if cooldown_cleared:
-                _try_rakuten_fallback_candidate(step, affiliate_ai_db)
+                swapped = _try_rakuten_fallback_candidate(step, affiliate_ai_db)
+                if swapped:
+                    _refresh_candidate_comparison_after_swap(step, user_data)
             else:
                 print(
                     f"[RAKUTEN FALLBACK SKIP] cooldown still active for {step.get('product', '?')}",
@@ -15161,34 +15190,126 @@ _SCORE_COMPONENT_LABELS = {
 }
 
 
-def _dominant_score_component(base, improve, routine):
-    """3つのスコア要素のうち最も高いものを返す('base'/'improve'/'routine')。
-    同値時はbase→improve→routineの順で優先する。"""
-    if base >= improve and base >= routine:
-        return "base"
-    if improve >= base and improve >= routine:
-        return "improve"
-    return "routine"
+def _unique_structural_differentiator(field, label_fn, best, others):
+    """
+    fieldに指定したリスト型フィールド(main_functions/active_ingredients/
+    support_ingredients等、score_product()/score_goal_fit()/
+    apply_common_score_rules()が実際に評価に使っているフィールドのみを
+    呼び出し側で渡すこと)について、bestには存在し、比較対象othersの
+    全員には一切存在しない値を先頭から1つ返す(無ければNone)。
+
+    「全候補が共通して持つ属性を決め手にしない」「同点(=他候補も持つ)を
+    優位と扱わない」をこの一致チェックで保証する。
+    """
+    best_items = [x for x in (best.get(field) or []) if x]
+    if not best_items:
+        return None
+    others_union = set()
+    for o in others:
+        others_union.update(x for x in (o.get(field) or []) if x)
+    for item in best_items:
+        if item not in others_union:
+            return label_fn(item)
+    return None
 
 
-def _candidate_feature_highlight(candidate):
+def _score_axis_advantage(best, others):
     """
-    候補固有の特徴を1つだけ返す(機能→主成分→補助成分の優先順)。
-    normalize_candidate()が保持した実データにある値をそのまま使うだけで、
-    存在しない情報は補完しない(無ければ空文字)。
+    base_score/improve_score/routine_scoreの各軸について、bestがothers
+    全員に対して実際に(同点でなく)上回っている軸のうち、差が最大のものを
+    (axis, gap)で返す。一つも上回っていなければNone。
+
+    3軸のうち絶対値が最大のものを機械的に選ぶのではなく、あくまで
+    「実際に他候補より優位だったか」を軸ごとに個別へ比較する。
     """
-    if not isinstance(candidate, dict):
-        return ""
-    main_functions = [f for f in (candidate.get("main_functions") or []) if f]
-    if main_functions:
-        return main_functions[0]
-    active = [a for a in (candidate.get("active_ingredients") or []) if a]
-    if active:
-        return ingredient_map.get(active[0], active[0])
-    support = [s for s in (candidate.get("support_ingredients") or []) if s]
-    if support:
-        return ingredient_map.get(support[0], support[0])
-    return ""
+    axis_fields = {
+        "base": "base_score",
+        "improve": "improve_score",
+        "routine": "routine_score",
+    }
+    best_axis = None
+    best_gap = 0
+    for axis, field in axis_fields.items():
+        other_values = [_safe_num(o.get(field, 0)) for o in others]
+        if not other_values:
+            continue
+        gap = _safe_num(best.get(field, 0)) - max(other_values)
+        if gap > 0 and gap > best_gap:
+            best_axis = axis
+            best_gap = gap
+    if best_axis is None:
+        return None
+    return best_axis, round(best_gap, 1)
+
+
+def _build_why_best_text(best, others, step, best_label):
+    """
+    why_bestの本文を、1位(best)と比較対象(others=2位・3位)の実データ比較
+    のみから組み立てる。othersは呼び出し側で少なくとも1件以上ある前提
+    (比較対象が無い場合の文言は呼び出し側で別途処理する)。
+
+    優先順位: (1)今回のpurpose/concernsとの一致差(build_concern_tags。
+    2位・3位が対応しない悩みにbestだけが対応している) → (2)main_functions
+    固有差 → (3)active_ingredients固有差 → (4)support_ingredients固有差。
+    いずれも「bestには存在し、比較したothers全員には存在しない」場合のみ
+    採用する。見つかった場合のみ、実際に優位なスコア軸(あれば)を補足として
+    添える。構造的な差もスコア優位も一つも無ければ、架空の理由を作らず
+    中立的な文言にする(テンプレートへの機械的な値埋め込みを避けるため、
+    ケースごとに文の骨格自体が変わる設計にしている)。
+    """
+    best_concerns = build_concern_tags(best, step)
+    others_concern_union = set()
+    for o in others:
+        others_concern_union.update(build_concern_tags(o, step))
+    unique_concern = next((c for c in best_concerns if c not in others_concern_union), None)
+
+    unique_function = None
+    unique_active = None
+    unique_support = None
+    if not unique_concern:
+        unique_function = _unique_structural_differentiator("main_functions", lambda x: x, best, others)
+    if not unique_concern and not unique_function:
+        unique_active = _unique_structural_differentiator(
+            "active_ingredients", lambda x: ingredient_map.get(x, x), best, others
+        )
+    if not unique_concern and not unique_function and not unique_active:
+        unique_support = _unique_structural_differentiator(
+            "support_ingredients", lambda x: ingredient_map.get(x, x), best, others
+        )
+
+    score_adv = _score_axis_advantage(best, others)
+    score_clause = ""
+    if score_adv:
+        axis, gap = score_adv
+        score_clause = f"{_SCORE_COMPONENT_LABELS[axis]}でも比較した候補より{gap}点上回っており、"
+
+    if unique_concern:
+        return (
+            f"今回優先度の高い{unique_concern}に対して、比較した候補の中では{best_label}だけが対応しており、"
+            f"{score_clause}この点が選ばれた理由です。"
+        )
+    if unique_function:
+        return (
+            f"{best_label}は比較した候補には無い「{unique_function}」という特徴を持ち、"
+            f"{score_clause}この点が選ばれた理由です。"
+        )
+    if unique_active:
+        return (
+            f"{best_label}は比較した候補が含まない{unique_active}を含み、"
+            f"{score_clause}この点が選ばれた理由です。"
+        )
+    if unique_support:
+        return (
+            f"{best_label}は比較した候補が含まない{unique_support}を含み、"
+            f"{score_clause}この点が選ばれた理由です。"
+        )
+    if score_adv:
+        axis, gap = score_adv
+        return (
+            f"主要な成分・機能では比較した候補と大きな差はありませんでしたが、"
+            f"{_SCORE_COMPONENT_LABELS[axis]}で比較した候補より{gap}点上回っていたことが選ばれた理由です。"
+        )
+    return "比較した候補との間に明確な優位点は確認できませんでした。総合スコアの僅差で選ばれています。"
 
 
 def build_candidate_comparison_notes(top_candidates, step=None, user_data=None):
@@ -15201,12 +15322,17 @@ def build_candidate_comparison_notes(top_candidates, step=None, user_data=None):
     ユーザーに適しているか」)とは明確に異なり、あくまで「2位・3位候補と比較
     して、なぜこの商品を1位にしたのか」という比較説明に限定する。
 
+    why_bestは1位商品を単独で解析して理由を推測するのではなく、必ず
+    top_candidates[1:3](2位・3位)との実データ比較(_build_why_best_text)
+    から組み立てる。比較対象が無い、または実際の優位点(構造的な差・
+    スコアの有意差のどちらも)が一つも見つからない場合は、存在しない理由を
+    作らず中立的な文言にする。
+
     normalize_candidate()が保持した実データ(active_ingredients/
-    support_ingredients/main_functions/concerns等)にある値だけを使い、
-    商品データに存在しない成分・機能・効果は一切補完しない。総合スコアは
-    既に確定した順位(top_candidates[0]が1位)をそのまま前提とし、
-    「総合スコアで他候補を上回った」以外の優劣(価格・特定成分の有無等)は
-    中立的な事実として書くに留め、「優れている」と断定しない。
+    support_ingredients/main_functions/concerns等、いずれもscore_product()/
+    score_goal_fit()/apply_common_score_rules()が実際に評価へ使っている
+    フィールド)にある値だけを使い、商品データに存在しない成分・機能・効果は
+    一切補完しない。
     戻り値: {"why_best": str, "diffs": [{"label": "2位"|"3位", "text": str}]}
     """
     if not isinstance(top_candidates, list) or not top_candidates:
@@ -15227,36 +15353,16 @@ def build_candidate_comparison_notes(top_candidates, step=None, user_data=None):
     if best.get("brand") and not best_label.startswith(best.get("brand")):
         best_label = f"{best.get('brand')} {best_label}".strip()
 
-    concern_tags = build_concern_tags(best, step)
-    feature = _candidate_feature_highlight(best)
+    others = [c for c in top_candidates[1:3] if isinstance(c, dict)]
 
     if base <= 0 and improve <= 0 and routine <= 0:
+        # 根拠となるスコアが無い商品について、断定的な理由を作らない。
         why_best = ""
+    elif not others:
+        # 比較対象が無いため、優位性は一切主張しない。
+        why_best = f"{best_label}は今回確認できた候補の中で唯一の選択肢でした。"
     else:
-        score_label = _SCORE_COMPONENT_LABELS[_dominant_score_component(base, improve, routine)]
-        if concern_tags and feature:
-            why_best = (
-                f"今回優先度の高い{concern_tags[0]}に対して、{best_label}は{feature}を含み、"
-                f"特に{score_label}の評価が高かったことが、総合スコアで他候補を上回った理由です。"
-            )
-        elif feature:
-            why_best = (
-                f"{best_label}は{feature}を含み、特に{score_label}の評価が高かったことが、"
-                f"総合スコアで他候補を上回った理由です。"
-            )
-        elif concern_tags:
-            why_best = (
-                f"今回優先度の高い{concern_tags[0]}への適合度と{score_label}の評価が高かったことが、"
-                f"総合スコアで他候補を上回った理由です。"
-            )
-        else:
-            # 成分・機能データが無い商品: スコア・価格等、実在するデータのみで説明する
-            # (データ不足を補完しない)。
-            price = safe_price(best.get("price_ref", 0))
-            if price > 0:
-                why_best = f"価格帯とスコアのバランスを含め、{score_label}の評価が高く、総合スコアで他候補を上回っています。"
-            else:
-                why_best = f"{score_label}の評価が高く、総合スコアで他候補を上回っています。"
+        why_best = _build_why_best_text(best, others, step, best_label)
 
     diffs = []
     rank_labels = {1: "2位", 2: "3位"}
