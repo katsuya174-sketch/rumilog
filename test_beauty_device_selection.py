@@ -270,8 +270,12 @@ def test_review_and_price_logic_unchanged_when_features_present():
 
 
 def test_extraction_does_not_affect_ranking_winner():
-    """特徴抽出は勝者選定(_fit_score/_sort_key)に一切影響しないこと。
-    レビュー・価格で劣るが特徴語が多い候補が不当に繰り上がらないこと。"""
+    """診断で優先対象となった肌悩み(concerns)が未選択の場合、特徴抽出そのもの
+    は勝者選定(_fit_score/_sort_key)に影響しないこと。レビュー・価格で劣る
+    が特徴語(=今回優先していない訴求)が多いだけの候補が不当に繰り上がら
+    ないこと(肌悩み適合ボーナスは診断が実際に優先した悩みとの一致でのみ
+    加点される。ボーナスがランキングを動かすケースは
+    test_concern_match_changes_ranking_outcome を参照)。"""
     scored_items = [
         (50, make_item("シンプルRF美顔器A", 8000, 300, 4.9, "A")),
         (40, make_item("毛穴・ハリ・乾燥・皮脂・赤み・ニキビ・キメ・くすみ全部入りRF美顔器B", 8000, 10, 2.0, "B",
@@ -281,3 +285,136 @@ def test_extraction_does_not_affect_ranking_winner():
         scored_items, "RF", {"sensitivity": "low"}, budget_value=0,
     )
     assert best_item["itemCode"] == "A"
+
+
+# === 肌悩み適合ボーナス(_fit_score反映、前回承認分) ===
+
+def test_user_priority_feature_labels_bridges_form_concerns_to_device_labels():
+    """get_user_concern_tags()(スキンケア側score_productと同じ信号源)を
+    _extract_device_appeal_features()と同じラベル空間へ変換できること。"""
+    labels = app_module._user_priority_feature_labels({"concerns": ["pores", "dryness"]})
+    assert labels == {"毛穴ケア", "乾燥対策", "バリア強化"}
+
+
+def test_user_priority_feature_labels_empty_when_no_concerns():
+    assert app_module._user_priority_feature_labels({}) == set()
+    assert app_module._user_priority_feature_labels({"concerns": []}) == set()
+    assert app_module._user_priority_feature_labels(None) == set()
+
+
+def test_no_description_item_earns_no_concern_bonus_source():
+    """商品説明が空の場合、特徴が抽出されず(=加点対象0)であること。"""
+    item = make_item("", 8000, 200, 4.0, "EMPTY", caption="")
+    assert app_module._extract_device_appeal_features(item) == []
+
+
+def test_unrelated_marketing_terms_do_not_earn_concern_bonus_source():
+    """「小顔」等は_DEVICE_FEATURE_KEYWORDSに含まれないため、診断で優先した
+    肌悩みがあっても一致せず加点対象にならないこと。"""
+    item = make_item("小顔RF美顔器B", 8000, 200, 4.0, "B", caption="小顔効果 全身美肌")
+    priority_labels = app_module._user_priority_feature_labels({"concerns": ["pores"]})
+    features = app_module._extract_device_appeal_features(item)
+    assert features == []
+    assert (set(features) & priority_labels) == set()
+
+
+def test_concern_match_changes_ranking_outcome():
+    """他の評価軸(score/review/price)が完全に同一でも、肌悩み適合ボーナスの
+    有無だけでランキングの勝者が変わること。"""
+    matched_item = make_item(
+        "毛穴乾燥ケアRF美顔器AAA", 8000, 100, 4.0, "AAA", caption="毛穴 乾燥",
+    )
+    unmatched_item = make_item(
+        "シンプルRF美顔器ZZZ", 8000, 100, 4.0, "ZZZ",
+    )
+    scored_items = [(50, matched_item), (50, unmatched_item)]
+
+    # concern未選択なら他条件が同一のため、concernボーナスなしのタイブレークで
+    # ZZZが勝つ(=AAAがボーナスなしでは勝てないことの確認)。
+    winner_without_bonus, _ = app_module.select_best_beauty_device_candidate(
+        scored_items, "RF", {"sensitivity": "low"}, budget_value=0,
+    )
+    assert winner_without_bonus["itemCode"] == "ZZZ"
+
+    # concernを選択すると、AAAが2特徴一致(+16)で逆転して勝つ。
+    winner_with_bonus, reason = app_module.select_best_beauty_device_candidate(
+        scored_items, "RF", {"sensitivity": "low", "concerns": ["pores", "dryness"]},
+        budget_value=0,
+    )
+    assert winner_with_bonus["itemCode"] == "AAA"
+
+
+def test_concern_match_caps_at_two_features_and_sixteen_points():
+    """3特徴一致でも加点は最大2特徴・+16点で頭打ちになること。頭打ちがなければ
+    3特徴一致のTHREEが勝つはずのレビュー件数差を用いて検証する。"""
+    user_data = {"sensitivity": "low", "concerns": ["pores", "dryness", "redness"]}
+    two_match_item = make_item(
+        "2特徴一致RF美顔器TWO", 8000, 200, 4.0, "TWO", caption="毛穴 乾燥",
+    )
+    three_match_item = make_item(
+        "3特徴一致RF美顔器THREE", 8000, 100, 4.0, "THREE", caption="毛穴 乾燥 赤み",
+    )
+    scored_items = [(50, two_match_item), (50, three_match_item)]
+    best_item, _ = app_module.select_best_beauty_device_candidate(
+        scored_items, "RF", user_data, budget_value=0,
+    )
+    assert best_item["itemCode"] == "TWO"
+
+
+def test_concern_match_does_not_double_count_synonyms():
+    """同じ意味の同義語を商品説明内に何度書いていても1特徴・+8点のみである
+    こと。重複加点されていればSYNが勝つはずのレビュー件数差を用いて検証する。"""
+    user_data = {"sensitivity": "low", "concerns": ["dryness"]}
+    synonym_heavy_item = make_item(
+        "乾燥ケアRF美顔器SYN", 8000, 100, 4.0, "SYN", caption="乾燥 保湿 うるおい 潤い",
+    )
+    single_mention_item = make_item(
+        "乾燥ケアRF美顔器SINGLE", 8000, 150, 4.0, "SINGLE", caption="乾燥",
+    )
+    scored_items = [(50, synonym_heavy_item), (50, single_mention_item)]
+    best_item, _ = app_module.select_best_beauty_device_candidate(
+        scored_items, "RF", user_data, budget_value=0,
+    )
+    assert best_item["itemCode"] == "SINGLE"
+
+
+def test_concern_match_tied_falls_back_to_review_price_reason():
+    """肌悩み一致数が候補間で同じ場合、device_selection_reasonの決定理由は
+    肌悩み適合ではなく実際のレビュー・価格差になること(差を捏造しない)。"""
+    user_data = {"sensitivity": "low", "concerns": ["pores"]}
+    item_a = make_item("毛穴ケアRF美顔器A", 8000, 300, 4.9, "A", caption="毛穴ケアに")
+    item_b = make_item("毛穴ケアRF美顔器B", 9000, 50, 3.0, "B", caption="毛穴ケアに")
+    scored_items = [(50, item_a), (40, item_b)]
+    best_item, reason = app_module.select_best_beauty_device_candidate(
+        scored_items, "RF", user_data, budget_value=0,
+    )
+    assert best_item["itemCode"] == "A"
+    assert "肌悩みとの一致項目が多かったため優先しました" not in reason
+    assert "レビュー評価" in reason
+    assert "レビュー件数" in reason
+
+
+def test_device_selection_reason_leads_with_concern_match_when_decisive():
+    """肌悩み適合ボーナスが順位差に決定的に寄与した場合、その説明が実際に
+    一致した特徴名とともにレビュー・価格より先に述べられること。"""
+    user_data = {"sensitivity": "low", "concerns": ["pores", "dryness"]}
+    matched_item = make_item(
+        "毛穴乾燥ケアRF美顔器A", 6000, 50, 3.0, "A", caption="毛穴 乾燥ケアに",
+    )
+    unmatched_item = make_item(
+        "レビュー高評価RF美顔器B", 8000, 100, 3.5, "B",
+    )
+    scored_items = [(50, matched_item), (50, unmatched_item)]
+    best_item, reason = app_module.select_best_beauty_device_candidate(
+        scored_items, "RF", user_data, budget_value=0,
+    )
+    assert best_item["itemCode"] == "A"
+    assert "毛穴ケア" in reason
+    assert "乾燥対策" in reason
+    assert "肌悩みとの一致項目が多かったため優先しました" in reason
+    assert "効果がある" not in reason
+    assert "改善します" not in reason
+    concern_idx = reason.index("肌悩みとの一致項目が多かったため優先しました")
+    addend_idx = reason.index("加えて")
+    assert concern_idx < addend_idx
+    assert "価格が候補内で最も抑えられている" in reason

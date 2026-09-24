@@ -292,6 +292,109 @@ class BuildCandidateComparisonNotesTests(unittest.TestCase):
         self.assertNotIn("基本適合スコア", result["why_best"])
 
 
+class WhyBestProductNameCleaningTests(unittest.TestCase):
+    """why_best表示用の商品名クリーニング(前回指示E)。楽天商品名に混入する
+    ポイント・クーポン・SALE・送料無料・キャンペーン等の販促文言だけを除去し、
+    正式商品名・ブランド・型番・容量は保持する。元候補のname自体(検索/
+    affiliate/ランキング)には影響させない。"""
+
+    def test_removes_point_coupon_sale_shipping_from_why_best(self):
+        raw_name = "【スーパーSALEポイント10倍】ドクターズコスメ VCローション 120mL 送料無料"
+        candidates = [
+            _candidate(raw_name, base_score=90, candidate_score_reasons=[
+                _reason("common_main_function_purpose_match", "商品の機能が今回の目的と一致する",
+                        feature="美白ケア", condition="美白", points=6),
+            ]),
+            _candidate("競合A", base_score=60, candidate_score_reasons=[]),
+        ]
+        step = {"category": "美容液", "purpose": "美白"}
+        result = app.build_candidate_comparison_notes(candidates, step, {})
+
+        self.assertIn("ドクターズコスメ", result["why_best"])
+        self.assertIn("VCローション", result["why_best"])
+        self.assertIn("120mL", result["why_best"])  # 容量は保持する
+        self.assertNotIn("ポイント10倍", result["why_best"])
+        self.assertNotIn("SALE", result["why_best"])
+        self.assertNotIn("送料無料", result["why_best"])
+        # 元候補のnameフィールド自体は変更されない(検索/affiliate/ランキングに影響させない)
+        self.assertEqual(candidates[0]["name"], raw_name)
+
+    def test_removes_coupon_and_campaign_text_from_why_best(self):
+        raw_name = "★クーポンで500円OFF★ アクアナイトクリーム 30g 期間限定キャンペーン"
+        candidates = [
+            _candidate(raw_name, base_score=90, candidate_score_reasons=[
+                _reason("common_main_function_purpose_match", "商品の機能が今回の目的と一致する",
+                        feature="保湿ケア", condition="乾燥対策", points=6),
+            ]),
+            _candidate("競合B", base_score=60, candidate_score_reasons=[]),
+        ]
+        step = {"category": "クリーム", "purpose": "乾燥対策"}
+        result = app.build_candidate_comparison_notes(candidates, step, {})
+
+        self.assertIn("アクアナイトクリーム", result["why_best"])
+        self.assertIn("30g", result["why_best"])  # 容量は保持する
+        self.assertNotIn("クーポン", result["why_best"])
+        self.assertNotIn("キャンペーン", result["why_best"])
+        self.assertEqual(candidates[0]["name"], raw_name)
+
+    def test_preserves_official_name_brand_model_when_no_promo_text(self):
+        clean_name = "資生堂 エリクシール ホワイト クリアローション T II 170mL"
+        candidates = [
+            _candidate(clean_name, brand="", base_score=90, candidate_score_reasons=[
+                _reason("common_main_function_purpose_match", "商品の機能が今回の目的と一致する",
+                        feature="美白ケア", condition="美白", points=6),
+            ]),
+            _candidate("競合C", base_score=60, candidate_score_reasons=[]),
+        ]
+        step = {"category": "化粧水", "purpose": "美白"}
+        result = app.build_candidate_comparison_notes(candidates, step, {})
+        self.assertIn(clean_name, result["why_best"])
+
+    def test_clean_why_best_product_name_unit_examples(self):
+        """_clean_why_best_product_name()単体を実楽天タイトル例で検証する。"""
+        cases = [
+            (
+                "【あす楽】アクポレス美容液 50mL 母の日ギフト キャンペーン中",
+                ["アクポレス美容液", "50mL"],
+                ["あす楽", "キャンペーン"],
+            ),
+            (
+                "オルビスユードットローション 180mL 詰め替え用 ポイント5倍 期間限定キャンペーン",
+                ["オルビスユードットローション", "180mL", "詰め替え用"],
+                ["ポイント5倍", "期間限定", "キャンペーン"],
+            ),
+            (
+                "DHC 薬用ビタミンC美容液 20mL",
+                ["DHC", "薬用ビタミンC美容液", "20mL"],
+                [],
+            ),
+        ]
+        for raw, must_include, must_exclude in cases:
+            cleaned = app._clean_why_best_product_name(raw)
+            for token in must_include:
+                self.assertIn(token, cleaned, f"{raw!r} -> {cleaned!r} should keep {token!r}")
+            for token in must_exclude:
+                self.assertNotIn(token, cleaned, f"{raw!r} -> {cleaned!r} should not keep {token!r}")
+
+    def test_falls_back_to_original_name_when_cleaning_empties_it(self):
+        """クリーニング結果が空になる場合(装飾・販促語のみの商品名)、
+        呼び出し側は元の文字列にフォールバックし、商品名自体を消さないこと。"""
+        only_promo_text = "★★★SALE★★★"
+        self.assertEqual(app._clean_why_best_product_name(only_promo_text), "")
+        candidates = [
+            _candidate(only_promo_text, brand="", base_score=90, candidate_score_reasons=[
+                _reason("common_main_function_purpose_match", "商品の機能が今回の目的と一致する",
+                        feature="美白ケア", condition="美白", points=6),
+            ]),
+            _candidate("競合D", base_score=60, candidate_score_reasons=[]),
+        ]
+        step = {"category": "美容液", "purpose": "美白"}
+        result = app.build_candidate_comparison_notes(candidates, step, {})
+        # 空文字へ潰れて商品名が消えてしまわないこと(フォールバックで元の
+        # 文字列が使われる)。
+        self.assertIn(only_promo_text, result["why_best"])
+
+
 class BuildCandidateComparisonTableDiffIntegrationTests(unittest.TestCase):
     """
     独立した「次点候補」セクションを廃止し、build_candidate_comparison_notes()の

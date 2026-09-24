@@ -4685,9 +4685,32 @@ def _extract_device_appeal_features(item):
     return labels
 
 
+def _user_priority_feature_labels(user_data):
+    """
+    今回の診断でユーザーが実際に優先対象とした肌悩みを、
+    _extract_device_appeal_features()と同じ正規ラベル空間
+    (_CONCERN_LABEL_MAP)へ変換する。
+
+    信号源はget_user_concern_tags(user_data)そのもの(score_product()が
+    スキンケア商品の「ユーザーが明示した悩みとの一致」ボーナスに使っているのと
+    同じ関数・同じ定義)であり、美容機器専用の新しい優先度判定は行わない。
+    _CONCERN_LABEL_MAPに対応がないタグ(例: oil_control)は黙って無視する
+    (存在しない一致を作らないため)。
+    """
+    if not isinstance(user_data, dict):
+        return set()
+    tags = get_user_concern_tags(user_data)
+    labels = set()
+    for tag in tags:
+        label = _CONCERN_LABEL_MAP.get(tag)
+        if label:
+            labels.add(label)
+    return labels
+
+
 def _build_device_selection_reason(
     pool_sorted, device_type, is_high_sensitivity, budget_value,
-    category_purpose="", category_reason="",
+    category_purpose="", category_reason="", user_data=None,
 ):
     """
     select_best_beauty_device_candidate()が実際に計算している評価軸
@@ -4708,10 +4731,18 @@ def _build_device_selection_reason(
     商品説明に実在する記載のみ。「〜に関する記載を確認できます」という
     範囲を超えない表現に留め、「効果がある」とは断定しない) →
     (3)刺激・安全面／レビュー・評価／価格・予算(既存の候補間比較ロジック、
-    parts)。(2)の特徴は現時点では_fit_score()のランキングには反映されて
-    いないため、「この商品が1位になった理由」として断定的には使わず、
-    あくまで商品情報として併記する。
+    parts)。
+
+    肌悩み適合ボーナス(_user_priority_feature_labels×
+    _extract_device_appeal_features、_fit_score()に加点済み)が「取得した
+    候補全体」に対して勝者だけの明確な優位だった場合のみ、その事実を
+    レビュー・価格等のparts説明より先に述べる。優位差がない(全候補が同数、
+    または一致自体がない)場合は、この理由を1位の決定理由として書かず、
+    従来通り(2)の「商品説明で確認できる特徴」を事実の記載としてのみ添える
+    (順位の理由としては述べない、二重説明も避ける)。
     """
+    priority_labels = _user_priority_feature_labels(user_data)
+
     if len(pool_sorted) < 2:
         winner_only = pool_sorted[0][1] if pool_sorted else None
         context_sentence = _device_context_sentence(category_purpose, category_reason, device_type)
@@ -4725,6 +4756,18 @@ def _build_device_selection_reason(
 
     _, winner = pool_sorted[0]
     others = [item for _, item in pool_sorted[1:]]
+
+    winner_features_ordered = _extract_device_appeal_features(winner)
+    winner_matched_concerns = [f for f in winner_features_ordered if f in priority_labels]
+    winner_concern_bonus = min(len(winner_matched_concerns), 2) * 8
+    other_concern_bonuses = [
+        min(len(set(_extract_device_appeal_features(o)) & priority_labels), 2) * 8
+        for o in others
+    ]
+    concern_decisive = bool(
+        priority_labels and winner_concern_bonus > 0
+        and other_concern_bonuses and winner_concern_bonus > max(other_concern_bonuses)
+    )
 
     parts = []
 
@@ -4764,10 +4807,23 @@ def _build_device_selection_reason(
             parts.append("「業務用」「高出力」等の強い表現がなく、敏感肌向けの条件に合っている")
 
     context_sentence = _device_context_sentence(category_purpose, category_reason, device_type)
-    feature_sentence = _device_feature_sentence(_extract_device_appeal_features(winner))
-    comparison_sentence = ""
-    if parts:
-        comparison_sentence = "今回取得した候補の中で、" + "、".join(parts) + "点が他候補より優位だったため、この製品を選びました。"
+
+    if concern_decisive:
+        concern_labels_text = "と".join(winner_matched_concerns[:2])
+        comparison_sentence = (
+            f"商品説明では、今回優先している{concern_labels_text}に関する記載が確認でき、"
+            f"比較候補より今回の肌悩みとの一致項目が多かったため優先しました。"
+        )
+        if parts:
+            comparison_sentence += "加えて、" + "、".join(parts) + "点でも他候補より優位でした。"
+        # concern_decisive時はcomparison_sentenceで既に特徴へ言及済みのため、
+        # _device_feature_sentence()との重複記載は避ける。
+        feature_sentence = ""
+    else:
+        feature_sentence = _device_feature_sentence(winner_features_ordered)
+        comparison_sentence = ""
+        if parts:
+            comparison_sentence = "今回取得した候補の中で、" + "、".join(parts) + "点が他候補より優位だったため、この製品を選びました。"
 
     if not context_sentence and not feature_sentence and not comparison_sentence:
         return _DEVICE_SELECTION_REASON_FALLBACK
@@ -4840,6 +4896,10 @@ def select_best_beauty_device_candidate(
     ).strip().lower()
     is_high_sensitivity = sensitivity in ("high", "高い", "高")
 
+    # 今回の診断で実際に優先対象となった肌悩み(スキンケア側score_productの
+    # 「ユーザーが明示した悩みとの一致」ボーナスと同じ信号源)。
+    priority_labels = _user_priority_feature_labels(user_data)
+
     # score_rakuten_item由来のスコアはタイトルの語数一致等でcandidateごとに
     # 大きくばらつく（実測で100超の差が出ることもある）ため、そのまま使うと
     # 予算・敏感度・レビュー等の他シグナルが埋もれてしまう。この関数の中でだけ
@@ -4886,6 +4946,18 @@ def select_best_beauty_device_candidate(
         fit += min(review_count, 500) / 50
         fit += review_avg * 2
 
+        # 肌悩み適合ボーナス: 今回の診断で実際に優先対象となった肌悩みと、
+        # 商品説明から抽出した特徴(_extract_device_appeal_features。同じ
+        # ラベルへ正規化される同義語は関数内で既に1特徴1回に重複除去済み)が
+        # 一致した分だけ加点する。一致しない特徴、診断項目に対応しない訴求
+        # (「小顔」等、_DEVICE_FEATURE_KEYWORDSに含めていない語)は加点しない。
+        # 商品説明に無関係な美容訴求が多数あっても、今回の優先悩みと一致
+        # しなければ加点は増えない。device type/search適合・刺激リスク・
+        # review・price/budgetの既存ロジックは変更しない。
+        if priority_labels:
+            matched_concerns = set(_extract_device_appeal_features(item)) & priority_labels
+            fit += min(len(matched_concerns), 2) * 8
+
         return fit
 
     def _sort_key(pair):
@@ -4903,6 +4975,7 @@ def select_best_beauty_device_candidate(
     selection_reason = _build_device_selection_reason(
         pool_sorted, device_type, is_high_sensitivity, budget_value,
         category_purpose=category_purpose, category_reason=category_reason,
+        user_data=user_data,
     )
     print(
         f"[DEVICE SELECT] device_type={device_type} "
@@ -7073,7 +7146,7 @@ def _is_ingredient_category_name(product_name: str) -> bool:
     return False
 
 
-def resolve_weekly_care_day_conflicts(data):
+def resolve_weekly_care_day_conflicts(data, conflict_log=None):
     """
     週ケア（ピーリング）と night の刺激成分（レチノイド・AHA/BHA/PHA）の曜日衝突を解消。
 
@@ -7081,6 +7154,12 @@ def resolve_weekly_care_day_conflicts(data):
     ケースB: 刺激成分が毎日(use_days=[]) かつ ピーリングが特定曜日
              → 刺激成分のuse_daysからピーリング曜日を除外する（最小変更）
              → 例: レチノール毎日 + ピーリング["土"] → レチノール["月","火","水","木","金","日"]
+
+    conflict_log: Noneでない場合、実際にuse_daysを変更した箇所だけを
+    {"type","product","category","from_days","to_days","reason_text"}として
+    追記する（「このルーティンの理由」表示用。このリストに無い曜日変更は
+    存在しないため、build_weekly_usage_plan側で理由を捏造しない基盤になる。
+    日程決定ロジック自体はconflict_logの有無で一切変わらない）。
     """
     # ---- ケースA: 刺激成分の明示的曜日を収集 ----
     irritant_days: set = set()
@@ -7124,6 +7203,21 @@ def resolve_weekly_care_day_conflicts(data):
                 flush=True,
             )
             step["use_days"] = new_days
+            if conflict_log is not None:
+                product_label = str(step.get("product", "") or step.get("category", "週ケア"))
+                conflict_log.append({
+                    "type": "weekly_care_day_conflict_A",
+                    "product": product_label,
+                    "category": str(step.get("category", "") or ""),
+                    "from_days": use_days,
+                    "to_days": new_days,
+                    "reason_text": (
+                        f"{product_label}は、夜に使用する刺激成分"
+                        f"（レチノイド/高濃度ビタミンC/アゼライン酸/AHA・BHA・PHA等）の"
+                        f"使用日（{'・'.join(sorted(irritant_days))}）と重複していたため、"
+                        f"{'・'.join(use_days)}から{'・'.join(new_days)}へ移動しました。"
+                    ),
+                })
 
     # ---- ケースB: 刺激成分が毎日 → ピーリング曜日を刺激成分から除外 ----
     if every_day_irritant_steps:
@@ -7147,11 +7241,25 @@ def resolve_weekly_care_day_conflicts(data):
                     flush=True,
                 )
                 step["use_days"] = new_irritant_days
+                if conflict_log is not None:
+                    product_label = str(step.get("product", "") or step.get("category", "刺激成分"))
+                    conflict_log.append({
+                        "type": "night_irritant_narrowed_for_peeling_B",
+                        "product": product_label,
+                        "category": str(step.get("category", "") or ""),
+                        "from_days": [],
+                        "to_days": new_irritant_days,
+                        "reason_text": (
+                            f"{product_label}は本来毎日使用できますが、週ケア"
+                            f"（ピーリング/パック）の使用日（{'・'.join(sorted(peeling_days))}）"
+                            f"と重複を避けるため、その曜日を除いて使用する予定にしています。"
+                        ),
+                    })
 
     return data
 
 
-def resolve_night_irritant_conflicts(data):
+def resolve_night_irritant_conflicts(data, conflict_log=None):
     """
     夜ルーティン内の刺激成分同士の曜日衝突を優先順位ベースで汎用的に解消。
 
@@ -7160,6 +7268,10 @@ def resolve_night_irritant_conflicts(data):
       2. 高濃度ビタミンC（vitamin_c/strong_vitamin_c）
       3. アゼライン酸（azelaic_acid）
       4. AHA/BHA/PHA（bha/aha/aha_bha/pha）
+
+    conflict_log: Noneでない場合、実際に曜日変更したstepだけを記録する
+    （「このルーティンの理由」表示用。resolve_weekly_care_day_conflictsと
+    同じ形式）。日程決定ロジック自体は変更しない。
     """
     _PRIORITY_GROUPS = [
         ({"retinoid", "retinol", "retinal"},          "レチノイド"),
@@ -7196,6 +7308,20 @@ def resolve_night_irritant_conflicts(data):
                 flush=True,
             )
             step["use_days"] = new_days
+            if conflict_log is not None:
+                product_label = str(step.get("product", "") or step.get("category", "夜ステップ"))
+                conflict_log.append({
+                    "type": "night_irritant_priority_conflict",
+                    "product": product_label,
+                    "category": str(step.get("category", "") or ""),
+                    "from_days": use_days,
+                    "to_days": new_days,
+                    "reason_text": (
+                        f"{product_label}（{label}）は、優先度がより高い刺激成分の"
+                        f"使用日（{'・'.join(sorted(fixed_days))}）と重複していたため、"
+                        f"{'・'.join(use_days)}から{'・'.join(new_days)}へ移動しました。"
+                    ),
+                })
 
         # このグループの（調整後の）曜日を fixed_days に追加
         for step in night_steps:
@@ -7214,7 +7340,7 @@ _DEVICE_PEELING_INCOMPATIBLE = {"RF", "超音波洗浄"}
 _DEVICE_RETINOL_INCOMPATIBLE = {"超音波洗浄"}
 
 
-def resolve_beauty_device_day_conflicts(data):
+def resolve_beauty_device_day_conflicts(data, conflict_log=None):
     """
     美容機器とレチノール・ピーリングの併用可否をルールベースで判定し、
     該当する場合はreasonに注意書きを付与する。
@@ -7224,6 +7350,10 @@ def resolve_beauty_device_day_conflicts(data):
     併用ルール（ユーザー指定）:
       レチノール使用日: LED可・RF可・EMS可・超音波洗浄不可
       ピーリング使用日: RF不可・超音波洗浄不可・LED可（EMS/エレクトロポレーション/マイクロカレントは可）
+
+    conflict_log: Noneでない場合、注意書きを付与した機器だけを記録する
+    （「このルーティンの理由」表示用）。この関数は曜日そのものは変更せず
+    注意書きの付与のみを行うため、from_days/to_daysはNoneのまま記録する。
     """
     devices = data.get("beauty_devices") or []
     if not isinstance(devices, list) or not devices:
@@ -7263,6 +7393,16 @@ def resolve_beauty_device_day_conflicts(data):
             note_text = "・".join(avoid_days) + "は使用を避けてください。"
             item["reason"] = f"{existing}（{note_text}）" if existing else note_text
             print(f"[DEVICE DAY CONFLICT] {dtype}: {avoid_days}", flush=True)
+            if conflict_log is not None:
+                product_label = str(item.get("product", "") or dtype or "美容機器")
+                conflict_log.append({
+                    "type": "beauty_device_conflict_note",
+                    "product": product_label,
+                    "category": "美容機器",
+                    "from_days": None,
+                    "to_days": None,
+                    "reason_text": f"{product_label}は、{note_text}",
+                })
 
     return data
 
@@ -16052,6 +16192,49 @@ def _merge_presence_absence_pairs(decisive):
     return result
 
 
+# why_bestに表示する商品名からだけ、楽天商品名に混入する販促文言を除去する。
+# clean_display_product_name()は内容量表記(mL/g等)自体を除去する別目的の
+# 関数(重複商品名の名寄せ用)のため、容量等をできる限り保持したいwhy_best
+# 表示用途にはそのまま使わない。ここで扱うのはbest_label(why_best本文専用の
+# ローカル変数)のみで、元のitemName/検索クエリ/affiliateリンク/ランキング
+# (top_candidates自体、_fit_score等)には一切影響しない。
+_WHY_BEST_PROMO_PATTERNS = [
+    r'[☆★]?ポイント\s*(\d+\s*倍|アップ|還元|付与)[☆★]?',
+    r'[☆★]?[Pp]\s*\d+\s*倍[☆★]?',
+    r'[\(（【\[]?[^\s（【\[】\)）\]]{0,12}クーポン[^\s）】\]]{0,20}[\)）】\]]?',
+    r'楽天(スーパー)?(SALE|Sale|sale|セール)',
+    r'[☆★]?(スーパー)?(SALE|Sale|sale|セール)[☆★]?',
+    r'送料無料',
+    r'[☆★]?[^\s☆★【】\(\)（）]{0,10}キャンペーン[^\s☆★【】\(\)（）]{0,10}[☆★]?',
+    r'あす楽(対応)?',
+    r'ランキング\s*\d*\s*位',
+    r'期間限定',
+    r'買いまわり',
+    r'エントリーで',
+]
+
+
+def _clean_why_best_product_name(name):
+    """
+    why_best表示用の商品名クリーニング。楽天商品名に実際に混入する
+    ポイント・クーポン・SALE・送料無料・キャンペーン等の販促文言だけを
+    除去し、正式商品名・ブランド・型番・容量等は可能な限りそのまま残す。
+    クリーニング後に空文字になった場合は呼び出し側で元の文字列にフォール
+    バックさせる(商品名自体を消してしまわないため)。
+    """
+    if not isinstance(name, str):
+        return ""
+    text = name.strip()
+    if not text:
+        return ""
+    for pattern in _WHY_BEST_PROMO_PATTERNS:
+        text = re.sub(pattern, '', text, flags=re.IGNORECASE)
+    text = re.sub(r'[\(（【\[]\s*[\)）】\]]', '', text)
+    text = re.sub(r'[☆★◆◇▼▽△▲♪♦♥❤✨]+', ' ', text)
+    text = re.sub(r'[／/]{1,}', ' ', text)
+    return " ".join(text.split())
+
+
 def _build_why_best_text(best, others, step, best_label):
     """
     why_bestの本文を、1位(best)と比較対象(others=2位・3位)の
@@ -16200,6 +16383,9 @@ def build_candidate_comparison_notes(top_candidates, step=None, user_data=None):
     best_label = str(best.get("name", "") or "").strip() or "この商品"
     if best.get("brand") and not best_label.startswith(best.get("brand")):
         best_label = f"{best.get('brand')} {best_label}".strip()
+    # why_best表示専用: 楽天商品名に混入する販促文言だけを除去する
+    # (元のbest["name"]/step/検索/affiliate/ランキングには影響しない)。
+    best_label = _clean_why_best_product_name(best_label) or best_label
 
     others = [c for c in top_candidates[1:3] if isinstance(c, dict)]
 
@@ -20536,13 +20722,78 @@ def supplement_night_steps_from_morning(data):
     return data
 
 
+def _routine_conflict_reasons_for_day(conflict_log, day):
+    """
+    その曜日に実際に関係したresolverの調整(resolve_weekly_care_day_conflicts/
+    resolve_night_irritant_conflicts)だけを理由文として返す。conflict_logに
+    記録が無い変更は理由として生成しない(追跡できない理由を作らない)。
+    美容機器の注意書き(from_days/to_daysがNone、曜日非依存)はここでは
+    扱わない(build_weekly_usage_plan側でdata["routine_reason_notes"]として
+    別途まとめる)。
+    """
+    if not conflict_log:
+        return []
+    reasons = []
+    for entry in conflict_log:
+        if not isinstance(entry, dict):
+            continue
+        from_days = entry.get("from_days")
+        to_days = entry.get("to_days")
+        if from_days is None and to_days is None:
+            continue  # 曜日非依存(美容機器の注意書き)はここでは扱わない
+        from_days = from_days or []
+        to_days = to_days or []
+        if from_days:
+            # 特定曜日→特定曜日への移動(ケースA、夜の刺激成分同士の優先度
+            # 衝突): 移動元(もう使われない曜日)・移動先(新たに使われる
+            # 曜日)の両方に理由を添える。
+            touched = day in from_days or day in to_days
+        else:
+            # 元々毎日(from_days=[])だった項目が特定曜日を避けるよう調整
+            # された(ケースB): 実際に除外された曜日にだけ理由を添える
+            # (残りの日は元々の「毎日」の範囲内で不自然ではないため)。
+            touched = day not in to_days
+        if touched:
+            text = entry.get("reason_text", "")
+            if text and text not in reasons:
+                reasons.append(text)
+    return reasons
+
+
 def build_weekly_usage_plan(data):
     """
     各stepのuse_daysフィールドに従って週間スケジュールを組み立てる。
     成分名・刺激性・スコア閾値の判断はGeminiに委譲し、コードは一切行わない。
+
+    「このルーティンの理由」(routine_reasons/routine_reason_notes):
+    resolve_weekly_care_day_conflicts/resolve_night_irritant_conflicts/
+    resolve_beauty_device_day_conflicts が実際に行った調整を
+    data["routine_conflict_log"](各resolverがconflict_log引数として
+    記録した実際の変更のみ)からそのまま引用する。ここでは新たな判定・
+    曜日決定は一切行わず、既存ログに無い曜日については理由を生成しない
+    (=その曜日にproductが無いのは単にuse_days対象外という設計であり、
+    conflictで除外されたわけではないことを、reasonが付かないことで
+    自然に区別する)。data["routine_conflict_log"]が無い場合(古い履歴の
+    再計算等、resolverが今回実行されていない場合)は全曜日でreasonsが
+    空になる(捏造しない)。
     """
     if not isinstance(data, dict):
         return []
+
+    conflict_log = data.get("routine_conflict_log")
+    if not isinstance(conflict_log, list):
+        conflict_log = []
+    # 曜日に依存しない注意書き(美容機器×レチノール/ピーリング)は
+    # 週間ビューの個別セルに対応する場所が無いため、まとめて
+    # data["routine_reason_notes"]に残す(既存のweekly_usage_planの
+    # 戻り値の形(dayごとのlist)は変更しない)。
+    data["routine_reason_notes"] = [
+        entry.get("reason_text", "")
+        for entry in conflict_log
+        if isinstance(entry, dict)
+        and entry.get("from_days") is None and entry.get("to_days") is None
+        and entry.get("reason_text")
+    ]
 
     routine_strategy = data.get("routine_strategy", {})
     if not isinstance(routine_strategy, dict):
@@ -20708,6 +20959,7 @@ def build_weekly_usage_plan(data):
             "night": night_items,
             "special_care": special_care,
             "note": overall_note,
+            "routine_reasons": _routine_conflict_reasons_for_day(conflict_log, day),
         })
 
     return usage_plan
@@ -21109,11 +21361,16 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
     data = supplement_night_steps_from_morning(data)
 
     # 週ケアとnight刺激成分の曜日衝突を強制解消
-    data = resolve_weekly_care_day_conflicts(data)
+    # routine_conflict_log: 各resolverが実際に行った曜日調整・注意書き付与を
+    # そのまま記録する（「このルーティンの理由」表示用。build_weekly_usage_plan
+    # 側はこのログに無い変更を理由として捏造しない）。
+    routine_conflict_log = []
+    data = resolve_weekly_care_day_conflicts(data, conflict_log=routine_conflict_log)
     # 夜ルーティン内のレチノイド×BHA/SA洗顔料の曜日衝突を解消
-    data = resolve_night_irritant_conflicts(data)
+    data = resolve_night_irritant_conflicts(data, conflict_log=routine_conflict_log)
     # 美容機器×レチノール/ピーリングの併用可否を判定（use_days確定後に実行）
-    data = resolve_beauty_device_day_conflicts(data)
+    data = resolve_beauty_device_day_conflicts(data, conflict_log=routine_conflict_log)
+    data["routine_conflict_log"] = routine_conflict_log
     _lab_segment("day_conflict_resolution")
 
     # 楽天商品名をGeminiで短く整形（rakuten_criteria / ai_rakuten_verified のみ対象）
