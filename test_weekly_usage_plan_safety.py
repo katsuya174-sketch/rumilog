@@ -121,9 +121,14 @@ class DayConflictResolverAndDisplayConsistencyTests(unittest.TestCase):
             self.assertFalse(bha_shown and peeling_shown, day_entry["day"])
 
     def test_retinol_and_high_concentration_vitamin_c_conflict_resolved_by_priority(self):
+        # 2026-09の安全ロジック修正により、Vitamin Cはingredient_strengthの
+        # 濃度("high"/"strong")を見て初めて刺激成分として扱われる。この
+        # テストは「高濃度」を名乗っているため、明示的に高濃度を設定する
+        # (通常濃度のケースはVitaminCConcentrationDayConflictTestsを参照)。
         data = _empty_data(night={"steps": [
             {"category": "美容液", "product": "レチノール美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "retinol"},
-            {"category": "美容液", "product": "高濃度VC美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "vitamin_c"},
+            {"category": "美容液", "product": "高濃度VC美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "vitamin_c",
+             "ingredient_strength": {"vitamin_c": "high"}},
         ]})
         data = app.resolve_night_irritant_conflicts(data)
 

@@ -7146,16 +7146,85 @@ def _is_ingredient_category_name(product_name: str) -> bool:
     return False
 
 
-# 「このルーティンの理由」表示用: 内部のingredient_focusタグ(retinoid等)を
-# ユーザーに安全な日本語ラベルへ変換する。rule ID・内部カテゴリ名等の
-# デバッグ表現はここで完全に置き換え、conflict_logのreason_textには
-# このラベル(または実際のproduct名)以外の内部識別子を一切含めない。
-_IRRITANT_GROUP_LABELS = [
-    ({"retinoid", "retinol", "retinal"}, "レチノール系"),
-    ({"vitamin_c", "strong_vitamin_c"}, "高濃度ビタミンC"),
-    ({"azelaic_acid"}, "アゼライン酸"),
-    ({"aha_bha", "aha", "bha", "pha"}, "AHA/BHA/PHA系角質ケア"),
-]
+# 夜ステップ同士の刺激成分グループ(resolve_night_irritant_conflicts専用)。
+# 「このルーティンの理由」表示用のラベルも兼ねる: 内部のingredient_focus
+# タグ(retinoid等)をユーザーに安全な日本語ラベルへ変換し、rule ID・
+# 内部カテゴリ名等のデバッグ表現はconflict_logのreason_textに一切含めない。
+#
+# 2026-09の安全ロジック調査で判明した通り、Vitamin Cは既存フィールド
+# ingredient_strength["vitamin_c"](infer_active_profile()が商品選定
+# スコアリングで使っているのと同じフィールド・同じ閾値"high"/"strong")を
+# 見て高濃度のみを刺激成分として扱う。通常濃度のVitamin Cはどの刺激成分
+# グループにも属さない(=衝突判定の対象外)。
+_NIGHT_IRRITANT_GROUP_ORDER = ["retinoid", "strong_vitamin_c", "azelaic", "aha_bha"]
+_NIGHT_IRRITANT_GROUP_LABELS = {
+    "retinoid": "レチノール系",
+    "strong_vitamin_c": "高濃度ビタミンC",
+    "azelaic": "アゼライン酸",
+    "aha_bha": "AHA/BHA/PHA系角質ケア",
+}
+_NIGHT_IRRITANT_GROUP_FOCUS_TAGS = {
+    "retinoid": {"retinoid", "retinol", "retinal"},
+    "azelaic": {"azelaic_acid"},
+    "aha_bha": {"aha_bha", "aha", "bha", "pha"},
+    # strong_vitamin_cはingredient_focusのタグ一致だけでなくingredient_
+    # strengthの濃度も見るため、_night_step_irritant_groups()で個別判定する。
+}
+_STRONG_VITAMIN_C_LEVELS = {"high", "strong"}
+
+# 実際に「同一夜に使うと刺激が重なる」と判断する組み合わせだけを明示的に
+# 列挙する(優先度チェーンによる推移的な誤衝突を避けるため)。根拠:
+#   retinoid⇄aha_bha, retinoid⇄strong_vitamin_c:
+#     infer_active_profile()のavoid_with(商品選定スコアリング側の
+#     既存ハードルール)。
+#   strong_vitamin_c⇄azelaic, azelaic⇄aha_bha, strong_vitamin_c⇄aha_bha:
+#     Geminiプロンプトのmandatory hard avoid_combinations
+#     (「必須組み合わせ」として明示指示されている4件のうち3件)。
+# retinoid⇄azelaicは意図的に含めない: 2026-09の調査で、このペアを
+# hard conflictとする判定源がinfer_active_profile()・Geminiプロンプトの
+# どちらにも存在しないことを確認し、resolve_night_irritant_conflicts()
+# だけが保守的に一律回避していたと判断したため解除する。
+_NIGHT_IRRITANT_CONFLICT_EDGES = {
+    frozenset({"retinoid", "aha_bha"}),
+    frozenset({"retinoid", "strong_vitamin_c"}),
+    frozenset({"strong_vitamin_c", "azelaic"}),
+    frozenset({"azelaic", "aha_bha"}),
+    frozenset({"strong_vitamin_c", "aha_bha"}),
+}
+
+
+def _is_strong_vitamin_c_step(step):
+    """
+    夜ステップがVitamin Cを主成分としており(ingredient_focus)、かつ
+    既存フィールドingredient_strength["vitamin_c"]が高濃度("high"/
+    "strong")を示す場合のみTrueを返す。ingredient_strengthの欠落・
+    dict以外の型・vitamin_cキー欠落・未知の値は、すべて「通常濃度」
+    として安全にFalseへフォールバックする(クラッシュしない・
+    誤って高濃度扱いしない)。
+    """
+    focus = _resolve_focus_tags(step.get("ingredient_focus"))
+    if "vitamin_c" not in focus:
+        return False
+    raw_strength = step.get("ingredient_strength")
+    if not isinstance(raw_strength, dict):
+        return False
+    level = str(raw_strength.get("vitamin_c", "") or "").strip().lower()
+    return level in _STRONG_VITAMIN_C_LEVELS
+
+
+def _night_step_irritant_groups(step):
+    """
+    夜ステップが属する刺激成分グループ(複数可)を返す。通常濃度の
+    Vitamin Cはどのグループにも属さない(=このリストに含まれない)。
+    """
+    focus = _resolve_focus_tags(step.get("ingredient_focus"))
+    groups = []
+    for group_id, tags in _NIGHT_IRRITANT_GROUP_FOCUS_TAGS.items():
+        if focus & tags:
+            groups.append(group_id)
+    if _is_strong_vitamin_c_step(step):
+        groups.append("strong_vitamin_c")
+    return groups
 
 
 def _compose_same_day_conflict_reason(product_label, conflicting_products):
@@ -7312,60 +7381,82 @@ def resolve_weekly_care_day_conflicts(data, conflict_log=None):
 
 def resolve_night_irritant_conflicts(data, conflict_log=None):
     """
-    夜ルーティン内の刺激成分同士の曜日衝突を優先順位ベースで汎用的に解消。
+    夜ルーティン内の刺激成分同士の曜日衝突を、実際に競合すると判断できる
+    組み合わせ(_NIGHT_IRRITANT_CONFLICT_EDGES)だけを対象に解消する。
 
-    優先順位（高い順に固定し、低い方を別曜日へ移動）:
-      1. レチノイド（retinol/retinal/retinoid）
-      2. 高濃度ビタミンC（vitamin_c/strong_vitamin_c）
-      3. アゼライン酸（azelaic_acid）
-      4. AHA/BHA/PHA（bha/aha/aha_bha/pha）
+    2026-09の安全ロジック調査を踏まえた設計変更(承認済み):
+      - Vitamin Cは通常濃度と高濃度(ingredient_strength["vitamin_c"]が
+        "high"/"strong")を区別する。通常濃度は衝突判定の対象外とし、
+        高濃度のみレチノール系等との強制別日対象として維持する。
+      - アゼライン酸×レチノール系の一律強制別日を解除する(このペアを
+        hard conflictとする判定源がinfer_active_profile()・Geminiの
+        avoid_combinations仕様のどちらにも無く、本関数だけが保守的に
+        競合扱いしていたため)。
+      - アゼライン酸×AHA/BHA/PHA・アゼライン酸×高濃度VC・レチノール系×
+        AHA/BHA/PHA・レチノール系×高濃度VC・高濃度VC×AHA/BHA/PHAは
+        引き続き競合として扱う(既存の判定源に根拠がある組み合わせ)。
+      - weekly_care側(resolve_weekly_care_day_conflicts/
+        _IRRITANT_FOCUS_TAGS)は今回変更しない。アゼライン酸×ピーリングを
+        新たな強制別日対象として追加することもしない(濃度・製品特性を
+        十分評価できないため、2026-09時点では見送り)。
+
+    グループの優先順位(高い順、既存の並びを維持): 1.レチノール系
+    2.高濃度ビタミンC 3.アゼライン酸 4.AHA/BHA/PHA系。ただし各グループの
+    「確定済み曜日」は、_NIGHT_IRRITANT_CONFLICT_EDGESで実際に競合すると
+    判断されている先行グループの曜日だけを集計する(根拠のない組み合わせ
+    同士は互いの曜日をブロックしない)。
 
     conflict_log: Noneでない場合、実際に曜日変更したstepだけを記録する
     （「このルーティンの理由」表示用。resolve_weekly_care_day_conflictsと
     同じ形式。reason_textは実際に競合した相手の製品名だけを使い、内部
-    タグ・優先度グループの内部名等は含めない）。日程決定ロジック自体は
-    変更しない。
+    タグ・グループ内部名等は含めない）。
     """
-    # 優先順位の並び自体はここで固定する(1.レチノール系 2.高濃度VC
-    # 3.アゼライン酸 4.AHA/BHA/PHA系)。表示ラベルは_IRRITANT_GROUP_LABELS
-    # と同じ内容を使う。
-    _PRIORITY_GROUPS = list(_IRRITANT_GROUP_LABELS)
-
     night_steps = [s for s in data.get("night", {}).get("steps", []) if isinstance(s, dict)]
 
-    # 優先度の高いグループから順に「確定済み曜日」を積み上げ、
-    # 低いグループが重複していたら安全な曜日へ移動する
-    fixed_days: set = set()
-    # 「このルーティンの理由」用: どの曜日にどの(既に確定済みの)夜ステップが
-    # 存在するかを記録し、実際に競合した相手の製品名を具体的に説明する。
-    fixed_products_by_day: dict = {}
+    fixed_days_by_group: dict = {}            # group_id -> set(days)
+    fixed_products_by_group_day: dict = {}     # group_id -> {day: set(product_label)}
 
-    for tags, label in _PRIORITY_GROUPS:
+    for group_id in _NIGHT_IRRITANT_GROUP_ORDER:
+        label = _NIGHT_IRRITANT_GROUP_LABELS[group_id]
+
+        # このグループと実際に競合すると判断されている、既に確定済みの
+        # 他グループの曜日・製品名だけを集める(根拠のない組み合わせは
+        # ブロック対象に含めない)。
+        blocking_days: set = set()
+        blocking_products_by_day: dict = {}
+        for other_id, other_days in fixed_days_by_group.items():
+            if frozenset({group_id, other_id}) not in _NIGHT_IRRITANT_CONFLICT_EDGES:
+                continue
+            blocking_days |= other_days
+            for d, products in fixed_products_by_group_day.get(other_id, {}).items():
+                blocking_products_by_day.setdefault(d, set()).update(products)
+
         conflict_steps = []
         for step in night_steps:
-            focus = _resolve_focus_tags(step.get("ingredient_focus"))
-            days = step.get("use_days") or []
-            if not (focus & tags) or not days:
+            if group_id not in _night_step_irritant_groups(step):
                 continue
-            if set(days) & fixed_days:
+            days = step.get("use_days") or []
+            if not days:
+                continue
+            if set(days) & blocking_days:
                 conflict_steps.append(step)
 
         for step in conflict_steps:
             use_days = list(step.get("use_days") or [])
-            safe = [d for d in _ALL_DAYS if d not in fixed_days]
+            safe = [d for d in _ALL_DAYS if d not in blocking_days]
             if not safe:
                 continue
             new_days = safe[:max(len(use_days), 1)]
+            product_label = str(step.get("product", "") or step.get("category", "夜ステップ"))
             print(
-                f"[NIGHT CONFLICT] {step.get('product','夜ステップ')} ({label}) "
-                f"{use_days} → {new_days} (fixed={sorted(fixed_days)})",
+                f"[NIGHT CONFLICT] {product_label} ({label}) "
+                f"{use_days} → {new_days} (blocking={sorted(blocking_days)})",
                 flush=True,
             )
             step["use_days"] = new_days
             if conflict_log is not None:
-                product_label = str(step.get("product", "") or step.get("category", "夜ステップ"))
                 conflicting_products = sorted({
-                    p for d in use_days for p in fixed_products_by_day.get(d, set())
+                    p for d in use_days for p in blocking_products_by_day.get(d, set())
                 })
                 conflict_log.append({
                     "type": "night_irritant_priority_conflict",
@@ -7377,15 +7468,22 @@ def resolve_night_irritant_conflicts(data, conflict_log=None):
                     "reason_text": _compose_same_day_conflict_reason(product_label, conflicting_products),
                 })
 
-        # このグループの（調整後の）曜日を fixed_days に追加
+        # このグループの（調整後の）曜日・製品を記録し、後続グループの
+        # blocking_days計算に使う。
+        this_group_days: set = set()
+        this_group_products_by_day: dict = {}
         for step in night_steps:
-            focus = _resolve_focus_tags(step.get("ingredient_focus"))
+            if group_id not in _night_step_irritant_groups(step):
+                continue
             days = step.get("use_days") or []
-            if focus & tags and days:
-                fixed_days.update(days)
-                product_label = str(step.get("product", "") or step.get("category", "夜ステップ"))
-                for d in days:
-                    fixed_products_by_day.setdefault(d, set()).add(product_label)
+            if not days:
+                continue
+            this_group_days.update(days)
+            product_label = str(step.get("product", "") or step.get("category", "夜ステップ"))
+            for d in days:
+                this_group_products_by_day.setdefault(d, set()).add(product_label)
+        fixed_days_by_group[group_id] = this_group_days
+        fixed_products_by_group_day[group_id] = this_group_products_by_day
 
     return data
 

@@ -124,7 +124,8 @@ class NightIrritantPriorityConflictReasonTests(unittest.TestCase):
     def test_reason_matches_actual_priority_move(self):
         data = _empty_data(night={"steps": [
             {"category": "美容液", "product": "レチノール美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "retinol"},
-            {"category": "美容液", "product": "高濃度VC美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "vitamin_c"},
+            {"category": "美容液", "product": "高濃度VC美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "vitamin_c",
+             "ingredient_strength": {"vitamin_c": "high"}},
         ]})
         log = []
         data = app.resolve_night_irritant_conflicts(data, conflict_log=log)
@@ -395,7 +396,8 @@ class FinalWeeklyPlanMatchesConflictLogAndReasonsTests(unittest.TestCase):
         data = _empty_data(
             night={"steps": [
                 {"category": "美容液", "product": "レチノール美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "retinol"},
-                {"category": "美容液", "product": "高濃度VC美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "vitamin_c"},
+                {"category": "美容液", "product": "高濃度VC美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "vitamin_c",
+                 "ingredient_strength": {"vitamin_c": "high"}},
             ]},
             weekly_care=[
                 {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["月"], "ingredient_focus": "aha"},
@@ -441,6 +443,231 @@ class FinalWeeklyPlanMatchesConflictLogAndReasonsTests(unittest.TestCase):
         for text in data["routine_reason_notes"]:
             self.assertNotIn("retinoid", text)
             self.assertNotIn("vitamin_c", text)
+
+
+class VitaminCConcentrationDayConflictTests(unittest.TestCase):
+    """2026-09の安全ロジック修正: Vitamin Cは既存フィールド
+    ingredient_strength["vitamin_c"](infer_active_profile()と同じ
+    フィールド・同じ閾値"high"/"strong")を見て、高濃度のみレチノール系
+    との強制別日対象として扱い、通常濃度は対象外にすること。"""
+
+    def test_regular_vitamin_c_is_not_forced_away_from_retinol(self):
+        data = _empty_data(night={"steps": [
+            {"category": "美容液", "product": "レチノール美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "retinol"},
+            {"category": "美容液", "product": "通常VC美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "vitamin_c"},
+        ]})
+        log = []
+        data = app.resolve_night_irritant_conflicts(data, conflict_log=log)
+        self.assertEqual(log, [])
+        vc_step = next(s for s in data["night"]["steps"] if s["product"] == "通常VC美容液")
+        self.assertEqual(vc_step["use_days"], ["月", "水", "金"])
+
+    def test_strong_vitamin_c_high_is_forced_away_from_retinol(self):
+        data = _empty_data(night={"steps": [
+            {"category": "美容液", "product": "レチノール美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "retinol"},
+            {"category": "美容液", "product": "高濃度VC美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "vitamin_c",
+             "ingredient_strength": {"vitamin_c": "high"}},
+        ]})
+        log = []
+        data = app.resolve_night_irritant_conflicts(data, conflict_log=log)
+        self.assertEqual(len(log), 1)
+        vc_step = next(s for s in data["night"]["steps"] if s["product"] == "高濃度VC美容液")
+        self.assertEqual(set(vc_step["use_days"]) & {"月", "水", "金"}, set())
+
+    def test_strong_vitamin_c_strong_is_forced_away_from_retinol(self):
+        """ingredient_strengthの値が"strong"表記の場合も高濃度として扱うこと。"""
+        data = _empty_data(night={"steps": [
+            {"category": "美容液", "product": "レチノール美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "retinol"},
+            {"category": "美容液", "product": "高濃度VC美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "vitamin_c",
+             "ingredient_strength": {"vitamin_c": "strong"}},
+        ]})
+        log = []
+        data = app.resolve_night_irritant_conflicts(data, conflict_log=log)
+        self.assertEqual(len(log), 1)
+        vc_step = next(s for s in data["night"]["steps"] if s["product"] == "高濃度VC美容液")
+        self.assertEqual(set(vc_step["use_days"]) & {"月", "水", "金"}, set())
+
+    def test_missing_ingredient_strength_falls_back_to_regular_and_does_not_crash(self):
+        data = _empty_data(night={"steps": [
+            {"category": "美容液", "product": "レチノール美容液", "use_days": ["月"], "ingredient_focus": "retinol"},
+            {"category": "美容液", "product": "VC美容液", "use_days": ["月"], "ingredient_focus": "vitamin_c"},
+        ]})
+        # ingredient_strengthキー自体が存在しない。
+        self.assertNotIn("ingredient_strength", data["night"]["steps"][1])
+        log = []
+        data = app.resolve_night_irritant_conflicts(data, conflict_log=log)
+        self.assertEqual(log, [])
+        self.assertEqual(data["night"]["steps"][1]["use_days"], ["月"])
+
+    def test_invalid_ingredient_strength_type_falls_back_to_regular_and_does_not_crash(self):
+        """ingredient_strengthがdict以外(不正値)でもクラッシュせず、
+        通常濃度として安全に扱うこと。"""
+        for bad_value in [None, "high", ["vitamin_c", "high"], 123]:
+            data = _empty_data(night={"steps": [
+                {"category": "美容液", "product": "レチノール美容液", "use_days": ["月"], "ingredient_focus": "retinol"},
+                {"category": "美容液", "product": "VC美容液", "use_days": ["月"], "ingredient_focus": "vitamin_c",
+                 "ingredient_strength": bad_value},
+            ]})
+            log = []
+            data = app.resolve_night_irritant_conflicts(data, conflict_log=log)
+            self.assertEqual(log, [], f"bad_value={bad_value!r}")
+            self.assertEqual(data["night"]["steps"][1]["use_days"], ["月"], f"bad_value={bad_value!r}")
+
+    def test_unknown_strength_value_falls_back_to_regular(self):
+        """"high"/"strong"以外の値(例: "low"/"medium"/未知の文字列)は
+        高濃度として扱わないこと。"""
+        for level in ["low", "medium", "とても高い", ""]:
+            data = _empty_data(night={"steps": [
+                {"category": "美容液", "product": "レチノール美容液", "use_days": ["月"], "ingredient_focus": "retinol"},
+                {"category": "美容液", "product": "VC美容液", "use_days": ["月"], "ingredient_focus": "vitamin_c",
+                 "ingredient_strength": {"vitamin_c": level}},
+            ]})
+            log = []
+            data = app.resolve_night_irritant_conflicts(data, conflict_log=log)
+            self.assertEqual(log, [], f"level={level!r}")
+
+
+class AzelaicRetinoidConflictRemovedTests(unittest.TestCase):
+    """2026-09の安全ロジック修正: アゼライン酸×レチノール系の一律強制
+    別日を解除したこと(このペアをhard conflictとする判定源が無かった
+    ため)。"""
+
+    def test_azelaic_is_not_forced_away_from_retinol(self):
+        data = _empty_data(night={"steps": [
+            {"category": "美容液", "product": "レチノール美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "retinol"},
+            {"category": "美容液", "product": "アゼライン酸美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "azelaic_acid"},
+        ]})
+        log = []
+        data = app.resolve_night_irritant_conflicts(data, conflict_log=log)
+        self.assertEqual(log, [])
+        az_step = next(s for s in data["night"]["steps"] if s["product"] == "アゼライン酸美容液")
+        self.assertEqual(az_step["use_days"], ["月", "水", "金"])
+
+    def test_azelaic_still_conflicts_with_aha_bha_night_step(self):
+        """アゼライン酸×AHA/BHA/PHA(夜ステップ同士)は引き続き競合対象
+        であること(Geminiのmandatory hard avoid_combinationsに根拠あり、
+        今回変更していない)。"""
+        data = _empty_data(night={"steps": [
+            {"category": "美容液", "product": "アゼライン酸美容液", "use_days": ["月"], "ingredient_focus": "azelaic_acid"},
+            {"category": "美容液", "product": "BHA美容液", "use_days": ["月"], "ingredient_focus": "bha"},
+        ]})
+        log = []
+        data = app.resolve_night_irritant_conflicts(data, conflict_log=log)
+        self.assertEqual(len(log), 1)
+        bha_step = next(s for s in data["night"]["steps"] if s["product"] == "BHA美容液")
+        self.assertNotIn("月", bha_step["use_days"])
+
+    def test_azelaic_still_conflicts_with_strong_vitamin_c(self):
+        """アゼライン酸×高濃度VCは引き続き競合対象であること(Geminiの
+        mandatory hard avoid_combinationsに根拠あり)。"""
+        data = _empty_data(night={"steps": [
+            {"category": "美容液", "product": "高濃度VC美容液", "use_days": ["月"], "ingredient_focus": "vitamin_c",
+             "ingredient_strength": {"vitamin_c": "high"}},
+            {"category": "美容液", "product": "アゼライン酸美容液", "use_days": ["月"], "ingredient_focus": "azelaic_acid"},
+        ]})
+        log = []
+        data = app.resolve_night_irritant_conflicts(data, conflict_log=log)
+        self.assertEqual(len(log), 1)
+        az_step = next(s for s in data["night"]["steps"] if s["product"] == "アゼライン酸美容液")
+        self.assertNotIn("月", az_step["use_days"])
+
+
+class AzelaicPeelingNoNewConflictTests(unittest.TestCase):
+    """アゼライン酸×ピーリング(weekly_care)は今回新たなhard conflictに
+    しないこと(_IRRITANT_FOCUS_TAGSは変更していない)。"""
+
+    def test_azelaic_and_peeling_do_not_conflict_across_weekly_care(self):
+        data = _empty_data(
+            night={"steps": [
+                {"category": "美容液", "product": "アゼライン酸美容液", "use_days": ["土"], "ingredient_focus": "azelaic_acid"},
+            ]},
+            weekly_care=[
+                {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["土"], "ingredient_focus": "aha_bha"},
+            ],
+        )
+        log = []
+        data = app.resolve_weekly_care_day_conflicts(data, conflict_log=log)
+        self.assertEqual(log, [])
+        self.assertEqual(data["weekly_care"][0]["use_days"], ["土"])
+        self.assertEqual(data["night"]["steps"][0]["use_days"], ["土"])
+
+
+class RetinoidPeelingConflictStillEnforcedTests(unittest.TestCase):
+    """レチノール系×ピーリング(weekly_care)は従来どおり競合として維持
+    されること(今回変更していない_IRRITANT_FOCUS_TAGS/
+    resolve_weekly_care_day_conflictsの回帰確認)。"""
+
+    def test_retinol_and_peeling_still_conflict(self):
+        data = _empty_data(
+            night={"steps": [
+                {"category": "美容液", "product": "レチノール美容液", "use_days": ["土"], "ingredient_focus": "retinol"},
+            ]},
+            weekly_care=[
+                {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["土"], "ingredient_focus": "aha"},
+            ],
+        )
+        log = []
+        data = app.resolve_weekly_care_day_conflicts(data, conflict_log=log)
+        self.assertEqual(len(log), 1)
+        self.assertNotIn("土", data["weekly_care"][0]["use_days"])
+
+
+class BeautyDeviceRegressionAfterIrritantFixTests(unittest.TestCase):
+    """美容機器×レチノール/ピーリングの既存ルールが今回の修正で回帰
+    していないこと。"""
+
+    def test_device_retinol_conflict_unaffected(self):
+        data = _empty_data(
+            night={"steps": [
+                {"category": "美容液", "product": "レチノール美容液", "use_days": ["月"], "ingredient_focus": "retinol"},
+            ]},
+            beauty_devices=[{"device_type": "超音波洗浄", "product": "超音波洗浄機A"}],
+        )
+        log = []
+        data = app.resolve_beauty_device_day_conflicts(data, conflict_log=log)
+        self.assertEqual(len(log), 1)
+        self.assertIn("レチノールを使用する日は使用を避けてください", data["beauty_devices"][0]["reason"])
+
+    def test_device_peeling_conflict_unaffected(self):
+        data = _empty_data(
+            weekly_care=[
+                {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["土"], "ingredient_focus": "aha"},
+            ],
+            beauty_devices=[{"device_type": "RF", "product": "RF美顔器A"}],
+        )
+        log = []
+        data = app.resolve_beauty_device_day_conflicts(data, conflict_log=log)
+        self.assertEqual(len(log), 1)
+        self.assertIn("ピーリングを行う日は使用を避けてください", data["beauty_devices"][0]["reason"])
+
+
+class NoFabricatedReasonForRemovedConflictsTests(unittest.TestCase):
+    """解除した競合(通常濃度VC×レチノール、アゼライン酸×レチノール)に
+    ついて、架空の「別日にしています」等の理由が出ないこと。conflict_logに
+    記録が無い=build_weekly_usage_plan側でも理由が生成されないことを
+    週間プラン全体で確認する。"""
+
+    def test_no_fabricated_reason_for_regular_vc_and_azelaic_vs_retinol(self):
+        data = _empty_data(night={"steps": [
+            {"category": "美容液", "product": "レチノール美容液", "use_days": ["月"], "ingredient_focus": "retinol"},
+            {"category": "美容液", "product": "通常VC美容液", "use_days": ["月"], "ingredient_focus": "vitamin_c"},
+            {"category": "美容液", "product": "アゼライン酸美容液", "use_days": ["月"], "ingredient_focus": "azelaic_acid"},
+        ]})
+        log = []
+        data = app.resolve_weekly_care_day_conflicts(data, conflict_log=log)
+        data = app.resolve_night_irritant_conflicts(data, conflict_log=log)
+        data = app.resolve_beauty_device_day_conflicts(data, conflict_log=log)
+        self.assertEqual(log, [])
+
+        data["routine_conflict_log"] = log
+        plan = app.build_weekly_usage_plan(data)
+        mon_entry = next(d for d in plan if d["day"] == "月")
+        self.assertEqual(mon_entry["routine_reasons"], [])
+        self.assertEqual(data["routine_reason_notes"], [])
+        # 3製品とも指定通り月曜に表示されること(架空の別日移動が起きていない)。
+        self.assertTrue(any("レチノール美容液" in x for x in mon_entry["night"]))
+        self.assertTrue(any("通常VC美容液" in x for x in mon_entry["night"]))
+        self.assertTrue(any("アゼライン酸美容液" in x for x in mon_entry["night"]))
 
 
 if __name__ == "__main__":
