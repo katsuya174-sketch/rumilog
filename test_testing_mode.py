@@ -452,5 +452,113 @@ class TestingModeWebAndIosSafetyTests(unittest.TestCase):
                 self.assertFalse(app.has_premium_features())
 
 
+class HistoryEntitlementQuotaTests(unittest.TestCase):
+    """
+    GET /api/v1/history の entitlement_type/monthly_limit/remaining_count。
+    既存のget_remaining_free_count/get_remaining_premium_count/
+    get_remaining_testing_mode_countをそのまま呼んでいるだけであることを、
+    実際のHTTPレスポンスを通して確認する(新規カウントロジックを追加して
+    いないことの裏付け)。
+    """
+
+    def setUp(self):
+        _truncate_premium_table()
+        _delete_testing_mode_usage_rows()
+        _clear_testing_mode_env()
+
+    def _fresh_ip_headers(self, suffix):
+        # free_usage.jsonは実ファイルのため、テストごとに未使用のIPを使い
+        # 他テスト・実データと衝突しないようにする(RFC5737 TEST-NET-3)。
+        return {"X-Forwarded-For": f"203.0.113.{suffix}"}
+
+    # FREE: limit=5、remaining_countはget_remaining_free_count()と一致
+    def test_free_entitlement_reports_limit_5(self):
+        client = app.app.test_client()
+        headers = self._fresh_ip_headers(11)
+        resp = client.get("/api/v1/history", headers=headers)
+        body = resp.get_json()
+        self.assertEqual(body["entitlement_type"], "free")
+        self.assertEqual(body["monthly_limit"], app.FREE_MONTHLY_LIMIT)
+        self.assertEqual(body["remaining_count"], app.FREE_MONTHLY_LIMIT)
+
+    # PREMIUM: limit=30、remaining_countはget_remaining_premium_count()と一致
+    def test_premium_entitlement_reports_limit_30(self):
+        key = app.issue_premium_key_for_google_play("tok_quota_premium_test", "2099-01-01T00:00:00")
+        try:
+            client = app.app.test_client()
+            resp = client.get(f"/api/v1/history?premium_key={key}")
+            body = resp.get_json()
+            self.assertEqual(body["entitlement_type"], "premium")
+            self.assertEqual(body["monthly_limit"], app.PREMIUM_MONTHLY_LIMIT)
+            self.assertEqual(body["remaining_count"], app.get_remaining_premium_count(key))
+            self.assertEqual(body["remaining_count"], app.PREMIUM_MONTHLY_LIMIT)
+        finally:
+            import psycopg2
+            conn = psycopg2.connect(app.DATABASE_URL)
+            cur = conn.cursor()
+            cur.execute("DELETE FROM premium_subscriptions WHERE premium_key = %s", (key,))
+            conn.commit()
+            cur.close()
+            conn.close()
+
+    # TESTING MODE: limit=30、remaining_countはget_remaining_testing_mode_count()と一致
+    def test_testing_mode_entitlement_reports_limit_30(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ["TESTING_MODE"] = "true"
+            os.environ["TESTING_MODE_VERSION_CODES"] = str(TEST_VERSION_CODE)
+            client = app.app.test_client()
+            nonce_resp = client.post("/api/v1/testing-mode/nonce")
+            nonce = nonce_resp.get_json()["nonce"]
+            request_hash = hashlib.sha256(nonce.encode()).hexdigest()
+            with patch.object(app, "_get_play_integrity_service",
+                               return_value=_mock_play_integrity_service(_valid_verdict(request_hash=request_hash))):
+                verify_resp = client.post("/api/v1/testing-mode/verify", json={"integrity_token": "dummy"})
+            self.assertEqual(verify_resp.status_code, 200)
+
+            resp = client.get("/api/v1/history")
+            body = resp.get_json()
+            self.assertEqual(body["entitlement_type"], "testing_mode")
+            self.assertEqual(body["monthly_limit"], app.TESTING_MODE_MONTHLY_LIMIT)
+            self.assertEqual(body["remaining_count"], app.TESTING_MODE_MONTHLY_LIMIT)
+
+            # premium_subscriptionsへは一切書き込まれていないこと
+            self.assertEqual(_count_premium_subscriptions_rows(), 0)
+
+    # TESTING MODE OFF後、通常FREEユーザーなら次回取得時からfree表示へ戻る
+    def test_testing_mode_off_reverts_to_free_entitlement(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ["TESTING_MODE"] = "true"
+            os.environ["TESTING_MODE_VERSION_CODES"] = str(TEST_VERSION_CODE)
+            client = app.app.test_client()
+            nonce = client.post("/api/v1/testing-mode/nonce").get_json()["nonce"]
+            request_hash = hashlib.sha256(nonce.encode()).hexdigest()
+            with patch.object(app, "_get_play_integrity_service",
+                               return_value=_mock_play_integrity_service(_valid_verdict(request_hash=request_hash))):
+                client.post("/api/v1/testing-mode/verify", json={"integrity_token": "dummy"})
+
+            before = client.get("/api/v1/history").get_json()
+            self.assertEqual(before["entitlement_type"], "testing_mode")
+
+            os.environ["TESTING_MODE"] = "false"
+            after = client.get("/api/v1/history", headers=self._fresh_ip_headers(22)).get_json()
+            self.assertEqual(after["entitlement_type"], "free")
+            self.assertEqual(after["monthly_limit"], app.FREE_MONTHLY_LIMIT)
+
+    # 既存のTesting Mode履歴挙動(has_premium_features()反映)を壊していないこと
+    def test_history_is_premium_field_still_reflects_testing_mode(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ["TESTING_MODE"] = "true"
+            os.environ["TESTING_MODE_VERSION_CODES"] = str(TEST_VERSION_CODE)
+            client = app.app.test_client()
+            nonce = client.post("/api/v1/testing-mode/nonce").get_json()["nonce"]
+            request_hash = hashlib.sha256(nonce.encode()).hexdigest()
+            with patch.object(app, "_get_play_integrity_service",
+                               return_value=_mock_play_integrity_service(_valid_verdict(request_hash=request_hash))):
+                client.post("/api/v1/testing-mode/verify", json={"integrity_token": "dummy"})
+
+            body = client.get("/api/v1/history").get_json()
+            self.assertTrue(body["is_premium"])
+
+
 if __name__ == "__main__":
     unittest.main()

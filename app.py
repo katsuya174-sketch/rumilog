@@ -15082,11 +15082,59 @@ def _safe_num(value):
         return 0.0
 
 
-def build_candidate_comparison_notes(top_candidates):
+_SCORE_COMPONENT_LABELS = {
+    "base": "基本適合スコア",
+    "improve": "改善適合スコア",
+    "routine": "相乗効果スコア",
+}
+
+
+def _dominant_score_component(base, improve, routine):
+    """3つのスコア要素のうち最も高いものを返す('base'/'improve'/'routine')。
+    同値時はbase→improve→routineの順で優先する。"""
+    if base >= improve and base >= routine:
+        return "base"
+    if improve >= base and improve >= routine:
+        return "improve"
+    return "routine"
+
+
+def _candidate_feature_highlight(candidate):
     """
-    1位候補が「なぜ1位か」、2位・3位が「1位とどう違うか」を、追加のGemini
-    呼び出し無しでスコア内訳(base/improve/routine)・成分・価格から機械的に
-    生成する（プレミアム機能「AI比較」の表示用）。
+    候補固有の特徴を1つだけ返す(機能→主成分→補助成分の優先順)。
+    normalize_candidate()が保持した実データにある値をそのまま使うだけで、
+    存在しない情報は補完しない(無ければ空文字)。
+    """
+    if not isinstance(candidate, dict):
+        return ""
+    main_functions = [f for f in (candidate.get("main_functions") or []) if f]
+    if main_functions:
+        return main_functions[0]
+    active = [a for a in (candidate.get("active_ingredients") or []) if a]
+    if active:
+        return ingredient_map.get(active[0], active[0])
+    support = [s for s in (candidate.get("support_ingredients") or []) if s]
+    if support:
+        return ingredient_map.get(support[0], support[0])
+    return ""
+
+
+def build_candidate_comparison_notes(top_candidates, step=None, user_data=None):
+    """
+    1位候補が「なぜ1位か」(why_best)と、2位・3位が「1位と比べてどう違うか」
+    (diffs)を、追加のGemini呼び出し無しで生成する(プレミアム機能「AI比較」の
+    表示用)。
+
+    役割はstep["recommend_reason"](通常の商品推薦理由=「なぜこの商品がこの
+    ユーザーに適しているか」)とは明確に異なり、あくまで「2位・3位候補と比較
+    して、なぜこの商品を1位にしたのか」という比較説明に限定する。
+
+    normalize_candidate()が保持した実データ(active_ingredients/
+    support_ingredients/main_functions/concerns等)にある値だけを使い、
+    商品データに存在しない成分・機能・効果は一切補完しない。総合スコアは
+    既に確定した順位(top_candidates[0]が1位)をそのまま前提とし、
+    「総合スコアで他候補を上回った」以外の優劣(価格・特定成分の有無等)は
+    中立的な事実として書くに留め、「優れている」と断定しない。
     戻り値: {"why_best": str, "diffs": [{"label": "2位"|"3位", "text": str}]}
     """
     if not isinstance(top_candidates, list) or not top_candidates:
@@ -15096,27 +15144,47 @@ def build_candidate_comparison_notes(top_candidates):
     if not isinstance(best, dict):
         return {"why_best": "", "diffs": []}
 
+    step = step if isinstance(step, dict) else {}
+    user_data = user_data if isinstance(user_data, dict) else {}
+
     base = _safe_num(best.get("base_score", 0))
     improve = _safe_num(best.get("improve_score", 0))
     routine = _safe_num(best.get("routine_score", 0))
 
-    reasons = []
-    if base > 0 and base >= improve and base >= routine:
-        reasons.append("肌質・悩みへの基本適合度が高い")
-    if improve > 0 and improve >= base and improve >= routine:
-        reasons.append("優先すべき改善項目に合う成分を含む")
-    if routine > 0 and routine >= base and routine >= improve:
-        reasons.append("既存ルーティンとの相性が良い")
+    best_label = str(best.get("name", "") or "").strip() or "この商品"
+    if best.get("brand") and not best_label.startswith(best.get("brand")):
+        best_label = f"{best.get('brand')} {best_label}".strip()
 
-    best_actives = [a for a in (best.get("active_ingredients") or []) if a]
-    best_actives_ja = [ingredient_map.get(a, a) for a in best_actives]
-    if best_actives_ja:
-        reasons.append(f"{'・'.join(best_actives_ja[:2])}を配合している")
+    concern_tags = build_concern_tags(best, step)
+    feature = _candidate_feature_highlight(best)
 
-    why_best = (
-        "、".join(reasons) + "ため、総合スコアが最も高くなっています。"
-        if reasons else ""
-    )
+    if base <= 0 and improve <= 0 and routine <= 0:
+        why_best = ""
+    else:
+        score_label = _SCORE_COMPONENT_LABELS[_dominant_score_component(base, improve, routine)]
+        if concern_tags and feature:
+            why_best = (
+                f"今回優先度の高い{concern_tags[0]}に対して、{best_label}は{feature}を含み、"
+                f"特に{score_label}の評価が高かったことが、総合スコアで他候補を上回った理由です。"
+            )
+        elif feature:
+            why_best = (
+                f"{best_label}は{feature}を含み、特に{score_label}の評価が高かったことが、"
+                f"総合スコアで他候補を上回った理由です。"
+            )
+        elif concern_tags:
+            why_best = (
+                f"今回優先度の高い{concern_tags[0]}への適合度と{score_label}の評価が高かったことが、"
+                f"総合スコアで他候補を上回った理由です。"
+            )
+        else:
+            # 成分・機能データが無い商品: スコア・価格等、実在するデータのみで説明する
+            # (データ不足を補完しない)。
+            price = safe_price(best.get("price_ref", 0))
+            if price > 0:
+                why_best = f"価格帯とスコアのバランスを含め、{score_label}の評価が高く、総合スコアで他候補を上回っています。"
+            else:
+                why_best = f"{score_label}の評価が高く、総合スコアで他候補を上回っています。"
 
     diffs = []
     rank_labels = {1: "2位", 2: "3位"}
@@ -15130,10 +15198,17 @@ def build_candidate_comparison_notes(top_candidates):
         if score_gap > 0:
             parts.append(f"総合スコアが{score_gap}点差")
 
+        best_actives = [a for a in (best.get("active_ingredients") or []) if a]
         cand_actives = set(a for a in (cand.get("active_ingredients") or []) if a)
         unique_to_best = [a for a in best_actives if a not in cand_actives]
         if unique_to_best:
-            parts.append(f"{ingredient_map.get(unique_to_best[0], unique_to_best[0])}を含む点が優位")
+            parts.append(f"{ingredient_map.get(unique_to_best[0], unique_to_best[0])}を含む点が異なる")
+        else:
+            best_functions = [f for f in (best.get("main_functions") or []) if f]
+            cand_functions = set(f for f in (cand.get("main_functions") or []) if f)
+            unique_function = [f for f in best_functions if f not in cand_functions]
+            if unique_function:
+                parts.append(f"{unique_function[0]}という特徴が異なる")
 
         best_price = safe_price(best.get("price_ref", 0))
         cand_price = safe_price(cand.get("price_ref", 0))
@@ -15141,7 +15216,7 @@ def build_candidate_comparison_notes(top_candidates):
             if best_price < cand_price:
                 parts.append(f"価格は¥{cand_price - best_price:,}安い")
             elif best_price > cand_price:
-                parts.append(f"価格は¥{best_price - cand_price:,}高いが評価スコアで優位")
+                parts.append(f"価格は¥{best_price - cand_price:,}高いが総合スコアでは上回る")
 
         diffs.append({
             "label": rank_labels.get(idx, f"{idx + 1}位"),
@@ -15237,6 +15312,13 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
         if final <= 0:
             final = base + improve + routine
 
+        def as_tag_list(value):
+            if isinstance(value, list):
+                return [str(v).strip() for v in value if str(v).strip()]
+            if isinstance(value, str) and value.strip():
+                return [value.strip()]
+            return []
+
         return {
             "brand": brand,
             "name": name,
@@ -15246,6 +15328,16 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
             "routine_score": routine,
             "source": clean_text(c.get("source", c.get("product_source", ""))),
             "price_ref": to_number(c.get("price_ref", c.get("price", 0))),
+            # 「なぜこの商品が1位か」(build_candidate_comparison_notes)の個別化に
+            # 必要な範囲だけ、元の商品データから保持する(説明生成に使わない
+            # フィールドは増やさない)。
+            "active_ingredients": as_tag_list(c.get("active_ingredients")),
+            "support_ingredients": as_tag_list(c.get("support_ingredients")),
+            "main_functions": as_tag_list(c.get("main_functions")),
+            "skin_types": as_tag_list(c.get("skin_types")),
+            "concerns": as_tag_list(c.get("concerns")),
+            "texture": clean_text(c.get("texture", "")),
+            "formulation": as_tag_list(c.get("formulation")),
         }
 
     def build_candidate_identity_keys(candidate):
@@ -15440,7 +15532,7 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
         step[key] = to_number(step.get(key, 0))
 
     step["top_candidates"] = preserve_ranked_top_candidates(step)
-    step["candidate_comparison"] = build_candidate_comparison_notes(step["top_candidates"])
+    step["candidate_comparison"] = build_candidate_comparison_notes(step["top_candidates"], step, user_data)
     step["candidate_comparison_table"] = build_candidate_comparison_table(step["top_candidates"])
 
     if step["top_candidates"]:
@@ -21897,6 +21989,25 @@ def api_history():
         _is_cre = is_creator()
         client_ip = get_client_ip()
 
+        # entitlement_type/monthly_limit/remaining_count: Android側トップページの
+        # 実際の利用枠表示用。既存のis_premium_user()/is_testing_mode_user()と
+        # 既存カウンター関数(get_remaining_free_count/get_remaining_premium_count/
+        # get_remaining_testing_mode_count)をそのまま呼ぶだけで、新規の回数管理
+        # ロジックは追加しない。is_creator()は現在テスターへの表示対象ではない
+        # (作成者は無制限のため通常premium表示のまま流用する)。
+        if is_premium_user():
+            entitlement_type = "premium"
+            monthly_limit = PREMIUM_MONTHLY_LIMIT
+            remaining_count = get_remaining_premium_count(request.args.get("premium_key", ""))
+        elif is_testing_mode_user():
+            entitlement_type = "testing_mode"
+            monthly_limit = TESTING_MODE_MONTHLY_LIMIT
+            remaining_count = get_remaining_testing_mode_count(user_id)
+        else:
+            entitlement_type = "free"
+            monthly_limit = FREE_MONTHLY_LIMIT
+            remaining_count = get_remaining_free_count(client_ip)
+
         history_data = load_results(user_id=user_id)
         dashboard = build_history_dashboard(history_data, _is_premium, _is_cre)
 
@@ -21927,6 +22038,9 @@ def api_history():
             "success": True,
             "is_premium": _is_premium,
             "remaining_free_count": get_remaining_free_count(client_ip),
+            "entitlement_type": entitlement_type,
+            "monthly_limit": monthly_limit,
+            "remaining_count": remaining_count,
             "streak": dashboard["streak"],
             "monthly_report": dashboard["monthly_report"],
             "improvement_summary": dashboard["improvement_summary"],
