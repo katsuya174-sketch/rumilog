@@ -15693,9 +15693,10 @@ def _find_decisive_score_reasons(best_agg, others_agg_list):
     """
     best_aggの各ruleについて、比較対象othersの全員に対して実際に(同点でなく)
     合計pointsが上回っているものだけを「順位差に実際に寄与した根拠」として
-    抽出する。othersのうち1件でも同点以上なら、そのruleは決め手として使わない
-    (「全候補共通の加点を決め手にしない」「同点を上回ったと表現しない」を
-    ここで保証する)。gap(bestと他候補最良値との差)が大きい順に返す。
+    抽出する(kind="gain")。othersのうち1件でも同点以上なら、そのruleは
+    決め手として使わない(「全候補共通の加点を決め手にしない」「同点を
+    上回ったと表現しない」をここで保証する)。gap(bestと他候補最良値との差)
+    が大きい順に返す。
     """
     decisive = []
     for rule, info in best_agg.items():
@@ -15711,9 +15712,71 @@ def _find_decisive_score_reasons(best_agg, others_agg_list):
                 "matched_user_condition": info["matched_user_condition"],
                 "points": info["points"],
                 "gap": round(info["points"] - best_other, 1),
+                "kind": "gain",
             })
     decisive.sort(key=lambda d: d["gap"], reverse=True)
     return decisive
+
+
+def _find_penalty_avoidance_reasons(best_agg, others_agg_list):
+    """
+    「1位への加点」だけでなく、「比較対象othersが実際に受けた減点を1位が
+    受けていない、または減点幅が小さい」ことも順位差への正当な寄与として
+    検出する(kind="avoidance")。
+
+    対象にするのは、比較対象othersの**全員**が同じruleで負のpointsを記録して
+    おり、かつ1位側がそのruleについて(記録が無い=未発生とみなして0、または
+    記録があっても)実際に全員より悪くない(同点でなく上回っている)場合のみ。
+    - 全員が同じ減点を受けている(1位も含めて同じ)場合は_find_decisive_score_reasons
+      側で「同点」として除外されるため、ここでは1位にそのruleの記録が無い
+      (=0扱い)ケースのみを扱う。1位にも同じruleの記録がある場合は、加点側の
+      比較(_find_decisive_score_reasons)が同じロジックで正しく処理するため、
+      ここでは対象外にする(二重カウントを避ける)。
+    - othersのうち1件でもそのruleの減点が無い(=0)候補がいれば、
+      「全候補に対する決め手」にはならないため除外する(1位が一部候補にしか
+      優位でないケースを「全て上回った」と誤表現しないため)。
+    - labelには減点条件そのものの説明(例:「刺激リスクが高いとされている」)を
+      使い、「何の減点を回避したのか」を明示する。存在しない情報は補わない。
+    """
+    all_other_rules = set()
+    for oa in others_agg_list:
+        all_other_rules.update(oa.keys())
+
+    avoidance = []
+    for rule in all_other_rules:
+        if rule in best_agg:
+            # bestも同じruleを記録している場合は_find_decisive_score_reasons側の対象
+            continue
+
+        other_points_for_rule = []
+        info_for_label = None
+        all_others_have_negative = True
+        for oa in others_agg_list:
+            info = oa.get(rule)
+            if info is None or info["points"] >= 0:
+                all_others_have_negative = False
+                break
+            other_points_for_rule.append(info["points"])
+            info_for_label = info_for_label or info
+
+        if not all_others_have_negative or not other_points_for_rule:
+            continue
+
+        best_points = 0  # bestにこのruleの記録が無い = この減点条件が発生しなかった
+        worst_other = max(other_points_for_rule)  # 他候補の中で最も減点が小さい(マシな)値
+        if best_points > worst_other:
+            avoidance.append({
+                "rule": rule,
+                "label": info_for_label["label"],
+                "feature": info_for_label["feature"],
+                "matched_user_condition": info_for_label["matched_user_condition"],
+                "points": best_points,
+                "gap": round(best_points - worst_other, 1),
+                "kind": "avoidance",
+            })
+
+    avoidance.sort(key=lambda d: d["gap"], reverse=True)
+    return avoidance
 
 
 def _score_axis_advantage(best, others):
@@ -15754,9 +15817,14 @@ def _build_why_best_text(best, others, step, best_label):
     組み立てる。othersは呼び出し側で少なくとも1件以上ある前提。
 
     1位商品を単独で解析して理由を推測するのではなく、1位・2位・3位が
-    実際に評価された根拠(rule単位のpoints)を突き合わせ、
-    「1位がothers全員に対して実際に上回っているrule」だけを決め手として使う
-    (同点・全候補共通の加点は決め手にしない)。決め手が複数見つかった場合は
+    実際に評価された根拠(rule単位のpoints)を突き合わせ、決め手として
+    以下の両方を使う:
+      (A) 1位がothers全員に対して実際に上回っている加点rule(kind="gain",
+          _find_decisive_score_reasons)。
+      (B) others全員が実際に受けた減点を1位が受けていない、または減点幅が
+          小さいrule(kind="avoidance", _find_penalty_avoidance_reasons)。
+    いずれも同点・全候補共通・一部候補にしか優位でないケースは決め手にしない
+    (「全候補を上回った」と誤表現しない)。決め手が複数見つかった場合は
     差(gap)が大きい順に、実際の該当成分・機能・条件(matched_product_feature/
     matched_user_condition)を添えて説明する。1位にも他候補にも共通して
     見られる加点は「共有点」として触れてよいが、決め手としては使わない。
@@ -15770,7 +15838,9 @@ def _build_why_best_text(best, others, step, best_label):
     best_agg = _aggregate_reasons_by_rule(best.get("candidate_score_reasons"))
     others_agg_list = [_aggregate_reasons_by_rule(o.get("candidate_score_reasons")) for o in others]
 
-    decisive = _find_decisive_score_reasons(best_agg, others_agg_list)
+    gains = _find_decisive_score_reasons(best_agg, others_agg_list)
+    avoidances = _find_penalty_avoidance_reasons(best_agg, others_agg_list)
+    decisive = sorted(gains + avoidances, key=lambda d: d["gap"], reverse=True)
 
     if decisive:
         # 決め手ではないが、比較した候補にも見られる加点を最大1つ、
@@ -15785,18 +15855,37 @@ def _build_why_best_text(best, others, step, best_label):
                 shared_label = info["label"]
                 break
 
-        phrases = []
-        for d in decisive[:2]:
+        selected = decisive[:2]
+        gain_phrases = []
+        avoidance_phrases = []
+        for d in selected:
             feature_text = "・".join(d["feature"][:2])
-            if feature_text and feature_text != d["label"]:
-                phrases.append(f"{d['label']}({feature_text})")
+            if d["kind"] == "avoidance":
+                if feature_text and feature_text != d["label"]:
+                    avoidance_phrases.append(f"「{d['label']}」({feature_text})")
+                else:
+                    avoidance_phrases.append(f"「{d['label']}」")
             else:
-                phrases.append(d["label"])
-        decisive_text = "、".join(phrases)
+                if feature_text and feature_text != d["label"]:
+                    gain_phrases.append(f"{d['label']}({feature_text})")
+                else:
+                    gain_phrases.append(d["label"])
+
+        clauses = []
+        if gain_phrases:
+            clauses.append(f"{best_label}は{'、'.join(gain_phrases)}で比較した候補より優位")
+        if avoidance_phrases:
+            avoidance_text = "、".join(avoidance_phrases)
+            if gain_phrases:
+                clauses.append(f"比較した候補に見られた{avoidance_text}の影響も受けていません")
+            else:
+                clauses.append(f"{best_label}は比較した候補に見られた{avoidance_text}の影響を受けていません")
+
+        decisive_sentence = "、".join(clauses) + "。この差が選ばれた理由です。"
 
         if shared_label:
-            return f"{shared_label}は比較した候補にも見られますが、{best_label}は{decisive_text}で比較した候補より優位だったため選ばれました。"
-        return f"{best_label}は{decisive_text}で比較した候補より優位だったため選ばれました。"
+            return f"{shared_label}は比較した候補にも見られますが、{decisive_sentence}"
+        return decisive_sentence
 
     score_adv = _score_axis_advantage(best, others)
     if score_adv:

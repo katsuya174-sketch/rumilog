@@ -500,5 +500,123 @@ class WhyBestUsesRealScoreReasonsTests(unittest.TestCase):
         self.assertIn("敏感肌向け", why_best)
 
 
+# =========================================================
+# STEP 5: why_bestの対称比較(1位への加点だけでなく、
+# 他候補が受けた減点を1位が回避したことも決め手として扱う)
+# =========================================================
+
+class PenaltyAvoidanceReasonTests(unittest.TestCase):
+    def _candidate(self, name, base_score, reasons):
+        return {
+            "brand": "", "name": name, "score": base_score, "base_score": base_score,
+            "improve_score": 0, "routine_score": 0, "source": "db", "price_ref": 2000,
+            "active_ingredients": [], "support_ingredients": [], "main_functions": [],
+            "skin_types": [], "concerns": [], "texture": "", "formulation": [],
+            "candidate_score_reasons": reasons,
+        }
+
+    # 1. 1位のみ強い加点 → 従来どおり(gain)説明されること
+    def test_gain_only_case_still_works(self):
+        best = self._candidate("1位商品", 90, [
+            _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む", feature="ナイアシンアミド", points=25),
+        ])
+        second = self._candidate("2位商品", 70, [])
+        result = app.build_candidate_comparison_notes([best, second], {}, {})
+        self.assertIn("ナイアシンアミド", result["why_best"])
+        self.assertNotIn("影響を受けていません", result["why_best"])
+
+    # 2. 2位・3位のみ同じ減点 → その回避を1位理由として説明
+    def test_others_share_penalty_best_avoids_it(self):
+        best = self._candidate("1位商品", 90, [])
+        second = self._candidate("2位商品", 80, [
+            _reason("routine_irritation_high_penalty", "刺激リスクが高いとされている", feature="irritation_risk=high", points=-10, axis="routine"),
+        ])
+        third = self._candidate("3位商品", 75, [
+            _reason("routine_irritation_high_penalty", "刺激リスクが高いとされている", feature="irritation_risk=high", points=-8, axis="routine"),
+        ])
+        result = app.build_candidate_comparison_notes([best, second, third], {}, {})
+        why_best = result["why_best"]
+        self.assertIn("刺激リスクが高いとされている", why_best)
+        self.assertIn("影響を受けていません", why_best)
+        self.assertIn("irritation_risk=high", why_best)
+
+    # 3. 1位も減点されるが減点幅が小さい → 相対差(既存のgain比較)を正しく扱う
+    def test_best_has_smaller_penalty_than_others(self):
+        best = self._candidate("1位商品", 90, [
+            _reason("common_contra_high_irritation", "刺激リスクが高いとされている成分・処方", feature="high_irritation_risk", points=-3),
+        ])
+        second = self._candidate("2位商品", 80, [
+            _reason("common_contra_high_irritation", "刺激リスクが高いとされている成分・処方", feature="high_irritation_risk", points=-10),
+        ])
+        third = self._candidate("3位商品", 75, [
+            _reason("common_contra_high_irritation", "刺激リスクが高いとされている成分・処方", feature="high_irritation_risk", points=-8),
+        ])
+        result = app.build_candidate_comparison_notes([best, second, third], {}, {})
+        self.assertIn("刺激リスクが高いとされている成分・処方", result["why_best"])
+
+    # 4. 全候補同じ減点 → 決め手にしない
+    def test_shared_penalty_across_all_candidates_is_not_decisive(self):
+        penalty = _reason("routine_irritation_high_penalty", "刺激リスクが高いとされている", feature="irritation_risk=high", points=-10, axis="routine")
+        best = self._candidate("1位商品", 90, [dict(penalty)])
+        second = self._candidate("2位商品", 80, [dict(penalty)])
+        result = app.build_candidate_comparison_notes([best, second], {}, {})
+        self.assertNotIn("影響を受けていません", result["why_best"])
+        self.assertNotIn("刺激リスクが高いとされている", result["why_best"])
+
+    # 5. 2位だけ減点、3位は1位と同等(減点なし) → 「全候補を上回った」と誤表現しない
+    def test_penalty_avoidance_not_claimed_when_only_one_other_has_it(self):
+        best = self._candidate("1位商品", 90, [])
+        second = self._candidate("2位商品", 85, [
+            _reason("routine_irritation_high_penalty", "刺激リスクが高いとされている", feature="irritation_risk=high", points=-10, axis="routine"),
+        ])
+        third = self._candidate("3位商品", 88, [])  # 3位は1位と同じく減点なし(同点)
+        result = app.build_candidate_comparison_notes([best, second, third], {}, {})
+        # 3位とは同点のため、このruleを「全候補に対する決め手」として使わないこと
+        self.assertNotIn("刺激リスクが高いとされている", result["why_best"])
+
+    # 6. 加点差＋減点差の両方が存在 → 実際の主要な順位差を反映
+    def test_both_gain_and_avoidance_are_reflected(self):
+        best = self._candidate("A商品", 90, [
+            _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む", feature="ナイアシンアミド", points=25),
+        ])
+        second = self._candidate("B商品", 70, [
+            _reason("routine_irritation_high_penalty", "刺激リスクが高いとされている", feature="irritation_risk=high", points=-10, axis="routine"),
+        ])
+        third = self._candidate("C商品", 65, [
+            _reason("routine_irritation_high_penalty", "刺激リスクが高いとされている", feature="irritation_risk=high", points=-8, axis="routine"),
+        ])
+        result = app.build_candidate_comparison_notes([best, second, third], {}, {})
+        why_best = result["why_best"]
+        self.assertIn("ナイアシンアミド", why_best)
+        self.assertIn("刺激リスクが高いとされている", why_best)
+        self.assertIn("影響も受けていません", why_best)
+
+    # 7. reasons有無でscore/rankingが完全一致すること(既存機能の維持確認)
+    def test_scoring_functions_unaffected_by_why_best_changes(self):
+        product = _BASE_REPRESENTATIVE_PRODUCTS[0][0]
+        step = _BASE_REPRESENTATIVE_PRODUCTS[0][1]
+        user_data = _BASE_REPRESENTATIVE_PRODUCTS[0][2]
+        budget = _BASE_REPRESENTATIVE_PRODUCTS[0][3]
+        expected = _BASE_REPRESENTATIVE_PRODUCTS[0][4]
+        s1 = app.score_product(product, step, user_data, budget)
+        reasons = []
+        s2 = app.score_product(product, step, user_data, budget, reasons=reasons)
+        self.assertEqual(s1, expected)
+        self.assertEqual(s1, s2)
+
+    def test_avoidance_helper_is_symmetric_with_gain_helper_for_shared_rules(self):
+        """bestも同じruleを持つ場合はavoidance側で二重カウントしないこと。"""
+        best_agg = app._aggregate_reasons_by_rule([
+            _reason("routine_irritation_high_penalty", "刺激リスクが高いとされている", points=-3, axis="routine"),
+        ])
+        others_agg_list = [
+            app._aggregate_reasons_by_rule([
+                _reason("routine_irritation_high_penalty", "刺激リスクが高いとされている", points=-10, axis="routine"),
+            ]),
+        ]
+        avoidance = app._find_penalty_avoidance_reasons(best_agg, others_agg_list)
+        self.assertEqual(avoidance, [])  # gain側(_find_decisive_score_reasons)の担当
+
+
 if __name__ == "__main__":
     unittest.main()
