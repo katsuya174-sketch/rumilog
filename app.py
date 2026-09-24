@@ -5265,13 +5265,18 @@ def _is_rakuten_item_valid_for_category(item_name: str, category: str, strict: b
         return True  # キーワード検索では非スキンケア拒否のみ（cross_rejectは適用しない）
 
     # ---- strict モードのみ: カテゴリ横断の除外チェック ----
+    # ピーリングの除外語は、Gemini候補用の_CANDIDATE_CATEGORY_FORBIDDEN["ピーリング"]と
+    # 常に同じ集合を使う。以前はここに「ウォッシュ」「フォーム」等が無く、
+    # Gemini候補側にしか無かったため、楽天criteria検索経路だけ通常の洗顔料
+    # (例:「〜ジェントルウォッシュ」)がピーリング候補として通ってしまっていた
+    # (2026-09、実機診断で確認)。_CANDIDATE_CATEGORY_FORBIDDEN側を更新すれば
+    # 自動的にこちらにも反映され、経路間で判定基準が再び乖離しないようにする。
     _CATEGORY_CROSS_REJECT = {
-        "ピーリング": [
-            "クレンジング", "メイク落とし", "クレンジングオイル", "クレンジングミルク",
-            "クレンジングジェル", "クレンジングバーム", "クレンジングクリーム",
-            "クレンジングフォーム", "ダブル洗顔不要",
-            "乳液", "クリーム", "化粧水", "シートマスク", "フェイスマスク", "パック",
-        ],
+        "ピーリング": sorted(set(_CANDIDATE_CATEGORY_FORBIDDEN.get("ピーリング", [])) | {
+            "クレンジングオイル", "クレンジングミルク", "クレンジングジェル",
+            "クレンジングバーム", "クレンジングクリーム", "クレンジングフォーム",
+            "ダブル洗顔不要", "パック",
+        }),
         "パック": ["クレンジング", "メイク落とし", "日焼け止め", "サンスクリーン"],
     }
     cross_reject = _CATEGORY_CROSS_REJECT.get(category, [])
@@ -11396,6 +11401,15 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         if p.get("name") in exclude_names:
             continue
 
+        # preserve_ranked_top_candidates()の表示用フィルタと同じ基準
+        # (is_candidate_wrong_for_category)を1位選定より前に適用する。
+        # 以前はここでチェックしておらず、表示用top_candidatesだけが
+        # 事後的に除外されるため、1位(step["product"])には
+        # カテゴリ不適合な商品(例:通常の洗顔料がピーリング1位になる)が
+        # そのまま残ってしまっていた。
+        if is_candidate_wrong_for_category(category, p.get("name", "")):
+            continue
+
         product = dict(p)
 
         # Phase 2: Gemini評価をキャッシュから適用（方針A・enrich の前に実行）
@@ -11541,6 +11555,13 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         brand = str(fields.get("brand", "") or "").strip()
 
         if not candidate_name:
+            continue
+
+        # DB一致(db_match)・AI仮想商品(ai_virtual)どちらの分岐に進む場合も、
+        # 1位選定より前にカテゴリ不適合(is_candidate_wrong_for_category)を
+        # 除外する。preserve_ranked_top_candidates()の表示用フィルタと
+        # 同じ関数・同じ基準を使うことで、1位とtop_candidatesの判定基準を揃える。
+        if is_candidate_wrong_for_category(category, candidate_name):
             continue
 
         candidate_key = normalize_product_name(candidate_name)
@@ -19698,9 +19719,20 @@ def build_weekly_usage_plan(data):
     MORNING_DISPLAY_CATEGORIES = {"化粧水", "美容液", "パック", "ピーリング", "ブースター"}
     # 夜の週間ルーティンから除外するカテゴリ（毎日必須なので省略）
     NIGHT_EXCLUDE_CATEGORIES = {"洗顔", "クレンジング"}
-    # 夜: AIがnight_stepsに含めた場合、use_daysに関わらず毎日表示するカテゴリ
-    # （AIがルーティンに入れた=毎日必要と判断したとみなす。入れていなければそのまま非表示）
+    # 夜: night_stepsに存在しない場合にmorning_stepsから補完表示するカテゴリ
+    # （AIが化粧水・美容液を朝のみに設定した場合でも夜の週間ビューに表示させる。
+    #   このNIGHT_ALWAYS_DAILYは「補完対象カテゴリ」を表すだけで、night_steps側の
+    #   use_days判定には使わない。use_days判定は下のNIGHT_DAILY_REGARDLESS_OF_USE_DAYS
+    #   を参照する）
     NIGHT_ALWAYS_DAILY = {"化粧水", "美容液"}
+    # 夜: use_daysに関わらず毎日表示するカテゴリ。
+    # 化粧水は元々「AIがnight_stepsに入れた=毎日必要」という前提で毎日固定表示。
+    # 美容液はここから除外する: レチノール/高濃度VC/AHA・BHA等の刺激成分美容液は
+    # conflict resolver(resolve_night_irritant_conflicts等)がuse_daysを
+    # 週3回等に確定させることがあり、それを無視してuse_days無関係に毎日表示すると、
+    # 安全のため非毎日にした判断が週間表示だけ嘘をつくことになるため
+    # (2026-09、実機診断で確認した表示層のバグ)。
+    NIGHT_DAILY_REGARDLESS_OF_USE_DAYS = {"化粧水"}
     # 夜: use_days=[]（毎日同じ）なら週間ビューに出さないカテゴリ
     NIGHT_SUPPRESS_IF_DAILY = {"乳液", "クリーム"}
 
@@ -19799,7 +19831,7 @@ def build_weekly_usage_plan(data):
             and step_label(s)
             and id(s) not in suppress_daily_ids
             and (
-                str(s.get("category") or "").strip() in NIGHT_ALWAYS_DAILY  # 化粧水・美容液は常時
+                str(s.get("category") or "").strip() in NIGHT_DAILY_REGARDLESS_OF_USE_DAYS  # 化粧水は常時
                 or not s.get("use_days")
                 or day in (s.get("use_days") or [])
             )
