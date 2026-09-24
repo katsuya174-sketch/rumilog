@@ -133,7 +133,13 @@ class NightIrritantPriorityConflictReasonTests(unittest.TestCase):
         entry = log[0]
         self.assertEqual(entry["type"], "night_irritant_priority_conflict")
         self.assertEqual(entry["product"], "高濃度VC美容液")
-        self.assertIn("優先度がより高い", entry["reason_text"])
+        # 「移動履歴」ではなく「なぜ同日にしないか→結果どう配置したか」を
+        # 説明する文言になっていること。実際に競合した相手(レチノール
+        # 美容液)の製品名を挙げ、内部タグ(retinoid等)は出さない。
+        self.assertIn("レチノール美容液", entry["reason_text"])
+        self.assertIn("別日にしています", entry["reason_text"])
+        self.assertNotIn("retinoid", entry["reason_text"])
+        self.assertNotIn("vitamin_c", entry["reason_text"])
         vc_step = next(s for s in data["night"]["steps"] if s["product"] == "高濃度VC美容液")
         self.assertEqual(entry["to_days"], vc_step["use_days"])
 
@@ -170,7 +176,13 @@ class BeautyDeviceConflictReasonNoteTests(unittest.TestCase):
         self.assertIsNone(entry["from_days"])
         self.assertIsNone(entry["to_days"])
         device_item = data["beauty_devices"][0]
-        self.assertIn(entry["reason_text"].split("は、", 1)[-1].rstrip("。"), device_item["reason"])
+        # 「最終配置理由」(なぜ同日にしないか)を説明する文言になっている
+        # こと。device_item["reason"](既存の「〜は使用を避けてください」
+        # 注意書きフィールド)自体は今回変更していないので、両者が同じ
+        # 文言である必要はない。
+        self.assertIn("レチノール", entry["reason_text"])
+        self.assertIn("同日使用にならないよう調整しています", entry["reason_text"])
+        self.assertIn("レチノールを使用する日は使用を避けてください", device_item["reason"])
 
         data["routine_conflict_log"] = log
         app.build_weekly_usage_plan(data)
@@ -231,6 +243,204 @@ class ConflictResolversUnchangedWithoutConflictLogTests(unittest.TestCase):
             without_log["night"]["steps"][0]["use_days"],
             with_log["night"]["steps"][0]["use_days"],
         )
+
+
+class PeelingHighConcentrationVitaminCConflictReasonTests(unittest.TestCase):
+    """ピーリング×高濃度ビタミンCの曜日衝突(週ケア↔夜ステップ間)について、
+    実際の既存ロジックの対応範囲を確認する。
+
+    重要な発見(今回のSTOP対象): resolve_weekly_care_day_conflicts()が
+    週ケア(ピーリング)と夜の刺激成分の衝突を検出する際に使う
+    _IRRITANT_FOCUS_TAGS = {"retinoid","retinol","retinal","aha_bha","aha",
+    "bha","pha"} には vitamin_c/azelaic_acid が含まれておらず、ピーリング×
+    高濃度VC・ピーリング×アゼライン酸の週ケア↔夜ステップ間衝突は現状
+    検出・解消されない(resolve_night_irritant_conflicts側の優先度グループ
+    はvitamin_c/azelaic_acidを含むが、これは夜ステップ同士の衝突専用で、
+    週ケア(weekly_care)のピーリングとは比較しない)。_IRRITANT_FOCUS_TAGSへ
+    vitamin_c/azelaic_acidを追加すれば検出できるが、それは既存の曜日安全
+    ロジック自体の変更(どの組み合わせを衝突とみなすか)にあたるため、
+    今回のタスクでは変更せず、ユーザーへ報告のうえ承認を待つ
+    (「根拠不明な理由を捏造しない」の原則により、現状は衝突ログが
+    作られないことをそのまま確認するテストとする)。"""
+
+    def test_peeling_and_high_concentration_vc_conflict_is_not_yet_detected(self):
+        data = _empty_data(
+            night={"steps": [
+                {"category": "美容液", "product": "高濃度VC美容液", "use_days": ["土"], "ingredient_focus": "vitamin_c"},
+            ]},
+            weekly_care=[
+                {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["土"], "ingredient_focus": "aha_bha"},
+            ],
+        )
+        log = []
+        data = app.resolve_weekly_care_day_conflicts(data, conflict_log=log)
+        # 現状の_IRRITANT_FOCUS_TAGSの範囲では、ピーリングと高濃度VCは
+        # 衝突として検出されない(=use_daysは変更されず、conflict_logにも
+        # 何も記録されない)。曜日安全ロジック自体は今回変更していないため、
+        # この挙動が「正しい現状」であることを確認する。
+        self.assertEqual(log, [])
+        self.assertEqual(data["weekly_care"][0]["use_days"], ["土"])
+        self.assertEqual(data["night"]["steps"][0]["use_days"], ["土"])
+
+
+class BeautyDevicePeelingConflictReasonTests(unittest.TestCase):
+    """美容機器×ピーリングの曜日衝突でも、最終配置理由がユーザー向けの
+    文章になること(前回はレチノールのみテスト済み)。"""
+
+    def test_device_peeling_conflict_reason_and_note(self):
+        data = _empty_data(
+            weekly_care=[
+                {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["土"], "ingredient_focus": "aha"},
+            ],
+            beauty_devices=[
+                {"device_type": "RF", "product": "RF美顔器A"},
+            ],
+        )
+        log = []
+        data = app.resolve_beauty_device_day_conflicts(data, conflict_log=log)
+
+        self.assertEqual(len(log), 1)
+        entry = log[0]
+        self.assertEqual(entry["product"], "RF美顔器A")
+        self.assertEqual(entry["conflicts_with"], ["ピーリング"])
+        self.assertIn("ピーリング", entry["reason_text"])
+        self.assertIn("同日使用にならないよう調整しています", entry["reason_text"])
+        device_item = data["beauty_devices"][0]
+        self.assertIn("ピーリングを行う日は使用を避けてください", device_item["reason"])
+
+
+class InternalIdentifiersNeverLeakToUserTextTests(unittest.TestCase):
+    """週間ルーティンの理由文に、内部タグ・rule ID・デバッグ表現が
+    そのまま表示されないこと。"""
+
+    _FORBIDDEN_TOKENS = [
+        "retinoid", "retinol", "retinal",
+        "vitamin_c", "strong_vitamin_c", "high_concentration_vitamin_c",
+        "azelaic_acid",
+        "aha_bha",
+        "sensitive_ok=yes", "sensitive_ok",
+        "rule_id", "rule:",
+        "_A", "_B",  # conflict_logの内部type名の断片
+        "weekly_care_day_conflict", "night_irritant_priority_conflict",
+        "night_irritant_narrowed_for_peeling", "beauty_device_conflict_note",
+    ]
+
+    def test_no_internal_tokens_in_any_generated_reason_text(self):
+        data = _empty_data(
+            night={"steps": [
+                {"category": "美容液", "product": "レチノール美容液", "use_days": ["土"], "ingredient_focus": "retinol"},
+                {"category": "美容液", "product": "高濃度VC美容液", "use_days": [], "ingredient_focus": "vitamin_c"},
+                {"category": "美容液", "product": "アゼライン酸美容液", "use_days": [], "ingredient_focus": "azelaic_acid"},
+            ]},
+            weekly_care=[
+                {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["土"], "ingredient_focus": "aha"},
+            ],
+            beauty_devices=[
+                {"device_type": "超音波洗浄", "product": "超音波洗浄機A"},
+            ],
+        )
+        log = []
+        data = app.resolve_weekly_care_day_conflicts(data, conflict_log=log)
+        data = app.resolve_night_irritant_conflicts(data, conflict_log=log)
+        data = app.resolve_beauty_device_day_conflicts(data, conflict_log=log)
+        data["routine_conflict_log"] = log
+
+        self.assertTrue(len(log) > 0)
+        plan = app.build_weekly_usage_plan(data)
+
+        all_texts = list(data["routine_reason_notes"])
+        for day_entry in plan:
+            all_texts.extend(day_entry["routine_reasons"])
+
+        self.assertTrue(all_texts)
+        for text in all_texts:
+            for token in self._FORBIDDEN_TOKENS:
+                self.assertNotIn(token, text, f"internal token {token!r} leaked into {text!r}")
+
+
+class DuplicateReasonSuppressedInWeeklySummaryTests(unittest.TestCase):
+    """同じ安全判断によって複数曜日に同じ説明が出る場合、routine_reason_notes
+    (週全体のユーザー表示欄)では1件にまとめること。曜日ごとの内部ログ
+    (routine_reasons)はそのまま保持してよい。"""
+
+    def test_same_reason_appears_once_in_weekly_summary_but_per_day_log_kept(self):
+        data = _empty_data(
+            night={"steps": [
+                {"category": "美容液", "product": "レチノール美容液", "use_days": ["土"], "ingredient_focus": "retinol"},
+            ]},
+            weekly_care=[
+                {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["土"], "ingredient_focus": "aha"},
+            ],
+        )
+        log = []
+        data = app.resolve_weekly_care_day_conflicts(data, conflict_log=log)
+        data["routine_conflict_log"] = log
+        plan = app.build_weekly_usage_plan(data)
+
+        # 移動元(土)・移動先の両方に同じreason_textが付くため、
+        # 曜日ごとのrouine_reasonsには両方に現れてよい。
+        reason_text = log[0]["reason_text"]
+        days_with_reason = [d["day"] for d in plan if reason_text in d["routine_reasons"]]
+        self.assertEqual(len(days_with_reason), 2)
+
+        # だが週全体のサマリでは1回だけにまとめること。
+        self.assertEqual(data["routine_reason_notes"].count(reason_text), 1)
+
+
+class FinalWeeklyPlanMatchesConflictLogAndReasonsTests(unittest.TestCase):
+    """複数の競合が同時に起きる現実的なケースで、最終的な週間プラン・
+    このルーティンの理由・conflict_logの3つが矛盾しないこと。"""
+
+    def test_multiple_conflicts_stay_consistent_end_to_end(self):
+        data = _empty_data(
+            night={"steps": [
+                {"category": "美容液", "product": "レチノール美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "retinol"},
+                {"category": "美容液", "product": "高濃度VC美容液", "use_days": ["月", "水", "金"], "ingredient_focus": "vitamin_c"},
+            ]},
+            weekly_care=[
+                {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["月"], "ingredient_focus": "aha"},
+            ],
+            beauty_devices=[
+                {"device_type": "超音波洗浄", "product": "超音波洗浄機A"},
+            ],
+        )
+        log = []
+        data = app.resolve_weekly_care_day_conflicts(data, conflict_log=log)
+        data = app.resolve_night_irritant_conflicts(data, conflict_log=log)
+        data = app.resolve_beauty_device_day_conflicts(data, conflict_log=log)
+        data["routine_conflict_log"] = log
+        plan = app.build_weekly_usage_plan(data)
+
+        peeling_step = data["weekly_care"][0]
+        retinol_step = next(s for s in data["night"]["steps"] if s["product"] == "レチノール美容液")
+        vc_step = next(s for s in data["night"]["steps"] if s["product"] == "高濃度VC美容液")
+
+        by_day = {d["day"]: d for d in plan}
+
+        # ピーリングが実際に表示される曜日にだけ special_care へ出て、
+        # 元の曜日(月)には出ないこと。
+        for day in peeling_step["use_days"]:
+            self.assertTrue(any("AHAピーリング" in x for x in by_day[day]["special_care"]))
+        self.assertFalse(any("AHAピーリング" in x for x in by_day["月"]["special_care"]))
+
+        # レチノールと高濃度VCが同日に重ならないこと、かつ実際に表示される
+        # 曜日と一致すること。
+        self.assertEqual(set(retinol_step["use_days"]) & set(vc_step["use_days"]), set())
+        for day in retinol_step["use_days"]:
+            self.assertTrue(any("レチノール美容液" in x for x in by_day[day]["night"]))
+        for day in vc_step["use_days"]:
+            self.assertTrue(any("高濃度VC美容液" in x for x in by_day[day]["night"]))
+
+        # 美容機器の注意書きが理由ノートに一致していること。
+        device_reason_entries = [e for e in log if e["type"] == "beauty_device_conflict_note"]
+        self.assertEqual(len(device_reason_entries), 1)
+        self.assertIn(device_reason_entries[0]["reason_text"], data["routine_reason_notes"])
+
+        # ルーティン全体の理由が空でないこと、かつ内部タグを含まないこと。
+        self.assertTrue(data["routine_reason_notes"])
+        for text in data["routine_reason_notes"]:
+            self.assertNotIn("retinoid", text)
+            self.assertNotIn("vitamin_c", text)
 
 
 if __name__ == "__main__":

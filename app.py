@@ -7146,6 +7146,50 @@ def _is_ingredient_category_name(product_name: str) -> bool:
     return False
 
 
+# 「このルーティンの理由」表示用: 内部のingredient_focusタグ(retinoid等)を
+# ユーザーに安全な日本語ラベルへ変換する。rule ID・内部カテゴリ名等の
+# デバッグ表現はここで完全に置き換え、conflict_logのreason_textには
+# このラベル(または実際のproduct名)以外の内部識別子を一切含めない。
+_IRRITANT_GROUP_LABELS = [
+    ({"retinoid", "retinol", "retinal"}, "レチノール系"),
+    ({"vitamin_c", "strong_vitamin_c"}, "高濃度ビタミンC"),
+    ({"azelaic_acid"}, "アゼライン酸"),
+    ({"aha_bha", "aha", "bha", "pha"}, "AHA/BHA/PHA系角質ケア"),
+]
+
+
+def _compose_same_day_conflict_reason(product_label, conflicting_products):
+    """
+    「土から日へ移動しました」という処理履歴ではなく、「何と何が競合し、
+    結果どう配置したか」というユーザー向けの最終配置理由を組み立てる。
+    conflicting_products(実際にconflict_logの元になった具体的な相手)が
+    特定できた場合のみ製品名を挙げ、特定できない場合は推測で相手を
+    作らない(該当箇所を呼ぶ側で必ずconflicting_productsを渡すため、
+    このフォールバックは通常発生しない防御的な分岐)。
+    """
+    if conflicting_products:
+        others_text = "・".join(conflicting_products)
+        return (
+            f"{product_label}と{others_text}は、どちらも刺激が出る可能性があるため、"
+            f"肌への負担が重ならないよう別日にしています。"
+        )
+    return f"{product_label}は、他の刺激ケアと重ならないよう配置しています。"
+
+
+def _compose_daily_narrowed_reason(product_label, conflicting_products):
+    """
+    毎日使用可能なケアが、特定のケア(ピーリング等)との刺激の重なりを
+    避けるためにその曜日だけ除外された場合の、ユーザー向け最終配置理由。
+    """
+    if conflicting_products:
+        others_text = "・".join(conflicting_products)
+        return (
+            f"{product_label}は毎日使用できますが、{others_text}との刺激の重なりを"
+            f"避けるため、同日使用にならないよう調整しています。"
+        )
+    return f"{product_label}は、他のケアとの刺激の重なりを避けるため、使用日を調整しています。"
+
+
 def resolve_weekly_care_day_conflicts(data, conflict_log=None):
     """
     週ケア（ピーリング）と night の刺激成分（レチノイド・AHA/BHA/PHA）の曜日衝突を解消。
@@ -7156,13 +7200,18 @@ def resolve_weekly_care_day_conflicts(data, conflict_log=None):
              → 例: レチノール毎日 + ピーリング["土"] → レチノール["月","火","水","木","金","日"]
 
     conflict_log: Noneでない場合、実際にuse_daysを変更した箇所だけを
-    {"type","product","category","from_days","to_days","reason_text"}として
-    追記する（「このルーティンの理由」表示用。このリストに無い曜日変更は
-    存在しないため、build_weekly_usage_plan側で理由を捏造しない基盤になる。
-    日程決定ロジック自体はconflict_logの有無で一切変わらない）。
+    {"type","product","category","from_days","to_days","conflicts_with",
+    "reason_text"}として追記する（「このルーティンの理由」表示用。この
+    リストに無い曜日変更は存在しないため、build_weekly_usage_plan側で
+    理由を捏造しない基盤になる。日程決定ロジック自体はconflict_logの
+    有無で一切変わらない）。reason_textは実際に競合した相手の製品名
+    (conflicts_with)だけを使い、内部タグ・rule ID等は含めない。
     """
     # ---- ケースA: 刺激成分の明示的曜日を収集 ----
     irritant_days: set = set()
+    # 「このルーティンの理由」用: どの曜日にどの夜ステップが刺激成分として
+    # 存在するかを記録し、ピーリングと実際に競合した相手を具体的に説明する。
+    irritant_products_by_day: dict = {}
     # ケースB 用: 毎日使用の刺激ステップを別に収集
     every_day_irritant_steps: list = []
 
@@ -7173,9 +7222,12 @@ def resolve_weekly_care_day_conflicts(data, conflict_log=None):
         focus = _resolve_focus_tags(raw_focus)
         if not focus & _IRRITANT_FOCUS_TAGS:
             continue
+        product_label = str(step.get("product", "") or step.get("category", "夜のケア"))
         days = step.get("use_days") or []
         if days:
             irritant_days.update(days)
+            for d in days:
+                irritant_products_by_day.setdefault(d, set()).add(product_label)
         else:
             every_day_irritant_steps.append(step)
 
@@ -7205,23 +7257,23 @@ def resolve_weekly_care_day_conflicts(data, conflict_log=None):
             step["use_days"] = new_days
             if conflict_log is not None:
                 product_label = str(step.get("product", "") or step.get("category", "週ケア"))
+                conflicting_products = sorted({
+                    p for d in conflict for p in irritant_products_by_day.get(d, set())
+                })
                 conflict_log.append({
                     "type": "weekly_care_day_conflict_A",
                     "product": product_label,
                     "category": str(step.get("category", "") or ""),
                     "from_days": use_days,
                     "to_days": new_days,
-                    "reason_text": (
-                        f"{product_label}は、夜に使用する刺激成分"
-                        f"（レチノイド/高濃度ビタミンC/アゼライン酸/AHA・BHA・PHA等）の"
-                        f"使用日（{'・'.join(sorted(irritant_days))}）と重複していたため、"
-                        f"{'・'.join(use_days)}から{'・'.join(new_days)}へ移動しました。"
-                    ),
+                    "conflicts_with": conflicting_products,
+                    "reason_text": _compose_same_day_conflict_reason(product_label, conflicting_products),
                 })
 
     # ---- ケースB: 刺激成分が毎日 → ピーリング曜日を刺激成分から除外 ----
     if every_day_irritant_steps:
         peeling_days: set = set()
+        peeling_products: set = set()
         for step in data.get("weekly_care", []):
             if not isinstance(step, dict):
                 continue
@@ -7230,6 +7282,7 @@ def resolve_weekly_care_day_conflicts(data, conflict_log=None):
             days = step.get("use_days") or []
             if days:
                 peeling_days.update(days)
+                peeling_products.add(str(step.get("product", "") or step.get("category", "週ケア")))
 
         if peeling_days:
             new_irritant_days = [d for d in _ALL_DAYS if d not in peeling_days]
@@ -7243,17 +7296,15 @@ def resolve_weekly_care_day_conflicts(data, conflict_log=None):
                 step["use_days"] = new_irritant_days
                 if conflict_log is not None:
                     product_label = str(step.get("product", "") or step.get("category", "刺激成分"))
+                    conflicting_products = sorted(peeling_products)
                     conflict_log.append({
                         "type": "night_irritant_narrowed_for_peeling_B",
                         "product": product_label,
                         "category": str(step.get("category", "") or ""),
                         "from_days": [],
                         "to_days": new_irritant_days,
-                        "reason_text": (
-                            f"{product_label}は本来毎日使用できますが、週ケア"
-                            f"（ピーリング/パック）の使用日（{'・'.join(sorted(peeling_days))}）"
-                            f"と重複を避けるため、その曜日を除いて使用する予定にしています。"
-                        ),
+                        "conflicts_with": conflicting_products,
+                        "reason_text": _compose_daily_narrowed_reason(product_label, conflicting_products),
                     })
 
     return data
@@ -7271,20 +7322,23 @@ def resolve_night_irritant_conflicts(data, conflict_log=None):
 
     conflict_log: Noneでない場合、実際に曜日変更したstepだけを記録する
     （「このルーティンの理由」表示用。resolve_weekly_care_day_conflictsと
-    同じ形式）。日程決定ロジック自体は変更しない。
+    同じ形式。reason_textは実際に競合した相手の製品名だけを使い、内部
+    タグ・優先度グループの内部名等は含めない）。日程決定ロジック自体は
+    変更しない。
     """
-    _PRIORITY_GROUPS = [
-        ({"retinoid", "retinol", "retinal"},          "レチノイド"),
-        ({"vitamin_c", "strong_vitamin_c"},            "高濃度ビタミンC"),
-        ({"azelaic_acid"},                             "アゼライン酸"),
-        ({"aha_bha", "aha", "bha", "pha"},             "AHA/BHA/PHA"),
-    ]
+    # 優先順位の並び自体はここで固定する(1.レチノール系 2.高濃度VC
+    # 3.アゼライン酸 4.AHA/BHA/PHA系)。表示ラベルは_IRRITANT_GROUP_LABELS
+    # と同じ内容を使う。
+    _PRIORITY_GROUPS = list(_IRRITANT_GROUP_LABELS)
 
     night_steps = [s for s in data.get("night", {}).get("steps", []) if isinstance(s, dict)]
 
     # 優先度の高いグループから順に「確定済み曜日」を積み上げ、
     # 低いグループが重複していたら安全な曜日へ移動する
     fixed_days: set = set()
+    # 「このルーティンの理由」用: どの曜日にどの(既に確定済みの)夜ステップが
+    # 存在するかを記録し、実際に競合した相手の製品名を具体的に説明する。
+    fixed_products_by_day: dict = {}
 
     for tags, label in _PRIORITY_GROUPS:
         conflict_steps = []
@@ -7310,17 +7364,17 @@ def resolve_night_irritant_conflicts(data, conflict_log=None):
             step["use_days"] = new_days
             if conflict_log is not None:
                 product_label = str(step.get("product", "") or step.get("category", "夜ステップ"))
+                conflicting_products = sorted({
+                    p for d in use_days for p in fixed_products_by_day.get(d, set())
+                })
                 conflict_log.append({
                     "type": "night_irritant_priority_conflict",
                     "product": product_label,
                     "category": str(step.get("category", "") or ""),
                     "from_days": use_days,
                     "to_days": new_days,
-                    "reason_text": (
-                        f"{product_label}（{label}）は、優先度がより高い刺激成分の"
-                        f"使用日（{'・'.join(sorted(fixed_days))}）と重複していたため、"
-                        f"{'・'.join(use_days)}から{'・'.join(new_days)}へ移動しました。"
-                    ),
+                    "conflicts_with": conflicting_products,
+                    "reason_text": _compose_same_day_conflict_reason(product_label, conflicting_products),
                 })
 
         # このグループの（調整後の）曜日を fixed_days に追加
@@ -7329,6 +7383,9 @@ def resolve_night_irritant_conflicts(data, conflict_log=None):
             days = step.get("use_days") or []
             if focus & tags and days:
                 fixed_days.update(days)
+                product_label = str(step.get("product", "") or step.get("category", "夜ステップ"))
+                for d in days:
+                    fixed_products_by_day.setdefault(d, set()).add(product_label)
 
     return data
 
@@ -7384,10 +7441,13 @@ def resolve_beauty_device_day_conflicts(data, conflict_log=None):
         # 「〜は避けてください」を2文連続で出すと同じ言い回しの繰り返しで
         # 冗長に見えるため、避けるべき日を1文にまとめる。
         avoid_days = []
+        conflict_labels = []
         if has_peeling and dtype in _DEVICE_PEELING_INCOMPATIBLE:
             avoid_days.append("ピーリングを行う日")
+            conflict_labels.append("ピーリング")
         if has_retinol and dtype in _DEVICE_RETINOL_INCOMPATIBLE:
             avoid_days.append("レチノールを使用する日")
+            conflict_labels.append("レチノール")
         if avoid_days:
             existing = str(item.get("reason", "") or "").strip()
             note_text = "・".join(avoid_days) + "は使用を避けてください。"
@@ -7395,13 +7455,18 @@ def resolve_beauty_device_day_conflicts(data, conflict_log=None):
             print(f"[DEVICE DAY CONFLICT] {dtype}: {avoid_days}", flush=True)
             if conflict_log is not None:
                 product_label = str(item.get("product", "") or dtype or "美容機器")
+                reason_text = (
+                    f"{product_label}は、{'・'.join(conflict_labels)}との刺激の重なりを"
+                    f"避けるため、同日使用にならないよう調整しています。"
+                )
                 conflict_log.append({
                     "type": "beauty_device_conflict_note",
                     "product": product_label,
                     "category": "美容機器",
                     "from_days": None,
                     "to_days": None,
-                    "reason_text": f"{product_label}は、{note_text}",
+                    "conflicts_with": conflict_labels,
+                    "reason_text": reason_text,
                 })
 
     return data
@@ -16235,6 +16300,32 @@ def _clean_why_best_product_name(name):
     return " ".join(text.split())
 
 
+def _normalize_for_brand_match(text):
+    """
+    why_best表示名にブランド名が既に含まれているかどうかを判定するための
+    緩やかな正規化。大文字小文字・半角全角スペース・括弧記号の差だけを
+    吸収し、それ以外の文字はそのまま比較する(異なるブランド名を誤って
+    同一視しないため、文字自体の置換・編集距離的なゆらぎ吸収はしない)。
+    """
+    text = str(text or "").lower()
+    text = re.sub(r'[\s　]+', '', text)
+    text = re.sub(r'[\(\)（）\[\]【】]', '', text)
+    return text
+
+
+def _brand_already_present_in_name(brand, name):
+    """
+    正規化した上でbrandがnameの部分文字列として既に含まれているかを返す。
+    含まれていれば(startswithに限らず、名前中のどこにあっても)、
+    build_candidate_comparison_notes()側でブランド名を重複して
+    先頭に付け足さない。
+    """
+    norm_brand = _normalize_for_brand_match(brand)
+    if not norm_brand:
+        return False
+    return norm_brand in _normalize_for_brand_match(name)
+
+
 def _build_why_best_text(best, others, step, best_label):
     """
     why_bestの本文を、1位(best)と比較対象(others=2位・3位)の
@@ -16380,12 +16471,18 @@ def build_candidate_comparison_notes(top_candidates, step=None, user_data=None):
     improve = _safe_num(best.get("improve_score", 0))
     routine = _safe_num(best.get("routine_score", 0))
 
-    best_label = str(best.get("name", "") or "").strip() or "この商品"
-    if best.get("brand") and not best_label.startswith(best.get("brand")):
-        best_label = f"{best.get('brand')} {best_label}".strip()
-    # why_best表示専用: 楽天商品名に混入する販促文言だけを除去する
-    # (元のbest["name"]/step/検索/affiliate/ランキングには影響しない)。
-    best_label = _clean_why_best_product_name(best_label) or best_label
+    # 処理順序: 先に販促文言を除去してから、ブランド名が(先頭に限らず)
+    # 既に含まれているかを判定する。販促文言除去より前に判定すると、
+    # 「【スーパーSALE】ブランド名 商品名」のような、先頭の括弧書きに
+    # ブランド名の判定が惑わされるケースがあるため。ブランド自体には
+    # 販促語が含まれない前提のため、ブランド付与後に再度クリーニングは
+    # 行わない(元のbest["name"]/step/検索/affiliate/ランキング/scoreには
+    # 一切影響しない。ここはwhy_best表示専用のローカル変数)。
+    raw_name = str(best.get("name", "") or "").strip() or "この商品"
+    best_label = _clean_why_best_product_name(raw_name) or raw_name
+    brand = str(best.get("brand", "") or "").strip()
+    if brand and not _brand_already_present_in_name(brand, best_label):
+        best_label = f"{brand} {best_label}".strip()
 
     others = [c for c in top_candidates[1:3] if isinstance(c, dict)]
 
@@ -20776,6 +20873,11 @@ def build_weekly_usage_plan(data):
     自然に区別する)。data["routine_conflict_log"]が無い場合(古い履歴の
     再計算等、resolverが今回実行されていない場合)は全曜日でreasonsが
     空になる(捏造しない)。
+
+    routine_reasons(dayごとの内部ログ)はその曜日に関係した理由をそのまま
+    保持するが、routine_reason_notes(週全体のユーザー表示用「このルー
+    ティンの理由」欄)は同じreason_textが複数曜日にまたがって重複する
+    場合、意味的に同じ説明を1件へまとめて簡潔にする。
     """
     if not isinstance(data, dict):
         return []
@@ -20783,17 +20885,22 @@ def build_weekly_usage_plan(data):
     conflict_log = data.get("routine_conflict_log")
     if not isinstance(conflict_log, list):
         conflict_log = []
-    # 曜日に依存しない注意書き(美容機器×レチノール/ピーリング)は
-    # 週間ビューの個別セルに対応する場所が無いため、まとめて
-    # data["routine_reason_notes"]に残す(既存のweekly_usage_planの
-    # 戻り値の形(dayごとのlist)は変更しない)。
-    data["routine_reason_notes"] = [
-        entry.get("reason_text", "")
-        for entry in conflict_log
-        if isinstance(entry, dict)
-        and entry.get("from_days") is None and entry.get("to_days") is None
-        and entry.get("reason_text")
-    ]
+    # data["routine_reason_notes"]: 週全体で表示する「このルーティンの理由」
+    # (簡潔な要約)。同じ安全判断が複数曜日にまたがって同じreason_textを
+    # 生む場合(例: ピーリングが移動した曜日・移動先の両方に同じ説明が
+    # 付く)、ここで意味的な重複を1件へまとめる。曜日ごとの内部ログ
+    # (_routine_conflict_reasons_for_day、day単位のroutine_reasons)は
+    # 引き続き保持し、こちらは変更しない。
+    seen_reason_texts = set()
+    routine_reason_notes = []
+    for entry in conflict_log:
+        if not isinstance(entry, dict):
+            continue
+        text = entry.get("reason_text", "")
+        if text and text not in seen_reason_texts:
+            seen_reason_texts.add(text)
+            routine_reason_notes.append(text)
+    data["routine_reason_notes"] = routine_reason_notes
 
     routine_strategy = data.get("routine_strategy", {})
     if not isinstance(routine_strategy, dict):

@@ -395,6 +395,95 @@ class WhyBestProductNameCleaningTests(unittest.TestCase):
         self.assertIn(only_promo_text, result["why_best"])
 
 
+class WhyBestBrandDeduplicationTests(unittest.TestCase):
+    """why_best表示名のブランド名重複を修正したことのテスト。
+    build_candidate_comparison_notes()は、クリーニング後の商品名に
+    ブランド名が既に(先頭に限らず)含まれていれば追加で付け足さない。"""
+
+    def test_brand_already_embedded_after_promo_bracket_is_not_duplicated(self):
+        """実際に問題として報告された楽天タイトルの形(先頭の販促括弧の
+        後にブランド名が続く)で、ブランド名が重複しないこと。"""
+        raw_name = "【スーパーSALEポイント10倍】ドクターズコスメ VCローション 120mL 送料無料"
+        candidates = [
+            _candidate(raw_name, brand="ドクターズコスメ", base_score=90, candidate_score_reasons=[
+                _reason("common_main_function_purpose_match", "商品の機能が今回の目的と一致する",
+                        feature="美白ケア", condition="美白", points=6),
+            ]),
+            _candidate("競合美容液A", base_score=60, candidate_score_reasons=[]),
+        ]
+        step = {"category": "美容液", "purpose": "美白"}
+        result = app.build_candidate_comparison_notes(candidates, step, {})
+        self.assertIn("ドクターズコスメ VCローション 120mL", result["why_best"])
+        self.assertNotIn("ドクターズコスメ ドクターズコスメ", result["why_best"])
+        # 元のcandidateデータ自体は変更されない(検索/affiliate/ランキング/
+        # scoreに影響させない)。
+        self.assertEqual(candidates[0]["name"], raw_name)
+        self.assertEqual(candidates[0]["brand"], "ドクターズコスメ")
+        self.assertEqual(candidates[0]["base_score"], 90)
+
+    def test_brand_missing_from_name_is_added_exactly_once(self):
+        """ブランド名が商品名にまったく含まれない場合は、従来通り1回だけ
+        先頭に付与すること。"""
+        candidates = [
+            _candidate("VCローション 120mL", brand="ドクターズコスメ", base_score=90, candidate_score_reasons=[
+                _reason("common_main_function_purpose_match", "商品の機能が今回の目的と一致する",
+                        feature="美白ケア", condition="美白", points=6),
+            ]),
+            _candidate("競合美容液A", base_score=60, candidate_score_reasons=[]),
+        ]
+        step = {"category": "美容液", "purpose": "美白"}
+        result = app.build_candidate_comparison_notes(candidates, step, {})
+        self.assertEqual(result["why_best"].count("ドクターズコスメ"), 1)
+        self.assertIn("ドクターズコスメ VCローション 120mL", result["why_best"])
+
+    def test_brand_matched_ignoring_case_whitespace_and_brackets(self):
+        """大文字小文字・半角全角スペース・括弧の差だけを吸収して一致
+        判定できること(それ以外の文字までゆらぎ吸収してはいけない)。"""
+        candidates = [
+            _candidate("(dr cosme) VCローション", brand="Dr Cosme", base_score=90, candidate_score_reasons=[
+                _reason("common_main_function_purpose_match", "商品の機能が今回の目的と一致する",
+                        feature="美白ケア", condition="美白", points=6),
+            ]),
+            _candidate("競合美容液A", base_score=60, candidate_score_reasons=[]),
+        ]
+        step = {"category": "美容液", "purpose": "美白"}
+        result = app.build_candidate_comparison_notes(candidates, step, {})
+        # 「Dr Cosme」を大文字小文字・空白違いで二重に付け足さないこと。
+        self.assertEqual(result["why_best"].lower().count("cosme"), 1)
+
+    def test_similar_but_different_brand_strings_are_not_treated_as_same(self):
+        """似ているが異なる文字列を誤って同一ブランド扱いしないこと
+        (部分文字列として実際に含まれない限り、常に1回付与される)。"""
+        candidates = [
+            _candidate("CDコスメ VCローション", brand="ABコスメ", base_score=90, candidate_score_reasons=[
+                _reason("common_main_function_purpose_match", "商品の機能が今回の目的と一致する",
+                        feature="美白ケア", condition="美白", points=6),
+            ]),
+            _candidate("競合美容液A", base_score=60, candidate_score_reasons=[]),
+        ]
+        step = {"category": "美容液", "purpose": "美白"}
+        result = app.build_candidate_comparison_notes(candidates, step, {})
+        self.assertIn("ABコスメ CDコスメ VCローション", result["why_best"])
+
+    def test_brand_check_runs_after_promo_cleaning_not_before(self):
+        """処理順序の確認: 販促文言除去より先にブランド判定を行うと、
+        括弧書きの販促語に惑わされて誤判定しうるケースでも、クリーニング後
+        の商品名を基準に正しく「含まれている」と判定できること。"""
+        raw_name = "【キャンペーン】ブランドX 保湿クリーム 50g"
+        candidates = [
+            _candidate(raw_name, brand="ブランドX", base_score=90, candidate_score_reasons=[
+                _reason("common_main_function_purpose_match", "商品の機能が今回の目的と一致する",
+                        feature="保湿ケア", condition="乾燥対策", points=6),
+            ]),
+            _candidate("競合クリームA", base_score=60, candidate_score_reasons=[]),
+        ]
+        step = {"category": "クリーム", "purpose": "乾燥対策"}
+        result = app.build_candidate_comparison_notes(candidates, step, {})
+        self.assertIn("ブランドX 保湿クリーム 50g", result["why_best"])
+        self.assertNotIn("ブランドX ブランドX", result["why_best"])
+        self.assertNotIn("キャンペーン", result["why_best"])
+
+
 class BuildCandidateComparisonTableDiffIntegrationTests(unittest.TestCase):
     """
     独立した「次点候補」セクションを廃止し、build_candidate_comparison_notes()の
