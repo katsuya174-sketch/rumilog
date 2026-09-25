@@ -376,6 +376,51 @@ class WhyBestProductNameCleaningTests(unittest.TestCase):
             for token in must_exclude:
                 self.assertNotIn(token, cleaned, f"{raw!r} -> {cleaned!r} should not keep {token!r}")
 
+    def test_removes_date_time_range_sale_markers(self):
+        """実機診断で発見された実例: 日付・時刻レンジ型のセール告知
+        (「【9/19 00:00~9/24 23:59】」等)を除去する。
+        clean_display_product_name()側で既にコロンが空白へ置換された後の
+        形(「【9/19 00~9/24 59】」)にも対応できること。"""
+        cases = [
+            (
+                "【★ 9/19 00~9/24 59】【】NEW 美容液 保湿 角層ケア セラミド",
+                ["NEW 美容液 保湿 角層ケア セラミド"],
+                ["9/19", "9 19", "00", "59"],
+            ),
+            (
+                "【9/19 00:00~9/24 23:59】限定 化粧水",
+                ["限定 化粧水"],
+                ["9/19", "00:00", "23:59"],
+            ),
+        ]
+        for raw, must_include, must_exclude in cases:
+            cleaned = app._clean_why_best_product_name(raw)
+            for token in must_include:
+                self.assertIn(token, cleaned, f"{raw!r} -> {cleaned!r} should keep {token!r}")
+            for token in must_exclude:
+                self.assertNotIn(token, cleaned, f"{raw!r} -> {cleaned!r} should not keep {token!r}")
+
+    def test_date_time_range_removal_does_not_touch_legitimate_capacity_or_model(self):
+        """容量レンジ(「150~200mL」、括弧の外)・型番中の数字は、日付レンジと
+        誤認して削除しないこと(境界ケース)。括弧の外にある「/」は既存の
+        別処理(_clean_why_best_product_nameの装飾記号整形)でスペース化
+        されうるが、数字自体は失われないことを確認する(日付レンジ用
+        パターンによる誤爆で情報ごと消えていないことの確認)。"""
+        cases = [
+            "VT シカローション 150~200mL",
+            "クレンジングオイル(150mL)",
+        ]
+        for raw in cases:
+            cleaned = app._clean_why_best_product_name(raw)
+            self.assertEqual(cleaned, raw, f"{raw!r} should not be altered by date-range removal")
+
+        # 型番中に「/」がある場合、既存の装飾記号整形でスペースに変わる
+        # ことはあるが、型番の数字自体は削除されないこと。
+        model_cleaned = app._clean_why_best_product_name("型番AB-15/20モデル")
+        self.assertIn("15", model_cleaned)
+        self.assertIn("20", model_cleaned)
+        self.assertIn("型番AB", model_cleaned)
+
     def test_falls_back_to_original_name_when_cleaning_empties_it(self):
         """クリーニング結果が空になる場合(装飾・販促語のみの商品名)、
         呼び出し側は元の文字列にフォールバックし、商品名自体を消さないこと。"""
