@@ -670,5 +670,191 @@ class NoFabricatedReasonForRemovedConflictsTests(unittest.TestCase):
         self.assertTrue(any("アゼライン酸美容液" in x for x in mon_entry["night"]))
 
 
+class FrequencyReasonNoteTests(unittest.TestCase):
+    """use_days_reason(Geminiが同じPhase2出力で返す、頻度・曜日を決めた
+    根拠)を集約したdata["frequency_reason_note"]のテスト。
+
+    重要な確認事項:
+    - 内容の言い換え・推測はせず、Geminiが書いた文をそのまま連結すること。
+    - 表示整形(trim・文末記号の補完のみ)は行うが、文末記号を重複させないこと。
+    - 箇条書き記号・改行を一切使わず、1本の地の文にまとめること。
+    - resolverが最終的に曜日を変更したstepは、Gemini由来の理由が最終結果と
+      矛盾するため除外すること(安全調整理由側でのみ説明する)。
+    - use_days_reasonが無い(旧診断・Geminiが省略した)場合は空文字のまま
+      (理由を捏造しない)。
+    """
+
+    def test_composes_flowing_text_from_night_and_weekly_steps(self):
+        data = _empty_data(
+            night={"steps": [
+                {"category": "美容液", "product": "ナイアシンアミド美容液", "use_days": [],
+                 "use_days_reason": "ナイアシンアミド美容液はセラミドを含み低刺激な処方のため毎日使用としています"},
+            ]},
+            weekly_care=[
+                {"category": "ピーリング", "product": "PHAピーリング", "use_days": ["水", "土"],
+                 "use_days_reason": "PHAは穏やかな角質ケア成分ですが、他の保湿ケアとのバランスを考慮し週2回としています"},
+            ],
+        )
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+
+        note = data["frequency_reason_note"]
+        self.assertIn("ナイアシンアミド美容液はセラミドを含み低刺激な処方のため毎日使用としています。", note)
+        self.assertIn("PHAは穏やかな角質ケア成分ですが、他の保湿ケアとのバランスを考慮し週2回としています。", note)
+        # 箇条書き記号・改行が一切無いこと
+        for forbidden in ["\n", "・", "- ", "* "]:
+            self.assertNotIn(forbidden, note)
+
+    def test_appends_period_only_when_missing_and_does_not_duplicate(self):
+        data = _empty_data(night={"steps": [
+            {"category": "美容液", "product": "美容液A", "use_days": [],
+             "use_days_reason": "低刺激処方のため毎日使用としています。"},
+            {"category": "美容液", "product": "美容液B", "use_days": ["月"],
+             "use_days_reason": "刺激が強いため週1回としています"},
+        ]})
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        note = data["frequency_reason_note"]
+        self.assertNotIn("。。", note)
+        self.assertIn("低刺激処方のため毎日使用としています。", note)
+        self.assertIn("刺激が強いため週1回としています。", note)
+
+    def test_does_not_reword_or_add_content_beyond_sentence_ending(self):
+        """整形は文末記号の補完のみ。文言そのものを書き換えないこと。"""
+        data = _empty_data(night={"steps": [
+            {"category": "美容液", "product": "美容液A", "use_days": [],
+             "use_days_reason": "  余白付きの理由文  "},
+        ]})
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        self.assertEqual(data["frequency_reason_note"], "余白付きの理由文。")
+
+    def test_dedupes_identical_reason_text(self):
+        data = _empty_data(night={"steps": [
+            {"category": "美容液", "product": "美容液A", "use_days": [],
+             "use_days_reason": "同じ理由文です。"},
+            {"category": "美容液", "product": "美容液B", "use_days": [],
+             "use_days_reason": "同じ理由文です。"},
+        ]})
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        self.assertEqual(data["frequency_reason_note"].count("同じ理由文です。"), 1)
+
+    def test_empty_when_no_use_days_reason_present(self):
+        """旧診断相当(use_days_reasonフィールド自体が無い)でも安全に
+        空文字になること(捏造しない)。"""
+        data = _empty_data(night={"steps": [
+            {"category": "美容液", "product": "美容液A", "use_days": []},
+        ]})
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        self.assertEqual(data["frequency_reason_note"], "")
+
+    def test_excludes_step_modified_by_conflict_resolver(self):
+        """resolverが実際に曜日を変更したstepは、Gemini由来のuse_days_reason
+        (変更前の曜日を前提に書かれている)が最終結果と矛盾するため、
+        頻度理由からは除外すること。安全調整理由側(routine_reason_notes)
+        には引き続き記録される。"""
+        data = _empty_data(
+            night={"steps": [
+                {"category": "美容液", "product": "レチノール美容液", "use_days": ["土"],
+                 "ingredient_focus": "retinol",
+                 "use_days_reason": "中濃度処方のため週1回、土曜日を選んでいます"},
+            ]},
+            weekly_care=[
+                {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["土"],
+                 "ingredient_focus": "aha",
+                 "use_days_reason": "中濃度AHAのため週1回、土曜日を選んでいます"},
+            ],
+        )
+        log = []
+        data = app.resolve_weekly_care_day_conflicts(data, conflict_log=log)
+        self.assertEqual(len(log), 1)
+        peeling_step = data["weekly_care"][0]
+        self.assertNotIn("土", peeling_step["use_days"])
+
+        data["routine_conflict_log"] = log
+        app.build_weekly_usage_plan(data)
+
+        # ピーリング(曜日変更された側)のuse_days_reasonは頻度理由に出ない。
+        self.assertNotIn("中濃度AHAのため週1回、土曜日を選んでいます。", data["frequency_reason_note"])
+        # 変更されなかったレチノール美容液の理由はそのまま出る。
+        self.assertIn("中濃度処方のため週1回、土曜日を選んでいます。", data["frequency_reason_note"])
+        # 安全調整理由側には、resolverの実際の調整理由が別途記録されている。
+        self.assertTrue(data["routine_reason_notes"])
+
+
+class RoutineConflictLogPersistenceTests(unittest.TestCase):
+    """normalize_result()がroutine_conflict_logを保存し、履歴を開き直しても
+    安全調整の理由(routine_reason_notes)が消えないことの回帰テスト。
+
+    発見した既存バグ: normalize_result()がroutine_conflict_logを保存対象の
+    フィールドとして持っていなかったため、build_weekly_usage_plan()が
+    生成直後は正しくroutine_reason_notesを返していても、履歴を保存→再読込
+    した後は毎回conflict_logが空とみなされ、安全調整の理由が消えていた。
+    """
+
+    def test_normalize_result_preserves_routine_conflict_log(self):
+        log = [{
+            "type": "weekly_care_day_conflict_A",
+            "product": "AHAピーリング",
+            "category": "ピーリング",
+            "from_days": ["土"],
+            "to_days": ["火"],
+            "conflicts_with": ["レチノール美容液"],
+            "reason_text": "AHAピーリングとレチノール美容液は、どちらも刺激が出る可能性があるため、肌への負担が重ならないよう別日にしています。",
+        }]
+        raw = _empty_data(routine_conflict_log=log)
+        normalized = app.normalize_result(raw)
+        self.assertEqual(normalized.get("routine_conflict_log"), log)
+
+    def test_reloaded_result_still_shows_safety_adjustment_reason(self):
+        """診断直後(生成時)と同じconflict_logが、正規化・保存を経ても
+        保持され、再度build_weekly_usage_plan()を呼んでも同じ安全調整
+        理由が再現されること(=履歴を開き直しても消えないことの再現)。"""
+        data = _empty_data(
+            night={"steps": [
+                {"category": "美容液", "product": "レチノール美容液", "use_days": ["土"], "ingredient_focus": "retinol"},
+            ]},
+            weekly_care=[
+                {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["土"], "ingredient_focus": "aha"},
+            ],
+        )
+        log = []
+        data = app.resolve_weekly_care_day_conflicts(data, conflict_log=log)
+        data["routine_conflict_log"] = log
+        app.build_weekly_usage_plan(data)
+        live_notes = list(data["routine_reason_notes"])
+        self.assertTrue(live_notes)
+
+        # normalize_result()で保存用に正規化(=DB保存を模擬)。
+        normalized = app.normalize_result(data)
+        self.assertEqual(normalized.get("routine_conflict_log"), log)
+
+        # 保存済みレコードを読み込んだ想定でbuild_weekly_usage_planを
+        # 再実行(=履歴を開き直した想定)しても、同じ理由が再現されること。
+        reloaded = dict(normalized)
+        app.build_weekly_usage_plan(reloaded)
+        self.assertEqual(reloaded["routine_reason_notes"], live_notes)
+
+
+class UseDaysReasonSchemaTests(unittest.TestCase):
+    """get_analysis_schema_phase2()のstep_schemaにuse_days_reasonが
+    追加されていること、既存フィールドの後方互換のためrequiredには
+    含まれていないこと。"""
+
+    def test_step_schema_includes_use_days_reason_and_not_required(self):
+        schema = app.get_analysis_schema_phase2()
+        step_schema = schema["properties"]["night"]["properties"]["steps"]["items"]
+        self.assertIn("use_days_reason", step_schema["properties"])
+        self.assertEqual(step_schema["properties"]["use_days_reason"], {"type": "string"})
+        self.assertNotIn("use_days_reason", step_schema["required"])
+
+    def test_weekly_care_uses_same_step_schema_with_use_days_reason(self):
+        schema = app.get_analysis_schema_phase2()
+        weekly_step_schema = schema["properties"]["weekly_care"]["items"]
+        self.assertIn("use_days_reason", weekly_step_schema["properties"])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -17522,6 +17522,11 @@ def normalize_result(raw_data, image_path=""):
         "warnings": raw_data.get("warnings", []),
         "improvement_plan": raw_data.get("improvement_plan", {}),
         "routine_strategy": raw_data.get("routine_strategy", {}),
+        # routine_conflict_log: resolve_*_day_conflicts が実際に行った曜日調整の記録。
+        # これが保存されないと、履歴を開き直すたびに build_weekly_usage_plan() が
+        # conflict_logを空とみなし、安全調整の理由(routine_reason_notes)が
+        # 初回表示後に消えてしまう(2026-09発見・修正)。
+        "routine_conflict_log": raw_data.get("routine_conflict_log", []),
         "weekly_usage_plan": raw_data.get("weekly_usage_plan", []),
         "input_budget": raw_data.get("input_budget", 0),
         "input_age": raw_data.get("input_age", 0),
@@ -18857,7 +18862,8 @@ def get_analysis_schema_phase2():
             "use_days": {"type": "array", "items": {"type": "string"}},
             "use_timing": {"type": "string"},
             "product_candidates": {"type": "array", "items": product_candidate_schema},
-            "selection_reason": {"type": "string"}
+            "selection_reason": {"type": "string"},
+            "use_days_reason": {"type": "string"}
         },
         "required": ["category","role","purpose","ingredient_focus","risk_note","priority","use_days","use_timing","product_candidates"]
     }
@@ -19585,6 +19591,31 @@ nightステップのuse_days=["月","水","金"]で高刺激成分を使用す�
 パック・ピーリングのみ。不要なら[]。
 ピーリング条件: texture/pores/dullness低スコアで角質ケア必要時のみ。
 パック条件: 乾燥・バリア低下顕著または刺激成分使用後の回復ケアが必要な時のみ。
+
+【use_days_reason（頻度・曜日を決めた根拠）】
+night・weekly_careの各stepについて、use_daysをどう決めたかを1〜2文の自然な文章で
+use_days_reasonに記述すること。商品カテゴリ名を文中に含め、単独で読んでも意味が
+通る完結した文にすること(箇条書き記法・「・」等の記号・改行は使わない)。
+
+判断の優先順位(重要・必ず遵守):
+1. まず、このセクションおよび【ピーリングの使用頻度個別評価】に記載した種別ごとの
+   頻度目安(例: PHA→週3〜5回または毎日可)の範囲内で頻度を決めること。
+   目安範囲内を選ぶ場合、use_days_reasonにはこの診断で実際に考慮した内容(配合成分・
+   肌状態・刺激バランス等、①〜④のうち実際に当てはまるもの)を具体的に書くこと。
+   「一般的に推奨されるため」等の一般論だけで済ませず、この診断固有の理由を書くこと。
+2. 目安範囲から外れる頻度を選ぶ場合は、【頻度制限の判断基準】の①〜④のうち、
+   実際にこの診断のデータから判断できる具体的な根拠が最低1つある場合に限り
+   逸脱してよい:
+   ①濃度が判断根拠として使える場合(低濃度/高濃度であることが確認できる)
+   ②緩和成分(セラミド・ナイアシンアミド・ヒアルロン酸等)の配合が確認できる場合
+   ③同じ夜ルーティン内に他の高刺激成分が実際に存在し、刺激累積を避ける必要がある場合
+   ④ユーザーのレチノール経験(retinol_exp)が判断材料になる場合
+   該当する根拠が無い場合は、目安範囲内の頻度を選ぶこと。目安範囲を外れているのに
+   該当根拠が無い場合にuse_days_reasonへそれらしい理由を書くことは禁止。
+3. 曜日そのもの(例: なぜ水曜か)に、頻度とは別の固有の理由(他成分との衝突回避等)が
+   ない限り、曜日そのものを選んだ理由は書かない。頻度(回数)の理由と曜日配置の理由を
+   混同しない。「連続を避けるため」等の機械的な配置制約のみが理由の場合、
+   use_days_reasonには頻度(回数)の理由のみを書き、曜日への言及は避ける。
 
 【product_candidates】
 各stepに必ず3件出力(2件以下禁止・4件可)。現行販売中の正式名称が確実な商品のみ。stepのcategoryと完全一致必須。
@@ -20962,6 +20993,71 @@ def _routine_conflict_reasons_for_day(conflict_log, day):
     return reasons
 
 
+_SENTENCE_ENDINGS = ("。", "！", "？", ".", "!", "?")
+
+
+def _ensure_sentence_ending(text):
+    """
+    表示整形のみ: 前後の空白を除去し、文末に句点等が無ければ「。」を
+    補完する。既に文末記号があれば重複させない。内容の追加・言い換え・
+    推測は行わない(Geminiが書いた文をそのまま尊重する)。
+    """
+    text = str(text or "").strip()
+    if not text:
+        return ""
+    if text.endswith(_SENTENCE_ENDINGS):
+        return text
+    return text + "。"
+
+
+def _step_conflict_modified(step, conflict_log):
+    """
+    このstepがresolve_*_day_conflicts によって曜日変更されたかを、
+    conflict_logのproduct/category/to_daysとの一致で判定する。
+    一致する場合、Gemini由来のuse_days_reasonは変更前の曜日を前提に
+    書かれているため最終結果と矛盾する可能性があり、頻度理由としては
+    採用しない(安全調整理由側でのみ説明する)。
+    """
+    if not conflict_log:
+        return False
+    product = str(step.get("product") or step.get("category") or "")
+    category = str(step.get("category") or "")
+    current_days = step.get("use_days") or []
+    for entry in conflict_log:
+        if not isinstance(entry, dict):
+            continue
+        if (entry.get("product") == product
+                and entry.get("category") == category
+                and (entry.get("to_days") or []) == current_days):
+            return True
+    return False
+
+
+def _compose_frequency_reason_note(night_steps, weekly_steps, conflict_log):
+    """
+    Geminiがuse_daysと同じ出力で返したuse_days_reasonを集約し、
+    箇条書きにせず自然な地の文として1つの文字列にまとめる。
+    理由内容そのものの追加・言い換え・推測はしない(整形のみ)。
+    resolverが最終的に曜日を変更したstepは対象から除外する
+    (安全調整理由(routine_reason_notes)側でのみ説明されるため)。
+    """
+    seen = set()
+    sentences = []
+    for step in list(night_steps) + list(weekly_steps):
+        if not isinstance(step, dict):
+            continue
+        raw_reason = step.get("use_days_reason")
+        if not raw_reason:
+            continue
+        if _step_conflict_modified(step, conflict_log):
+            continue
+        sentence = _ensure_sentence_ending(raw_reason)
+        if sentence and sentence not in seen:
+            seen.add(sentence)
+            sentences.append(sentence)
+    return "".join(sentences)
+
+
 def build_weekly_usage_plan(data):
     """
     各stepのuse_daysフィールドに従って週間スケジュールを組み立てる。
@@ -21018,6 +21114,15 @@ def build_weekly_usage_plan(data):
     if not isinstance(morning_steps, list): morning_steps = []
     if not isinstance(night_steps, list):   night_steps   = []
     if not isinstance(weekly_steps, list):  weekly_steps  = []
+
+    # data["frequency_reason_note"]: night/weekly_careのuse_days_reasonを
+    # 集約した「頻度の理由」(週全体表示用)。resolverが曜日を変更した
+    # stepは除外し(routine_reason_notes側で説明)、最終結果と矛盾しない
+    # ものだけを地の文として連結する。use_days_reasonが無い診断
+    # (旧データ、またはGeminiが省略した場合)は空文字のまま(捏造しない)。
+    data["frequency_reason_note"] = _compose_frequency_reason_note(
+        night_steps, weekly_steps, conflict_log
+    )
 
     days = ["月", "火", "水", "木", "金", "土", "日"]
 
