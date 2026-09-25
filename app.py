@@ -23079,6 +23079,65 @@ def logout():
 
 
 # 診断履歴ページ
+def _extract_ingredient_focus_labels(item):
+    """
+    保存済み診断1件のmorning/night全ステップからingredient_focusタグを集め、
+    既存のingredient_map(内部タグ→日本語ラベル、score_product()等でも
+    使っているcontrolled vocabulary)で変換できたものだけを事実として返す。
+    変換できない/存在しないタグは無視し、推測で補わない。履歴比較の
+    「この期間継続して使われていたケア」表示専用の抽出であり、日程・
+    スコア計算ロジックには一切使わない。
+    """
+    if not isinstance(item, dict):
+        return []
+    labels = []
+    for section in ["morning", "night"]:
+        section_data = item.get(section)
+        if not isinstance(section_data, dict):
+            continue
+        for step in section_data.get("steps", []) or []:
+            if not isinstance(step, dict):
+                continue
+            for tag in as_list(step.get("ingredient_focus")):
+                tag_text = str(tag or "").strip()
+                if not tag_text:
+                    continue
+                normalized = normalize_ingredient_tag(tag_text) or tag_text.lower()
+                label = ingredient_map.get(normalized)
+                if label and label not in labels:
+                    labels.append(label)
+    return labels
+
+
+def _continued_care_facts(newer_item, older_item):
+    """
+    履歴比較(前回比)用: 新旧2つの診断記録の両方に存在した
+    ingredient_focusラベルだけを「この期間継続して使われていたケア」の
+    事実として返す。スコア変化との因果関係は一切判定・生成しない。
+    """
+    newer_labels = set(_extract_ingredient_focus_labels(newer_item))
+    older_labels = set(_extract_ingredient_focus_labels(older_item))
+    return sorted(newer_labels & older_labels)
+
+
+def _continued_care_note(continued_care):
+    """
+    continued_careラベル一覧から、ユーザー向けの中立的な一文を組み立てる。
+    「○○を使ったから改善した」という因果断定は一切行わず、「この期間
+    継続して使われていたケア」という事実の提示と、因果関係を断定しない
+    旨の注記を必ずセットで返す。継続ケアの事実が一つも無い場合は空文字を
+    返し、呼び出し側は「このルーティンの理由」等と同様に理由を捏造しない
+    (無理に表示しない)。
+    """
+    if not continued_care:
+        return ""
+    labels_text = "・".join(continued_care)
+    return (
+        f"この期間の記録では{labels_text}を含むケアが継続されています。"
+        f"※スコア変化との因果関係を断定するものではありません。"
+    )
+
+
 def build_history_dashboard(history_data, is_premium, is_creator):
     """
     Web版 /history ルート(history())から抽出した処理そのもの。
@@ -23153,6 +23212,8 @@ def build_history_dashboard(history_data, is_premium, is_creator):
                 "skin_age_estimate": item.get("skin_age_estimate", 0),
                 "input_age": item.get("input_age", 0),
                 "score_diff": {},
+                "continued_care": [],
+                "continued_care_note": "",
                 "i18n_en": item.get("i18n_en", {}),
             }))
 
@@ -23307,6 +23368,16 @@ def build_history_dashboard(history_data, is_premium, is_creator):
                 reverse=True
             )[:5]
             prepared[i - 1]["improvement_highlights"] = highlights
+
+            # 履歴比較の「事実」: この期間、新旧両方の診断記録に存在した
+            # ingredient_focusラベルだけを継続ケアの事実として付与する
+            # (score_diffとは独立。因果関係の判定はしない)。
+            continued_care = _continued_care_facts(
+                history_data[i - 1] if i - 1 < len(history_data) else {},
+                history_data[i] if i < len(history_data) else {},
+            )
+            prepared[i - 1]["continued_care"] = continued_care
+            prepared[i - 1]["continued_care_note"] = _continued_care_note(continued_care)
 
             # 前回診断からの日数ラベル（新しい日付 - 古い日付 = 正の値）
             try:
@@ -23570,6 +23641,8 @@ def api_history():
                 "score_diff": item.get("score_diff", {}),
                 "improvement_highlights": item.get("improvement_highlights", []),
                 "period_label": item.get("period_label", ""),
+                "continued_care": item.get("continued_care", []),
+                "continued_care_note": item.get("continued_care_note", ""),
             })
 
         return jsonify({
