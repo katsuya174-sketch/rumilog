@@ -4843,7 +4843,12 @@ def _device_context_sentence(category_purpose, category_reason, device_type):
     context = str(category_reason or "").strip() or str(category_purpose or "").strip()
     if not context:
         return ""
-    return f"今回選ばれた{device_type}の方式について: {context}。"
+    # contextはGemini生成のcategory-level reasonで、既に句点で終わっている
+    # ことが多い。末尾を確認せず無条件で「。」を追加すると「ため。。この」の
+    # ような二重句点になるため、末尾記号の有無を確認してから補う。
+    if not context.endswith(("。", "！", "？", ".", "!", "?")):
+        context = context + "。"
+    return f"今回選ばれた{device_type}の方式について: {context}"
 
 
 def _device_feature_sentence(features):
@@ -6451,6 +6456,152 @@ def infer_brand_from_title(product_name: str, category: str = "") -> str:
         return ""
 
 
+# 正規表現ベースのnormalize_display_product_name()だけでは、機能列挙型の
+# 楽天タイトル(例:「【...部門NO1】業界初... 1台6役 イオン導入 ...」)から
+# 「ブランド名+正式商品名」を安全に抽出できない。infer_brand_from_title()と
+# 同じ既存のGemini呼び出し経路を拡張し、ブランド名と同時に正式商品名も
+# 構造化して取得する(新規の外部API・新規の呼び出し経路の追加ではない。
+# 既存呼び出し1回の出力を拡張するだけ)。
+def infer_brand_and_clean_name_from_title(raw_title: str, category: str = ""):
+    """
+    楽天の生タイトルから、Geminiでブランド名と「販促文言を除いた正式
+    商品名」を同時に抽出する。infer_brand_from_title()と同じ呼び出し
+    パターン(temperature=0, リトライ・タイムアウトも同等)を使い、
+    同じbrand_name_cacheテーブル(新規DBスキーマ不要、別のcache_key
+    プレフィックスで共有)にキャッシュする。
+
+    Gemini出力は無条件に信用しない。戻り値を返す前に
+    _validate_inferred_brand_and_name()で以下を検証する:
+    - 空値/異常に長い出力
+    - 販促文言・内部注記の残存(normalize_display_product_nameで除去
+      されるパターンがまだ残っていないか)
+    - 元の楽天タイトルとの関連性(完全な作文でないか、文字集合の
+      重なりで簡易チェック)
+    - ブランド名の商品名内への重複
+
+    検証に失敗した場合は (\"\", \"\") を返す。呼び出し側は既存の
+    normalize_display_product_name()ベースの結果を使い続けること
+    (最終手段のフォールバックは変更しない)。
+
+    戻り値: (brand, clean_name)。取得・検証に失敗した場合は両方空文字。
+    """
+    raw_title = str(raw_title or "").strip()
+    if not raw_title:
+        return "", ""
+
+    cache_key = f"pname_v1:{normalize_product_name(raw_title)}"
+    cached = get_cached_brand(cache_key)
+    if cached is not None:
+        if not cached:
+            return "", ""
+        try:
+            parsed = json.loads(cached)
+            return str(parsed.get("brand", "") or ""), str(parsed.get("name", "") or "")
+        except (ValueError, TypeError, AttributeError):
+            return "", ""
+
+    try:
+        _prompt = (
+            "次の日本の化粧品・美容機器の楽天商品タイトルから、"
+            "(1)ブランド名・メーカー名 と "
+            "(2)販促文言(ランキング訴求・キャンペーン・機能の羅列・"
+            "プレゼント訴求等)を除いた正式な商品名(型番を含む)を"
+            "抽出してください。\n"
+            f"商品タイトル: 「{raw_title}」\n"
+            f"カテゴリ: {category or '不明'}\n\n"
+            "出力形式(この1行のみ、他の説明は一切不要):\n"
+            "ブランド名|||商品名\n\n"
+            "ブランド名・商品名のいずれかが確実に読み取れない場合は、"
+            "その部分を空欄のまま出力してください(例: 商品名が不明なら"
+            "「ブランド名|||」)。確信が持てない場合は無理に埋めず"
+            "空欄にしてください。商品名に「※」で始まる注釈や確信度に"
+            "関する補足は一切含めないでください。"
+        )
+        _response = call_gemini_with_retry(
+            client=client,
+            model=DETAIL_MODEL,
+            contents=[_prompt],
+            config=types.GenerateContentConfig(temperature=0, max_output_tokens=80),
+            max_retries=1,
+            timeout=8,
+        )
+        _text = (_response.text or "").strip()
+        if "|||" not in _text:
+            save_brand_to_cache(cache_key, _BRAND_CACHE_NO_BRAND_SENTINEL)
+            return "", ""
+        _brand_part, _, _name_part = _text.partition("|||")
+        brand = _brand_part.strip().strip("「」\"'")
+        name = _name_part.strip().strip("「」\"'")
+
+        brand, name = _validate_inferred_brand_and_name(raw_title, brand, name)
+        if not name:
+            save_brand_to_cache(cache_key, _BRAND_CACHE_NO_BRAND_SENTINEL)
+            return "", ""
+
+        print(f"[BRAND+NAME INFER FROM TITLE] {raw_title[:50]}... → brand={brand!r} name={name!r}", flush=True)
+        save_brand_to_cache(cache_key, json.dumps({"brand": brand, "name": name}, ensure_ascii=False))
+        return brand, name
+    except Exception as _e:
+        print(f"[BRAND+NAME INFER FROM TITLE ERROR] {_e}", flush=True)
+        return "", ""
+
+
+def _validate_inferred_brand_and_name(raw_title, brand, name):
+    """
+    infer_brand_and_clean_name_from_title()が返したGemini出力を、
+    ユーザー表示に使う前に検証・正規化する。Gemini出力を無条件には
+    信用しないという方針に基づき、以下のいずれかに該当する場合は
+    name(場合によりbrandも)を空文字にして呼び出し側にフォールバック
+    させる:
+    - nameが空、または元のタイトルより長い(=抽出になっていない)
+    - nameが異常に長い(DISPLAY_NAME_FALLBACK_LENGTHの2倍を超える)
+    - normalize_display_product_name()を通すとまだ内容が大きく削られる
+      (=販促文言・内部注記がまだ残っている)
+    - nameを構成する文字が元の楽天タイトルにほとんど含まれない
+      (=Geminiが元データに無い内容を作文した疑いが強い)
+    - nameが既にbrandを含んでいる場合、brandの重複表示を避けるため
+      _brand_already_present_in_name()の判定をそのまま利用する
+    """
+    brand = str(brand or "").strip()
+    name = str(name or "").strip()
+    if not name:
+        return "", ""
+    if len(name) > max(len(raw_title), 1):
+        # 抽出のはずが元タイトルより長い = 抽出になっていない
+        return "", ""
+    if len(name) > DISPLAY_NAME_FALLBACK_LENGTH * 2:
+        return "", ""
+
+    further_cleaned = normalize_display_product_name(name)
+    # normalize_display_product_name適用後に元の半分未満まで縮む場合、
+    # まだ販促文言・内部注記が残っていたとみなし、Gemini出力を信用しない。
+    if further_cleaned and len(further_cleaned) < len(name) * 0.5:
+        return "", ""
+    if not further_cleaned:
+        return "", ""
+    name = further_cleaned
+
+    # 元の楽天タイトルに存在しない内容を作文していないかの簡易チェック
+    # (完全一致ではなく、文字集合ベースの緩い重なり判定。全角/半角・
+    # 空白の差異を吸収するため正規化してから比較する)。
+    _norm_title_chars = set(_normalize_for_brand_match(raw_title))
+    _norm_name_chars = set(_normalize_for_brand_match(name))
+    if _norm_name_chars:
+        overlap_ratio = len(_norm_name_chars & _norm_title_chars) / len(_norm_name_chars)
+        if overlap_ratio < 0.8:
+            print(
+                f"[BRAND+NAME VALIDATION REJECTED] name={name!r}が元タイトルとの"
+                f"文字重なり率{overlap_ratio:.2f}と低いため作文の疑いがあり不採用",
+                flush=True,
+            )
+            return "", ""
+
+    if brand and len(brand) > 40:
+        brand = ""
+
+    return brand, name
+
+
 def _batch_prewarm_brand_memory_cache(cache_keys):
     """
     複数のbrand_v1キーを1回のSELECT(cache_key = ANY(%s))でまとめて取得し、
@@ -6741,9 +6892,60 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
         # 商品の実タイトルに差し替える。(他カテゴリはGemini出力の具体的な
         # 商品名をそのまま使うため対象外)
         if category in ("美容機器", "サプリメント") and rakuten_item.get("rakuten_title"):
-            _display_title = clean_display_product_name(rakuten_item["rakuten_title"])
+            _raw_title = rakuten_item["rakuten_title"]
+            _display_title = normalize_display_product_name(_raw_title)
             if _display_title:
                 step["product"] = _display_title
+
+            # 正規表現ベースの除去だけでは「ブランド名+商品名」に収まらない
+            # 販促文言(ランキング訴求・機能列挙等)が残ることがある
+            # (実例: 美容機器タイトルで90文字超)。この場合のみ、
+            # infer_brand_and_clean_name_from_title()(既存のGemini
+            # ブランド推定呼び出しと同じ経路の拡張。新規の呼び出し経路
+            # ではない)で正式なブランド名+商品名の抽出を試みる。
+            # 不要な追加Gemini呼び出しを避けるため、正規表現の結果が
+            # 既に十分短い場合はこの呼び出しを行わない。
+            if step.get("product") and len(step["product"]) > DISPLAY_NAME_FALLBACK_LENGTH:
+                _inferred_brand, _inferred_name = infer_brand_and_clean_name_from_title(_raw_title, category=category)
+                if _inferred_name:
+                    _existing_brand = str(step.get("brand", "") or "").strip()
+                    _combined_brand = _existing_brand or _inferred_brand
+                    # ブランド名が商品名側にも重複して入っている場合、
+                    # 既存のclean_brand_and_product_name()で剥がしてから
+                    # 採用する(Android側のProductTitleTextはbrand+product
+                    # を単純結合するだけで重複除去をしないため、ここで
+                    # 二重表示を防ぐ必要がある)。
+                    _combined_brand, _deduped_name = clean_brand_and_product_name(_combined_brand, _inferred_name)
+                    if _deduped_name:
+                        step["product"] = _deduped_name
+                        if _combined_brand and not _existing_brand:
+                            step["brand"] = _combined_brand
+                        print(
+                            f"[DISPLAY NAME] Gemini抽出で正式名を採用: "
+                            f"brand={_combined_brand!r} name={_deduped_name!r}",
+                            flush=True,
+                        )
+
+            # Gemini抽出でも確実に特定できなかった場合のみ、カテゴリの
+            # 安全な総称名(_DEVICE_DEFAULTS/_SUPPLEMENT_DEFAULTSの既存の
+            # 検索用総称語、医学的判断を含まない固定文字列)へフォール
+            # バックする(最終手段。文字数自体は成功条件ではなく、
+            # Gemini抽出も失敗した場合の安全策)。ブランド自体は
+            # (画像推測等で)別途維持されるため失われない。
+            if step.get("product") and len(step["product"]) > DISPLAY_NAME_FALLBACK_LENGTH:
+                _generic_name = None
+                if category == "美容機器":
+                    _generic_name = _DEVICE_DEFAULTS.get(device_type, {}).get("product")
+                elif category == "サプリメント":
+                    _generic_name = _SUPPLEMENT_DEFAULTS.get(supplement_type, {}).get("product")
+                if _generic_name:
+                    print(
+                        f"[DISPLAY NAME FALLBACK] {category} Gemini抽出でも特定できず"
+                        f"{len(step['product'])}文字と長いため総称名へ変更: "
+                        f"{step['product'][:40]}... -> {_generic_name}",
+                        flush=True,
+                    )
+                    step["product"] = _generic_name
 
         # 楽天リンク取得後もブランドが不明なら画像から推測して補完
         if not str(step.get("brand", "") or "").strip() and step.get("image"):
@@ -7111,6 +7313,440 @@ def _resolve_focus_tags(raw_focus):
             continue
         tags.add(normalize_ingredient_tag(item_text) or item_text.lower())
     return tags
+
+
+def _normalize_use_days_field(steps):
+    """
+    night/weekly_careの各stepのuse_daysフィールドを、意味が同じ表現へ
+    統一する(表示・判定ロジック側は既に[]/Noneを同一視しているが、
+    保存データ自体でGeminiが同じ「毎日使用可」の意味に対して[]と
+    Noneを使い分けており、use_days_reasonの有無にも影響していたため、
+    生成直後にこの時点で正規化しておく)。
+    リスト・None以外の不正な型が来た場合も、安全に[](毎日扱い)へ
+    倒す。値の意味そのもの(曜日制限の有無)は一切変更しない。
+    """
+    if not isinstance(steps, list):
+        return
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        v = step.get("use_days")
+        if not isinstance(v, list):
+            step["use_days"] = []
+
+
+# プロンプト【ピーリングの使用頻度個別評価】に明記された、濃度に依存
+# しない(=濃度を判定する構造化フィールドが無くても判定できる)頻度目安
+# のみをここに反映する。AHA/BHA等、目安が濃度によって変わる成分は、
+# 濃度を判定する構造化フィールドが現状存在しないため対象外とする
+# (根拠のない閾値を推測で発明しないため)。
+_WEEKLY_CARE_DOCUMENTED_FREQUENCY_RANGES = {
+    "pha": (3, 5),  # 「PHAは週3〜5回または毎日可」
+}
+
+
+def _log_weekly_care_frequency_range_check(weekly_steps):
+    """
+    weekly_careの各stepについて、プロンプトに既に明記されている頻度目安
+    (濃度非依存のもののみ)と実際の使用日数を突き合わせ、範囲外であれば
+    サーバーログに記録する(検知のみ。自動修正・曜日変更は行わない。
+    「範囲外だから直す」という判断には新たな安全基準の決定が必要であり、
+    それはこの関数の責務ではない)。
+    """
+    if not isinstance(weekly_steps, list):
+        return
+    for step in weekly_steps:
+        if not isinstance(step, dict):
+            continue
+        focus = _resolve_focus_tags(step.get("ingredient_focus"))
+        days = step.get("use_days") or []
+        count = 7 if not days else len(days)
+        for tag, (lo, hi) in _WEEKLY_CARE_DOCUMENTED_FREQUENCY_RANGES.items():
+            if tag in focus and not (lo <= count <= hi):
+                print(
+                    f"[FREQUENCY RANGE CHECK] {step.get('product', '') or step.get('category', '')}"
+                    f"(ingredient_focus={tag}) use_days数={count}回/週が"
+                    f"プロンプト記載の目安({lo}〜{hi}回/週)から外れています。",
+                    flush=True,
+                )
+
+
+def _log_weekly_stimulus_pattern(data):
+    """
+    最終確定したnight/weekly_careのuse_daysについて、刺激系タグ
+    (_IRRITANT_FOCUS_TAGS、既存の同日衝突判定と同じ定義)を持つstepが
+    実際にどの曜日に配置されているかを集計し、週7日中いくつの曜日が
+    「何らかの刺激系ケアがある日」かをサーバーログに記録する。
+
+    重要: 何日以上の刺激系ケア(裏を返せば何日未満の休息日)が安全・
+    適切かという閾値は、現在のプロンプト・コードのどこにも定義されて
+    いない。この関数はその閾値を独自に発明せず、事実(曜日ごとの刺激系
+    ケアの有無)を可視化するだけに留める。自動調整は行わない。
+    """
+    if not isinstance(data, dict):
+        return {}
+    stimulus_days: set = set()
+    per_day_products: dict = {}
+    steps = list(data.get("night", {}).get("steps", []) or []) + list(data.get("weekly_care", []) or [])
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        focus = _resolve_focus_tags(step.get("ingredient_focus"))
+        if not focus & _IRRITANT_FOCUS_TAGS:
+            continue
+        days = step.get("use_days") or []
+        target_days = days if days else _ALL_DAYS
+        product_label = str(step.get("product", "") or step.get("category", ""))
+        for d in target_days:
+            stimulus_days.add(d)
+            per_day_products.setdefault(d, set()).add(product_label)
+
+    # 注意: 曜日の並び替えにPythonのsorted()(Unicodeコードポイント順)を
+    # 使うと「月火水木金土日」の自然な曜日順にならないため、必ず
+    # _ALL_DAYSの順序を基準に並べる。
+    ordered_stimulus_days = [d for d in _ALL_DAYS if d in stimulus_days]
+    rest_days = [d for d in _ALL_DAYS if d not in stimulus_days]
+    print(
+        f"[WEEKLY STIMULUS PATTERN] 刺激系ケアがある曜日: {ordered_stimulus_days}"
+        f"({len(ordered_stimulus_days)}/7日) / 刺激系ケアが無い曜日: {rest_days}"
+        f"({len(rest_days)}/7日) / 内訳: "
+        f"{ {d: [p for p in per_day_products.get(d, [])] for d in ordered_stimulus_days} }",
+        flush=True,
+    )
+    return {"stimulus_days": ordered_stimulus_days, "rest_days": rest_days}
+
+
+def _log_missing_use_days_reason(night_steps, weekly_steps):
+    """
+    use_daysが具体的な曜日に制限されている(=毎日ではない、頻度を
+    絞った)にもかかわらずuse_days_reasonが空のstepを検知し、
+    サーバーログに記録する。
+
+    このようなstepは「このルーティンの理由」に本来表示されるべき
+    非自明な判断でありながら、Geminiがuse_days_reasonを省略した
+    ために理由が一切表示されない状態になる。理由を捏造して埋める
+    ことはせず、検知・可視化のみ行う。
+    """
+    steps = list(night_steps or []) + list(weekly_steps or [])
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        if step.get("use_days") and not step.get("use_days_reason"):
+            print(
+                f"[MISSING USE_DAYS_REASON] {step.get('product', '') or step.get('category', '')}"
+                f" use_days={step.get('use_days')}だがuse_days_reasonが空です。",
+                flush=True,
+            )
+
+
+def _has_consecutive_days(days):
+    """
+    月〜日を週の巡回とみなし、daysの中に隣接する曜日ペア(日→月の週跨ぎ含む)
+    があるかを判定する。プロンプトの「連続禁止」方針(高濃度AHA/BHA等の
+    複数の頻度例で明記)と同じ解釈。
+    """
+    if len(days) < 2:
+        return False
+    try:
+        positions = sorted(_ALL_DAYS.index(d) for d in days if d in _ALL_DAYS)
+    except ValueError:
+        return False
+    for i in range(len(positions) - 1):
+        if positions[i + 1] - positions[i] == 1:
+            return True
+    if len(positions) >= 2 and positions[0] == 0 and positions[-1] == 6:
+        return True
+    return False
+
+
+def _evenly_spaced_days(count):
+    """
+    月〜日の7日を、指定した日数だけ幾何学的に均等分割して選ぶ。
+    美容・医学的な判断は一切含まない、7日を等間隔に割り付けるだけの
+    機械的な配置(プロンプトの判断例: 週3回→["月","水","金"]、
+    週2回→["火","金"]等と同じ「連続させない」考え方を、任意の日数へ
+    一般化したもの)。
+    """
+    if count <= 0 or count >= 7:
+        return list(_ALL_DAYS) if count >= 7 else []
+    step_size = 7 / count
+    idx_set = {int(round(i * step_size)) % 7 for i in range(count)}
+    i = 0
+    while len(idx_set) < count and i < 7:
+        idx_set.add(i)
+        i += 1
+    ordered = sorted(idx_set)[:count]
+    return [_ALL_DAYS[i] for i in ordered]
+
+
+def _redistribute_consecutive_stimulus_days(steps, conflict_log=None):
+    """
+    刺激系タグ(_IRRITANT_FOCUS_TAGS)を持つ各stepについて、そのstep
+    自身のuse_daysが連続した曜日を含む場合、同じ使用日数を維持した
+    まま(頻度は一切変更しない)、均等配置へ組み替える。
+
+    これは「週間ルーティン全体評価→必要なら調整」の実際の調整部分の
+    うち、既存ルール(プロンプトに明記された「連続禁止」方針)だけで
+    安全に決定できる範囲に限定した実装。複数の異なるactive間で週全体の
+    刺激日数を減らす調整(例: レチノールとPHAの合計日数を減らす)は、
+    根拠となる既存ルール・閾値が無いため、ここでは一切行わない
+    (build_weekly_usage_plan呼び出し側のコメント・報告を参照)。
+
+    conflict_logが渡された場合、実際に曜日を変更したstepだけを
+    resolve_*_day_conflictsと同じ形式で記録する(「このルーティンの
+    理由」の安全調整理由として、Gemini由来のuse_days_reasonと矛盾
+    しないよう、既存の_step_conflict_modified()の除外対象に含める)。
+    """
+    if not isinstance(steps, list):
+        return
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        focus = _resolve_focus_tags(step.get("ingredient_focus"))
+        if not focus & _IRRITANT_FOCUS_TAGS:
+            continue
+        days = step.get("use_days") or []
+        if len(days) < 2 or not _has_consecutive_days(days):
+            continue
+        new_days = _evenly_spaced_days(len(days))
+        if not new_days or set(new_days) == set(days):
+            continue
+        product_label = str(step.get("product", "") or step.get("category", "週ケア"))
+        print(
+            f"[CONSECUTIVE DAY REDISTRIBUTION] {product_label} {days} -> {new_days}"
+            f"(頻度は変更せず、連続日を避けるため配置のみ変更)",
+            flush=True,
+        )
+        old_days = list(days)
+        step["use_days"] = new_days
+        if conflict_log is not None:
+            conflict_log.append({
+                "type": "consecutive_day_redistribution",
+                "product": product_label,
+                "category": str(step.get("category", "") or ""),
+                "from_days": old_days,
+                "to_days": new_days,
+                "conflicts_with": [],
+                "reason_text": (
+                    f"{product_label}は、同じ週内で使用日が連続しないよう、"
+                    f"頻度は変えずに曜日の配置だけを調整しています。"
+                ),
+            })
+
+
+# ■ 商品選定時の刺激配慮（既存プロンプト、use_days設定前の段階）を
+# コード側でも検知できるようにする(製品の入れ替え・追加は行わない。
+# 検知のみ。「1種のみに絞る」という是正には、どの製品を外すかという
+# 追加の判断が必要で、既存データだけでは安全に決定できないため)。
+def _log_high_stimulus_product_selection_check(night_steps, scores):
+    """
+    既存プロンプト【商品選定時の刺激配慮】に明記された
+    「hydration<=50 かつ barrier<=50の場合、高刺激成分(A〜E相当)は
+    1種のみに絞る」というルールを、実際の最終選定結果と突き合わせて
+    検知する。閾値(50)・ルール自体はプロンプトに既存のものをそのまま
+    使用し、新しい基準は発明しない。違反していても自動修正はしない
+    (製品の入れ替えは既存データだけでは安全に決定できないため)。
+    """
+    if not isinstance(scores, dict):
+        return
+    hydration = scores.get("hydration")
+    barrier = scores.get("barrier")
+    if hydration is None or barrier is None:
+        return
+    if not (hydration <= 50 and barrier <= 50):
+        return
+    high_stim_tags = {"retinoid", "retinol", "retinal", "aha", "bha", "aha_bha", "azelaic_acid"}
+    high_stim_products = []
+    for step in (night_steps or []):
+        if not isinstance(step, dict):
+            continue
+        focus = _resolve_focus_tags(step.get("ingredient_focus"))
+        if focus & high_stim_tags:
+            high_stim_products.append(str(step.get("product", "") or step.get("category", "")))
+        strength = step.get("ingredient_strength")
+        if isinstance(strength, dict) and str(strength.get("vitamin_c", "")).lower() in ("high", "strong"):
+            high_stim_products.append(str(step.get("product", "") or step.get("category", "")))
+    if len(high_stim_products) > 1:
+        print(
+            f"[HIGH STIMULUS SELECTION CHECK] hydration={hydration} barrier={barrier}"
+            f"(共に50以下)にもかかわらず、高刺激成分を含む商品が"
+            f"{len(high_stim_products)}種選定されています: {high_stim_products}"
+            f"(プロンプト【商品選定時の刺激配慮】に照らすと1種のみが望ましい)。",
+            flush=True,
+        )
+
+
+# 週間評価で「刺激が重複する組み合わせ」として明示的に扱う、AHA/BHA系
+# タグ(PHAは含めない)。刺激累積管理ルールのC区分(AHA/BHA/SA)と同じ
+# 定義。PHAは既存プロンプトで既に独立した緩やかな頻度目安(週3〜5回)を
+# 持つため、AHA/BHAと機械的に同列に扱わない(2026-09の外部皮膚科学
+# 資料調査でも、PHAはAHA/BHAと異なりレチノイド併用時のサイクリングを
+# 必須としないという記述が複数ソースで一致していた)。
+_AHA_BHA_NON_PHA_TAGS = {"aha", "bha", "aha_bha"}
+
+# 既存プロンプト【ピーリングの使用頻度個別評価】に明記された、AHA/BHAの
+# 濃度別の許容頻度の「下限」(最も保守的な値)をそのまま転記したもの。
+# 新しい数値・新しい分類は一切作らない。2026-09の再監査で、濃度別に
+# 下限が大きく異なる(低濃度は週2、高濃度は週1)ことが判明したため、
+# 「週1回」への一律引き下げは低濃度AHA/BHAにとっては既存許容範囲を
+# 下回る過剰な制限になると確認された。
+#   低濃度AHA(グリコール酸・乳酸<5%)+保湿成分豊富 → 週2〜4回(敏感肌週2〜3回) : 下限2
+#   低濃度BHA(サリチル酸<2%)+保湿成分あり         → 週2〜3回              : 下限2
+#   中濃度AHA(5〜15%)                              → 週1〜2回              : 下限1
+#   高濃度BHA                                       → 週1〜2回              : 下限1
+#   高濃度AHA/BHA(15%超)・強力ケミカルピール       → 週1回以下            : 下限1
+_AHA_BHA_TIER_FLOOR = {
+    ("aha", "low"): 2,
+    ("aha", "medium"): 1,
+    ("aha", "high"): 1,
+    ("bha", "low"): 2,
+    ("bha", "medium"): 1,
+    ("bha", "high"): 1,
+}
+
+
+def _classify_aha_bha_conservative_floor(step):
+    """
+    weekly_careのAHA/BHA stepについて、ingredient_strength(利用可能な
+    場合のみ)から濃度を実際に判定できるときだけ、既存プロンプンの
+    対応する分類の下限(_AHA_BHA_TIER_FLOOR)を返す。
+
+    濃度を安全に判定できない場合(ingredient_strengthが無い、または
+    "aha"/"bha"キー自体が無い、実データではこちらが大半)はNoneを返す。
+    判定不能なのに特定の濃度を仮定して頻度を変更してはならないため、
+    呼び出し側はNoneの場合、頻度調整を行わない。
+    """
+    focus = _resolve_focus_tags(step.get("ingredient_focus"))
+    strength = step.get("ingredient_strength")
+    if not isinstance(strength, dict) or not strength:
+        return None
+    for tag in ("aha", "bha"):
+        if tag not in focus:
+            continue
+        level = str(strength.get(tag, "") or "").strip().lower()
+        if level in ("high", "strong"):
+            return _AHA_BHA_TIER_FLOOR[(tag, "high")]
+        if level in ("medium", "mid"):
+            return _AHA_BHA_TIER_FLOOR[(tag, "medium")]
+        if level == "low":
+            return _AHA_BHA_TIER_FLOOR[(tag, "low")]
+    return None  # 濃度キー自体が無い、または未知の値 = 判定不能
+
+
+def _evaluate_retinoid_aha_bha_weekly_combination(data, user_data=None, conflict_log=None):
+    """
+    週間ルーティン全体評価: レチノイド(濃度問わず、既存の刺激累積管理
+    ルールB区分と同じ定義)とAHA/BHA(PHAを除く、C区分)が同一週内に
+    併存する場合を「刺激が重複する組み合わせ」として明示的に評価する。
+
+    「レチノイド週3回以上ならAHA/BHAは週1〜2回」のような固定ハード
+    上限は導入しない(2026-09調査の外部資料は複数ソースで一致していた
+    が、清潔な臨床基準ではなく一般向け情報のため、暗黙の固定ルールとして
+    コードに埋め込むことはしない)。「一律週1回」も導入しない(2026-09の
+    再監査で、低濃度AHA/BHAの既存許容範囲(下限週2)を下回ってしまう
+    ことが判明したため)。
+
+    トリガー条件は既存プロンプト【商品選定時の刺激配慮】に既に明記
+    されている「hydration<=50 かつ barrier<=50」をそのまま使う
+    (新しい閾値の発明ではない)。この条件を満たし、かつレチノイド×
+    AHA/BHAの組み合わせが存在する場合のみ評価対象とする。
+
+    実際に頻度を調整するのは、_classify_aha_bha_conservative_floor()で
+    濃度が安全に分類できた場合のみ。その分類に対応する既存目安の下限
+    まで(それより高い場合に限り)引き下げる。濃度を安全に分類できない
+    場合(実データではこちらが大半)は、頻度を変更せず、検知ログのみ
+    残す(判定不能なのに特定の濃度を仮定しない)。
+
+    retinol_exp(利用可能な場合)は判定のトリガー条件・下限値の選択には
+    使わず、ログ上の説明理由にのみ反映する(存在しないデータを補完して
+    トリガー条件や強度を推測しない)。
+    """
+    if not isinstance(data, dict):
+        return
+    scores = data.get("scores") or {}
+    hydration = scores.get("hydration")
+    barrier = scores.get("barrier")
+    if hydration is None or barrier is None:
+        return
+    if not (hydration <= 50 and barrier <= 50):
+        return  # 既存ルールのトリガー条件を満たさない場合は何もしない
+
+    night_steps = data.get("night", {}).get("steps", []) or []
+    weekly_steps = data.get("weekly_care", []) or []
+
+    has_retinoid = any(
+        isinstance(s, dict) and _resolve_focus_tags(s.get("ingredient_focus")) & _RETINOID_ONLY_TAGS
+        for s in night_steps
+    )
+    if not has_retinoid:
+        return
+
+    # 参考情報(判定条件には使わない。利用可能な場合のみ理由文に反映)。
+    retinol_exp = ""
+    if isinstance(user_data, dict):
+        retinol_exp = str(user_data.get("exp", "") or user_data.get("retinol_exp", "") or "").strip()
+
+    for step in weekly_steps:
+        if not isinstance(step, dict):
+            continue
+        focus = _resolve_focus_tags(step.get("ingredient_focus"))
+        if "pha" in focus:
+            continue  # PHAは対象外(既存の独立した頻度目安を維持)
+        if not (focus & _AHA_BHA_NON_PHA_TAGS):
+            continue
+
+        conservative_floor = _classify_aha_bha_conservative_floor(step)
+        product_label = str(step.get("product", "") or step.get("category", "週ケア"))
+        days = step.get("use_days") or []
+        current_count = len(days) if days else 7
+
+        if conservative_floor is None:
+            # 濃度を安全に判定できないため、頻度は変更せず検知のみ。
+            print(
+                f"[RETINOID+AHA_BHA COMBINATION DETECTED] {product_label}: "
+                f"hydration={hydration} barrier={barrier}(共に50以下)でレチノイドとの"
+                f"併用を検知しましたが、ingredient_strengthが無く濃度を安全に判定"
+                f"できないため、頻度の自動調整は行いません(判定不能なのに濃度を"
+                f"仮定しない)。現在の使用日数: 週{current_count}回。",
+                flush=True,
+            )
+            continue
+
+        if current_count <= conservative_floor:
+            continue  # 既に該当分類の既存下限内。効果を不必要に落とさない。
+
+        old_days = list(days) if days else list(_ALL_DAYS)
+        new_days = _evenly_spaced_days(conservative_floor)
+
+        factors = ["バリア機能・水分量の低下(barrier/hydrationスコアが共に50以下)"]
+        if retinol_exp and retinol_exp not in ("high", "慣れている"):
+            factors.append("レチノール使用経験が浅いこと")
+        strength = step.get("ingredient_strength")
+        factors.append(f"配合成分の濃度情報({strength})により分類した既存目安の下限")
+
+        print(
+            f"[RETINOID+AHA_BHA CONSERVATIVE LEAN] {product_label}: "
+            f"hydration={hydration} barrier={barrier}、レチノイドとの併用を検知。"
+            f"考慮した要因: {factors}。use_days {old_days}(週{current_count}回)を"
+            f"濃度分類に対応する既存目安の下限(週{conservative_floor}回)へ調整: {new_days}",
+            flush=True,
+        )
+        step["use_days"] = new_days
+        if conflict_log is not None:
+            conflict_log.append({
+                "type": "retinoid_aha_bha_conservative_lean",
+                "product": product_label,
+                "category": str(step.get("category", "") or ""),
+                "from_days": old_days,
+                "to_days": new_days,
+                "conflicts_with": ["レチノイド"],
+                "reason_text": (
+                    f"{product_label}は、バリア機能・水分量がともに低下しており、"
+                    f"レチノイドとの刺激の重なりリスクが高いため、頻度を既存の"
+                    f"目安の中でより穏やかな範囲へ調整しています。"
+                ),
+            })
+
 
 # 「成分名+カテゴリ名」パターン検出用カテゴリ集合
 # 例: "セラミド 乳液" "ナイアシンアミド 美容液" "ビタミンC 化粧水"
@@ -13936,7 +14572,7 @@ def finalize_step_display_fields(step, best, user_data):
         return step
 
     brand = str(best.get("brand", "") or step.get("brand", "") or "").strip()
-    raw_name = clean_display_product_name(
+    raw_name = normalize_display_product_name(
         best.get("name") or step.get("product") or ""
     )
 
@@ -16381,6 +17017,19 @@ _WHY_BEST_PROMO_PATTERNS = [
     r'期間限定',
     r'買いまわり',
     r'エントリーで',
+    # 2026-09追加: 表示名正規化の全経路共通化(normalize_display_product_name)に
+    # あたり、why_bestだけでなく通常商品カード・美容機器・サプリメントでも
+    # 実際に観測された販促・内部注記パターンをここに追加する。
+    # 例:「【美人百花毛穴ケア美顔器部門NO1】」のようなランキング訴求バッジ。
+    r'[^\s（【\[】\)）\]]{0,12}部門\s*(NO\.?\s?1|No\.?\s?1|1位)',
+    r'\b(NO\.?\s?1|No\.?\s?1)\b',
+    # 「業界初」「日本初」等のインパクト訴求語(直後の短い訴求文言までは
+    # 対象にしない。「完全防水」等の実際の仕様説明を誤って消さないため)。
+    r'(業界|日本|世界|アジア)初',
+    r'[\(（【\[]?プレゼント[\)）】\]]?',
+    # Geminiが商品名フィールドへ自発的に書き込むことがある内部注記
+    # (例:「（※ブランド名補完）」)。ユーザー向けには不要な内部情報のため除去。
+    r'[\(（]\s*※[^)）]{0,30}[\)）]',
 ]
 
 
@@ -16403,6 +17052,65 @@ def _clean_why_best_product_name(name):
     text = re.sub(r'[☆★◆◇▼▽△▲♪♦♥❤✨]+', ' ', text)
     text = re.sub(r'[／/]{1,}', ' ', text)
     return " ".join(text.split())
+
+
+# --- 目標と、達成できていないことの明記 ---
+# 目標は「ブランド名+商品名だけ」であり、文字数そのものが目的ではない。
+# 楽天の生タイトルからブランド名以外の全ての付加情報(型番・機能列挙等)を
+# 安全に判別して「正式商品名」だけを抽出する構造的な手法を検討したが、
+# 以下の理由により今回は採用せず、長さベースのフォールバックのみを
+# 実装している(確実に商品名を特定できない場合の安全策として)。
+#
+# 検討して不採用にした手法: 「ブランド名の前後にある、EMS/LED/RF等の
+# 全角/半角大文字トークンや型番(IPX7等)を"機能列挙の開始位置"とみなし、
+# それより前(または後)を商品名として抽出する」という構造的手法を
+# 試作したが、実データで反例が見つかった。例:
+#   「7in1 LED美顔器 ニキビ対策 ハリ 7色光IPL 軽量 ...」
+# のような実在タイトルでは、"LED"はカテゴリ・型番を表す正式名称の
+# 一部であり、機能列挙の開始マーカーではない。この手法を適用すると
+# 「7in1」の直後で切れてしまい、正式な商品名(「LED美顔器」等)まで
+# 誤って削除してしまう。ブランド名・型番なのか販促上の機能列挙語
+# なのかを新規の外部API呼び出し(禁止されている)無しに確実に判別する
+# 手段が無いため、この手法は安全に一般化できないと判断し、実装しない。
+#
+# 代わりに、既知の販促・内部注記パターン(normalize_display_product_name)
+# を除去したうえで、それでもなお非常に長く残る場合にのみ、カテゴリの
+# 安全な総称名(_DEVICE_DEFAULTS/_SUPPLEMENT_DEFAULTS、ブランドは
+# 別途保持されるため失われない)へフォールバックする、保守的だが
+# 安全な方式を維持する。値は既存の正常な商品名(例:「ドクターシーラボ
+# VC100エッセンスローションEX」約24文字)を十分に許容しつつ、実際に
+# 観測された販促スパム混入タイトル(60〜100文字超)を確実に検知できる、
+# 余裕を持った長さとして設定した(美容・医学的な閾値ではなく、
+# UI表示文字数の安全域)。
+DISPLAY_NAME_FALLBACK_LENGTH = 32
+
+
+def normalize_display_product_name(name):
+    """
+    ユーザー向け表示専用の商品名正規化。「ブランド名+商品名」以外の
+    販促文言(ランキング訴求・キャンペーン・日付レンジ告知等)・内部注記
+    (「※ブランド名補完」等)を除去する、全表示経路(通常商品カード・
+    weekly routine・routine reason・candidate comparison・beauty device・
+    supplement)共通の正規化エントリポイント。
+
+    _WHY_BEST_PROMO_PATTERNS(why_bestと共有の販促文言ブロックリスト)で
+    販促文言を除去したうえで、clean_display_product_name()で容量・
+    セット表記等も除去する。検索クエリ・affiliateリンク生成・
+    スコアリングに使う元の文字列は一切変更しない(呼び出し側で
+    あらかじめ別変数に退避してから渡すこと)。
+
+    クリーニングの結果すべて消えてしまった場合は、段階的に緩い
+    結果へフォールバックし、最終的に空文字は返さない(商品名自体を
+    消してしまわないため)。
+    """
+    if not isinstance(name, str):
+        return ""
+    original = name.strip()
+    if not original:
+        return ""
+    promo_removed = _clean_why_best_product_name(original)
+    further = clean_display_product_name(promo_removed) if promo_removed else ""
+    return further or promo_removed or original
 
 
 def _normalize_for_brand_match(text):
@@ -16674,7 +17382,7 @@ def build_candidate_comparison_table(top_candidates, diffs=None):
         rows.append({
             "rank": idx,
             "brand": cand.get("brand", ""),
-            "name": cand.get("name", ""),
+            "name": normalize_display_product_name(str(cand.get("name", "") or "")),
             "price": price,
             "score": round(score, 1),
             "cost_perf": cost_perf,
@@ -19616,6 +20324,13 @@ use_days_reasonに記述すること。商品カテゴリ名を文中に含め�
    ない限り、曜日そのものを選んだ理由は書かない。頻度(回数)の理由と曜日配置の理由を
    混同しない。「連続を避けるため」等の機械的な配置制約のみが理由の場合、
    use_days_reasonには頻度(回数)の理由のみを書き、曜日への言及は避ける。
+4. 「週3回程度が適しているため週3回にした」のような、結論をそのまま理由として
+   繰り返すだけの循環説明は禁止。必ず①〜④のうち実際にこの診断で確認できる
+   要素(配合成分・肌状態・刺激バランス・レチノール経験等)を理由の中核に据えること。
+5. use_days=[](毎日使用)を選んだstepは、ユーザーにとって自明な判断であり
+   アプリ側では理由を表示しない。use_days_reasonへ多くの労力をかける必要はなく、
+   簡潔で構わない。労力は頻度を絞ったstep(use_daysが具体的な曜日のリストになる
+   もの)のuse_days_reasonに重点的に使うこと。
 
 【product_candidates】
 各stepに必ず3件出力(2件以下禁止・4件可)。現行販売中の正式名称が確実な商品のみ。stepのcategoryと完全一致必須。
@@ -19636,6 +20351,9 @@ use_days_reasonに記述すること。商品カテゴリ名を文中に含め�
 - name: 正式製品名（必須）例: "スネイルムチン96エッセンス" "グリーンティーヒアルロン酸セラム"
   ※「日焼け止め」「化粧水」「保湿クリーム」などカテゴリ名のみ・成分名+カテゴリ名のみは禁止
   ※必ずブランドと製品名のペアで出力すること
+  ※「（※ブランド名補完）」のような自己注釈・処理過程のコメント・確信度に関する
+    補足は一切含めないこと。ブランドが不確実な場合でも、注釈を付けず最も可能性が
+    高いブランド名のみを記載する(不確実性の表明は別フィールドのconfidenceで行う)。
 - confidence: 70未満出力禁止(90+:確実 80+:名称確実 70+:成分不確か)
 - release_status: current のみ
 - active_ingredients: 英語タグ(retinol/retinal/vitamin_c/niacinamide/azelaic_acid/ceramide/hyaluronic等)
@@ -21040,11 +21758,23 @@ def _compose_frequency_reason_note(night_steps, weekly_steps, conflict_log):
     理由内容そのものの追加・言い換え・推測はしない(整形のみ)。
     resolverが最終的に曜日を変更したstepは対象から除外する
     (安全調整理由(routine_reason_notes)側でのみ説明されるため)。
+
+    表示対象は「ユーザーが見て、なぜこの使い方なのか疑問に思う可能性が
+    ある判断」に限定する。クレンジング・洗顔・通常の化粧水/乳液/クリーム
+    を毎日使うことは自明で説明価値が低いため、use_days=[](毎日使用)の
+    stepは理由があっても表示対象に含めない。use_daysが具体的な曜日に
+    制限されている(=毎日ではない、頻度を絞った)stepだけを対象とする。
+    どのstepも対象外の場合は空文字を返す(捏造しない)。
     """
     seen = set()
     sentences = []
     for step in list(night_steps) + list(weekly_steps):
         if not isinstance(step, dict):
+            continue
+        # use_daysが空([])=毎日使用は自明な判断のため理由欄には出さない。
+        # _normalize_use_days_field()によりNoneも[]へ統一済みのため、
+        # ここでの判定は「非空リストかどうか」だけで一貫して行える。
+        if not step.get("use_days"):
             continue
         raw_reason = step.get("use_days_reason")
         if not raw_reason:
@@ -21496,6 +22226,11 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
     if "steps" not in data["night"] or not isinstance(data["night"].get("steps"), list):
         data["night"]["steps"] = []
 
+    # use_days=[]/Noneの意味統一(Gemini出力の生の値のみを正規化し、
+    # 曜日制限の有無という意味自体は変更しない)。
+    _normalize_use_days_field(data["night"]["steps"])
+    _normalize_use_days_field(data["weekly_care"])
+
     # =========================
     # ④ AI候補拡張
     # =========================
@@ -21678,10 +22413,27 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
     data = supplement_night_steps_from_morning(data)
 
     # 週ケアとnight刺激成分の曜日衝突を強制解消
-    # routine_conflict_log: 各resolverが実際に行った曜日調整・注意書き付与を
-    # そのまま記録する（「このルーティンの理由」表示用。build_weekly_usage_plan
-    # 側はこのログに無い変更を理由として捏造しない）。
+    # routine_conflict_log: 各resolver・週間最適化ステップが実際に行った
+    # 曜日調整・注意書き付与をそのまま記録する（「このルーティンの理由」
+    # 表示用。build_weekly_usage_plan側はこのログに無い変更を理由として
+    # 捏造しない）。
     routine_conflict_log = []
+
+    # 週間ルーティン全体評価・最適化(第1段階): 各stepの使用日数(頻度)は
+    # 一切変更せず、プロンプトに明記された「連続禁止」方針だけを根拠に、
+    # 単一step内で曜日が連続している場合のみ均等配置へ組み替える。
+    # これにより新たな同日競合が生じる可能性があるため、後続の
+    # resolve_*_day_conflictsで必ず再チェックする。
+    _redistribute_consecutive_stimulus_days(data.get("night", {}).get("steps"), conflict_log=routine_conflict_log)
+    _redistribute_consecutive_stimulus_days(data.get("weekly_care"), conflict_log=routine_conflict_log)
+
+    # 週間ルーティン全体評価・最適化(第1.5段階): レチノイド×AHA/BHA
+    # (PHAを除く)という、刺激が重複する組み合わせを週単位で評価する。
+    # 既存プロンプト【商品選定時の刺激配慮】のトリガー条件(hydration/
+    # barrierとも50以下)を満たす場合のみ、AHA/BHA側の頻度を既存目安の
+    # 最も保守的な範囲へ調整する(固定の「最低休息日」等は発明しない)。
+    _evaluate_retinoid_aha_bha_weekly_combination(data, user_data=user_data, conflict_log=routine_conflict_log)
+
     data = resolve_weekly_care_day_conflicts(data, conflict_log=routine_conflict_log)
     # 夜ルーティン内のレチノイド×BHA/SA洗顔料の曜日衝突を解消
     data = resolve_night_irritant_conflicts(data, conflict_log=routine_conflict_log)
@@ -21689,6 +22441,30 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
     data = resolve_beauty_device_day_conflicts(data, conflict_log=routine_conflict_log)
     data["routine_conflict_log"] = routine_conflict_log
     _lab_segment("day_conflict_resolution")
+
+    # 週間ルーティン全体評価(第2段階・検知専用、自動調整はしない)。
+    # 既存プロンプトに明記された頻度目安からの逸脱、既存の商品選定時
+    # 刺激配慮ルール(hydration/barrier<=50時の高刺激成分数)、週全体の
+    # 刺激系ケア配置をサーバーログへ記録する。
+    #
+    # 重要: レチノイド×AHA/BHA(既存の刺激累積管理ルールB×C相当)は
+    # 上記の_evaluate_retinoid_aha_bha_weekly_combination()で既に
+    # 評価・調整済み(トリガー条件を満たす場合のみ)。
+    #
+    # 一方、レチノイド×PHAのように、既存プロンプトの目安の中で両者が
+    # 既に最も保守的な値(例: レチノール中〜高濃度の例示値=週3回、PHAの
+    # 目安下限=週3回)を選んでおり、かつ2026-09の外部皮膚科学資料調査でも
+    # 「PHAはAHA/BHAと異なりレチノイド併用時のサイクリングを必須と
+    # しない」という記述が複数ソースで一致していたため、PHAについては
+    # 意図的に調整対象から除外している。また、同日重複禁止の既存
+    # ルールにより、頻度を維持したまま曜日を再配置しても合計日数
+    # (このケースでは6/7日)は数学的に変化しない(3+3日を重複禁止で
+    # 配置すると必ず6日消費するため)ことも確認済み。これらの理由から、
+    # レチノイド×PHAの組み合わせ自体は自動調整せず検知のみに留める。
+    _log_weekly_care_frequency_range_check(data.get("weekly_care"))
+    _log_weekly_stimulus_pattern(data)
+    _log_missing_use_days_reason(data.get("night", {}).get("steps"), data.get("weekly_care"))
+    _log_high_stimulus_product_selection_check(data.get("night", {}).get("steps"), data.get("scores"))
 
     # 楽天商品名をGeminiで短く整形（rakuten_criteria / ai_rakuten_verified のみ対象）
     data = gemini_clean_rakuten_product_names(data)

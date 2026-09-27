@@ -687,8 +687,8 @@ class FrequencyReasonNoteTests(unittest.TestCase):
     def test_composes_flowing_text_from_night_and_weekly_steps(self):
         data = _empty_data(
             night={"steps": [
-                {"category": "美容液", "product": "ナイアシンアミド美容液", "use_days": [],
-                 "use_days_reason": "ナイアシンアミド美容液はセラミドを含み低刺激な処方のため毎日使用としています"},
+                {"category": "美容液", "product": "レチノール美容液", "use_days": ["月", "水", "金"],
+                 "use_days_reason": "レチノールは刺激があるため週3回の使用で肌を慣らしています"},
             ]},
             weekly_care=[
                 {"category": "ピーリング", "product": "PHAピーリング", "use_days": ["水", "土"],
@@ -699,7 +699,7 @@ class FrequencyReasonNoteTests(unittest.TestCase):
         app.build_weekly_usage_plan(data)
 
         note = data["frequency_reason_note"]
-        self.assertIn("ナイアシンアミド美容液はセラミドを含み低刺激な処方のため毎日使用としています。", note)
+        self.assertIn("レチノールは刺激があるため週3回の使用で肌を慣らしています。", note)
         self.assertIn("PHAは穏やかな角質ケア成分ですが、他の保湿ケアとのバランスを考慮し週2回としています。", note)
         # 箇条書き記号・改行が一切無いこと
         for forbidden in ["\n", "・", "- ", "* "]:
@@ -707,8 +707,8 @@ class FrequencyReasonNoteTests(unittest.TestCase):
 
     def test_appends_period_only_when_missing_and_does_not_duplicate(self):
         data = _empty_data(night={"steps": [
-            {"category": "美容液", "product": "美容液A", "use_days": [],
-             "use_days_reason": "低刺激処方のため毎日使用としています。"},
+            {"category": "美容液", "product": "美容液A", "use_days": ["月", "水", "金"],
+             "use_days_reason": "刺激があるため週3回としています。"},
             {"category": "美容液", "product": "美容液B", "use_days": ["月"],
              "use_days_reason": "刺激が強いため週1回としています"},
         ]})
@@ -716,13 +716,13 @@ class FrequencyReasonNoteTests(unittest.TestCase):
         app.build_weekly_usage_plan(data)
         note = data["frequency_reason_note"]
         self.assertNotIn("。。", note)
-        self.assertIn("低刺激処方のため毎日使用としています。", note)
+        self.assertIn("刺激があるため週3回としています。", note)
         self.assertIn("刺激が強いため週1回としています。", note)
 
     def test_does_not_reword_or_add_content_beyond_sentence_ending(self):
         """整形は文末記号の補完のみ。文言そのものを書き換えないこと。"""
         data = _empty_data(night={"steps": [
-            {"category": "美容液", "product": "美容液A", "use_days": [],
+            {"category": "美容液", "product": "美容液A", "use_days": ["月"],
              "use_days_reason": "  余白付きの理由文  "},
         ]})
         data["routine_conflict_log"] = []
@@ -731,14 +731,30 @@ class FrequencyReasonNoteTests(unittest.TestCase):
 
     def test_dedupes_identical_reason_text(self):
         data = _empty_data(night={"steps": [
-            {"category": "美容液", "product": "美容液A", "use_days": [],
+            {"category": "美容液", "product": "美容液A", "use_days": ["月", "水"],
              "use_days_reason": "同じ理由文です。"},
-            {"category": "美容液", "product": "美容液B", "use_days": [],
+            {"category": "美容液", "product": "美容液B", "use_days": ["火", "木"],
              "use_days_reason": "同じ理由文です。"},
         ]})
         data["routine_conflict_log"] = []
         app.build_weekly_usage_plan(data)
         self.assertEqual(data["frequency_reason_note"].count("同じ理由文です。"), 1)
+
+    def test_daily_use_step_excluded_even_with_reason(self):
+        """use_days=[](毎日使用)は自明な判断のため、use_days_reasonが
+        あっても頻度の理由には表示しないこと(前回指示: 基本的な毎日ケアは
+        理由欄を埋めない)。"""
+        data = _empty_data(night={"steps": [
+            {"category": "化粧水", "product": "化粧水A", "use_days": [],
+             "use_days_reason": "毎日の水分補給として使用するため。"},
+            {"category": "美容液", "product": "レチノール美容液", "use_days": ["月", "水", "金"],
+             "use_days_reason": "レチノールは刺激があるため週3回としています。"},
+        ]})
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        note = data["frequency_reason_note"]
+        self.assertNotIn("毎日の水分補給として使用するため。", note)
+        self.assertIn("レチノールは刺激があるため週3回としています。", note)
 
     def test_empty_when_no_use_days_reason_present(self):
         """旧診断相当(use_days_reasonフィールド自体が無い)でも安全に
@@ -854,6 +870,672 @@ class UseDaysReasonSchemaTests(unittest.TestCase):
         schema = app.get_analysis_schema_phase2()
         weekly_step_schema = schema["properties"]["weekly_care"]["items"]
         self.assertIn("use_days_reason", weekly_step_schema["properties"])
+
+
+class UseDaysNoneListUnificationTests(unittest.TestCase):
+    """_normalize_use_days_field(): Gemini出力のuse_daysがNone/欠落/
+    不正な型であっても、意味が同じ([]=毎日使用可)表現へ統一すること。
+    曜日制限がある場合の値は一切変更しないこと。"""
+
+    def test_none_is_normalized_to_empty_list(self):
+        steps = [{"category": "クリーム", "product": "クリームA", "use_days": None}]
+        app._normalize_use_days_field(steps)
+        self.assertEqual(steps[0]["use_days"], [])
+
+    def test_missing_key_is_normalized_to_empty_list(self):
+        steps = [{"category": "クリーム", "product": "クリームA"}]
+        app._normalize_use_days_field(steps)
+        self.assertEqual(steps[0]["use_days"], [])
+
+    def test_invalid_type_is_normalized_to_empty_list(self):
+        for bad_value in ["月水金", 123, {}]:
+            steps = [{"category": "クリーム", "use_days": bad_value}]
+            app._normalize_use_days_field(steps)
+            self.assertEqual(steps[0]["use_days"], [], f"bad_value={bad_value!r}")
+
+    def test_existing_specific_days_are_not_changed(self):
+        steps = [{"category": "美容液", "use_days": ["月", "水", "金"]}]
+        app._normalize_use_days_field(steps)
+        self.assertEqual(steps[0]["use_days"], ["月", "水", "金"])
+
+    def test_none_input_list_does_not_crash(self):
+        app._normalize_use_days_field(None)  # クラッシュしないことのみ確認
+
+
+class WeeklyCareFrequencyRangeCheckTests(unittest.TestCase):
+    """_log_weekly_care_frequency_range_check(): プロンプトに明記された
+    濃度非依存の頻度目安(PHA→週3〜5回)からの逸脱を検知できること。
+    検知のみで自動修正・曜日変更は一切行わないこと。"""
+
+    def test_pha_within_documented_range_does_not_mutate_data(self):
+        steps = [{"category": "ピーリング", "product": "PHAピーリング",
+                   "ingredient_focus": ["pha"], "use_days": ["火", "木", "土"]}]
+        before = [dict(s) for s in steps]
+        app._log_weekly_care_frequency_range_check(steps)
+        self.assertEqual(steps, before)
+
+    def test_pha_below_documented_range_is_detectable_without_mutation(self):
+        """今回の診断(20260926152914212101)で実際に確認されたのと同種の
+        「週2回」ケースでも、検知関数はデータを一切変更しないこと
+        (自動修正はしない、あくまで検知のみ)。"""
+        steps = [{"category": "ピーリング", "product": "PHAピーリング",
+                   "ingredient_focus": ["pha"], "use_days": ["水", "土"]}]
+        before = [dict(s) for s in steps]
+        app._log_weekly_care_frequency_range_check(steps)
+        self.assertEqual(steps, before)
+
+    def test_non_pha_ingredient_is_not_checked(self):
+        """濃度によって目安が変わる成分(AHA等)は、濃度を判定する構造化
+        フィールドが無いため対象外(根拠のない閾値を発明しない)。"""
+        steps = [{"category": "ピーリング", "product": "AHAピーリング",
+                   "ingredient_focus": ["aha"], "use_days": ["木"]}]
+        before = [dict(s) for s in steps]
+        app._log_weekly_care_frequency_range_check(steps)
+        self.assertEqual(steps, before)
+
+    def test_none_input_does_not_crash(self):
+        app._log_weekly_care_frequency_range_check(None)
+
+
+class WeeklyStimulusPatternDetectionTests(unittest.TestCase):
+    """_log_weekly_stimulus_pattern(): 週間全体で刺激系ケアがどの曜日に
+    配置されているかを検知できること。今回の実診断で確認された
+    「レチノール=月水金、PHA=火木土」のように、個別には目安範囲内でも
+    合計すると刺激系ケアがほぼ毎日になるケースを必ずfixture化する。
+    検知のみで、自動調整(曜日変更・頻度変更)は一切行わないこと。"""
+
+    def test_retinol_and_pha_alternating_days_detected_as_six_stimulus_days(self):
+        """診断20260926152914212101の実データを再現したfixture。
+        レチノール(月水金)とPHA(火木土)が重複しないため、既存の
+        同日衝突検知(resolve_*_day_conflicts)は一切介入しないが、
+        週7日中6日が何らかの刺激系ケアで占められ、完全な休息日は
+        日曜のみになる。この関数はこの事実を検知できること。"""
+        data = _empty_data(
+            night={"steps": [
+                {"category": "美容液", "product": "ABC-Gリペアセラム",
+                 "ingredient_focus": ["レチノール"], "use_days": ["月", "水", "金"]},
+            ]},
+            weekly_care=[
+                {"category": "ピーリング", "product": "スキンピール",
+                 "ingredient_focus": ["pha"], "use_days": ["火", "木", "土"]},
+            ],
+        )
+        result = app._log_weekly_stimulus_pattern(data)
+        self.assertEqual(result["stimulus_days"], ["月", "火", "水", "木", "金", "土"])
+        self.assertEqual(result["rest_days"], ["日"])
+        # データそのものは一切変更しないこと(検知のみ)。
+        self.assertEqual(data["night"]["steps"][0]["use_days"], ["月", "水", "金"])
+        self.assertEqual(data["weekly_care"][0]["use_days"], ["火", "木", "土"])
+
+    def test_no_stimulus_products_yields_all_rest_days(self):
+        data = _empty_data(night={"steps": [
+            {"category": "化粧水", "product": "保湿化粧水", "ingredient_focus": ["セラミド"], "use_days": []},
+        ]})
+        result = app._log_weekly_stimulus_pattern(data)
+        self.assertEqual(result["stimulus_days"], [])
+        self.assertEqual(sorted(result["rest_days"]), sorted(app._ALL_DAYS))
+
+    def test_daily_stimulus_step_marks_all_seven_days(self):
+        data = _empty_data(night={"steps": [
+            {"category": "美容液", "product": "レチノール美容液", "ingredient_focus": ["retinol"], "use_days": []},
+        ]})
+        result = app._log_weekly_stimulus_pattern(data)
+        self.assertEqual(sorted(result["stimulus_days"]), sorted(app._ALL_DAYS))
+        self.assertEqual(result["rest_days"], [])
+
+    def test_does_not_mutate_input_data(self):
+        data = _empty_data(
+            night={"steps": [
+                {"category": "美容液", "ingredient_focus": ["retinol"], "use_days": ["月"]},
+            ]},
+        )
+        before_night = [dict(s) for s in data["night"]["steps"]]
+        app._log_weekly_stimulus_pattern(data)
+        self.assertEqual(data["night"]["steps"], before_night)
+
+
+class MissingUseDaysReasonDetectionTests(unittest.TestCase):
+    """_log_missing_use_days_reason(): 頻度を絞った(=毎日ではない)stepで
+    use_days_reasonが空の場合を検知できること。理由を捏造せず、検知の
+    みであること(データを変更しない)。"""
+
+    def test_detects_non_daily_step_without_reason(self):
+        night = [{"category": "美容液", "product": "レチノール美容液",
+                   "use_days": ["月", "水", "金"], "use_days_reason": ""}]
+        before = [dict(s) for s in night]
+        app._log_missing_use_days_reason(night, [])
+        self.assertEqual(night, before)  # データは変更しない
+
+    def test_does_not_flag_daily_step_without_reason(self):
+        # use_days=[](毎日)は元々理由不要のため、検知対象外であっても
+        # クラッシュしないことのみ確認(戻り値が無い関数のため例外なしを確認)。
+        night = [{"category": "化粧水", "product": "化粧水A",
+                   "use_days": [], "use_days_reason": ""}]
+        app._log_missing_use_days_reason(night, [])  # クラッシュしないこと
+
+    def test_does_not_flag_step_with_reason_present(self):
+        night = [{"category": "美容液", "product": "レチノール美容液",
+                   "use_days": ["月", "水", "金"],
+                   "use_days_reason": "刺激があるため週3回としています。"}]
+        app._log_missing_use_days_reason(night, [])  # クラッシュしないこと
+
+    def test_none_inputs_do_not_crash(self):
+        app._log_missing_use_days_reason(None, None)
+
+
+class RealDiagnosisFixtureRegressionTests(unittest.TestCase):
+    """診断ID 20260926152914212101(2026-09の品質監査対象)の実データを
+    再現したfixtureによる、build_weekly_usage_plan()のエンドツーエンド
+    回帰テスト。基本的な毎日ケア(クレンジング/洗顔/化粧水/乳液/クリーム)
+    は理由欄に出さず、非自明な判断(レチノール週3回・PHA週3回)だけが
+    残ることを確認する。"""
+
+    def _real_diagnosis_data(self):
+        return _empty_data(
+            night={"steps": [
+                {"category": "クレンジング", "product": "マイルドクレンジングオイル",
+                 "ingredient_focus": ["低刺激"], "use_days": [],
+                 "use_days_reason": "夜のメイクや皮脂汚れを毎日落とす必要があるため。"},
+                {"category": "洗顔", "product": "泡洗顔料",
+                 "ingredient_focus": ["低刺激"], "use_days": [],
+                 "use_days_reason": "夜の洗顔は毎日行う必要があるため。"},
+                {"category": "化粧水", "product": "化粧水III とてもしっとり",
+                 "ingredient_focus": ["セラミド"], "use_days": [],
+                 "use_days_reason": "夜の水分補給とバリアケアとして毎日使用するため。"},
+                {"category": "美容液", "product": "ABC-Gリペアセラム",
+                 "ingredient_focus": ["レチノール"], "use_days": ["月", "水", "金"],
+                 "use_days_reason": "レチノールは刺激があるため、週3回の使用で肌を慣らしながらケアするため。"},
+                {"category": "乳液", "product": "モイストエマルジョン",
+                 "ingredient_focus": ["セラミド"], "use_days": [],
+                 "use_days_reason": "夜の保湿とバリアケアとして毎日使用するため。"},
+                {"category": "クリーム", "product": "日本酒のクリーム",
+                 "ingredient_focus": ["セラミド"], "use_days": None,
+                 "use_days_reason": None},
+            ]},
+            weekly_care=[
+                {"category": "ピーリング", "product": "スキンピール",
+                 "ingredient_focus": ["pha"], "use_days": ["火", "木", "土"],
+                 "use_days_reason": "PHAや低刺激な角質ケアは週3回程度の使用が適しているため。"},
+            ],
+            beauty_devices=[
+                {"device_type": "超音波洗浄", "product": "超音波洗浄機A",
+                 "reason": "毛穴の黒ずみと皮脂詰まりを効率的にケアするため。"},
+            ],
+        )
+
+    def test_only_non_daily_steps_appear_in_frequency_reason_note(self):
+        data = self._real_diagnosis_data()
+        # 実際の生成パイプラインと同じ順序で適用する:
+        # use_days正規化 -> 連続日再配置(第1段階最適化) -> 既存resolver。
+        app._normalize_use_days_field(data["night"]["steps"])
+        app._normalize_use_days_field(data["weekly_care"])
+        log = []
+        app._redistribute_consecutive_stimulus_days(data["night"]["steps"], conflict_log=log)
+        app._redistribute_consecutive_stimulus_days(data["weekly_care"], conflict_log=log)
+        data = app.resolve_beauty_device_day_conflicts(data, conflict_log=log)
+        data["routine_conflict_log"] = log
+        app.build_weekly_usage_plan(data)
+
+        note = data["frequency_reason_note"]
+        # 基本的な毎日ケアは理由欄に出ないこと
+        for daily_reason in [
+            "夜のメイクや皮脂汚れを毎日落とす必要があるため。",
+            "夜の洗顔は毎日行う必要があるため。",
+            "夜の水分補給とバリアケアとして毎日使用するため。",
+            "夜の保湿とバリアケアとして毎日使用するため。",
+        ]:
+            self.assertNotIn(daily_reason, note)
+        # 非自明な判断(頻度を絞ったもの)は残ること
+        self.assertIn("レチノールは刺激があるため、週3回の使用で肌を慣らしながらケアするため。", note)
+        self.assertIn("PHAや低刺激な角質ケアは週3回程度の使用が適しているため。", note)
+        # 箇条書きになっていないこと
+        for forbidden in ["\n", "・", "- ", "* "]:
+            self.assertNotIn(forbidden, note)
+
+    def test_beauty_device_conflict_note_has_no_double_period(self):
+        data = self._real_diagnosis_data()
+        app._normalize_use_days_field(data["night"]["steps"])
+        app._normalize_use_days_field(data["weekly_care"])
+        log = []
+        data = app.resolve_beauty_device_day_conflicts(data, conflict_log=log)
+        for entry in log:
+            self.assertNotIn("。。", entry["reason_text"])
+
+    def test_weekly_stimulus_pattern_matches_real_diagnosis(self):
+        """連続日再配置(第1段階最適化)を適用しても、Geminiの原案が
+        既に最適(内部で連続していない)なため変化せず、週6日パターンは
+        維持されること(=既存ルールの範囲では改善不能という結論の
+        エンドツーエンド確認)。"""
+        data = self._real_diagnosis_data()
+        app._normalize_use_days_field(data["night"]["steps"])
+        app._normalize_use_days_field(data["weekly_care"])
+        log = []
+        app._redistribute_consecutive_stimulus_days(data["night"]["steps"], conflict_log=log)
+        app._redistribute_consecutive_stimulus_days(data["weekly_care"], conflict_log=log)
+        self.assertEqual(log, [])
+        result = app._log_weekly_stimulus_pattern(data)
+        self.assertEqual(result["stimulus_days"], ["月", "火", "水", "木", "金", "土"])
+        self.assertEqual(result["rest_days"], ["日"])
+
+
+class ConsecutiveDayRedistributionTests(unittest.TestCase):
+    """_redistribute_consecutive_stimulus_days(): 週間ルーティン全体評価の
+    「実際に調整する」部分。単一stepの使用日数(頻度)は一切変更せず、
+    連続した曜日だけを既存の「連続禁止」方針に沿って均等配置へ組み替える。"""
+
+    def test_consecutive_days_are_redistributed_without_changing_frequency(self):
+        """頻度を落とさず曜日再配置だけで改善できるケース。"""
+        steps = [{"category": "美容液", "product": "レチノール美容液",
+                   "ingredient_focus": ["レチノール"], "use_days": ["月", "火", "水"]}]
+        log = []
+        app._redistribute_consecutive_stimulus_days(steps, conflict_log=log)
+        new_days = steps[0]["use_days"]
+        self.assertEqual(len(new_days), 3)  # 頻度(日数)は変更しない
+        self.assertFalse(app._has_consecutive_days(new_days))
+        self.assertEqual(len(log), 1)
+        self.assertEqual(log[0]["type"], "consecutive_day_redistribution")
+        self.assertEqual(log[0]["from_days"], ["月", "火", "水"])
+        self.assertEqual(log[0]["to_days"], new_days)
+
+    def test_already_non_consecutive_days_are_not_changed(self):
+        """診断20260926152914212101の実データ(レチノール月水金)は既に
+        連続していないため、変更されないこと(=Geminiの原案が既に
+        最適だったケース)。"""
+        steps = [{"category": "美容液", "product": "レチノール美容液",
+                   "ingredient_focus": ["レチノール"], "use_days": ["月", "水", "金"]}]
+        log = []
+        app._redistribute_consecutive_stimulus_days(steps, conflict_log=log)
+        self.assertEqual(steps[0]["use_days"], ["月", "水", "金"])
+        self.assertEqual(log, [])
+
+    def test_pha_already_non_consecutive_is_not_changed(self):
+        """同診断のPHA(火木土)も同様に変更されないこと。"""
+        steps = [{"category": "ピーリング", "product": "PHAピーリング",
+                   "ingredient_focus": ["pha"], "use_days": ["火", "木", "土"]}]
+        log = []
+        app._redistribute_consecutive_stimulus_days(steps, conflict_log=log)
+        self.assertEqual(steps[0]["use_days"], ["火", "木", "土"])
+        self.assertEqual(log, [])
+
+    def test_non_irritant_step_is_not_touched_even_if_consecutive(self):
+        """刺激系タグを持たないstep(セラミド等)は、曜日が連続していても
+        対象外(既存プロンプトの「連続禁止」方針は刺激系成分に対する
+        ものであり、保湿系にまで拡大解釈しない)。"""
+        steps = [{"category": "パック", "product": "保湿パック",
+                   "ingredient_focus": ["セラミド"], "use_days": ["月", "火"]}]
+        log = []
+        app._redistribute_consecutive_stimulus_days(steps, conflict_log=log)
+        self.assertEqual(steps[0]["use_days"], ["月", "火"])
+        self.assertEqual(log, [])
+
+    def test_daily_use_step_is_not_touched(self):
+        steps = [{"category": "美容液", "ingredient_focus": ["retinol"], "use_days": []}]
+        log = []
+        app._redistribute_consecutive_stimulus_days(steps, conflict_log=log)
+        self.assertEqual(steps[0]["use_days"], [])
+        self.assertEqual(log, [])
+
+    def test_single_day_step_is_not_touched(self):
+        steps = [{"category": "ピーリング", "ingredient_focus": ["aha"], "use_days": ["木"]}]
+        log = []
+        app._redistribute_consecutive_stimulus_days(steps, conflict_log=log)
+        self.assertEqual(steps[0]["use_days"], ["木"])
+        self.assertEqual(log, [])
+
+    def test_redistributed_step_reason_excluded_from_frequency_note_but_kept_in_safety_note(self):
+        """再配置されたstepのGemini由来use_days_reasonは、変更前の曜日を
+        前提に書かれているため最終結果と矛盾する。既存の
+        _step_conflict_modified()による除外の仕組みがこの新しい
+        調整タイプにも正しく適用され、安全調整理由側にのみ説明が
+        残ることを確認する。"""
+        data = _empty_data(night={"steps": [
+            {"category": "美容液", "product": "レチノール美容液",
+             "ingredient_focus": ["レチノール"], "use_days": ["月", "火", "水"],
+             "use_days_reason": "刺激があるため週3回、月火水に配置しています。"},
+        ]})
+        log = []
+        app._redistribute_consecutive_stimulus_days(data["night"]["steps"], conflict_log=log)
+        data["routine_conflict_log"] = log
+        app.build_weekly_usage_plan(data)
+
+        # Gemini由来の理由(変更前の曜日を前提)は頻度の理由に出ない
+        self.assertNotIn("刺激があるため週3回、月火水に配置しています。", data["frequency_reason_note"])
+        # 安全面の調整理由(resolver/最適化側の事実)は出る
+        self.assertTrue(data["routine_reason_notes"])
+        self.assertIn("連続しないよう", data["routine_reason_notes"][0])
+
+
+class HighStimulusProductSelectionCheckTests(unittest.TestCase):
+    """_log_high_stimulus_product_selection_check(): 既存プロンプト
+    【商品選定時の刺激配慮】の「hydration<=50かつbarrier<=50なら
+    高刺激成分は1種のみに絞る」ルールを検知できること(検知のみ、
+    製品の自動入れ替えはしない)。"""
+
+    def test_detects_multiple_high_stimulus_products_when_scores_low(self):
+        """sensitive/barrier低下ケース。"""
+        night_steps = [
+            {"category": "美容液", "product": "レチノール美容液", "ingredient_focus": ["retinol"]},
+            {"category": "美容液", "product": "高濃度VC美容液", "ingredient_focus": ["vitamin_c"],
+             "ingredient_strength": {"vitamin_c": "high"}},
+        ]
+        before = [dict(s) for s in night_steps]
+        app._log_high_stimulus_product_selection_check(night_steps, {"hydration": 45, "barrier": 40})
+        self.assertEqual(night_steps, before)  # 検知のみ、データは変更しない
+
+    def test_does_not_flag_single_high_stimulus_product(self):
+        """activeが1種類だけのケース。"""
+        night_steps = [
+            {"category": "美容液", "product": "レチノール美容液", "ingredient_focus": ["retinol"]},
+        ]
+        app._log_high_stimulus_product_selection_check(night_steps, {"hydration": 40, "barrier": 35})
+
+    def test_does_not_flag_when_scores_are_healthy(self):
+        """今回の実診断(barrier=75, hydration=55)のように、条件(共に50以下)を
+        満たさない場合は検知対象外であること。"""
+        night_steps = [
+            {"category": "美容液", "product": "レチノール美容液", "ingredient_focus": ["retinol"]},
+            {"category": "美容液", "product": "高濃度VC美容液", "ingredient_focus": ["vitamin_c"],
+             "ingredient_strength": {"vitamin_c": "high"}},
+        ]
+        before = [dict(s) for s in night_steps]
+        app._log_high_stimulus_product_selection_check(night_steps, {"hydration": 55, "barrier": 75})
+        self.assertEqual(night_steps, before)
+
+    def test_none_scores_do_not_crash(self):
+        app._log_high_stimulus_product_selection_check([], None)
+        app._log_high_stimulus_product_selection_check(None, {"hydration": 40, "barrier": 40})
+
+
+class UndecidableCrossActiveCoverageDocumentationTests(unittest.TestCase):
+    """レチノール(月水金)+PHA(火木土)のように、個々のactiveは既存目安の
+    範囲内でも、複数の異なるactiveを合計すると週間の刺激系ケア日数が
+    多くなるケースについて、既存ルールだけでは自動調整できないことを
+    数学的事実として確認する(実装しない判断そのものの回帰テスト)。"""
+
+    def test_non_overlapping_three_plus_three_always_consumes_six_days(self):
+        """同日重複禁止という既存ルールの下で、3日×2つのactiveを重複
+        させずに配置すると、曜日の組み合わせによらず必ず6日を消費する
+        (=配置の最適化では改善できないことの数学的確認)。"""
+        import itertools
+        days = app._ALL_DAYS
+        for a_days in itertools.combinations(days, 3):
+            for b_days in itertools.combinations(days, 3):
+                if set(a_days) & set(b_days):
+                    continue  # 同日重複は既存ルールで禁止されているため対象外
+                union = set(a_days) | set(b_days)
+                self.assertEqual(len(union), 6)
+
+    def test_redistribution_does_not_touch_the_real_diagnosis_case(self):
+        """診断20260926152914212101の実データ(レチノール月水金+PHA火木土)は
+        既存の「連続禁止」ルールの範囲では既に最適(それぞれ内部で連続
+        していない)であり、既存ルールの範囲では調整の余地が無いことを
+        確認する(=検知のみに留めた設計判断の裏付け)。"""
+        night_steps = [{"category": "美容液", "ingredient_focus": ["レチノール"],
+                          "use_days": ["月", "水", "金"]}]
+        weekly_steps = [{"category": "ピーリング", "ingredient_focus": ["pha"],
+                           "use_days": ["火", "木", "土"]}]
+        log = []
+        app._redistribute_consecutive_stimulus_days(night_steps, conflict_log=log)
+        app._redistribute_consecutive_stimulus_days(weekly_steps, conflict_log=log)
+        self.assertEqual(night_steps[0]["use_days"], ["月", "水", "金"])
+        self.assertEqual(weekly_steps[0]["use_days"], ["火", "木", "土"])
+        self.assertEqual(log, [])
+
+
+class AhaBhaFrequencyGuidanceClassificationTests(unittest.TestCase):
+    """2026-09の再監査: 既存プロンプト【ピーリングの使用頻度個別評価】に
+    明記されたAHA/BHAの濃度別下限を、_AHA_BHA_TIER_FLOORが正確に
+    転記していることを確認する(新しい数値を作っていないことの根拠)。
+    低濃度AHA/BHAの下限(週2)は、高濃度の下限(週1)より高いため、
+    一律「週1回」への引き下げは低濃度側にとって既存許容範囲を下回る
+    過剰な制限になることを検証する。"""
+
+    def test_low_concentration_aha_floor_is_two_not_one(self):
+        # 低濃度AHA(<5%)+保湿成分豊富 → 週2〜4回(敏感肌週2〜3回)、下限2
+        self.assertEqual(app._AHA_BHA_TIER_FLOOR[("aha", "low")], 2)
+
+    def test_low_concentration_bha_floor_is_two_not_one(self):
+        # 低濃度BHA(<2%)+保湿成分あり → 週2〜3回、下限2
+        self.assertEqual(app._AHA_BHA_TIER_FLOOR[("bha", "low")], 2)
+
+    def test_medium_aha_and_high_bha_floor_is_one(self):
+        self.assertEqual(app._AHA_BHA_TIER_FLOOR[("aha", "medium")], 1)
+        self.assertEqual(app._AHA_BHA_TIER_FLOOR[("bha", "medium")], 1)
+
+    def test_high_concentration_floor_is_one(self):
+        self.assertEqual(app._AHA_BHA_TIER_FLOOR[("aha", "high")], 1)
+        self.assertEqual(app._AHA_BHA_TIER_FLOOR[("bha", "high")], 1)
+
+    def test_classify_returns_none_when_ingredient_strength_missing(self):
+        """濃度情報が無い(実データの大半のケース)場合は判定不能とし、
+        Noneを返すこと(特定の濃度を仮定しない)。"""
+        step = {"ingredient_focus": ["aha"], "use_days": ["火", "木", "土"]}
+        self.assertIsNone(app._classify_aha_bha_conservative_floor(step))
+
+    def test_classify_returns_none_when_strength_dict_lacks_matching_key(self):
+        step = {"ingredient_focus": ["aha"], "ingredient_strength": {"vitamin_c": "high"}}
+        self.assertIsNone(app._classify_aha_bha_conservative_floor(step))
+
+    def test_classify_low_aha(self):
+        step = {"ingredient_focus": ["aha"], "ingredient_strength": {"aha": "low"}}
+        self.assertEqual(app._classify_aha_bha_conservative_floor(step), 2)
+
+    def test_classify_medium_aha(self):
+        step = {"ingredient_focus": ["aha"], "ingredient_strength": {"aha": "medium"}}
+        self.assertEqual(app._classify_aha_bha_conservative_floor(step), 1)
+
+    def test_classify_high_bha(self):
+        step = {"ingredient_focus": ["bha"], "ingredient_strength": {"bha": "high"}}
+        self.assertEqual(app._classify_aha_bha_conservative_floor(step), 1)
+
+    def test_classify_low_bha(self):
+        step = {"ingredient_focus": ["bha"], "ingredient_strength": {"bha": "low"}}
+        self.assertEqual(app._classify_aha_bha_conservative_floor(step), 2)
+
+    def test_classify_unknown_level_value_is_unclassifiable(self):
+        step = {"ingredient_focus": ["aha"], "ingredient_strength": {"aha": "とても強い"}}
+        self.assertIsNone(app._classify_aha_bha_conservative_floor(step))
+
+
+class RetinoidAhaBhaWeeklyCombinationTests(unittest.TestCase):
+    """_evaluate_retinoid_aha_bha_weekly_combination(): 固定ハード上限
+    ("レチノイド週3回以上ならAHA/BHAは週1〜2回"等)も、一律「週1回」への
+    引き下げも導入しない。既存プロンプト【商品選定時の刺激配慮】の
+    トリガー条件(hydration<=50かつbarrier<=50)を満たし、かつ
+    ingredient_strengthから濃度を安全に分類できた場合のみ、その分類の
+    既存下限まで調整する。濃度が判定できない場合(実データの大半)は
+    頻度を変更せず検知のみ行う。"""
+
+    def _night_with_retinoid(self, use_days=None):
+        return [{"category": "美容液", "product": "レチノール美容液",
+                  "ingredient_focus": ["retinol"], "use_days": use_days if use_days is not None else ["月", "水", "金"]}]
+
+    def test_triggers_and_uses_tier_specific_floor_for_medium_aha(self):
+        """濃度が判定できる場合(中濃度AHA): 既存目安の下限(週1回)へ調整。"""
+        data = _empty_data(
+            night={"steps": self._night_with_retinoid()},
+            weekly_care=[{"category": "ピーリング", "product": "AHAピーリング",
+                           "ingredient_focus": ["aha"], "ingredient_strength": {"aha": "medium"},
+                           "use_days": ["火", "木", "土"]}],
+        )
+        data["scores"] = {"hydration": 40, "barrier": 35}
+        log = []
+        app._evaluate_retinoid_aha_bha_weekly_combination(data, user_data={}, conflict_log=log)
+        peeling = data["weekly_care"][0]
+        self.assertEqual(len(peeling["use_days"]), 1)
+        self.assertEqual(len(log), 1)
+        self.assertEqual(log[0]["type"], "retinoid_aha_bha_conservative_lean")
+        self.assertEqual(log[0]["from_days"], ["火", "木", "土"])
+
+    def test_low_concentration_aha_is_capped_at_two_not_one(self):
+        """低濃度AHAは既存下限が週2であり、週1へは引き下げないこと
+        (2026-09の再監査で修正した中心点)。"""
+        data = _empty_data(
+            night={"steps": self._night_with_retinoid()},
+            weekly_care=[{"category": "ピーリング", "product": "低濃度AHAピーリング",
+                           "ingredient_focus": ["aha"], "ingredient_strength": {"aha": "low"},
+                           "use_days": ["月", "水", "金", "日"]}],  # 週4回
+        )
+        data["scores"] = {"hydration": 30, "barrier": 30}
+        log = []
+        app._evaluate_retinoid_aha_bha_weekly_combination(data, user_data={}, conflict_log=log)
+        peeling = data["weekly_care"][0]
+        self.assertEqual(len(peeling["use_days"]), 2)  # 週1ではなく週2
+
+    def test_low_concentration_aha_already_at_floor_is_not_changed(self):
+        """低濃度AHAが既に週2回なら、それ以上(週1へ)は下げないこと。"""
+        data = _empty_data(
+            night={"steps": self._night_with_retinoid()},
+            weekly_care=[{"category": "ピーリング", "product": "低濃度AHAピーリング",
+                           "ingredient_focus": ["aha"], "ingredient_strength": {"aha": "low"},
+                           "use_days": ["火", "金"]}],
+        )
+        data["scores"] = {"hydration": 30, "barrier": 30}
+        log = []
+        app._evaluate_retinoid_aha_bha_weekly_combination(data, user_data={}, conflict_log=log)
+        self.assertEqual(data["weekly_care"][0]["use_days"], ["火", "金"])
+        self.assertEqual(log, [])
+
+    def test_unclassifiable_concentration_does_not_change_frequency(self):
+        """濃度を安全に判定できない(ingredient_strengthが無い、実データの
+        大半のケース)場合は、頻度を一切変更しないこと(判定不能なのに
+        濃度を仮定しない)。検知ログには残る。"""
+        data = _empty_data(
+            night={"steps": self._night_with_retinoid()},
+            weekly_care=[{"category": "ピーリング", "product": "AHAピーリング",
+                           "ingredient_focus": ["aha"], "use_days": ["火", "木", "土"]}],
+        )
+        data["scores"] = {"hydration": 40, "barrier": 35}
+        log = []
+        app._evaluate_retinoid_aha_bha_weekly_combination(data, user_data={}, conflict_log=log)
+        self.assertEqual(data["weekly_care"][0]["use_days"], ["火", "木", "土"])
+        self.assertEqual(log, [])  # 頻度変更が無いためconflict_logにも記録されない
+
+    def test_does_not_trigger_when_scores_are_healthy(self):
+        """barrier高/hydration高ケース(今回の実診断相当): 調整しない。"""
+        data = _empty_data(
+            night={"steps": self._night_with_retinoid()},
+            weekly_care=[{"category": "ピーリング", "product": "AHAピーリング",
+                           "ingredient_focus": ["aha"], "ingredient_strength": {"aha": "medium"},
+                           "use_days": ["火", "木", "土"]}],
+        )
+        data["scores"] = {"hydration": 75, "barrier": 75}
+        log = []
+        app._evaluate_retinoid_aha_bha_weekly_combination(data, user_data={}, conflict_log=log)
+        self.assertEqual(data["weekly_care"][0]["use_days"], ["火", "木", "土"])
+        self.assertEqual(log, [])
+
+    def test_does_not_trigger_when_only_one_score_is_low(self):
+        """barrier低・hydration正常のように片方だけでは、既存ルールの
+        AND条件を満たさないため調整しない(推測で補わない)。"""
+        data = _empty_data(
+            night={"steps": self._night_with_retinoid()},
+            weekly_care=[{"category": "ピーリング", "product": "AHAピーリング",
+                           "ingredient_focus": ["aha"], "ingredient_strength": {"aha": "medium"},
+                           "use_days": ["火", "木", "土"]}],
+        )
+        data["scores"] = {"hydration": 70, "barrier": 30}
+        log = []
+        app._evaluate_retinoid_aha_bha_weekly_combination(data, user_data={}, conflict_log=log)
+        self.assertEqual(data["weekly_care"][0]["use_days"], ["火", "木", "土"])
+        self.assertEqual(log, [])
+
+    def test_pha_is_not_touched_even_when_triggered(self):
+        """PHAケース: PHAはAHA/BHAと機械的に同列に扱わず、対象外のまま
+        独立した既存の頻度目安を維持する。"""
+        data = _empty_data(
+            night={"steps": self._night_with_retinoid()},
+            weekly_care=[{"category": "ピーリング", "product": "PHAピーリング",
+                           "ingredient_focus": ["pha"], "use_days": ["火", "木", "土"]}],
+        )
+        data["scores"] = {"hydration": 30, "barrier": 30}
+        log = []
+        app._evaluate_retinoid_aha_bha_weekly_combination(data, user_data={}, conflict_log=log)
+        self.assertEqual(data["weekly_care"][0]["use_days"], ["火", "木", "土"])
+        self.assertEqual(log, [])
+
+    def test_single_active_without_retinoid_does_not_trigger(self):
+        """単独active(AHAのみ、レチノイドなし)ケース: 組み合わせ自体が
+        存在しないため調整しない。"""
+        data = _empty_data(
+            night={"steps": [{"category": "美容液", "product": "ナイアシンアミド美容液",
+                                "ingredient_focus": ["niacinamide"], "use_days": []}]},
+            weekly_care=[{"category": "ピーリング", "product": "AHAピーリング",
+                           "ingredient_focus": ["aha"], "ingredient_strength": {"aha": "medium"},
+                           "use_days": ["火", "木", "土"]}],
+        )
+        data["scores"] = {"hydration": 30, "barrier": 30}
+        log = []
+        app._evaluate_retinoid_aha_bha_weekly_combination(data, user_data={}, conflict_log=log)
+        self.assertEqual(data["weekly_care"][0]["use_days"], ["火", "木", "土"])
+        self.assertEqual(log, [])
+
+    def test_daily_medium_aha_is_reduced_to_its_tier_floor(self):
+        """中濃度AHAが毎日([])の極端なケースでも、判定できる場合は
+        その分類の下限(週1回)まで調整すること。"""
+        data = _empty_data(
+            night={"steps": self._night_with_retinoid()},
+            weekly_care=[{"category": "ピーリング", "product": "AHAピーリング",
+                           "ingredient_focus": ["aha"], "ingredient_strength": {"aha": "medium"},
+                           "use_days": []}],
+        )
+        data["scores"] = {"hydration": 20, "barrier": 20}
+        log = []
+        app._evaluate_retinoid_aha_bha_weekly_combination(data, user_data={}, conflict_log=log)
+        self.assertEqual(len(data["weekly_care"][0]["use_days"]), 1)
+
+    def test_already_at_or_below_conservative_floor_is_not_changed(self):
+        """既に該当分類の下限以下なら、それ以上効果を落とさないこと。"""
+        data = _empty_data(
+            night={"steps": self._night_with_retinoid()},
+            weekly_care=[{"category": "ピーリング", "product": "AHAピーリング",
+                           "ingredient_focus": ["aha"], "ingredient_strength": {"aha": "high"},
+                           "use_days": ["木"]}],
+        )
+        data["scores"] = {"hydration": 20, "barrier": 20}
+        log = []
+        app._evaluate_retinoid_aha_bha_weekly_combination(data, user_data={}, conflict_log=log)
+        self.assertEqual(data["weekly_care"][0]["use_days"], ["木"])
+        self.assertEqual(log, [])
+
+    def test_missing_scores_do_not_crash_and_do_not_trigger(self):
+        data = _empty_data(
+            night={"steps": self._night_with_retinoid()},
+            weekly_care=[{"category": "ピーリング", "product": "AHAピーリング",
+                           "ingredient_focus": ["aha"], "ingredient_strength": {"aha": "medium"},
+                           "use_days": ["火", "木", "土"]}],
+        )
+        data["scores"] = {}
+        log = []
+        app._evaluate_retinoid_aha_bha_weekly_combination(data, user_data={}, conflict_log=log)
+        self.assertEqual(data["weekly_care"][0]["use_days"], ["火", "木", "土"])
+        self.assertEqual(log, [])
+
+    def test_adjusted_step_reason_excluded_from_frequency_note_but_explained_in_safety_note(self):
+        """調整されたstepのGemini由来use_days_reasonは最終結果と矛盾する
+        ため頻度の理由には出ず、安全調整理由側で実際に考慮した要因
+        (バリア・水分量の低下、レチノイドとの併用)が説明されること。"""
+        data = _empty_data(
+            night={"steps": [{"category": "美容液", "product": "レチノール美容液",
+                                "ingredient_focus": ["retinol"], "use_days": ["月", "水", "金"],
+                                "use_days_reason": "レチノールは刺激があるため週3回としています。"}]},
+            weekly_care=[{"category": "ピーリング", "product": "AHAピーリング",
+                           "ingredient_focus": ["aha"], "ingredient_strength": {"aha": "medium"},
+                           "use_days": ["火", "木", "土"],
+                           "use_days_reason": "AHAは低刺激な処方のため週3回としています。"}],
+        )
+        data["scores"] = {"hydration": 30, "barrier": 30}
+        log = []
+        app._evaluate_retinoid_aha_bha_weekly_combination(data, user_data={}, conflict_log=log)
+        data["routine_conflict_log"] = log
+        app.build_weekly_usage_plan(data)
+
+        self.assertNotIn("AHAは低刺激な処方のため週3回としています。", data["frequency_reason_note"])
+        # レチノールの理由(調整されていない側)はそのまま残る
+        self.assertIn("レチノールは刺激があるため週3回としています。", data["frequency_reason_note"])
+        self.assertTrue(data["routine_reason_notes"])
+        self.assertIn("バリア機能・水分量がともに低下", data["routine_reason_notes"][0])
+        self.assertIn("レチノイド", data["routine_reason_notes"][0])
 
 
 if __name__ == "__main__":
