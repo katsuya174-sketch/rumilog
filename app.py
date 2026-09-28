@@ -4907,9 +4907,9 @@ def select_best_beauty_device_candidate(
 
     # score_rakuten_item由来のスコアはタイトルの語数一致等でcandidateごとに
     # 大きくばらつく（実測で100超の差が出ることもある）ため、そのまま使うと
-    # 予算・敏感度・レビュー等の他シグナルが埋もれてしまう。この関数の中でだけ
-    # プール内相対値に正規化し、あくまで複数シグナルの一つとして扱う
-    # (score_rakuten_item自体や他カテゴリでの使われ方は変更しない)。
+    # 他シグナルが埋もれてしまう。この関数の中でだけプール内相対値に正規化し、
+    # 検索適合度という1つの評価軸として扱う(score_rakuten_item自体や他
+    # カテゴリでの使われ方は変更しない)。
     _raw_scores = [sc for sc, _ in pool]
     _score_min, _score_max = min(_raw_scores), max(_raw_scores)
     _score_span = (_score_max - _score_min) or 1
@@ -4917,7 +4917,20 @@ def select_best_beauty_device_candidate(
     def _normalized_relevance(score):
         return (score - _score_min) / _score_span * 20  # 0〜20
 
-    def _fit_score(pair):
+    # 評価軸を「肌悩み適合を主軸、レビュー・価格は補助/タイブレーカー」という
+    # 優先関係の辞書式順序(lexicographic tuple)で表現する。重み付き合計
+    # (レビュー最大20点 + 検索適合最大20点、等)にすると肌悩み適合(最大16点)が
+    # 他シグナルの組み合わせに埋もれてしまう問題があったため、点数の調整では
+    # なく「肌悩み適合が同点の候補の中でだけ次の軸を見る」という優先順位その
+    # ものを明示する構造に変更した。
+    #   1. concern_match_count: 今回の診断で優先対象となった肌悩みとの一致数
+    #      (上限2、_extract_device_appeal_featuresの重複除去済み特徴)。
+    #   2. safety_ok: 敏感肌×刺激的方式で強度語がある候補を後方に回す。
+    #   3. budget_ok: 予算を大幅超過する候補を後方に回す。
+    #   4. search_relevance: score_rakuten_item由来の検索適合度(相対正規化)。
+    #   5. review_avg / 6. review_count: 品質シグナル。
+    #   7. price(安い方が優先): 最後のタイブレーカー。
+    def _sort_key(pair):
         score, item = pair
         title = str(item.get("itemName", "") or "")
         caption = str(item.get("itemCaption", "") or "")
@@ -4926,52 +4939,28 @@ def select_best_beauty_device_candidate(
         review_count = safe_price(item.get("reviewCount", 0))
         review_avg = safe_price(item.get("reviewAverage", 0))
 
-        # 実在・検索適合スコア(score_rakuten_item)をプール内相対値として反映。
-        fit = _normalized_relevance(score)
-
-        # 予算適合: 大幅に予算を超える場合のみ減点する。budget_valueは月間
-        # スキンケア予算であり機器の一括価格とは単位が違うため、「安いほど良い」
-        # という加点はせず、あくまで「予算を大きく超えていないか」のみを見る
-        # (でなければ常に最安値が勝ってしまい、レビュー等の品質シグナルが
-        #  機能しなくなる)。
-        if budget_value and price > 0:
-            ratio = price / budget_value
-            if ratio > 1.5:
-                fit -= min((ratio - 1.5) * 15, 40)
-
-        # 敏感肌: 刺激を伴う方式(RF/EMS/超音波洗浄)で、商品名・説明文に
-        # 「業務用」「高出力」等の強度を示す語がある場合のみ減点する
-        # (肌質・悩みとの目的適合はdevice_type選定で既に判断済みのため
-        #  ここで再評価しない＝二重評価を避ける)。
-        if is_high_sensitivity and device_type in _STIMULATING_DEVICE_TYPES:
-            if any(w in text for w in _DEVICE_INTENSITY_KEYWORDS):
-                fit -= 20
-
-        # レビュー数・評価は品質シグナルとして加点(上限あり)。
-        fit += min(review_count, 500) / 50
-        fit += review_avg * 2
-
-        # 肌悩み適合ボーナス: 今回の診断で実際に優先対象となった肌悩みと、
-        # 商品説明から抽出した特徴(_extract_device_appeal_features。同じ
-        # ラベルへ正規化される同義語は関数内で既に1特徴1回に重複除去済み)が
-        # 一致した分だけ加点する。一致しない特徴、診断項目に対応しない訴求
-        # (「小顔」等、_DEVICE_FEATURE_KEYWORDSに含めていない語)は加点しない。
-        # 商品説明に無関係な美容訴求が多数あっても、今回の優先悩みと一致
-        # しなければ加点は増えない。device type/search適合・刺激リスク・
-        # review・price/budgetの既存ロジックは変更しない。
+        concern_match_count = 0
         if priority_labels:
             matched_concerns = set(_extract_device_appeal_features(item)) & priority_labels
-            fit += min(len(matched_concerns), 2) * 8
+            concern_match_count = min(len(matched_concerns), 2)
 
-        return fit
+        safety_ok = 1
+        if is_high_sensitivity and device_type in _STIMULATING_DEVICE_TYPES:
+            if any(w in text for w in _DEVICE_INTENSITY_KEYWORDS):
+                safety_ok = 0
 
-    def _sort_key(pair):
-        score, item = pair
+        budget_ok = 1
+        if budget_value and price > 0 and (price / budget_value) > 1.5:
+            budget_ok = 0
+
         return (
-            _fit_score(pair),
-            score,
-            safe_price(item.get("reviewCount", 0)),
-            -safe_price(item.get("itemPrice", 0)),
+            concern_match_count,
+            safety_ok,
+            budget_ok,
+            _normalized_relevance(score),
+            review_avg,
+            review_count,
+            -price,
             str(item.get("itemCode", "")),
         )
 
@@ -4985,7 +4974,7 @@ def select_best_beauty_device_candidate(
     print(
         f"[DEVICE SELECT] device_type={device_type} "
         f"winner={best_item.get('itemName','')[:50]!r} "
-        f"base_score={best_score} fit={_fit_score((best_score, best_item)):.1f} "
+        f"base_score={best_score} sort_key={_sort_key((best_score, best_item))} "
         f"price={best_item.get('itemPrice')} reviews={best_item.get('reviewCount')} "
         f"candidates={len(pool)}",
         flush=True
@@ -5010,6 +4999,80 @@ _SUPPLEMENT_INGREDIENT_KEYWORDS = {
 }
 
 
+_SUPPLEMENT_SELECTION_REASON_FALLBACK = _DEVICE_SELECTION_REASON_FALLBACK
+
+
+def _supplement_matches_keywords(item, keyword_variants):
+    if not keyword_variants:
+        return False
+    title = str(item.get("itemName", "") or "")
+    caption = str(item.get("itemCaption", "") or "")
+    text_lower = f"{title} {caption}".lower()
+    return any(kw.lower() in text_lower for kw in keyword_variants)
+
+
+def _build_supplement_selection_reason(pool_sorted, supplement_type, keyword_variants, budget_value):
+    """
+    _build_device_selection_reason()と同じ考え方。select_best_supplement_
+    candidate()が実際に比較している評価軸(成分一致・予算適合・価格・レビュー
+    評価・レビュー件数)のうち、勝者が「取得した候補全体」に対して本当に優位
+    だった項目だけを事実として述べる(同点は優位と書かない)。候補が1件しか
+    ない場合は比較自体ができないため中立的な文言を返す。
+    """
+    if len(pool_sorted) < 2:
+        return _SUPPLEMENT_SELECTION_REASON_FALLBACK
+
+    _, winner = pool_sorted[0]
+    others = [item for _, item in pool_sorted[1:]]
+
+    winner_matches = _supplement_matches_keywords(winner, keyword_variants)
+    other_matches = [_supplement_matches_keywords(o, keyword_variants) for o in others]
+    ingredient_decisive = bool(keyword_variants and winner_matches and not any(other_matches))
+
+    parts = []
+
+    winner_review_avg = safe_price(winner.get("reviewAverage", 0))
+    other_review_avgs = [safe_price(o.get("reviewAverage", 0)) for o in others]
+    if other_review_avgs and winner_review_avg > max(other_review_avgs):
+        parts.append(f"レビュー評価が{winner_review_avg}と他候補より高い")
+
+    winner_review_count = safe_price(winner.get("reviewCount", 0))
+    other_review_counts = [safe_price(o.get("reviewCount", 0)) for o in others]
+    if other_review_counts and winner_review_count > max(other_review_counts):
+        parts.append(f"レビュー件数が{winner_review_count}件と他候補より多い")
+
+    winner_price = safe_price(winner.get("itemPrice", 0))
+    other_prices = [
+        safe_price(o.get("itemPrice", 0)) for o in others
+        if safe_price(o.get("itemPrice", 0)) > 0
+    ]
+    if winner_price > 0 and other_prices and winner_price < min(other_prices):
+        parts.append("価格が候補内で最も抑えられている")
+
+    if budget_value and winner_price > 0:
+        winner_ratio = winner_price / budget_value
+        other_over_budget = any(
+            (safe_price(o.get("itemPrice", 0)) / budget_value) > 1.5
+            for o in others if safe_price(o.get("itemPrice", 0)) > 0
+        )
+        if winner_ratio <= 1.5 and other_over_budget:
+            parts.append("予算の範囲内に収まっている")
+
+    if ingredient_decisive:
+        comparison_sentence = (
+            f"商品説明で今回の対象成分({supplement_type})に関する記載が確認でき、"
+            f"比較候補にはこの記載がなかったため優先しました。"
+        )
+        if parts:
+            comparison_sentence += "加えて、" + "、".join(parts) + "点でも他候補より優位でした。"
+        return comparison_sentence
+
+    if not parts:
+        return _SUPPLEMENT_SELECTION_REASON_FALLBACK
+
+    return "今回取得した候補の中で、" + "、".join(parts) + "点が他候補より優位だったため、この製品を選びました。"
+
+
 def select_best_supplement_candidate(scored_items, supplement_type, ingredient_focus, user_data, budget_value):
     """
     fetch_rakuten_candidates()が返すスコア済み実在候補群から、この
@@ -5023,9 +5086,13 @@ def select_best_supplement_candidate(scored_items, supplement_type, ingredient_f
 
     ランダム要素は一切ない。同じ候補群・同じuser_data/budget_valueであれば
     常に同じ1件を返す。
+
+    戻り値: (winner_item_or_None, selection_reason)。selection_reasonは
+    「なぜ候補の中からこの商品を選んだか」を示す比較理由(_build_device_
+    selection_reason()と同じ考え方でsupplement向けに定義)。
     """
     if not scored_items:
-        return None
+        return None, ""
 
     single_items = [
         (sc, it) for sc, it in scored_items
@@ -5045,7 +5112,19 @@ def select_best_supplement_candidate(scored_items, supplement_type, ingredient_f
     for tag in focus_tags:
         keyword_variants.extend(_SUPPLEMENT_INGREDIENT_KEYWORDS.get(tag, ()))
 
-    def _fit_score(pair):
+    # select_best_beauty_device_candidate()と同じ考え方(肌悩み適合を主軸、
+    # レビュー・価格は補助/タイブレーカー)を、サプリメントの主軸である
+    # 「成分(ingredient_focus)一致」に置き換えて適用する。重み付き合計にせず
+    # 辞書式順序(lexicographic tuple)にすることで、成分一致が同点の候補の
+    # 中でだけレビュー・価格を見るようにする。
+    #   1. ingredient_match_tier: ingredient_focusのキーワードが商品説明に
+    #      含まれる(2)／判定対象キーワードが無い(1、加点も減点もしない)／
+    #      キーワードがあるのに含まれない(0)。
+    #   2. type_match_ok: supplement_type名自体との一致。
+    #   3. budget_ok: 予算を大幅超過する候補を後方に回す。
+    #   4. search_relevance: score_rakuten_item由来の検索適合度(相対正規化)。
+    #   5. review_avg / 6. review_count / 7. price(安い方優先)。
+    def _sort_key(pair):
         score, item = pair
         title = str(item.get("itemName", "") or "")
         caption = str(item.get("itemCaption", "") or "")
@@ -5054,58 +5133,40 @@ def select_best_supplement_candidate(scored_items, supplement_type, ingredient_f
         review_count = safe_price(item.get("reviewCount", 0))
         review_avg = safe_price(item.get("reviewAverage", 0))
 
-        fit = _normalized_relevance(score)
-
-        # supplement_typeとの一致(文字列として含まれるか否かのみ。
-        # 繰り返し出現しても加点は増えない)。
-        if supplement_type and supplement_type.lower() in text_lower:
-            fit += 10
-
-        # ingredient_focusとの一致。事実として楽天のitemName/itemCaptionに
-        # 含まれる語だけを見る補助評価であり、一致しない候補は
-        # 「supplement_typeとして関係が確認できない」として明確に減点する
-        # (レビュー数だけで無関係な商品が1位に来ないようにするため)。
         if keyword_variants:
-            if any(kw.lower() in text_lower for kw in keyword_variants):
-                fit += 25
-            else:
-                fit -= 25
+            ingredient_match_tier = 2 if any(kw.lower() in text_lower for kw in keyword_variants) else 0
+        else:
+            ingredient_match_tier = 1
 
-        # 予算適合: 大幅に超える場合のみ減点(美容機器と同じ考え方。
-        # budget_valueは月間スキンケア予算でサプリの一括価格とは単位が違うため
-        # 安いほど加点、という扱いはしない)。
-        if budget_value and price > 0:
-            ratio = price / budget_value
-            if ratio > 1.5:
-                fit -= min((ratio - 1.5) * 15, 40)
+        type_match_ok = 1 if (supplement_type and supplement_type.lower() in text_lower) else 0
 
-        # レビュー数・評価は品質シグナルとして加点(上限あり)。
-        fit += min(review_count, 500) / 50
-        fit += review_avg * 2
+        budget_ok = 1
+        if budget_value and price > 0 and (price / budget_value) > 1.5:
+            budget_ok = 0
 
-        return fit
-
-    def _sort_key(pair):
-        score, item = pair
         return (
-            _fit_score(pair),
-            score,
-            safe_price(item.get("reviewCount", 0)),
-            -safe_price(item.get("itemPrice", 0)),
+            ingredient_match_tier,
+            type_match_ok,
+            budget_ok,
+            _normalized_relevance(score),
+            review_avg,
+            review_count,
+            -price,
             str(item.get("itemCode", "")),
         )
 
     pool_sorted = sorted(pool, key=_sort_key, reverse=True)
     best_score, best_item = pool_sorted[0]
+    selection_reason = _build_supplement_selection_reason(pool_sorted, supplement_type, keyword_variants, budget_value)
     print(
         f"[SUPPLEMENT SELECT] supplement_type={supplement_type} "
         f"winner={best_item.get('itemName','')[:50]!r} "
-        f"base_score={best_score} fit={_fit_score((best_score, best_item)):.1f} "
+        f"base_score={best_score} sort_key={_sort_key((best_score, best_item))} "
         f"price={best_item.get('itemPrice')} reviews={best_item.get('reviewCount')} "
         f"candidates={len(pool)}",
         flush=True
     )
-    return best_item
+    return best_item, selection_reason
 
 
 # === Phase 2: criteria-based Rakuten search ===
@@ -6920,13 +6981,14 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
             category=category,
             brand=brand,
         )
-        best_raw_item = select_best_supplement_candidate(
+        best_raw_item, supplement_selection_reason = select_best_supplement_candidate(
             scored_candidates, supplement_type, ingredient_focus, user_data, budget_value
         )
         rakuten_item = None
         if best_raw_item:
             _cleaned_name = clean_ai_product_name(clean_display_product_name(product_name))
             rakuten_item = _build_rakuten_result(best_raw_item, _cleaned_name)
+            step["device_selection_reason"] = supplement_selection_reason
     else:
         rakuten_item = fetch_rakuten_item(
             product_name=product_name,
@@ -15506,6 +15568,25 @@ _DEVICE_PURPOSE_LABELS = {
     "マイクロカレント": "軽度のハリ不足のケア",
 }
 
+# 美容機器・サプリメントの「改善が期待される対象」の定性的表示用。
+# 通常スキンケア商品のcalculate_step_impact()は、Geminiが構造化抽出した
+# active_ingredients/ingredient_strength/formulation等の裏付けデータを前提に
+# 数値化しているが、美容機器・サプリメントにはこれと同等の裏付けデータが
+# 無く、同じ関数で数値を出すと実際には精度の異なるものを同じ「+34」という
+# 数値表現で見せてしまい誤解を招く(2026-09、実機監査での指摘)。
+# 代わりに、_DEVICE_PURPOSE_LABELS/_SUPPLEMENT_DEFAULTSのpurpose(device_type/
+# supplement_type選定時に既にGeminiが判断済みの対象)を、_BASE_SCORE_LABELSと
+# 同じ語彙の対象名(数値なし)としてそのまま示す。新しい判定ロジックは追加せず、
+# 既存の確定済み情報を対象名として整理するだけ。
+_DEVICE_EXPECTED_IMPROVEMENT_AREAS = {
+    "RF": ["ハリ"],
+    "LED": ["赤み", "ニキビ"],
+    "EMS": ["ハリ"],
+    "エレクトロポレーション": ["保湿"],
+    "超音波洗浄": ["毛穴", "皮脂バランス"],
+    "マイクロカレント": ["ハリ"],
+}
+
 
 def enrich_beauty_devices(data, user_data):
     """
@@ -15529,16 +15610,24 @@ def enrich_beauty_devices(data, user_data):
             print(f"[DEVICE SKIP unknown device_type] {dtype!r}", flush=True)
             continue
 
+        _purpose_text = _DEVICE_PURPOSE_LABELS.get(dtype, "")
         cleaned.append({
             "category": "美容機器",
             "device_type": dtype,
             "product": defaults["product"],
             "brand": "",
-            "purpose": _DEVICE_PURPOSE_LABELS.get(dtype, ""),
+            "purpose": _purpose_text,
             "device_function": defaults["device_function"],
             "frequency": defaults["frequency"],
             "reason": str(item.get("reason", "") or "").strip(),
             "priority": defaults["priority"],
+            # 通常商品カード(StepCard)と同じ悩みタグチップ表示のため、
+            # 既存のbuild_concern_tags()(purpose文中のキーワードから
+            # 「赤み鎮静」等の統一された表示ラベルへ変換する既存関数、
+            # 通常商品と同じ語彙)をそのまま流用する。新規の判定ロジックは
+            # 追加しない。
+            "concern_tags": build_concern_tags({}, {"purpose": _purpose_text}),
+            "expected_improvement_areas": _DEVICE_EXPECTED_IMPROVEMENT_AREAS.get(dtype, []),
         })
 
     cleaned.sort(key=lambda d: d.get("priority", 9))
@@ -15555,6 +15644,24 @@ def enrich_beauty_devices(data, user_data):
 # ingredient_focusタグはresult.htmlの安全性バナー（過剰摂取・脂溶性ビタミン・薬相互作用等の
 # 自動判定、render_extra_sectionマクロ内）が既にこのタグとcautionテキストを参照する設計のため、
 # 既存のバナーロジックをそのまま流用できるよう定義している（テンプレート側の変更は不要）。
+# _DEVICE_EXPECTED_IMPROVEMENT_AREASと同じ趣旨。サプリメントについても、
+# calculate_step_impact()のような通常スキンケア用の数値化ロジックをそのまま
+# 転用すると根拠のない数値になってしまうため、成分ごとにpurposeの効能から
+# 導ける改善期待領域(_BASE_SCORE_LABELSと同じ語彙)を定性的に固定で持たせる。
+_SUPPLEMENT_EXPECTED_IMPROVEMENT_AREAS = {
+    "ビタミンC": ["くすみ", "色ムラ"],
+    "Lシステイン": ["くすみ", "色ムラ"],
+    "ビタミンB群": ["ニキビ", "皮脂バランス"],
+    "ビタミンD": ["ニキビ", "バリア"],
+    "オメガ3": ["赤み", "ニキビ", "バリア"],
+    "コラーゲンペプチド": ["ハリ"],
+    "セラミド": ["保湿", "バリア"],
+    "ヒアルロン酸": ["保湿"],
+    "乳酸菌": ["ニキビ"],
+    "亜鉛": ["ニキビ", "皮脂バランス"],
+}
+
+
 _SUPPLEMENT_DEFAULTS = {
     "ビタミンC": {
         "product": "ビタミンC サプリメント",
@@ -15670,6 +15777,8 @@ def enrich_supplements(data, user_data):
             "timing": defaults["timing"],
             "caution": defaults["caution"],
             "priority": defaults["priority"],
+            "concern_tags": build_concern_tags({}, {"purpose": defaults["purpose"]}),
+            "expected_improvement_areas": _SUPPLEMENT_EXPECTED_IMPROVEMENT_AREAS.get(stype, []),
         })
 
     cleaned.sort(key=lambda d: d.get("priority", 9))
@@ -18824,7 +18933,7 @@ def append_result(raw_data, image_path="", is_premium=False):
 
     print(f"[RESULT SAVED] id={record_id} user_id={record.get('user_id')!r} client_ip={record.get('client_ip')!r}", flush=True)
 
-    # 無料ユーザーは直近5件のみ保持
+    # 無料ユーザーは直近3件のみ保持
     if not is_premium:
         uid = normalized.get("user_id", "")
         trim_results_by_user_id(uid, keep=FREE_HISTORY_LIMIT)
@@ -19886,19 +19995,19 @@ def validate_questionnaire_values(user_data):
     正式なvalueかどうかを検証する。不正な場合は (False, message) を返す。"""
     oil = user_data.get("oil", "")
     if oil not in QUESTIONNAIRE_VALID_OIL_STATUS:
-        return False, f"肌質(oil_status)の値が不正です: {oil!r}"
+        return False, gettext("肌質(oil_status)の値が不正です: %(value)r", value=oil)
 
     sens = user_data.get("sens", "")
     if sens not in QUESTIONNAIRE_VALID_SENSITIVITY:
-        return False, f"敏感度(sensitivity)の値が不正です: {sens!r}"
+        return False, gettext("敏感度(sensitivity)の値が不正です: %(value)r", value=sens)
 
     exp = user_data.get("exp", "")
     if exp not in QUESTIONNAIRE_VALID_RETINOL_EXP:
-        return False, f"レチノール使用経験(retinol_exp)の値が不正です: {exp!r}"
+        return False, gettext("レチノール使用経験(retinol_exp)の値が不正です: %(value)r", value=exp)
 
     for concern in user_data.get("concerns", []):
         if concern not in QUESTIONNAIRE_VALID_CONCERNS:
-            return False, f"肌の悩み(concerns)の値が不正です: {concern!r}"
+            return False, gettext("肌の悩み(concerns)の値が不正です: %(value)r", value=concern)
 
     return True, ""
 
@@ -19913,6 +20022,20 @@ def resize_for_gemini(file, max_size=1024):
     return img.copy()
 
 
+class ImageQualityError(ValueError):
+    """
+    写真の明るさ/ブレ等、画質に起因する入力エラー。通常のValueError
+    (未選択などの単純な入力不足)と区別するための専用型。
+    以前はメッセージ文字列が「【」で始まるかどうかで判定していたが、
+    ローカライズ後は文言(表示言語)に依存せず判定できるよう型で分離する
+    (api_create_diagnosis側のIMAGE_QUALITY_ERROR/INPUT_MISSING振り分けが
+    表示言語に関わらず正しく動作するようにするため)。
+    ValueErrorのサブクラスのため、既存のexcept ValueErrorはそのまま
+    このエラーも捕捉できる(Web版/lab側の挙動は変更しない)。
+    """
+    pass
+
+
 def check_image_quality(file_storage):
     """(ok: bool, message: str) を返す。エラー時は (True, "") でスキップ。"""
     try:
@@ -19924,14 +20047,14 @@ def check_image_quality(file_storage):
 
         brightness = float(gray.mean())
         if brightness < 35:
-            return False, "画像が暗すぎます。明るい場所で撮り直してください。"
+            return False, gettext("画像が暗すぎます。明るい場所で撮り直してください。")
         if brightness > 240:
-            return False, "画像が明るすぎます。直射日光を避けて撮り直してください。"
+            return False, gettext("画像が明るすぎます。直射日光を避けて撮り直してください。")
 
         edges = np.array(img.filter(ImageFilter.FIND_EDGES), dtype=np.float32)
         sharpness = float(edges.mean())
         if sharpness < 4.0:
-            return False, "画像がぼやけています。カメラを安定させて撮り直してください。"
+            return False, gettext("画像がぼやけています。カメラを安定させて撮り直してください。")
 
         return True, ""
     except Exception:
@@ -19944,18 +20067,25 @@ def load_uploaded_images(request):
     right_file = request.files.get("right_photo")
 
     if not front_file or front_file.filename == "":
-        raise ValueError("正面画像を選択してください")
+        raise ValueError(gettext("正面画像を選択してください"))
 
     if not left_file or left_file.filename == "":
-        raise ValueError("左頬画像を選択してください")
+        raise ValueError(gettext("左頬画像を選択してください"))
 
     if not right_file or right_file.filename == "":
-        raise ValueError("右頬画像を選択してください")
+        raise ValueError(gettext("右頬画像を選択してください"))
 
-    for file, label in [(front_file, "正面"), (left_file, "左頬"), (right_file, "右頬")]:
+    _photo_labels = {
+        "front": gettext("正面"),
+        "left": gettext("左頬"),
+        "right": gettext("右頬"),
+    }
+    for file, label_key in [(front_file, "front"), (left_file, "left"), (right_file, "right")]:
         ok, msg = check_image_quality(file)
         if not ok:
-            raise ValueError(f"【{label}画像】{msg}")
+            raise ImageQualityError(
+                gettext("【%(label)s画像】%(message)s", label=_photo_labels[label_key], message=msg)
+            )
 
     front_img = resize_for_gemini(front_file)
     left_img = resize_for_gemini(left_file)
@@ -22675,14 +22805,14 @@ def classify_gemini_error(error_text):
         or ("429" in error_text and "RESOURCE_EXHAUSTED" in error_text)
     )
 
-    message = "分析中にエラーが発生しました。時間をおいて再度お試しください。"
+    message = gettext("分析中にエラーが発生しました。時間をおいて再度お試しください。")
 
     if _is_quota_error:
-        message = "現在、分析サービスを一時停止しています。ご不便をおかけして申し訳ありません。復旧までしばらくお待ちください。"
+        message = gettext("現在、分析サービスを一時停止しています。ご不便をおかけして申し訳ありません。復旧までしばらくお待ちください。")
     elif "503" in error_text or "UNAVAILABLE" in error_text:
-        message = "現在分析が混み合っています。少し時間をおいて再度お試しください。"
+        message = gettext("現在分析が混み合っています。少し時間をおいて再度お試しください。")
     elif "429" in error_text:
-        message = "現在分析利用が集中しています。しばらくしてから再度お試しください。"
+        message = gettext("現在分析利用が集中しています。しばらくしてから再度お試しください。")
 
     return message
 
@@ -22716,7 +22846,7 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
         _lab_seg_state["prev"] = now
 
     if not can_use_global_diagnosis():
-        message = "現在、今月の分析上限に達しています。来月以降に再度お試しください。"
+        message = gettext("現在、今月の分析上限に達しています。来月以降に再度お試しください。")
         raise DiagnosisError("USAGE_LIMIT_EXCEEDED", message, http_status=429)
 
     # =========================
@@ -22910,7 +23040,7 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
         print("====================================")
         raise DiagnosisError(
             "PRODUCT_SELECTION_ERROR",
-            "商品選定中にエラーが発生しました。時間をおいて再度お試しください。",
+            gettext("商品選定中にエラーが発生しました。時間をおいて再度お試しください。"),
             http_status=500,
             original=e,
         )
@@ -23465,14 +23595,14 @@ def api_create_diagnosis():
 
     try:
         front_img, left_img, right_img = load_uploaded_images(request)
-    except ValueError as e:
+    except ImageQualityError as e:
         # load_uploaded_imagesは「未選択」(入力不足)と「明るさ/ブレ等の
-        # 品質不良」(写真品質エラー)の両方をValueErrorで送出する。
-        # メッセージが「【○○画像】」で始まる方が品質エラー(既存の
-        # check_image_quality由来の文言形式、判定基準自体は変更していない)。
-        msg = str(e)
-        code = "IMAGE_QUALITY_ERROR" if msg.startswith("【") else "INPUT_MISSING"
-        return _api_error(code, msg, 400)
+        # 品質不良」(写真品質エラー)を型で区別して送出する(ImageQualityError
+        # はValueErrorのサブクラスのため、以前の文字列プレフィックス判定と異なり
+        # 表示言語(ja/en)に関わらず正しく分類できる)。
+        return _api_error("IMAGE_QUALITY_ERROR", str(e), 400)
+    except ValueError as e:
+        return _api_error("INPUT_MISSING", str(e), 400)
 
     # ===== 診断コア処理(Web版と完全に同一のrun_diagnosis_coreを実行) =====
     try:
@@ -24693,7 +24823,7 @@ def build_history_dashboard(history_data, is_premium, is_creator):
             for key in _all_premium_score_keys:
                 all_premium_score_series[key].append(safe_int(premium_scores_dict.get(key, 0)))
 
-        # 無料ユーザーは表示を直近5件に制限
+        # 無料ユーザーは表示を直近3件に制限
         if not is_premium and not is_creator:
             history_data = history_data[:FREE_HISTORY_LIMIT]
 
@@ -25223,7 +25353,7 @@ def api_history_detail(result_id):
                 response_data.update(data)
                 return jsonify(response_data), 200
 
-        return _api_error("NOT_FOUND", "指定された診断結果が見つかりません", 404)
+        return _api_error("NOT_FOUND", gettext("指定された診断結果が見つかりません"), 404)
 
     except Exception as e:
         print("===== API HISTORY DETAIL ROUTE ERROR =====")
@@ -25262,7 +25392,7 @@ def api_auth_request_link():
 def api_auth_verify():
     token = (request.form.get("token") or "").strip()
     if not token:
-        return _api_error("INPUT_MISSING", "token is required", 400)
+        return _api_error("INPUT_MISSING", gettext("トークンが必要です"), 400)
 
     email, new_user_id = _complete_magic_login(token)
     if not email:
@@ -25292,11 +25422,11 @@ def api_reviewer_verify():
     """
     key = (request.form.get("key") or "").strip()
     if not key:
-        return _api_error("INPUT_MISSING", "key is required", 400)
+        return _api_error("INPUT_MISSING", gettext("キーが必要です"), 400)
 
     reviewer_key = os.getenv("REVIEWER_ACCESS_KEY", "")
     if not reviewer_key or not hmac.compare_digest(key, reviewer_key):
-        return _api_error("INVALID_TOKEN", "無効なキーです", 400)
+        return _api_error("INVALID_TOKEN", gettext("無効なキーです"), 400)
 
     flask_session["reviewer_access_fingerprint"] = _reviewer_access_fingerprint(reviewer_key)
     flask_session.permanent = True
@@ -25524,12 +25654,14 @@ def api_delete_account():
     user_id = flask_session.get("user_id", "")
 
     if not email or not user_id:
-        return _api_error("NOT_LOGGED_IN", "ログインが必要です", 401)
+        return _api_error("NOT_LOGGED_IN", gettext("ログインが必要です"), 401)
 
     try:
         deleted = delete_account_data(email, user_id)
     except AccountDeletionError as e:
-        return _api_error("INTERNAL_ERROR", f"アカウント削除に失敗しました: {e}", 500)
+        # {e}自体はDB例外等の内部詳細(開発者向け)のため翻訳せず、
+        # 定型の案内部分のみをローカライズする。
+        return _api_error("INTERNAL_ERROR", gettext("アカウント削除に失敗しました: %(detail)s", detail=str(e)), 500)
 
     flask_session.clear()
     resp = jsonify({"success": True, "deleted": deleted})
@@ -25549,27 +25681,29 @@ def api_delete_account():
 def api_premium_verify_purchase():
     signed_transaction = (request.form.get("signed_transaction") or "").strip()
     if not signed_transaction:
-        return _api_error("INPUT_MISSING", "signed_transaction is required", 400)
+        return _api_error("INPUT_MISSING", gettext("signed_transactionが必要です"), 400)
 
     verifier = _get_apple_signed_data_verifier()
     if verifier is None:
-        return _api_error("NOT_CONFIGURED", "App Store決済の検証設定が未完了です", 503)
+        return _api_error("NOT_CONFIGURED", gettext("App Store決済の検証設定が未完了です"), 503)
 
     try:
         payload = verifier.verify_and_decode_signed_transaction(signed_transaction)
     except VerificationException as e:
         traceback.print_exc()
-        return _api_error("INVALID_TRANSACTION", f"購入情報を検証できませんでした: {e}", 400)
+        # {e}自体はApple SDKの内部例外詳細(開発者向け)のため翻訳せず、
+        # 定型の案内部分のみをローカライズする。
+        return _api_error("INVALID_TRANSACTION", gettext("購入情報を検証できませんでした: %(detail)s", detail=str(e)), 400)
 
     expected_product_id = os.getenv("APPLE_PREMIUM_PRODUCT_ID", "com.katsuya174.lumilog.premium.monthly")
     if payload.productId != expected_product_id:
-        return _api_error("INVALID_TRANSACTION", "不明な商品IDです", 400)
+        return _api_error("INVALID_TRANSACTION", gettext("不明な商品IDです"), 400)
 
     if payload.revocationDate:
-        return _api_error("INVALID_TRANSACTION", "この購入は無効化されています", 400)
+        return _api_error("INVALID_TRANSACTION", gettext("この購入は無効化されています"), 400)
 
     if not payload.expiresDate or payload.expiresDate < int(datetime.now().timestamp() * 1000):
-        return _api_error("INVALID_TRANSACTION", "このサブスクリプションは期限切れです", 400)
+        return _api_error("INVALID_TRANSACTION", gettext("このサブスクリプションは期限切れです"), 400)
 
     valid_until_iso = datetime.fromtimestamp(payload.expiresDate / 1000).isoformat()
     email = flask_session.get("email")  # ログイン済みならメールアカウントに紐付ける(任意)
@@ -25580,7 +25714,7 @@ def api_premium_verify_purchase():
         # DB書き込み失敗を"success": Trueとして返さない。クライアント(iOS)側で
         # リトライ可能なエラーとして扱えるようにする。
         print(f"[APPLE VERIFY PURCHASE DB ERROR] {repr(e)}", flush=True)
-        return _api_error("PERSIST_FAILED", "購入情報の保存に失敗しました。しばらくしてから再度お試しください。", 500)
+        return _api_error("PERSIST_FAILED", gettext("購入情報の保存に失敗しました。しばらくしてから再度お試しください。"), 500)
 
     return jsonify({
         "success": True,
@@ -25667,15 +25801,15 @@ def api_premium_verify_purchase_android():
     purchase_token = (request.form.get("purchase_token") or "").strip()
     product_id = (request.form.get("product_id") or "").strip()
     if not purchase_token or not product_id:
-        return _api_error("INPUT_MISSING", "purchase_token and product_id are required", 400)
+        return _api_error("INPUT_MISSING", gettext("purchase_tokenとproduct_idが必要です"), 400)
 
     expected_product_id = os.getenv("GOOGLE_PLAY_PREMIUM_PRODUCT_ID", "premium_monthly")
     if product_id != expected_product_id:
-        return _api_error("INVALID_TRANSACTION", "不明な商品IDです", 400)
+        return _api_error("INVALID_TRANSACTION", gettext("不明な商品IDです"), 400)
 
     service = _get_android_publisher_service()
     if service is None:
-        return _api_error("NOT_CONFIGURED", "Google Play決済の検証設定が未完了です", 503)
+        return _api_error("NOT_CONFIGURED", gettext("Google Play決済の検証設定が未完了です"), 503)
 
     package_name = os.getenv("GOOGLE_PLAY_PACKAGE_NAME", "jp.lumilog.app")
 
@@ -25685,24 +25819,26 @@ def api_premium_verify_purchase_android():
         ).execute()
     except GoogleApiHttpError as e:
         # 無効・偽装・失効済みのpurchase_token等、Google側がリクエスト自体を拒否した場合。
+        # {e}自体はGoogle APIの内部例外詳細(開発者向け)のため翻訳せず、
+        # 定型の案内部分のみをローカライズする。
         traceback.print_exc()
-        return _api_error("INVALID_TRANSACTION", f"購入情報を検証できませんでした: {e}", 400)
+        return _api_error("INVALID_TRANSACTION", gettext("購入情報を検証できませんでした: %(detail)s", detail=str(e)), 400)
     except Exception as e:
         # ネットワーク断・Google側の一時的な障害等、tokenの正当性とは無関係な失敗。
         # クライアント側でリトライ可能なエラーとして扱えるよう400ではなく503を返す。
         traceback.print_exc()
-        return _api_error("VERIFICATION_FAILED", f"購入情報の検証中にエラーが発生しました: {e}", 503)
+        return _api_error("VERIFICATION_FAILED", gettext("購入情報の検証中にエラーが発生しました: %(detail)s", detail=str(e)), 503)
 
     line_items = purchase.get("lineItems") or []
     matching_item = next(
         (item for item in line_items if item.get("productId") == expected_product_id), None
     )
     if matching_item is None:
-        return _api_error("INVALID_TRANSACTION", "不明な商品IDです", 400)
+        return _api_error("INVALID_TRANSACTION", gettext("不明な商品IDです"), 400)
 
     subscription_state = purchase.get("subscriptionState", "")
     if subscription_state not in _GOOGLE_PLAY_ACTIVE_SUBSCRIPTION_STATES:
-        return _api_error("INVALID_TRANSACTION", "このサブスクリプションは有効ではありません", 400)
+        return _api_error("INVALID_TRANSACTION", gettext("このサブスクリプションは有効ではありません"), 400)
 
     expiry_time_raw = matching_item.get("expiryTime", "")
     try:
@@ -25711,14 +25847,14 @@ def api_premium_verify_purchase_android():
         expiry_dt_utc = datetime.fromisoformat(expiry_time_raw.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
         traceback.print_exc()
-        return _api_error("INVALID_TRANSACTION", "購入情報を検証できませんでした", 400)
+        return _api_error("INVALID_TRANSACTION", gettext("購入情報を検証できませんでした"), 400)
 
     # 他の課金経路(validate_premium_key()のdatetime.now()比較、Apple版の
     # datetime.fromtimestamp())と同じ「サーバーのローカル時刻基準・naive」の
     # 値としてvalid_untilを保存するため、一度epoch秒を経由して変換する。
     expiry_epoch = expiry_dt_utc.timestamp()
     if expiry_epoch <= datetime.now().timestamp():
-        return _api_error("INVALID_TRANSACTION", "このサブスクリプションは期限切れです", 400)
+        return _api_error("INVALID_TRANSACTION", gettext("このサブスクリプションは期限切れです"), 400)
 
     valid_until_iso = datetime.fromtimestamp(expiry_epoch).isoformat()
     linked_purchase_token = purchase.get("linkedPurchaseToken") or None
@@ -25734,7 +25870,7 @@ def api_premium_verify_purchase_android():
         # DB書き込み失敗を"success": Trueとして返さない。クライアント(Android)側で
         # リトライ可能なエラーとして扱えるようにする。
         print(f"[GOOGLE PLAY VERIFY PURCHASE DB ERROR] {repr(e)}", flush=True)
-        return _api_error("PERSIST_FAILED", "購入情報の保存に失敗しました。しばらくしてから再度お試しください。", 500)
+        return _api_error("PERSIST_FAILED", gettext("購入情報の保存に失敗しました。しばらくしてから再度お試しください。"), 500)
 
     return jsonify({
         "success": True,

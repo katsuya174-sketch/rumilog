@@ -418,3 +418,170 @@ def test_device_selection_reason_leads_with_concern_match_when_decisive():
     addend_idx = reason.index("加えて")
     assert concern_idx < addend_idx
     assert "価格が候補内で最も抑えられている" in reason
+
+
+# =========================================================
+# ①② 選定ロジックの辞書式順序(lexicographic tuple)化
+# 「肌悩み適合を主軸、レビュー・価格・検索適合度は補助/タイブレーカー」という
+# 優先関係そのものを構造化し、重み付き合計(旧設計)では埋もれていた肌悩み
+# 適合の優位性が確実にランキングを支配することを確認する回帰テスト。
+# =========================================================
+
+def test_concern_match_wins_over_large_review_and_relevance_advantage():
+    """旧来の重み付き合計(レビュー最大20点+検索適合最大20点=最大40点)なら
+    肌悩み適合(最大16点)を上回って逆転していたはずの大きなレビュー・検索適合
+    差があっても、新しい辞書式順序では肌悩み適合が確実に優先されること。
+    (この回帰テストは、_sort_keyを旧来の重み付き合計に戻すと失敗する。)"""
+    user_data = {"sensitivity": "low", "concerns": ["pores", "dryness"]}
+    matched_item = make_item(
+        "毛穴乾燥ケアRF美顔器A", 8000, 10, 3.0, "A", caption="毛穴 乾燥ケアに",
+    )
+    unmatched_item = make_item(
+        "レビュー圧倒的RF美顔器B", 8000, 1000, 5.0, "B",
+    )
+    # scoreの差(score_rakuten_item由来、相対正規化で最大20点分)もBに有利。
+    scored_items = [(30, matched_item), (50, unmatched_item)]
+    best_item, reason = app_module.select_best_beauty_device_candidate(
+        scored_items, "RF", user_data, budget_value=0,
+    )
+    assert best_item["itemCode"] == "A"
+    assert "肌悩みとの一致項目が多かったため優先しました" in reason
+
+
+def test_safety_penalty_outranks_review_advantage():
+    """敏感肌×刺激的方式の強度語ペナルティは、レビュー・検索適合の優位より
+    優先して勝敗を決めること(安全性は肌悩み適合の次に優先される軸)。"""
+    user_data = {"sensitivity": "high"}
+    safe_item = make_item("やさしいRF美顔器A", 8000, 10, 3.0, "A", caption="やさしい使い心地")
+    intense_item = make_item(
+        "業務用RF美顔器B", 8000, 1000, 5.0, "B", caption="業務用の高出力設計",
+    )
+    scored_items = [(30, safe_item), (50, intense_item)]
+    best_item, reason = app_module.select_best_beauty_device_candidate(
+        scored_items, "RF", user_data, budget_value=0,
+    )
+    assert best_item["itemCode"] == "A"
+    assert "業務用" in reason or "高出力" in reason
+
+
+# =========================================================
+# サプリメント選定(select_best_supplement_candidate /
+# _build_supplement_selection_reason): 美容機器と同じ辞書式順序の考え方を
+# 「成分(ingredient_focus)一致」を主軸として適用する。
+# =========================================================
+
+def make_supplement_item(name, price, review_count, review_avg, code, caption=""):
+    return {
+        "itemName": name,
+        "itemCaption": caption,
+        "itemPrice": price,
+        "reviewCount": review_count,
+        "reviewAverage": review_avg,
+        "itemCode": code,
+    }
+
+
+def test_supplement_winner_and_reason_are_returned_as_tuple():
+    scored_items = [
+        (50, make_supplement_item("ビタミンCサプリA", 2000, 100, 4.5, "A", caption="ビタミンC配合")),
+    ]
+    best_item, reason = app_module.select_best_supplement_candidate(
+        scored_items, "ビタミンC", ["vitamin_c"], {}, budget_value=0,
+    )
+    assert best_item["itemCode"] == "A"
+    assert isinstance(reason, str) and reason
+
+
+def test_supplement_selection_empty_pool_returns_none_and_empty_reason():
+    best_item, reason = app_module.select_best_supplement_candidate(
+        [], "ビタミンC", ["vitamin_c"], {}, budget_value=0,
+    )
+    assert best_item is None
+    assert reason == ""
+
+
+def test_supplement_ingredient_match_wins_over_large_review_advantage():
+    """旧来の重み付き合計(成分一致+25点 vs レビュー最大20点)ではレビュー差が
+    大きいと逆転しうる組み合わせでも、辞書式順序では成分一致が確実に優先
+    されること。"""
+    matched_item = make_supplement_item(
+        "ビタミンCサプリA", 2000, 10, 3.0, "A", caption="ビタミンC配合",
+    )
+    unmatched_item = make_supplement_item(
+        "無関係サプリB", 2000, 1000, 5.0, "B", caption="コラーゲン配合",
+    )
+    scored_items = [(30, matched_item), (50, unmatched_item)]
+    best_item, reason = app_module.select_best_supplement_candidate(
+        scored_items, "ビタミンC", ["vitamin_c"], {}, budget_value=0,
+    )
+    assert best_item["itemCode"] == "A"
+    assert "対象成分" in reason
+    assert "ビタミンC" in reason
+
+
+def test_supplement_selection_reason_reflects_actual_review_advantage_when_ingredient_tied():
+    """成分一致が同点の場合、決定理由は実際のレビュー差になること
+    (成分一致を優位と偽らない)。"""
+    item_a = make_supplement_item("ビタミンCサプリA", 2000, 100, 4.9, "A", caption="ビタミンC配合")
+    item_b = make_supplement_item("ビタミンCサプリB", 2000, 100, 3.0, "B", caption="ビタミンC配合")
+    scored_items = [(50, item_a), (50, item_b)]
+    best_item, reason = app_module.select_best_supplement_candidate(
+        scored_items, "ビタミンC", ["vitamin_c"], {}, budget_value=0,
+    )
+    assert best_item["itemCode"] == "A"
+    assert "対象成分" not in reason
+    assert "レビュー評価" in reason
+
+
+def test_supplement_selection_reason_does_not_claim_advantage_on_tie():
+    item_a = make_supplement_item("ビタミンCサプリA", 2000, 100, 4.0, "A", caption="ビタミンC配合")
+    item_b = make_supplement_item("ビタミンCサプリB", 2000, 100, 4.0, "B", caption="ビタミンC配合")
+    scored_items = [(50, item_a), (50, item_b)]
+    best_item, reason = app_module.select_best_supplement_candidate(
+        scored_items, "ビタミンC", ["vitamin_c"], {}, budget_value=0,
+    )
+    assert reason == app_module._SUPPLEMENT_SELECTION_REASON_FALLBACK
+    assert "他候補より" not in reason
+
+
+def test_supplement_selection_reason_fallback_when_only_one_candidate():
+    scored_items = [(50, make_supplement_item("ビタミンCサプリA", 2000, 100, 4.0, "A", caption="ビタミンC配合"))]
+    best_item, reason = app_module.select_best_supplement_candidate(
+        scored_items, "ビタミンC", ["vitamin_c"], {}, budget_value=0,
+    )
+    assert best_item["itemCode"] == "A"
+    assert reason == app_module._SUPPLEMENT_SELECTION_REASON_FALLBACK
+
+
+# =========================================================
+# ③ デザイン統一: 美容機器・サプリメントにも通常商品と同じ悩みタグ
+# (concern_tags)と、定性的な改善期待項目(expected_improvement_areas)を
+# 付与する(数値化の根拠がないため、通常商品のtopImpactsのような数値は使わない)。
+# =========================================================
+
+def test_enrich_beauty_devices_adds_concern_tags_and_expected_improvement_areas():
+    data = {"beauty_devices": [{"device_type": "LED", "reason": "赤み・ニキビ改善に有効なため"}]}
+    enriched = app_module.enrich_beauty_devices(data, {})
+    step = enriched["beauty_devices"][0]
+    assert step["concern_tags"], "LEDのpurposeから悩みタグが抽出されること"
+    assert step["expected_improvement_areas"] == ["赤み", "ニキビ"]
+
+
+def test_enrich_supplements_adds_concern_tags_and_expected_improvement_areas():
+    data = {"supplements": [{"supplement_type": "ビタミンC", "reason": "シミ・くすみ改善に有効なため"}]}
+    enriched = app_module.enrich_supplements(data, {})
+    step = enriched["supplements"][0]
+    assert step["concern_tags"], "ビタミンCのpurposeから悩みタグが抽出されること"
+    assert step["expected_improvement_areas"] == ["くすみ", "色ムラ"]
+
+
+def test_enrich_beauty_devices_expected_improvement_areas_covers_all_device_types():
+    """未定義のdevice_typeが将来追加された場合に空リストへ安全にフォールバック
+    することを含め、既存の全device_typeが定性的な改善期待項目を持つこと。"""
+    for dtype in app_module._DEVICE_DEFAULTS:
+        assert dtype in app_module._DEVICE_EXPECTED_IMPROVEMENT_AREAS, dtype
+
+
+def test_enrich_supplements_expected_improvement_areas_covers_all_supplement_types():
+    for stype in app_module._SUPPLEMENT_DEFAULTS:
+        assert stype in app_module._SUPPLEMENT_EXPECTED_IMPROVEMENT_AREAS, stype
