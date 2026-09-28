@@ -166,6 +166,96 @@ class CandidateComparisonTableNameCleaningTests(unittest.TestCase):
         self.assertIn("The Ordinary", table[1]["name"])
 
 
+class GeminiCleanRakutenProductNamesTopCandidateSyncTests(unittest.TestCase):
+    """gemini_clean_rakuten_product_names(): 1位ステップの整形結果が
+    step["product"]だけでなくtop_candidates[0]["name"]にも同期される
+    こと。why_best(_build_why_best_text)・商品比較表は
+    top_candidates[0]を直接参照する(step["product"]とは独立)ため、
+    ここが同期していないと、商品カードは整形済みなのに「なぜこの商品が
+    1位か」・商品比較表の1位行だけ楽天の生タイトル(販促文・ブランド
+    バッジ等込み)のままになる(2026-09、実機診断20260928083119852553で
+    確認した不具合の回帰テスト)。"""
+
+    def setUp(self):
+        app._rakuten_name_clean_cache.clear()
+
+    def _build_data(self, raw_title):
+        step = {
+            "product_source": "rakuten_criteria",
+            "product": raw_title,
+            "brand": "",
+            "rakuten_title": raw_title,
+            "top_candidates": [
+                {"name": raw_title, "brand": "", "source": "rakuten_criteria", "price_ref": 1000},
+            ],
+        }
+        return {"morning": {"steps": [step]}, "night": {"steps": []}, "weekly_care": []}, step
+
+    def test_top_candidate_zero_name_is_synced_with_cleaned_step_product(self):
+        raw_title = "59まで！【公式】オルナオーガニック【楽天】乳液「はり対策用」コラーゲン3種+ヒアルロン酸"
+        data, step = self._build_data(raw_title)
+        with patch("app.call_gemini_with_retry",
+                   return_value=_FakeGeminiResponse("1. オルナオーガニック 乳液")):
+            app.gemini_clean_rakuten_product_names(data)
+        self.assertEqual(step["top_candidates"][0]["name"], step["product"])
+        self.assertNotIn("59まで", step["top_candidates"][0]["name"])
+        self.assertNotIn("【楽天】", step["top_candidates"][0]["name"])
+
+    def test_top_candidate_zero_name_synced_via_rule_based_fallback(self):
+        """Gemini呼び出しが失敗した場合のルールベースfallback整形でも
+        同様にtop_candidates[0]["name"]が同期されること。"""
+        raw_title = "【スーパーSALE】オルナオーガニック乳液単体オンリー 送料無料"
+        data, step = self._build_data(raw_title)
+        with patch("app.call_gemini_with_retry", side_effect=Exception("timeout")):
+            app.gemini_clean_rakuten_product_names(data)
+        self.assertEqual(step["top_candidates"][0]["name"], step["product"])
+        self.assertNotIn("スーパーSALE", step["top_candidates"][0]["name"])
+
+    def test_second_candidate_still_cleaned_independently(self):
+        """1位のtop_candidates[0]同期を追加しても、2位候補の既存の
+        個別整形ロジックには影響しないこと。"""
+        raw_title_1 = "59まで！【公式】オルナオーガニック【楽天】乳液"
+        raw_title_2 = "【スーパーSALE】競合品乳液単体オンリー 送料無料"
+        data, step = self._build_data(raw_title_1)
+        step["top_candidates"].append(
+            {"name": raw_title_2, "brand": "", "source": "rakuten_criteria", "price_ref": 900}
+        )
+        with patch(
+            "app.call_gemini_with_retry",
+            return_value=_FakeGeminiResponse("1. オルナオーガニック 乳液\n2. 競合品 乳液"),
+        ):
+            app.gemini_clean_rakuten_product_names(data)
+        self.assertEqual(step["top_candidates"][0]["name"], "オルナオーガニック 乳液")
+        self.assertEqual(step["top_candidates"][1]["name"], "競合品 乳液")
+
+    def test_why_best_uses_synced_name_not_raw_rakuten_title(self):
+        """統合確認: 同期後、_build_why_best_textが実際にtop_candidates[0]
+        から読むbest_labelも整形済みの名前になること。"""
+        raw_title = "59まで！【公式】オルナオーガニック【楽天】乳液「はり対策用」コラーゲン3種+ヒアルロン酸"
+        data, step = self._build_data(raw_title)
+        step["top_candidates"].append(
+            {"name": "競合品", "brand": "", "source": "rakuten_criteria", "price_ref": 900,
+             "base_score": 50, "score": 50, "candidate_score_reasons": []}
+        )
+        step["top_candidates"][0].update({
+            "base_score": 90,
+            "score": 90,
+            "candidate_score_reasons": [
+                {"axis": "base", "rule": "ingredient_focus_active_match",
+                 "label": "今回重視する成分を主成分として含む",
+                 "matched_product_feature": "niacinamide", "matched_user_condition": "niacinamide",
+                 "points": 25},
+            ],
+        })
+        with patch("app.call_gemini_with_retry",
+                   return_value=_FakeGeminiResponse("1. オルナオーガニック 乳液")):
+            app.gemini_clean_rakuten_product_names(data)
+        notes = app.build_candidate_comparison_notes(step["top_candidates"], step, {})
+        self.assertNotIn("59まで", notes["why_best"])
+        self.assertNotIn("【楽天】", notes["why_best"])
+        self.assertIn("オルナオーガニック", notes["why_best"])
+
+
 class DeviceContextSentenceDoublePeriodTests(unittest.TestCase):
     """device_selection_reason生成時の二重句点バグの回帰テスト。"""
 

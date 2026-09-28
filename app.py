@@ -8269,6 +8269,9 @@ def gemini_clean_rakuten_product_names(data):
     """楽天商品タイトルからブランド名+製品名のみをGeminiで抽出する。
     1位ステップ（rakuten_criteria / ai_rakuten_verified）と
     top_candidates の2位・3位候補名を同一バッチで処理する。
+    1位ステップの結果はstep["product"]/["brand"]だけでなく、
+    top_candidates[0]["name"]/["brand"]にも同期する(why_best・商品比較表
+    はtop_candidates[0]を直接参照するため)。
     """
     all_steps = []
     for section in ["morning", "night"]:
@@ -8298,9 +8301,25 @@ def gemini_clean_rakuten_product_names(data):
         if not raw_title:
             continue
         _step = step  # closure capture
+
+        def _apply_to_step_and_top_candidate(cleaned, s=_step):
+            _apply_cleaned_product(s, cleaned, "brand", "product")
+            # top_candidates[0]はstep["product"]/step["brand"]と同一商品を
+            # 指しているが、このクリーニングを受けないまま独自のname
+            # フィールドを保持していた。_build_why_best_text()/
+            # build_candidate_comparison_table()はtop_candidates[0]の
+            # nameを直接参照する(step["product"]とは独立)ため、ここで
+            # 同期させないと、商品カードは整形済みなのに「なぜこの商品が
+            # 1位か」・商品比較表の1位行だけ楽天の生タイトル(販促文・
+            # ブランドバッジ等込み)のままになる(2026-09、実機診断
+            # 20260928083119852553で確認)。
+            top_candidates = s.get("top_candidates")
+            if isinstance(top_candidates, list) and top_candidates and isinstance(top_candidates[0], dict):
+                _apply_cleaned_product(top_candidates[0], cleaned, "brand", "name")
+
         items.append({
             "title": raw_title,
-            "apply": lambda cleaned, s=_step: _apply_cleaned_product(s, cleaned, "brand", "product"),
+            "apply": _apply_to_step_and_top_candidate,
         })
 
     # 2位・3位候補の name フィールド（top_candidates[1:3]）
