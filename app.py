@@ -7111,14 +7111,36 @@ def _refresh_candidate_comparison_after_swap(step, user_data):
     top_candidatesを持たないstep(美容機器・サプリメント。これらは
     finalize_step_data()を経由せずcandidate_comparisonという概念自体が
     無い)は何もしない。
+
+    この関数は「1位が入れ替わった後の再計算」だけでなく、
+    gemini_clean_rakuten_product_names()(商品名整形)の後に全stepへ
+    無条件で呼ばれる「整形後の名前でwhy_best/商品比較表を最新化する」
+    用途でも使われる。後者のケースではtop_candidates[0]自体は入れ替
+    わっておらず、_comparison_candidates(商品比較表専用リスト、同一商品の
+    別ショップ出品を別行として残す)は引き続き有効なため、無条件に破棄
+    せず、1位が実際に一致する場合はそのまま使い続ける。
     """
     if not step.get("top_candidates"):
         return
+    top_candidates = step["top_candidates"]
+    comparison_candidates = step.get("_comparison_candidates")
+    if (
+        comparison_candidates
+        and (
+            comparison_candidates[0].get("name") != top_candidates[0].get("name")
+            or comparison_candidates[0].get("brand") != top_candidates[0].get("brand")
+        )
+    ):
+        # 1位が入れ替わっており(_try_rakuten_fallback_candidateによる
+        # スワップ等)、_comparison_candidatesの前提が崩れているため破棄する。
+        step.pop("_comparison_candidates", None)
+        comparison_candidates = None
+    _comparison_source = comparison_candidates or top_candidates
     step["candidate_comparison"] = build_candidate_comparison_notes(
-        step["top_candidates"], step, user_data
+        _comparison_source, step, user_data
     )
     step["candidate_comparison_table"] = build_candidate_comparison_table(
-        step["top_candidates"], step["candidate_comparison"].get("diffs")
+        _comparison_source, step["candidate_comparison"].get("diffs")
     )
 
 
@@ -8357,7 +8379,26 @@ def gemini_clean_rakuten_product_names(data):
                 "apply": lambda cleaned, c=_cand: _apply_cleaned_product(c, cleaned, "brand", "name"),
             })
 
-    print(f"[NAME CLEAN] 整形対象={len(items)}件 (1位ステップ+2位3位候補)", flush=True)
+    # 商品比較表専用リスト(_comparison_candidates)の2位以降。[0](1位)は
+    # preserve_ranked_top_candidates側でtop_candidates[0]と同一dict
+    # オブジェクトを共有させているため、上のループで既に整形される。
+    # [1:3]は推薦用top_candidatesの重複除去基準が異なるため別インスタンスに
+    # なっており(同一商品・別ショップの出品を別行として残す設計)、ここで
+    # 個別に整形しないと商品比較表の2位・3位だけ楽天の生タイトルのままになる。
+    for step in all_steps:
+        for cand in (step.get("_comparison_candidates") or [])[1:3]:
+            if not isinstance(cand, dict):
+                continue
+            raw_title = str(cand.get("name", "") or "").strip()
+            if not raw_title:
+                continue
+            _cand = cand
+            items.append({
+                "title": raw_title,
+                "apply": lambda cleaned, c=_cand: _apply_cleaned_product(c, cleaned, "brand", "name"),
+            })
+
+    print(f"[NAME CLEAN] 整形対象={len(items)}件 (1位ステップ+2位3位候補+比較表専用候補)", flush=True)
 
     if not items:
         return data
@@ -13596,6 +13637,10 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             "routine_score": c.get("_routine_score", 0),
             "source": c.get("_source", ""),
             "price_ref": c.get("price_ref", 0),
+            # 出品を一意に識別するID/URL。商品比較表専用の重複除去
+            # (preserve_ranked_top_candidates内のcomparison_candidates)で使う。
+            "item_code": c.get("item_code", ""),
+            "rakuten_link": c.get("rakuten_link", ""),
             # 比較説明文生成用の成分情報
             "active_ingredients": c.get("active_ingredients", []),
             "main_functions": c.get("main_functions", []),
@@ -17821,6 +17866,12 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
             "routine_score": routine,
             "source": clean_text(c.get("source", c.get("product_source", ""))),
             "price_ref": to_number(c.get("price_ref", c.get("price", 0))),
+            # 出品を一意に識別するID/URL(楽天由来のitem_code/rakuten_link)。
+            # 商品比較表専用の重複除去(comparison_candidates参照)で、
+            # 「同一商品・別ショップ・別価格」を誤って1件にまとめないために使う。
+            # db由来の候補には無いことがある(その場合は空文字のまま)。
+            "item_code": clean_text(c.get("item_code", "")),
+            "rakuten_link": clean_text(c.get("rakuten_link", "")),
             # 「なぜこの商品が1位か」(build_candidate_comparison_notes)の個別化に
             # 必要な範囲だけ、元の商品データから保持する(説明生成に使わない
             # フィールドは増やさない)。
@@ -17883,6 +17934,21 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
         seen_keys = set()
         seen_product_names = set()  # 製品名レベルの追加重複チェック
 
+        # 商品比較表(価格・コスパ)専用の候補リスト。推薦用(normalized_candidates)
+        # と重複除去の基準を分離する(2026-09、実機診断で判明: 同一商品が複数の
+        # 楽天ショップから別価格で出品されているケースが多く、推薦用の厳格な
+        # 重複除去(ブランド+商品名が同じなら別ショップでも1件にまとめる)を
+        # そのまま比較表に使うと、本来見せたい「店舗ごとの価格差」まで
+        # 潰れてしまい、比較表が1件以下になって非表示になる不具合があった)。
+        # 出品を一意に識別できるitem_code/rakuten_linkがあればそれを基準にし
+        # (価格は取得タイミングで変動しうるため判定に使わない)、無い場合のみ
+        # ブランド+商品名+価格の保守的な基準にフォールバックする。
+        # normalized_candidates(推薦ロジック・why_best等)の基準・挙動は
+        # 一切変更しない。
+        comparison_candidates = []
+        comparison_seen_listing_ids = set()
+        comparison_seen_fallback_keys = set()
+
         for c in raw_candidates:
             normalized = normalize_candidate(c)
             if not normalized:
@@ -17898,6 +17964,23 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
             if is_candidate_wrong_for_category(_step_cat, _cand_name):
                 print(f"[CANDIDATE FILTER] wrong category skipped: cat={_step_cat} name={_cand_name!r}", flush=True)
                 continue
+
+            if len(comparison_candidates) < 6:
+                _listing_id = normalized.get("item_code") or normalized.get("rakuten_link")
+                if _listing_id:
+                    if _listing_id not in comparison_seen_listing_ids:
+                        comparison_seen_listing_ids.add(_listing_id)
+                        comparison_candidates.append(normalized)
+                else:
+                    # 出品識別子が取得できない候補(db由来等)のみ、保守的に
+                    # ブランド+商品名+価格で判定する。
+                    _fallback_key = (
+                        normalize_product_name(_cand_name),
+                        normalized.get("price_ref", 0),
+                    )
+                    if _fallback_key not in comparison_seen_fallback_keys:
+                        comparison_seen_fallback_keys.add(_fallback_key)
+                        comparison_candidates.append(normalized)
 
             identity_keys = build_candidate_identity_keys(normalized)
 
@@ -17924,6 +18007,26 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
             # だったため、追加のAI呼び出しなしに予備を確保する。
             if len(normalized_candidates) >= 6:
                 break
+
+        # 比較表専用リストの1位が推薦用リストの1位と一致する場合のみ、
+        # candidate_comparison_table/why_bestで整合性を持って使える
+        # (別出品扱いにした候補が紛れ込んで1位がすり替わっていないことの保証)。
+        # 一致しない場合(理論上ほぼ起きないが、安全側として)は使わない。
+        if (
+            comparison_candidates
+            and normalized_candidates
+            and comparison_candidates[0].get("name") == normalized_candidates[0].get("name")
+            and comparison_candidates[0].get("brand") == normalized_candidates[0].get("brand")
+        ):
+            # 1位はnormalized_candidates[0]と同一のdictオブジェクトを共有させる。
+            # normalize_candidate()は呼び出すたびに新しいdictを作るため、
+            # 共有しないとgemini_clean_rakuten_product_names()がtop_candidates[0]
+            # へ適用した商品名整形が_comparison_candidates側には反映されず、
+            # 商品比較表の1位だけ楽天の生タイトルのままになってしまう。
+            comparison_candidates[0] = normalized_candidates[0]
+            step["_comparison_candidates"] = comparison_candidates
+        else:
+            step.pop("_comparison_candidates", None)
 
         if normalized_candidates:
             # 楽天検索由来の候補は仕様上ブランド欄が常に空文字になる。
@@ -18039,9 +18142,15 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
         step[key] = to_number(step.get(key, 0))
 
     step["top_candidates"] = preserve_ranked_top_candidates(step)
-    step["candidate_comparison"] = build_candidate_comparison_notes(step["top_candidates"], step, user_data)
+    # 商品比較表(価格・コスパ)専用の候補リストがあればそちらを使う(同一商品の
+    # 別ショップ出品を別行として残すため、推薦用のtop_candidatesより多く
+    # 実売候補を含みうる)。1位はtop_candidatesと必ず一致することが
+    # preserve_ranked_top_candidates側で保証されているため、why_best/
+    # 商品比較表の「1位」の整合性は崩れない。無ければ従来通りtop_candidates。
+    _comparison_source = step.get("_comparison_candidates") or step["top_candidates"]
+    step["candidate_comparison"] = build_candidate_comparison_notes(_comparison_source, step, user_data)
     step["candidate_comparison_table"] = build_candidate_comparison_table(
-        step["top_candidates"], step["candidate_comparison"].get("diffs")
+        _comparison_source, step["candidate_comparison"].get("diffs")
     )
 
     if step["top_candidates"]:
@@ -20735,13 +20844,14 @@ use_days_reasonに記述すること。商品カテゴリ名を文中に含め�
 
 【routine_strategy】
 strategy_type: fixed/rotation(攻め成分分散が必要な場合のみrotation)
-overall_policy/morning_policy/night_policy/weekly_policy
+overall_policy: 全体方針を一文で
+morning_policy/night_policy/weekly_policy: 朝・夜・週間ケアがそれぞれ何を主目的とし、互いにどう役割分担しているかを明確にする(例:朝は紫外線対策と最低限の保湿に絞り、夜に集中ケアを行う、等。各時間帯の役割の説明にとどめ、個別商品の理由を並べない)
 active_care_frequency/recovery_care_frequency
 rotation_targets: ローテーション対象成分配列
 morning_order: 朝の使用順序配列(ブースターは化粧水前)
 night_order: 夜の使用順序配列
 ※パックを使う日は、原則「化粧水の後・美容液の前」に配置する。ただしメーカーが使用順を指定している製品はその順に従う。
-reason: この肌状態に合う理由
+reason: このルーティン全体をこの方針にした理由を2〜3文で。優先度の高い改善項目を中心に、なぜこの全体方針にしたかを説明する(特定の項目名を必ず挙げる必要はない)。頻度については、全体としてどう設計したか(例:刺激系ケアを分散させる方針か、毎日ケアを優先する方針か)には触れてよいが、個別の頻度設定の詳細理由(例:成分Xがなぜ週n回か)には触れない(そちらは各stepのuse_days_reasonで別途扱うため重複させない)
 
 avoid_combinations(3件以上必須):
 [{{families:[タグA,タグB], scope:"same_session"/"any", reason:"この肌スコアに言及した理由", severity:"hard"/"soft"}}]
@@ -21046,13 +21156,14 @@ priority_concerns(配列)/key_ingredients(配列)/care_direction(短文)
 
 【routine_strategy】
 strategy_type: fixed(固定型)/rotation(ローテーション型、攻め成分分散が必要な場合のみ)
-overall_policy/morning_policy/night_policy/weekly_policy
+overall_policy: 全体方針を一文で
+morning_policy/night_policy/weekly_policy: 朝・夜・週間ケアがそれぞれ何を主目的とし、互いにどう役割分担しているかを明確にする(例:朝は紫外線対策と最低限の保湿に絞り、夜に集中ケアを行う、等。各時間帯の役割の説明にとどめ、個別商品の理由を並べない)
 active_care_frequency/recovery_care_frequency
 rotation_targets: ローテーション対象成分配列
 morning_order: 朝の使用順序配列(ブースターは化粧水前)
 night_order: 夜の使用順序配列(役割・テクスチャーに基づく順序)
 ※パックを使う日は、原則「化粧水の後・美容液の前」に配置する。ただしメーカーが使用順を指定している製品はその順に従う。
-reason: この肌状態に合う理由
+reason: このルーティン全体をこの方針にした理由を2〜3文で。優先度の高い改善項目を中心に、なぜこの全体方針にしたかを説明する(特定の項目名を必ず挙げる必要はない)。頻度については、全体としてどう設計したか(例:刺激系ケアを分散させる方針か、毎日ケアを優先する方針か)には触れてよいが、個別の頻度設定の詳細理由(例:成分Xがなぜ週n回か)には触れない(そちらは各stepのuse_days_reasonで別途扱うため重複させない)
 
 avoid_combinations(3件以上必須):
 [{{families:[タグA,タグB], scope:"same_session"/"any", reason:"この肌スコア・経験値に言及した理由", severity:"hard"/"soft"}}]
@@ -22832,6 +22943,23 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
     # 楽天商品名をGeminiで短く整形（rakuten_criteria / ai_rakuten_verified のみ対象）
     data = gemini_clean_rakuten_product_names(data)
     _lab_segment("gemini_name_clean")
+
+    # why_best(candidate_comparison)・商品比較表はfinalize_result_data内の
+    # finalize_step_data()で既に確定済みだが、それは商品名整形
+    # (gemini_clean_rakuten_product_names、直前の呼び出し)より前のタイミング
+    # だったため、整形前の楽天生タイトルを使ったままのwhy_best・商品比較表が
+    # 確定してしまっていた(2026-09、実機診断20260928083119852553で確認)。
+    # 整形後の最終的な商品名で再計算する。_refresh_candidate_comparison_
+    # after_swap()はtop_candidatesを持たないstep(美容機器・サプリメント)
+    # では何もしないため、全stepへ無条件に適用してよい。
+    for _section in ("morning", "night"):
+        for _step in data.get(_section, {}).get("steps", []):
+            if isinstance(_step, dict):
+                _refresh_candidate_comparison_after_swap(_step, user_data)
+    for _step in data.get("weekly_care", []):
+        if isinstance(_step, dict):
+            _refresh_candidate_comparison_after_swap(_step, user_data)
+    _lab_segment("candidate_comparison_refresh_after_name_clean")
 
     # Geminiによる商品選定理由・1位vs2位比較文を生成
     data = gemini_generate_selection_reasons(data, user_data)

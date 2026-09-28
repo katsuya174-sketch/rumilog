@@ -283,6 +283,240 @@ class GeminiNameCleanPromptSeoKeywordGuidanceTests(unittest.TestCase):
         self.assertIn("アゼライン酸化粧水", prompt)
 
 
+class RoutineStrategyPromptOverallReasonGuidanceTests(unittest.TestCase):
+    """build_analysis_prompt()/build_analysis_prompt_phase2()の
+    routine_strategy.overall_policy/reason指示に、「なぜこのルーティン
+    にしたのかのトータルの理由」を求める指示が含まれていること。
+
+    修正前は「reason: この肌状態に合う理由」という短い指示のみで、
+    実機診断で「週間ルーティンの理由欄の内容が不十分」という指摘を受けた。
+    実際の出力品質(Geminiが指示通り書くか)はプロンプトエンジニアリングの
+    性質上モックでは検証できないため、指示文言自体が存在すること・将来の
+    編集で誤って削除されないことだけを保証する回帰テスト。
+
+    あわせて、ユーザーからの以下の指摘を反映した内容であることも確認する:
+    - 「優先順位1位に必ず言及」という硬直したルールにはしない
+      (優先度の高い項目を中心に、という柔軟な表現にする)。
+    - 個別の頻度設定の詳細理由(use_days_reason/frequency_reason_note側の
+      役割)をreasonに重複させない。
+    """
+
+    _USER_DATA = {"concerns": [], "age": 30, "budget": 5000, "exp": "beginner", "oil": "oily", "sens": "normal"}
+
+    def test_full_prompt_contains_overall_reason_guidance(self):
+        prompt = app.build_analysis_prompt(self._USER_DATA)
+        self.assertIn("全体方針を一文で", prompt)
+        self.assertIn("このルーティン全体をこの方針にした理由", prompt)
+        self.assertIn("優先度の高い改善項目を中心に", prompt)
+        # 「優先順位1位に必ず言及」という硬直した表現は含まれないこと
+        self.assertNotIn("優先順位1位に必ず言及", prompt)
+        # 個別頻度理由の詳細をreasonに含めないことの明示
+        self.assertIn("個別の頻度設定の詳細理由", prompt)
+        self.assertIn("use_days_reason", prompt)
+
+    def test_phase2_prompt_contains_overall_reason_guidance(self):
+        prompt = app.build_analysis_prompt_phase2(self._USER_DATA, {})
+        self.assertIn("全体方針を一文で", prompt)
+        self.assertIn("このルーティン全体をこの方針にした理由", prompt)
+
+    def test_prompt_contains_morning_night_weekly_role_division_guidance(self):
+        prompt = app.build_analysis_prompt(self._USER_DATA)
+        self.assertIn("互いにどう役割分担しているか", prompt)
+
+
+def _real_candidate(name, price_ref, item_code, score=90, brand="テストブランド"):
+    """商品比較表テスト用: 実売(rakuten_criteria)候補を1件作る。
+    brandはデフォルトで非空にしている(空文字だとpreserve_ranked_top_candidates
+    がinfer_brand_from_title()経由で実際にGemini APIを呼んでしまうため)。"""
+    return {
+        "name": name, "brand": brand, "source": "rakuten_criteria",
+        "price_ref": price_ref, "item_code": item_code,
+        "rakuten_link": f"https://item.rakuten.co.jp/{item_code}/",
+        "score": score, "base_score": score, "improve_score": 0, "routine_score": 0,
+        "active_ingredients": [], "main_functions": [],
+    }
+
+
+class ComparisonTableSameProductDifferentShopTests(unittest.TestCase):
+    """preserve_ranked_top_candidates()/build_candidate_comparison_table():
+    同一商品が複数の楽天ショップから別価格で出品されている場合、推薦用の
+    候補(top_candidates)は従来通り1件に重複除去する一方、商品比較表
+    (価格・コスパ)専用の候補リスト(_comparison_candidates)では出品
+    identifier(item_code/rakuten_link)が異なれば別ショップの出品として
+    別行に残すこと。2026-09、実機診断で「商品比較欄が表示されない/
+    3位まで出ない」ことが確認された根本原因(推薦用の厳格な重複除去を
+    比較表にもそのまま使っていたため、別ショップ出品が1件に潰れていた)
+    への対応の回帰テスト。"""
+
+    def test_recommendation_list_still_dedupes_same_product_different_shop(self):
+        """推薦用top_candidatesの重複除去基準は変更しないこと。"""
+        step = {
+            "category": "化粧水", "purpose": "保湿", "product": "", "brand": "",
+            "top_candidates": [
+                _real_candidate("商品A", 1000, "shop1:item1", score=90),
+                _real_candidate("商品A", 1200, "shop2:item2", score=88),
+                _real_candidate("商品B", 1500, "shop3:item3", score=60),
+            ],
+        }
+        result = app.finalize_step_data(step, {})
+        names = [c["name"] for c in result["top_candidates"]]
+        self.assertEqual(names, ["商品A", "商品B"])
+
+    def test_comparison_table_shows_same_product_from_different_shops_separately(self):
+        step = {
+            "category": "化粧水", "purpose": "保湿", "product": "", "brand": "",
+            "top_candidates": [
+                _real_candidate("商品A", 1000, "shop1:item1", score=90),
+                _real_candidate("商品A", 1200, "shop2:item2", score=88),
+                _real_candidate("商品B", 1500, "shop3:item3", score=60),
+            ],
+        }
+        result = app.finalize_step_data(step, {})
+        rows = [(r["name"], r["price"]) for r in result["candidate_comparison_table"]]
+        self.assertEqual(len(rows), 3)
+        self.assertIn(("商品A", 1000), rows)
+        self.assertIn(("商品A", 1200), rows)
+        self.assertIn(("商品B", 1500), rows)
+
+    def test_comparison_table_dedupes_identical_listing_id_only_once(self):
+        """同一出品(item_codeが同じ)が候補プールに重複して入っていても、
+        比較表では1件にまとめること(無限に行が増えない)。"""
+        step = {
+            "category": "化粧水", "purpose": "保湿", "product": "", "brand": "",
+            "top_candidates": [
+                _real_candidate("商品A", 1000, "shop1:item1", score=90),
+                _real_candidate("商品A", 1000, "shop1:item1", score=90),
+                _real_candidate("商品B", 1500, "shop3:item3", score=60),
+            ],
+        }
+        result = app.finalize_step_data(step, {})
+        rows = [(r["name"], r["price"]) for r in result["candidate_comparison_table"]]
+        self.assertEqual(len(rows), 2)
+
+    def test_comparison_table_falls_back_to_name_price_when_no_listing_id(self):
+        """item_code/rakuten_linkが無い候補(db由来等)は、保守的にブランド+
+        商品名+価格で判定する(同名同価格は1件、同名でも価格が違えば別行)。"""
+        step = {
+            "category": "化粧水", "purpose": "保湿", "product": "", "brand": "",
+            "top_candidates": [
+                {"name": "商品A", "brand": "テストブランド", "source": "db", "price_ref": 1000,
+                 "score": 90, "base_score": 90, "improve_score": 0, "routine_score": 0,
+                 "active_ingredients": [], "main_functions": []},
+                {"name": "商品A", "brand": "テストブランド", "source": "db", "price_ref": 1000,
+                 "score": 90, "base_score": 90, "improve_score": 0, "routine_score": 0,
+                 "active_ingredients": [], "main_functions": []},
+                {"name": "商品B", "brand": "テストブランド2", "source": "db", "price_ref": 1500,
+                 "score": 60, "base_score": 60, "improve_score": 0, "routine_score": 0,
+                 "active_ingredients": [], "main_functions": []},
+            ],
+        }
+        result = app.finalize_step_data(step, {})
+        rows = [(r["name"], r["price"]) for r in result["candidate_comparison_table"]]
+        self.assertEqual(len(rows), 2)  # 同名同価格の1・2番目は1件にまとめられる
+
+    def test_comparison_rank_one_stays_synced_with_recommendation_after_name_clean(self):
+        """商品比較表の1位は、gemini_clean_rakuten_product_names()による
+        商品名整形後もstep["product"](推薦用1位)と同じ名前になること
+        (_comparison_candidates[0]がtop_candidates[0]と同一dictオブジェクトを
+        共有する設計の回帰テスト)。"""
+        raw_title = "59まで！【公式】オルナオーガニック【楽天】化粧水"
+        step = {
+            "category": "化粧水", "purpose": "保湿", "product": raw_title, "brand": "",
+            "product_source": "rakuten_criteria", "rakuten_title": raw_title,
+            "top_candidates": [
+                _real_candidate(raw_title, 1000, "shop1:item1", score=90),
+                _real_candidate("競合品", 1500, "shop3:item3", score=60),
+            ],
+        }
+        result = app.finalize_step_data(step, {})
+        data = {"morning": {"steps": [result]}, "night": {"steps": []}, "weekly_care": []}
+        with patch("app.call_gemini_with_retry",
+                   return_value=_FakeGeminiResponse("1. オルナオーガニック 化粧水")):
+            data = app.gemini_clean_rakuten_product_names(data)
+        step_after = data["morning"]["steps"][0]
+        app._refresh_candidate_comparison_after_swap(step_after, {})
+        rank1_row = step_after["candidate_comparison_table"][0]
+        self.assertNotIn("59まで", rank1_row["name"])
+        self.assertEqual(rank1_row["name"], step_after["top_candidates"][0]["name"])
+
+    def test_comparison_rank_two_gets_cleaned_independently(self):
+        """比較表専用リストの2位(推薦用top_candidatesには無い、別ショップ
+        出品)も、gemini_clean_rakuten_product_names()の対象に含まれること。
+        推薦用の重複除去(名前一致)で1件に潰れるよう、2つの候補には
+        あえて全く同じ生タイトルを与える(別ショップの出品が同じ楽天生
+        タイトルになるのはよくあるケース)。"""
+        raw_title = "59まで！【公式】オルナオーガニック【楽天】化粧水"
+        step = {
+            "category": "化粧水", "purpose": "保湿", "product": raw_title, "brand": "",
+            "product_source": "rakuten_criteria", "rakuten_title": raw_title,
+            "top_candidates": [
+                _real_candidate(raw_title, 1000, "shop1:item1", score=90),
+                _real_candidate(raw_title, 1200, "shop2:item2", score=89),
+            ],
+        }
+        result = app.finalize_step_data(step, {})
+        # 事前条件: 推薦用は1件に重複除去され、比較表専用は2件残っている
+        self.assertEqual(len(result["top_candidates"]), 1)
+        self.assertEqual(len(result["candidate_comparison_table"]), 2)
+
+        data = {"morning": {"steps": [result]}, "night": {"steps": []}, "weekly_care": []}
+        with patch(
+            "app.call_gemini_with_retry",
+            return_value=_FakeGeminiResponse("1. オルナオーガニック 化粧水\n2. オルナオーガニック 化粧水"),
+        ):
+            data = app.gemini_clean_rakuten_product_names(data)
+        step_after = data["morning"]["steps"][0]
+        app._refresh_candidate_comparison_after_swap(step_after, {})
+        rows = step_after["candidate_comparison_table"]
+        self.assertEqual(len(rows), 2)
+        for row in rows:
+            self.assertNotIn("59まで", row["name"])
+
+    def test_refresh_discards_stale_comparison_candidates_when_rank_one_swapped(self):
+        """_try_rakuten_fallback_candidateによる1位差し替え後は、古い
+        _comparison_candidates(差し替え前の1位を前提に構築)を破棄し、
+        新しいtop_candidatesだけで再計算すること(1位のすり替わりを防ぐ)。"""
+        step = {
+            "category": "化粧水", "purpose": "保湿", "product": "", "brand": "",
+            "top_candidates": [
+                _real_candidate("商品A", 1000, "shop1:item1", score=90),
+                _real_candidate("商品A", 1200, "shop2:item2", score=88),
+                _real_candidate("商品C", 1500, "shop3:item3", score=60),
+            ],
+        }
+        result = app.finalize_step_data(step, {})
+        self.assertIn("_comparison_candidates", result)
+
+        # 1位差し替え(_try_rakuten_fallback_candidateが行う操作を模す)
+        swapped = result["top_candidates"][1]
+        result["top_candidates"] = [swapped] + [
+            c for c in result["top_candidates"] if c is not swapped
+        ]
+        app._refresh_candidate_comparison_after_swap(result, {})
+        self.assertNotIn("_comparison_candidates", result)
+        self.assertEqual(
+            result["candidate_comparison_table"][0]["name"],
+            result["top_candidates"][0]["name"],
+        )
+
+    def test_refresh_keeps_comparison_candidates_when_rank_one_unchanged(self):
+        """1位が変わっていない通常のリフレッシュ(商品名整形後の再計算等)
+        では、_comparison_candidatesを保持し続けること(比較表の複数ショップ
+        表示が失われないこと)。"""
+        step = {
+            "category": "化粧水", "purpose": "保湿", "product": "", "brand": "",
+            "top_candidates": [
+                _real_candidate("商品A", 1000, "shop1:item1", score=90),
+                _real_candidate("商品A", 1200, "shop2:item2", score=88),
+                _real_candidate("商品C", 1500, "shop3:item3", score=60),
+            ],
+        }
+        result = app.finalize_step_data(step, {})
+        app._refresh_candidate_comparison_after_swap(result, {})
+        self.assertIn("_comparison_candidates", result)
+        self.assertEqual(len(result["candidate_comparison_table"]), 3)
+
+
 class DeviceContextSentenceDoublePeriodTests(unittest.TestCase):
     """device_selection_reason生成時の二重句点バグの回帰テスト。"""
 
