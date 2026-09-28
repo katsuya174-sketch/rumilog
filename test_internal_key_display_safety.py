@@ -448,5 +448,73 @@ class ComparisonTableRealCandidateOnlyTests(unittest.TestCase):
         self.assertEqual(rows[0]["diff_from_best"], "")
 
 
+class IsRealPricedCandidateDataDrivenTests(unittest.TestCase):
+    """_is_real_priced_candidate()/build_candidate_comparison_table():
+    実売候補かどうかをsource値のallowlistではなく、データの性質
+    (ai_virtualでない・price_ref>0・名前を持つ)で判定すること。
+
+    2026-09、source allowlist(rakuten_criteria/verified_cacheのみ)実装が
+    db/ai+db等の実売candidateを誤って比較表から除外し、商品比較
+    セクション自体が非表示になるリグレッションが実機診断で発生した
+    (診断20260928083119852553)。このクラスはその再発防止。"""
+
+    def test_db_source_with_real_price_is_treated_as_real(self):
+        candidates = [
+            _candidate("DB実売商品1", source="db", price_ref=1500, score=90),
+            _candidate("DB実売商品2", source="db", price_ref=2500, score=80),
+        ]
+        rows = app.build_candidate_comparison_table(candidates)
+        self.assertEqual(len(rows), 2)
+
+    def test_ai_plus_db_source_with_real_price_is_treated_as_real(self):
+        candidates = [
+            _candidate("ハイブリッド商品1", source="ai+db", price_ref=1200, score=90),
+            _candidate("ハイブリッド商品2", source="ai+db", price_ref=2200, score=80),
+        ]
+        rows = app.build_candidate_comparison_table(candidates)
+        self.assertEqual(len(rows), 2)
+
+    def test_fallback_source_with_real_price_is_treated_as_real(self):
+        candidates = [
+            _candidate("フォールバック商品1", source="fallback", price_ref=900, score=90),
+            _candidate("フォールバック商品2", source="fallback", price_ref=1900, score=80),
+        ]
+        rows = app.build_candidate_comparison_table(candidates)
+        self.assertEqual(len(rows), 2)
+
+    def test_unknown_future_source_with_real_price_is_treated_as_real(self):
+        """未知のsource値(将来追加されうる)でも、ai_virtualでなく価格・
+        名前を持つ限り実売として扱われること(allowlist方式の再発防止)。"""
+        candidates = [
+            _candidate("将来ソース商品1", source="some_new_source_2027", price_ref=1000, score=90),
+            _candidate("将来ソース商品2", source="some_new_source_2027", price_ref=2000, score=80),
+        ]
+        rows = app.build_candidate_comparison_table(candidates)
+        self.assertEqual(len(rows), 2)
+
+    def test_ai_virtual_excluded_even_with_nonzero_price_if_present(self):
+        """ai_virtualは仕様上price_ref=0のはずだが、万一0でない値が
+        入っていてもsourceで確実に除外すること(データ性質判定の中でも
+        source=="ai_virtual"は明示的に見る)。"""
+        candidates = [
+            _candidate("仮想商品", source="ai_virtual", price_ref=1000, score=95),
+            _candidate("実売商品", source="rakuten_criteria", price_ref=1000, score=70),
+        ]
+        rows = app.build_candidate_comparison_table(candidates)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "実売商品")
+
+    def test_zero_price_excluded_regardless_of_source(self):
+        """sourceが実売系であっても、price_refが実際に0(価格不明)の
+        候補は「不明」を比較表に混在させないため除外すること。"""
+        candidates = [
+            _candidate("価格不明商品", source="rakuten_criteria", price_ref=0, score=90),
+            _candidate("実売商品", source="rakuten_criteria", price_ref=1500, score=80),
+        ]
+        rows = app.build_candidate_comparison_table(candidates)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["name"], "実売商品")
+
+
 if __name__ == "__main__":
     unittest.main()

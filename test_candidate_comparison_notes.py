@@ -129,14 +129,21 @@ class BuildCandidateComparisonNotesTests(unittest.TestCase):
     # 単純に1位自身の3スコアの最大値(この例ではroutine=5がbase=10等より小さく
     # 最大にならない)を機械的に選ばないこと。improve軸で他候補より本当に
     # 優位な場合にimprove適合スコアが理由として使われることを確認する。
-    def test_score_axis_reason_reflects_actual_gap_not_own_max_value(self):
+    def test_axis_only_score_gap_without_rule_reasons_falls_back_to_neutral_text(self):
+        """スコア軸(improve_score等)の合計値だけが異なり、rule単位の採点
+        根拠(candidate_score_reasons)が無い場合、「ポイントが高いから
+        1位」という自明な言い換え(誰でも分かる情報量ゼロの文)は使わず、
+        中立文言にすること(ユーザー指摘により、axis単位の点差だけを
+        述べる説明ティアを意図的に廃止した)。"""
         candidates = [
             _candidate("改善重視商品", base_score=10, improve_score=90, routine_score=5),
             _candidate("競合A", base_score=10, improve_score=20, routine_score=5),
         ]
         result = app.build_candidate_comparison_notes(candidates, {}, {})
-        self.assertIn("改善適合スコア", result["why_best"])
-        self.assertNotIn("基本適合スコア", result["why_best"])
+        self.assertEqual(
+            result["why_best"],
+            "比較した候補との間に明確な優位点は確認できませんでした。総合スコアの僅差で選ばれています。",
+        )
 
     # ランキング評価に使われていない属性(main_functions/active_ingredients/
     # support_ingredients/concerns以外、例: textureのような未対応フィールド)は
@@ -174,12 +181,17 @@ class BuildCandidateComparisonNotesTests(unittest.TestCase):
             step, user_data,
         )
         self.assertNotEqual(result_a["why_best"], result_b["why_best"])
-        # 文の骨格自体が異なること(片方は採点根拠(reasons)由来、もう片方はスコア軸由来)
+        # 文の骨格自体が異なること(片方は採点根拠(reasons)由来、もう片方は
+        # rule単位の根拠が無いため中立文言)
         self.assertIn("毛穴引き締め", result_a["why_best"])
-        self.assertIn("改善適合スコア", result_b["why_best"])
+        self.assertEqual(
+            result_b["why_best"],
+            "比較した候補との間に明確な優位点は確認できませんでした。総合スコアの僅差で選ばれています。",
+        )
 
-    # 比較根拠の種類(構造的差/スコアのみ/根拠なし)ごとに文の骨格自体が変わること
-    # (語尾や単語だけを変えた見せかけの個別化になっていないことの確認)
+    # 比較根拠の種類(全候補への決定的優位/一部候補への部分優位/根拠なし)
+    # ごとに文の骨格自体が変わること(語尾や単語だけを変えた見せかけの
+    # 個別化になっていないことの確認)
     def test_different_reason_kinds_produce_structurally_different_sentences(self):
         structural = app.build_candidate_comparison_notes(
             [
@@ -191,10 +203,17 @@ class BuildCandidateComparisonNotesTests(unittest.TestCase):
             ],
             {}, {},
         )
-        score_only = app.build_candidate_comparison_notes(
+        partial = app.build_candidate_comparison_notes(
             [
-                _candidate("商品B", base_score=80),
-                _candidate("競合B", base_score=50),
+                _candidate("商品B", base_score=80, candidate_score_reasons=[
+                    _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                            feature="レチノール", points=25),
+                ]),
+                _candidate("競合B1", base_score=80, candidate_score_reasons=[]),
+                _candidate("競合B2", base_score=80, candidate_score_reasons=[
+                    _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                            feature="レチノール", points=25),
+                ]),
             ],
             {}, {},
         )
@@ -206,12 +225,13 @@ class BuildCandidateComparisonNotesTests(unittest.TestCase):
             {}, {},
         )
         self.assertIn("ナイアシンアミド", structural["why_best"])
-        self.assertNotIn("ナイアシンアミド", score_only["why_best"])
-        self.assertIn("基本適合スコア", score_only["why_best"])
+        self.assertNotIn("レチノール", structural["why_best"])
+        self.assertIn("レチノール", partial["why_best"])
+        self.assertIn("2位と比べると", partial["why_best"])
         self.assertIn("明確な優位点は確認できません", no_evidence["why_best"])
         # 3者とも文構造が異なること
-        self.assertNotEqual(structural["why_best"], score_only["why_best"])
-        self.assertNotEqual(score_only["why_best"], no_evidence["why_best"])
+        self.assertNotEqual(structural["why_best"], partial["why_best"])
+        self.assertNotEqual(partial["why_best"], no_evidence["why_best"])
 
     # 成分・機能データが無い商品でもクラッシュせず、価格・スコアのみで説明すること
     def test_why_best_falls_back_to_price_and_score_when_no_ingredient_data(self):
@@ -284,17 +304,20 @@ class BuildCandidateComparisonNotesTests(unittest.TestCase):
         self.assertNotIn("優れている", text)
         self.assertNotIn("優位", text)
 
-    # 実際のスコア関係と説明内容が矛盾しない: improve_scoreで他候補より
-    # 実際に優位な場合のみ「改善適合スコア」に言及すること
-    # (test_score_axis_reason_reflects_actual_gap_not_own_max_valueで詳細確認)
-    def test_dominant_score_component_matches_actual_scores(self):
+    # 実際のスコア関係と説明内容が矛盾しない: rule単位の採点根拠が無く
+    # axis合計値(improve_score等)だけが異なる場合、存在しない内訳を
+    # 捏造せず中立文言にすること
+    # (test_axis_only_score_gap_without_rule_reasons_falls_back_to_neutral_textで詳細確認)
+    def test_dominant_score_component_without_rule_reasons_does_not_fabricate_breakdown(self):
         candidates = [
             _candidate("改善重視商品", base_score=10, improve_score=90, routine_score=5),
             _candidate("競合", base_score=10, improve_score=20, routine_score=5),
         ]
         result = app.build_candidate_comparison_notes(candidates, {}, {})
-        self.assertIn("改善適合スコア", result["why_best"])
-        self.assertNotIn("基本適合スコア", result["why_best"])
+        self.assertEqual(
+            result["why_best"],
+            "比較した候補との間に明確な優位点は確認できませんでした。総合スコアの僅差で選ばれています。",
+        )
 
 
 class WhyBestProductNameCleaningTests(unittest.TestCase):
@@ -763,6 +786,89 @@ class RakutenFallbackCandidateComparisonRefreshTests(unittest.TestCase):
         step = {"category": "美容機器", "product": "RF美顔器"}
         app._refresh_candidate_comparison_after_swap(step, {})
         self.assertNotIn("candidate_comparison", step)
+
+
+class PartialAdvantageFallbackTests(unittest.TestCase):
+    """_build_why_best_text(): 全候補に対する決定的な決め手(decisive)が
+    無い場合でも、一部の候補(例: 2位にだけ)に対して実際に優位だった
+    ruleがあれば、情報量の無い
+    中立文言より、対象を明示した次善の理由(_find_partial_advantage_reason)
+    を使うこと。全候補に対して優位と誤読されないよう、対象(「2位」等)を
+    必ず明示する。"""
+
+    def test_advantage_over_one_of_two_others_is_used_instead_of_neutral_fallback(self):
+        candidates = [
+            _candidate(
+                "商品A", base_score=80, improve_score=0, routine_score=0,
+                candidate_score_reasons=[
+                    _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                            feature="niacinamide", condition="niacinamide", points=25),
+                ],
+            ),
+            _candidate(
+                "商品B", base_score=80, improve_score=0, routine_score=0,
+                candidate_score_reasons=[],
+            ),
+            _candidate(
+                "商品C", base_score=80, improve_score=0, routine_score=0,
+                candidate_score_reasons=[
+                    _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                            feature="niacinamide", condition="niacinamide", points=25),
+                ],
+            ),
+        ]
+        notes = app.build_candidate_comparison_notes(candidates, {}, {})
+        why_best = notes["why_best"]
+        self.assertIn("2位と比べると", why_best)
+        self.assertIn("ナイアシンアミド", why_best)
+        self.assertNotIn("明確な優位点は確認できませんでした", why_best)
+
+    def test_neutral_fallback_still_used_when_no_partial_advantage_exists(self):
+        """1位・2位・3位が全く同じ採点根拠(完全な同点)しか持たない場合は、
+        部分優位も無いため、従来通り中立文言のままであること(存在しない
+        差を捏造しない)。"""
+        same_reasons = [
+            _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                    feature="niacinamide", condition="niacinamide", points=25),
+        ]
+        candidates = [
+            _candidate("商品A", base_score=80, improve_score=0, routine_score=0,
+                       candidate_score_reasons=list(same_reasons)),
+            _candidate("商品B", base_score=80, improve_score=0, routine_score=0,
+                       candidate_score_reasons=list(same_reasons)),
+            _candidate("商品C", base_score=80, improve_score=0, routine_score=0,
+                       candidate_score_reasons=list(same_reasons)),
+        ]
+        notes = app.build_candidate_comparison_notes(candidates, {}, {})
+        self.assertIn("明確な優位点は確認できませんでした", notes["why_best"])
+
+    def test_partial_advantage_names_the_specific_beaten_rank_not_all(self):
+        """優位が2位に対してだけの場合、「3位」を含めて全候補に対して
+        優位だったかのように誤読される表現にはならないこと。"""
+        candidates = [
+            _candidate(
+                "商品A", base_score=80, improve_score=0, routine_score=0,
+                candidate_score_reasons=[
+                    _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                            feature="niacinamide", condition="niacinamide", points=25),
+                ],
+            ),
+            _candidate(
+                "商品B", base_score=80, improve_score=0, routine_score=0,
+                candidate_score_reasons=[],
+            ),
+            _candidate(
+                "商品C", base_score=80, improve_score=0, routine_score=0,
+                candidate_score_reasons=[
+                    _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                            feature="niacinamide", condition="niacinamide", points=25),
+                ],
+            ),
+        ]
+        notes = app.build_candidate_comparison_notes(candidates, {}, {})
+        why_best = notes["why_best"]
+        self.assertIn("2位と比べると", why_best)
+        self.assertNotIn("3位", why_best)
 
 
 if __name__ == "__main__":

@@ -16906,13 +16906,6 @@ def _safe_num(value):
         return 0.0
 
 
-_SCORE_COMPONENT_LABELS = {
-    "base": "基本適合スコア",
-    "improve": "改善適合スコア",
-    "routine": "相乗効果スコア",
-}
-
-
 def _aggregate_reasons_by_rule(candidate_score_reasons):
     """
     candidate_score_reasons(score_product()/score_routine_balance()/
@@ -17036,35 +17029,6 @@ def _find_penalty_avoidance_reasons(best_agg, others_agg_list):
 
     avoidance.sort(key=lambda d: d["gap"], reverse=True)
     return avoidance
-
-
-def _score_axis_advantage(best, others):
-    """
-    base_score/improve_score/routine_scoreの各軸について、bestがothers
-    全員に対して実際に(同点でなく)上回っている軸のうち、差が最大のものを
-    (axis, gap)で返す。一つも上回っていなければNone。
-
-    3軸のうち絶対値が最大のものを機械的に選ぶのではなく、あくまで
-    「実際に他候補より優位だったか」を軸ごとに個別へ比較する。
-    """
-    axis_fields = {
-        "base": "base_score",
-        "improve": "improve_score",
-        "routine": "routine_score",
-    }
-    best_axis = None
-    best_gap = 0
-    for axis, field in axis_fields.items():
-        other_values = [_safe_num(o.get(field, 0)) for o in others]
-        if not other_values:
-            continue
-        gap = _safe_num(best.get(field, 0)) - max(other_values)
-        if gap > 0 and gap > best_gap:
-            best_axis = axis
-            best_gap = gap
-    if best_axis is None:
-        return None
-    return best_axis, round(best_gap, 1)
 
 
 # カテゴリが一致していれば同一カテゴリの全候補が定義上必ず得る加点。
@@ -17310,6 +17274,48 @@ def _brand_already_present_in_name(brand, name):
     return norm_brand in _normalize_for_brand_match(name)
 
 
+def _find_partial_advantage_reasons(best_agg, others_agg_list, other_labels):
+    """
+    _find_decisive_score_reasons()/_find_penalty_avoidance_reasons()は
+    「others全員に対して同点でなく優位」なruleだけを決め手として使うため、
+    比較対象が2件以上いる場合、「2位に対してだけ」「3位に対してだけ」
+    実際に優位だったruleがあっても、それらは一つも決め手として拾われない。
+    その結果、実際にはある差にもかかわらず「明確な優位点は確認できません
+    でした」という、情報量の無い中立文言に落ちてしまうケースがある
+    (2026-09、洗顔等の汎用カテゴリで実機診断により確認)。
+
+    決定的な決め手(_build_why_best_text側のdecisive)が一つも見つから
+    ない場合に限り、次善として「一部の候補に対してだけ実際に優位だった
+    rule」を、対象を明示したうえで補助的に使う。「1位はポイントが一番
+    高いから1位」という自明な言い換えには意味が無く(誰でも分かる)、
+    2位・3位それぞれと比べて具体的に何が優れていたのかという内訳こそが
+    ユーザーに必要な情報のため、単一のruleだけでなく、見つかった中から
+    最大2件を差(gap)が大きい順に返す(_build_why_best_text側の
+    decisive分岐がselected = decisive[:2]で複数の決め手を列挙するのと
+    同じ考え方)。「全候補に対して優位」と誤読されないよう、呼び出し側は
+    比較対象を必ず具体的に(「2位に対しては」等)明示すること。同点・
+    0点以下・_UNIVERSAL_SHARED_RULESは対象にしない
+    (_find_decisive_score_reasonsと同じ基準)。存在しない差を作らない
+    ため、一件も見つからなければ空リストを返す。
+    """
+    matches = []  # [(rule, info, beaten_labels, gap_sum), ...]
+    for rule, info in best_agg.items():
+        if info["points"] <= 0 or rule in _UNIVERSAL_SHARED_RULES:
+            continue
+        beaten_labels = []
+        gap_sum = 0
+        for label, oa in zip(other_labels, others_agg_list):
+            other_points = oa.get(rule, {}).get("points", 0)
+            if info["points"] > other_points:
+                beaten_labels.append(label)
+                gap_sum += info["points"] - other_points
+        if not beaten_labels:
+            continue
+        matches.append((rule, info, beaten_labels, gap_sum))
+    matches.sort(key=lambda m: (len(m[2]), m[3]), reverse=True)
+    return matches
+
+
 def _build_why_best_text(best, others, step, best_label):
     """
     why_bestの本文を、1位(best)と比較対象(others=2位・3位)の
@@ -17340,9 +17346,13 @@ def _build_why_best_text(best, others, step, best_label):
     「順位差を生んでいない」ため、why_bestの導入句として機械的には使わない。
     一部の候補とだけ共通している場合に限り、補助的な文脈として添えてよい。
 
-    決定的な採点根拠差が一つも見つからない場合のみ、axis単位のスコア差
-    (_score_axis_advantage、これも同点は使わない)を補助的に使う。
-    それも無ければ、架空の理由を作らず中立的な文言にする。
+    決定的な採点根拠差が一つも見つからない場合は、「一部の候補に対して
+    だけ」実際に優位だったrule(_find_partial_advantage_reasons、最大
+    2件)を、対象を明示して次善の理由にする。「ポイントが一番高いから
+    1位」という自明な言い換え(axis単位の点差だけを述べる説明)は
+    誰でも分かる情報量ゼロの文になるため使わない。2位・3位それぞれと
+    比べて具体的に何が優れていたのかの内訳を示すことこそが目的。
+    それも無い場合のみ、架空の理由を作らず中立的な文言にする。
     ケースごとに文の骨格自体が変わるため、固定テンプレートへの機械的な
     値埋め込みにはならない。
     """
@@ -17412,13 +17422,24 @@ def _build_why_best_text(best, others, step, best_label):
             return f"{shared_label}は比較した候補にも見られますが、{decisive_sentence}"
         return decisive_sentence
 
-    score_adv = _score_axis_advantage(best, others)
-    if score_adv:
-        axis, gap = score_adv
-        return (
-            f"{best_label}は個々の採点根拠では比較した候補と大きな差はありませんでしたが、"
-            f"{_SCORE_COMPONENT_LABELS[axis]}で比較した候補より{gap}点上回っていたことが選ばれた理由です。"
-        )
+    # 全候補に対する決定的な決め手が一つも無い場合、「一部の候補に対して
+    # だけ」実際に優位だったruleを、対象を明示したうえで次善の理由として
+    # 使う(_find_partial_advantage_reasons参照。「ポイントが高いから1位」
+    # という自明な言い換えではなく、2位・3位それぞれと比べて具体的に
+    # 何が優れていたのかの内訳を示す。全候補への優位とは誤読させない)。
+    other_labels = ["2位", "3位"][:len(others)]
+    partial_matches = _find_partial_advantage_reasons(best_agg, others_agg_list, other_labels)
+    if partial_matches:
+        phrases = []
+        for rule, info, beaten_labels, _gap_sum in partial_matches[:2]:
+            feature_text = "・".join(_safe_display_labels(info["feature"], limit=2))
+            if feature_text and feature_text != info["label"]:
+                reason_phrase = f"{info['label']}({feature_text})"
+            else:
+                reason_phrase = info["label"]
+            target = "・".join(beaten_labels)
+            phrases.append(f"{target}と比べると{reason_phrase}で上回っていました")
+        return f"{best_label}は、" + "、".join(phrases) + "。"
 
     return "比較した候補との間に明確な優位点は確認できませんでした。総合スコアの僅差で選ばれています。"
 
@@ -17530,6 +17551,35 @@ def build_candidate_comparison_notes(top_candidates, step=None, user_data=None):
     return {"why_best": why_best, "diffs": diffs}
 
 
+def _is_real_priced_candidate(cand):
+    """
+    候補が「実売商品として比較表(価格・コスパ)に出してよいか」を、source
+    列挙のallowlistではなく、データの性質そのもので判定する。
+
+    2026-09、この判定をsource allowlist(rakuten_criteria/verified_cache
+    のみ許可)で実装したところ、db/ai+db/fallback等、他の実売source値を
+    持つ候補まで誤って除外され、商品比較セクション自体が非表示になる
+    リグレッションが実機診断で発生した。sourceの種類は今後も増減しうる
+    ため、「新しいsource値を漏れなく列挙し続ける」方式は本質的に壊れ
+    やすい。
+
+    除外すべきなのは実際にはai_virtual(Geminiが生成した仮想候補で、
+    price_ref=0が仕様どおりの値)だけであり、「仮想候補でないこと」
+    「価格が実際に確認できていること(price_ref>0)」「商品として識別
+    できる名前を持つこと」という、実売商品なら必ず満たすはずのデータの
+    性質で判定する方が、未知のsource値に対しても頑健。
+    """
+    if not isinstance(cand, dict):
+        return False
+    if cand.get("source") == "ai_virtual":
+        return False
+    if safe_price(cand.get("price_ref", 0)) <= 0:
+        return False
+    if not str(cand.get("name", "") or "").strip():
+        return False
+    return True
+
+
 def build_candidate_comparison_table(top_candidates, diffs=None):
     """
     1〜3位候補の価格・スコア・コスパを並べた比較表を作る（プレミアム機能
@@ -17554,7 +17604,7 @@ def build_candidate_comparison_table(top_candidates, diffs=None):
 
     rank_to_diff_label = {2: "2位", 3: "3位"}
 
-    # 「価格・コスパ比較」は実売候補(rakuten_criteria/verified_cache)だけを
+    # 「価格・コスパ比較」は実売候補(_is_real_priced_candidate参照)だけを
     # 対象にする。ai_virtualはGeminiが生成した仮想候補で、実売価格を
     # 持ちえない(price_ref=0が仕様どおりの値であり、データ欠落ではない)。
     # 実売でない候補を「不明」として価格比較へ混在させない
@@ -17562,11 +17612,10 @@ def build_candidate_comparison_table(top_candidates, diffs=None):
     # なお、この絞り込みはこの比較表(candidate_comparison_table)専用。
     # why_best(build_candidate_comparison_notes)側のbest(=step["product"]と
     # 一致させる必要がある1位)には影響しない。
-    _REAL_SOURCE_TYPES = ("rakuten_criteria", "verified_cache")
     original_best = top_candidates[0] if isinstance(top_candidates[0], dict) else None
     real_candidates = [
         (orig_idx, cand) for orig_idx, cand in enumerate(top_candidates[:3], start=1)
-        if isinstance(cand, dict) and cand.get("source") in _REAL_SOURCE_TYPES
+        if _is_real_priced_candidate(cand)
     ]
 
     rows = []
@@ -17582,7 +17631,7 @@ def build_candidate_comparison_table(top_candidates, diffs=None):
         # ai_virtualだった場合は、この表の1位が実際のwhy_best対象と
         # 一致しなくなるため、誤解を招く比較文を出さず空文字にする。
         diff_text = ""
-        if original_best is not None and original_best.get("source") in _REAL_SOURCE_TYPES:
+        if original_best is not None and _is_real_priced_candidate(original_best):
             diff_text = diff_by_label.get(rank_to_diff_label.get(orig_idx, ""), "")
         rows.append({
             "rank": new_idx,
