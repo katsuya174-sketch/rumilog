@@ -28,7 +28,7 @@ from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.pool import PoolError as _Psycopg2PoolError
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v17"  # 週間ルーティンの使用順でパックを化粧水後・美容液前に配置するルールをプロンプトに追加
+ANALYSIS_CACHE_VERSION = "v18"  # routine_strategy.reasonをreason_priority_focus/reason_frequency_designの2フィールドに分割(スキーマ変更のため必須)
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
