@@ -902,6 +902,74 @@ class UseDaysNoneListUnificationTests(unittest.TestCase):
         app._normalize_use_days_field(None)  # クラッシュしないことのみ確認
 
 
+class UseDaysSurvivesLateStepInsertionTests(unittest.TestCase):
+    """診断20260927050949108625の回帰テスト。_normalize_use_days_field()は
+    run_diagnosis_core内で早い段階(AI候補拡張より前)で一度呼ばれるが、
+    その後にensure_required_routine_steps()が未充足カテゴリ(洗顔・クリーム等)
+    のstepを新規に挿入する。この新規stepはuse_daysキー自体を持たないため、
+    最終保存payload・APIレスポンスでuse_daysが欠落したまま返っていた
+    (表示・判定ロジックは[]/Noneを同一視するため実害は無かったが、
+    「保存データ・APIレスポンスは常にuse_days=[]/listである」という契約が
+    最終出力地点で保証されていなかった)。"""
+
+    def test_step_inserted_by_ensure_required_routine_steps_gets_use_days_after_late_normalize(self):
+        # 洗顔もクリームも持たない夜ルーティン(Gemini出力を模した最小データ)。
+        data = {
+            "morning": {"steps": []},
+            "night": {"steps": [
+                {"category": "化粧水", "product": "化粧水A", "use_days": []},
+            ]},
+            "weekly_care": [],
+        }
+        data = app.ensure_required_routine_steps(data)
+
+        night_steps = data["night"]["steps"]
+        categories = [s.get("category") for s in night_steps]
+        self.assertIn("洗顔", categories)
+        self.assertIn("クリーム", categories)
+
+        # ensure_required_routine_steps直後は、挿入されたstepにuse_daysキーが
+        # 無いこと(バグの再現条件そのものを確認)。
+        inserted = [s for s in night_steps if s.get("category") in ("洗顔", "クリーム")]
+        self.assertTrue(inserted)
+        for step in inserted:
+            self.assertNotIn(
+                "use_days", step,
+                "この前提が崩れた場合、ensure_required_routine_steps()の実装が"
+                "変わりバグの再現条件自体が変化している可能性がある",
+            )
+
+        # 修正: run_diagnosis_core側で最終整形直前にもう一度正規化する。
+        app._normalize_use_days_field(night_steps)
+        for step in night_steps:
+            self.assertEqual(
+                step.get("use_days"), [],
+                f"category={step.get('category')!r}のuse_daysが正規化後も[]でない",
+            )
+
+    def test_prepare_result_for_view_normalizes_use_days_for_old_saved_records(self):
+        """生成ロジック修正前に保存された旧診断データ(use_daysキー欠落)でも、
+        再表示(履歴詳細等)のAPIレスポンスではuse_days=[]として返ること
+        (契約はレコードの生成時期に依存しない)。"""
+        old_saved_record = {
+            "id": "old-1",
+            "night": {"steps": [
+                {"category": "洗顔", "product": "旧ソープ"},  # use_daysキー無し(旧バグ)
+                {"category": "化粧水", "product": "旧化粧水", "use_days": ["月", "水", "金"]},
+            ]},
+            "weekly_care": [
+                {"category": "ピーリング", "product": "旧ピーリング"},  # use_daysキー無し
+            ],
+            "morning": {"steps": []},
+        }
+        result = app.prepare_result_for_view(old_saved_record)
+        night_steps = result["night"]["steps"]
+        self.assertEqual(night_steps[0]["use_days"], [])
+        # 曜日制限がある既存値は変更しないこと。
+        self.assertEqual(night_steps[1]["use_days"], ["月", "水", "金"])
+        self.assertEqual(result["weekly_care"][0]["use_days"], [])
+
+
 class WeeklyCareFrequencyRangeCheckTests(unittest.TestCase):
     """_log_weekly_care_frequency_range_check(): プロンプトに明記された
     濃度非依存の頻度目安(PHA→週3〜5回)からの逸脱を検知できること。

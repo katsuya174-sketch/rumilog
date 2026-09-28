@@ -240,6 +240,133 @@ class ValidateInferredBrandAndNameTests(unittest.TestCase):
         self.assertEqual(brand, "")
         self.assertEqual(name, "テスト商品")
 
+    def test_accepts_brand_containing_symbol_when_present_verbatim_in_raw_title(self):
+        # 診断20260927050949108625の実データ調査で判明: brand="肌〇"は
+        # Geminiの創作でも伏せ字でもなく、売り手自身が記載した実在ブランド名
+        # 「肌〇(はだまる)」(U+3007、フリガナ付きで元タイトルに明記)だった。
+        # 記号を含むという理由だけでbrandを一律rejectする実装を一度導入したが、
+        # この実データにより誤検知(実在ブランドの過剰リジェクト)と判明し撤回した
+        # (経緯はapp.py側の_validate_inferred_brand_and_nameのdocstring参照)。
+        # 元タイトルとの文字重なりが高い記号入りbrandは正しく採用されること。
+        raw = "肌〇 ( はだまる ) ナチュラルフェイスソープ60g 敏感肌 低刺激 洗顔石鹸"
+        brand, name = app._validate_inferred_brand_and_name(raw, "肌〇", "ナチュラルフェイスソープ")
+        self.assertEqual(brand, "肌〇")
+        self.assertEqual(name, "ナチュラルフェイスソープ")
+
+    def test_rejects_brand_that_is_generic_category_name(self):
+        raw = "洗顔 低刺激 敏感肌用"
+        brand, name = app._validate_inferred_brand_and_name(raw, "洗顔", "低刺激フェイスソープ")
+        self.assertEqual(brand, "")
+
+    def test_rejects_brand_not_present_in_raw_title(self):
+        """brandが元タイトルに全く含まれない(=作文の疑いが強い)場合は
+        brandのみ不採用にし、nameは正常なら残すこと。"""
+        raw = "ANLAN 超音波洗浄機 毛穴ケア"
+        brand, name = app._validate_inferred_brand_and_name(raw, "全く無関係なブランド名", "超音波洗浄機")
+        self.assertEqual(brand, "")
+        self.assertEqual(name, "超音波洗浄機")
+
+    def test_accepts_brand_present_in_raw_title(self):
+        raw = "肌ラボ 極潤ヒアルロン液 化粧水"
+        brand, name = app._validate_inferred_brand_and_name(raw, "肌ラボ", "極潤ヒアルロン液")
+        self.assertEqual(brand, "肌ラボ")
+        self.assertEqual(name, "極潤ヒアルロン液")
+
+
+class InferBrandFromTitleGeneralKnowledgeInferenceTests(unittest.TestCase):
+    """infer_brand_from_title(): 診断20260927050949108625の調査で判明した、
+    この関数固有の設計上の限界を記録する回帰・特性テスト。
+
+    この関数は「タイトルからの抽出」ではなく「Geminiの一般知識による推測」を
+    意図した設計(docstring: "商品名だけからGeminiでブランド名を推測する")。
+    呼び出し元のattach_affiliate_links_to_stepは、step["rakuten_title"]
+    (楽天の生タイトル)が保存されていればそれを優先して渡すよう修正済み
+    (BrandInferSourceTextPrefersRakutenTitleTests参照)。ただしそれでも
+    real Rakuten商品にマッチしなかったstep(product_source="ai"/"ai_virtual"、
+    rakuten_titleが無い)では、従来どおり短い商品名のみでの一般知識推測に
+    フォールバックする。
+
+    そのため、_validate_inferred_brand_and_name()のような「元テキストとの
+    文字重なりが低ければreject」という検証は、この関数の意図された使い方
+    (テキストに無い一般知識での補完)そのものを壊してしまうため適用できない。
+    実データ(brand="肌〇" = 実在ブランド「肌丸(はだまる)」)でも、記号を
+    含むという理由だけでの一律rejectが実在ブランドを誤って落とすことが
+    判明した(詳細はapp.py _validate_inferred_brand_and_name docstring参照)。
+
+    現状、この関数が返す値がGeminiの正しい一般知識なのか、もっともらしい
+    架空のでっち上げなのかを、既存データだけで安全に判別する一般的な方法は
+    無い(製品ブランドの正解データベースが存在しない、元テキストとの表記
+    揺れ・言語違いを安全に吸収できる汎用的な照合ロジックも無い)ため、
+    追加の検証ロジックは実装しない。空文字・40文字超・既存カテゴリ総称語
+    という既存の最小限の検証のみを維持する。"""
+
+    def setUp(self):
+        app._BRAND_NAME_CACHE.clear()
+
+    def test_plausible_fabricated_brand_name_still_passes_current_validation(self):
+        """既存検証の限界を示す特性テスト: 元タイトルに存在しない、もっともらしい
+        架空ブランド名でもGemini応答が空文字・40文字以内・非汎用カテゴリ名で
+        あれば現状は採用される。安全な追加検証が無いことを明示するための
+        テストであり、これは既知の制約であって隠れたバグではない。"""
+        with patch("app.call_gemini_with_retry", return_value=_FakeGeminiResponse("ナチュールピュアラボ")), \
+             patch("app.save_brand_to_cache"):
+            brand = app.infer_brand_from_title("ナチュラルフェイス ソープ", category="洗顔")
+        self.assertEqual(brand, "ナチュールピュアラボ")
+
+    def test_accepts_normal_brand_name(self):
+        with patch("app.call_gemini_with_retry", return_value=_FakeGeminiResponse("ファンケル")), \
+             patch("app.save_brand_to_cache"):
+            brand = app.infer_brand_from_title("マイルドクレンジングオイル", category="クレンジング")
+        self.assertEqual(brand, "ファンケル")
+
+    def test_accepts_real_brand_name_containing_symbol_character(self):
+        # 実データ回帰: 記号を含む実在ブランド名(肌〇=肌丸/はだまる)を、
+        # 記号を理由に誤ってrejectしないこと。
+        with patch("app.call_gemini_with_retry", return_value=_FakeGeminiResponse("肌〇")), \
+             patch("app.save_brand_to_cache"):
+            brand = app.infer_brand_from_title("ナチュラルフェイス ソープ", category="洗顔")
+        self.assertEqual(brand, "肌〇")
+
+
+class BrandInferSourceTextPrefersRakutenTitleTests(unittest.TestCase):
+    """attach_affiliate_links_to_step(): brand補完のためのinfer_brand_from_title()
+    呼び出しに、短い整形済み商品名ではなくstep["rakuten_title"](楽天の生
+    タイトル)が利用可能ならそちらを優先して渡すこと(診断20260927050949108625
+    の回帰テスト)。ネットワークI/O(fetch_rakuten_item等)を避けるため、
+    step側に実画像+リンクを与えてbrand補完直後に早期returnする経路を使う。"""
+
+    def test_uses_rakuten_title_when_available(self):
+        step = {
+            "category": "洗顔",
+            "product": "ナチュラルフェイス ソープ",
+            "brand": "",
+            "rakuten_title": "肌〇 ( はだまる ) ナチュラルフェイス ソープ60g 敏感肌 低刺激",
+            "image": "https://example.com/real.jpg",
+            "rakuten_link": "https://example.com/item",
+            "product_source": "rakuten_criteria",
+        }
+        with patch("app.infer_brand_from_title", return_value="肌〇") as mock_infer:
+            app.attach_affiliate_links_to_step(step, [])
+        mock_infer.assert_called_once_with(
+            "肌〇 ( はだまる ) ナチュラルフェイス ソープ60g 敏感肌 低刺激", "洗顔",
+        )
+        self.assertEqual(step["brand"], "肌〇")
+
+    def test_falls_back_to_product_name_when_no_rakuten_title(self):
+        # ai/ai_virtual由来等、実在の楽天商品にマッチしなかったstepでは
+        # 従来どおり短い商品名のみで推測する。
+        step = {
+            "category": "洗顔",
+            "product": "低刺激泡洗顔フォーム",
+            "brand": "",
+            "image": "https://example.com/real.jpg",
+            "rakuten_link": "https://example.com/item",
+            "product_source": "ai_virtual",
+        }
+        with patch("app.infer_brand_from_title", return_value="") as mock_infer:
+            app.attach_affiliate_links_to_step(step, [])
+        mock_infer.assert_called_once_with("低刺激泡洗顔フォーム", "洗顔")
+
 
 class InferBrandAndCleanNameFromTitleTests(unittest.TestCase):
     """infer_brand_and_clean_name_from_title(): 既存のinfer_brand_from_title()

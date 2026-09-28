@@ -6561,6 +6561,18 @@ def _validate_inferred_brand_and_name(raw_title, brand, name):
       (=Geminiが元データに無い内容を作文した疑いが強い)
     - nameが既にbrandを含んでいる場合、brandの重複表示を避けるため
       _brand_already_present_in_name()の判定をそのまま利用する
+    - brandが既存の汎用カテゴリ名(_GENERIC_CATEGORY_NAMES)そのもの、
+      または元の楽天タイトルとの文字重なりが低い(=作文の疑いが強い)
+      場合、brandのみ空文字にする(infer_brand_from_title()には既に
+      あった_GENERIC_CATEGORY_NAMESチェックがこの関数には無かった
+      非対称の是正、および、この関数はraw_titleからの「抽出」を前提と
+      するため、nameと同じ文字重なりチェックをbrandにも適用できる、
+      という2点が根拠。伏せ字記号を含むかどうかでの判定は、診断
+      20260927050949108625の調査当初brand="肌〇"を伏せ字と誤認して
+      一度導入したが、実際には元の楽天タイトルに売り手自身が記載した
+      実在ブランド名(「肌〇(はだまる)」)であったと判明したため撤回
+      した。記号を含むこと自体は実在ブランドの誤検知が避けられず
+      安全な一般判定にならない)
     """
     brand = str(brand or "").strip()
     name = str(name or "").strip()
@@ -6596,8 +6608,20 @@ def _validate_inferred_brand_and_name(raw_title, brand, name):
             )
             return "", ""
 
-    if brand and len(brand) > 40:
-        brand = ""
+    if brand:
+        if len(brand) > 40 or brand in _GENERIC_CATEGORY_NAMES:
+            brand = ""
+        else:
+            _norm_brand_chars = set(_normalize_for_brand_match(brand))
+            if _norm_brand_chars:
+                _brand_overlap_ratio = len(_norm_brand_chars & _norm_title_chars) / len(_norm_brand_chars)
+                if _brand_overlap_ratio < 0.8:
+                    print(
+                        f"[BRAND+NAME VALIDATION REJECTED] brand={brand!r}が元タイトルとの"
+                        f"文字重なり率{_brand_overlap_ratio:.2f}と低いため作文の疑いがあり不採用",
+                        flush=True,
+                    )
+                    brand = ""
 
     return brand, name
 
@@ -6787,7 +6811,20 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
     # ブランド名が含まれること」という必須条件として使われるため、
     # 実在の対象商品が軒並み弾かれてリンク無しになる不具合があった。
     if not brand and category not in ("美容機器", "サプリメント"):
-        _inferred_brand = infer_brand_from_title(product_name, category)
+        # 実際に楽天でマッチした商品(product_source in
+        # ai_rakuten_verified/rakuten_criteria)には、この時点で既に
+        # step["rakuten_title"](楽天の生タイトル。finalize_step_data等の
+        # 販促文言除去より前の元テキスト)が保存済みのことがある。
+        # product_name(既に整形済みの短い表示名)だけを渡すと、実際には
+        # タイトル中に書かれているブランド名までGeminiの「一般知識推測」
+        # 任せになってしまう(診断20260927050949108625で発覚。ブランド名
+        # 「肌〇」はタイトル冒頭に実在したが、整形済みの短い商品名だけを
+        # 渡していたため本来「抽出」できるはずの情報が失われていた)。
+        # 生タイトルがあればそちらを優先して渡し、テキストに実在する
+        # ブランド名はより確実に「抽出」させる(無ければ従来どおり
+        # product_nameのみでの一般知識推測にフォールバックする)。
+        _brand_infer_source_text = str(step.get("rakuten_title", "") or "").strip() or product_name
+        _inferred_brand = infer_brand_from_title(_brand_infer_source_text, category)
         if _inferred_brand:
             brand = _inferred_brand
             step["brand"] = _inferred_brand
@@ -18390,6 +18427,14 @@ def prepare_result_for_view(result):
             result.get("ai_improvement_strategy", [])
         )
 
+    # use_days=[]/Noneの意味統一を、生成時のバグ・生成ロジック変更前の
+    # 旧レコードにも関わらず保証する(APIレスポンスの契約は生成時期に
+    # 依存しない)。
+    _night_for_normalize = result.get("night")
+    if isinstance(_night_for_normalize, dict):
+        _normalize_use_days_field(_night_for_normalize.get("steps"))
+    _normalize_use_days_field(result.get("weekly_care"))
+
     # weekly_usage_plan は毎回 build_weekly_usage_plan() で再計算する。
     # 保存済みの値をそのまま使うと、build_weekly_usage_plan のロジック変更
     # （例: パックを夜の化粧水後・美容液前に統合）が過去の履歴に反映されない。
@@ -22508,6 +22553,21 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
     # ⑩ 予算情報
     # =========================
     data = finalize_budget_info(data, budget_value)
+
+    # use_days=[]/Noneの意味統一を最終出力直前で再保証する。
+    # 22252行目付近の同名呼び出しはAI候補拡張より前の早い段階のもので、
+    # use_days_reason処理には十分だが、その後のensure_required_routine_steps()
+    # (未充足カテゴリのstep新規追加。use_daysキー自体を持たない)や
+    # supplement_night_steps_from_morning()(正規化を通していないmorning側
+    # stepのdeepcopy)等、night/weekly_careのstepリストを追加・複製する
+    # 処理がここまでに複数入るため、そこで新規に加わったstepはuse_days
+    # キーが欠落したまま保存されていた(診断20260927050949108625で発覚)。
+    # 表示・判定ロジックは[]/Noneを同一視するため実害は無かったが、
+    # 「保存データ・APIレスポンスではuse_daysが常に[]/list」という契約を
+    # 保証するため、最終整形の直前でもう一度正規化する。
+    _normalize_use_days_field(data.get("night", {}).get("steps"))
+    _normalize_use_days_field(data.get("weekly_care"))
+
     data["weekly_usage_plan"] = build_weekly_usage_plan(data)
     _lab_segment("budget_finalize")
     print("[LAB TIME] after build_weekly_usage_plan", round(time.time() - lab_t0, 2), flush=True)
