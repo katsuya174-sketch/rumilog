@@ -18182,6 +18182,17 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
             step["_comparison_candidates"] = comparison_candidates
         else:
             step.pop("_comparison_candidates", None)
+            # 商品比較表が「候補は十分あるのに表示されない」原因切り分け用の
+            # 計測ログ。ロジックは変更していない(既存のelse分岐のまま)。
+            if comparison_candidates or normalized_candidates:
+                print(
+                    f"[COMPARISON DROPPED] step={_step_cat!r} "
+                    f"comparison_top={comparison_candidates[0].get('name','') if comparison_candidates else None!r} "
+                    f"recommend_top={normalized_candidates[0].get('name','') if normalized_candidates else None!r} "
+                    f"comparison_empty={not comparison_candidates} "
+                    f"recommend_empty={not normalized_candidates}",
+                    flush=True
+                )
 
         # 候補が各段階でどれだけ失われているかを可視化するための計測ログ。
         # 「商品比較の件数が少なすぎる」問題の対策(クエリ拡張/取得件数増/
