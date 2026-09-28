@@ -715,8 +715,11 @@ class RakutenFallbackCandidateComparisonRefreshTests(unittest.TestCase):
             _candidate("旧1位商品", base_score=90, candidate_score_reasons=[
                 _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
                         feature="レチノール", points=25),
-                _reason("common_availability", "日本での入手性が確認されている",
-                        feature="amazon", points=5),
+                # common_availabilityは「なぜ1位か」の理由として引用しない
+                # 対象(_NON_CITABLE_REASON_RULES)のため、この決定的優位テスト
+                # では別の引用可能なruleを使う。
+                _reason("common_formulation_barrier_concern", "バリア機能に配慮した処方",
+                        feature="low_irritation", points=5),
             ]),
             _candidate("新1位商品", base_score=90, candidate_score_reasons=[
                 _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",

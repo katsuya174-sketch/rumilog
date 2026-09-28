@@ -5883,8 +5883,19 @@ def search_rakuten_for_step(step, improvement_plan):
     all_results = []
 
     def collect(results):
+        # 出品単位(item_code)で重複除去する。同一商品でも別ショップ・別価格の
+        # 出品は別出品として残す(2026-09、商品比較表(価格・コスパ)専用の
+        # 別ショップ判定をpreserve_ranked_top_candidates側に実装したが、
+        # この時点で既に商品名だけで1件に潰されており手遅れだった不具合の
+        # 修正。item_codeがあればそれを優先し、無ければrakuten_link、
+        # それも無い場合のみ従来通り商品名の正規化にフォールバックする
+        # (どの出品識別子も取得できない場合の安全側の重複除去)。
         for r in results:
-            k = normalize_product_name(r.get("rakuten_title", "") or r.get("name", ""))
+            k = (
+                str(r.get("item_code") or "").strip()
+                or str(r.get("rakuten_link") or "").strip()
+                or normalize_product_name(r.get("rakuten_title", "") or r.get("name", ""))
+            )
             if k and k not in seen_keys:
                 seen_keys.add(k)
                 all_results.append(r)
@@ -17093,6 +17104,8 @@ def _find_decisive_score_reasons(best_agg, others_agg_list):
     """
     decisive = []
     for rule, info in best_agg.items():
+        if rule in _NON_CITABLE_REASON_RULES:
+            continue
         other_points = [oa.get(rule, {}).get("points", 0) for oa in others_agg_list]
         if not other_points:
             continue
@@ -17137,6 +17150,8 @@ def _find_penalty_avoidance_reasons(best_agg, others_agg_list):
 
     avoidance = []
     for rule in all_other_rules:
+        if rule in _NON_CITABLE_REASON_RULES:
+            continue
         if rule in best_agg:
             # bestも同じruleを記録している場合は_find_decisive_score_reasons側の対象
             continue
@@ -17175,6 +17190,16 @@ def _find_penalty_avoidance_reasons(best_agg, others_agg_list):
 # カテゴリが一致していれば同一カテゴリの全候補が定義上必ず得る加点。
 # 順位差の説明には決して使わない(candidate_score_reasons自体には残す)。
 _UNIVERSAL_SHARED_RULES = {"product_category_base_fit"}
+
+# common_availability(入手性)/common_budget_fit(予算適合)は、他の大多数の
+# ルール(成分一致・機能一致・肌タイプ適合・処方特性等、いずれも「その商品が
+# 肌に合うか」という実質的な差)と違い、「買いやすいか」という物流的な差
+# でしかない。これ単独が「なぜ1位か」の理由として引用されると、スキンケア
+# 商品を選ぶ理由として説得力に欠ける(2026-09、実機監査で「入手性が容易な
+# 点により1位になっている」という指摘を受けた)。スコアリング自体(加点)には
+# 一切手を加えず、決定的優位・部分優位の理由として引用する対象からだけ
+# 除外する(candidate_score_reasons自体には残るため、根拠トレースは失わない)。
+_NON_CITABLE_REASON_RULES = {"common_availability", "common_budget_fit"}
 
 
 def _merge_duplicate_reason_phrases(decisive):
@@ -17441,7 +17466,7 @@ def _find_partial_advantage_reasons(best_agg, others_agg_list, other_labels):
     """
     matches = []  # [(rule, info, beaten_labels, gap_sum), ...]
     for rule, info in best_agg.items():
-        if info["points"] <= 0 or rule in _UNIVERSAL_SHARED_RULES:
+        if info["points"] <= 0 or rule in _UNIVERSAL_SHARED_RULES or rule in _NON_CITABLE_REASON_RULES:
             continue
         beaten_labels = []
         gap_sum = 0
@@ -17516,7 +17541,7 @@ def _build_why_best_text(best, others, step, best_label):
         for rule, info in best_agg.items():
             if rule in decisive_rules or info["points"] <= 0:
                 continue
-            if rule in _UNIVERSAL_SHARED_RULES:
+            if rule in _UNIVERSAL_SHARED_RULES or rule in _NON_CITABLE_REASON_RULES:
                 continue
             other_points_for_rule = [oa.get(rule, {}).get("points", 0) for oa in others_agg_list]
             if not other_points_for_rule:
@@ -20853,6 +20878,15 @@ night_order: 夜の使用順序配列
 ※パックを使う日は、原則「化粧水の後・美容液の前」に配置する。ただしメーカーが使用順を指定している製品はその順に従う。
 reason: このルーティン全体をこの方針にした理由を2〜3文で。優先度の高い改善項目を中心に、なぜこの全体方針にしたかを説明する(特定の項目名を必ず挙げる必要はない)。頻度については、全体としてどう設計したか(例:刺激系ケアを分散させる方針か、毎日ケアを優先する方針か)には触れてよいが、個別の頻度設定の詳細理由(例:成分Xがなぜ週n回か)には触れない(そちらは各stepのuse_days_reasonで別途扱うため重複させない)
 
+【routine_strategy 出力例】
+(例: バリア機能・皮脂バランスの改善優先度が高いケース)
+overall_policy: バリア機能の回復を最優先し、刺激を抑えながら皮脂バランスも整える。
+morning_policy: 紫外線対策と皮脂コントロールに絞り、刺激の少ない最低限のケアにとどめる。
+night_policy: 保湿・バリア強化を中心とした集中ケアを行い、日中受けた刺激をケアする。
+weekly_policy: 週1〜2回のパックでバリア機能の底上げを図り、毎日の刺激蓄積を避ける。
+reason: 優先度の高いバリア機能と皮脂バランスの改善を軸に、朝は刺激を抑えた最低限のケア、夜はセラミドや鎮静成分による集中ケアという役割分担にした。皮脂分泌が活発な一方で保湿不足も見られるため、皮脂を抑えすぎず保湿とのバランスを重視する方針とした。週間ケアは肌への負担を考慮し、毎日ではなく集中ケアとして頻度を絞る設計にしている。
+(この例と同程度の具体性・文の数を目安にする。項目名や文面をそのまま流用せず、実際のスコア・優先順位に基づいて書くこと)
+
 avoid_combinations(3件以上必須):
 [{{families:[タグA,タグB], scope:"same_session"/"any", reason:"この肌スコアに言及した理由", severity:"hard"/"soft"}}]
 タグ: retinoid/aha_bha/strong_vitamin_c/vitamin_c/azelaic/niacinamide/ceramide/barrier/peptide/pdrn
@@ -21164,6 +21198,15 @@ morning_order: 朝の使用順序配列(ブースターは化粧水前)
 night_order: 夜の使用順序配列(役割・テクスチャーに基づく順序)
 ※パックを使う日は、原則「化粧水の後・美容液の前」に配置する。ただしメーカーが使用順を指定している製品はその順に従う。
 reason: このルーティン全体をこの方針にした理由を2〜3文で。優先度の高い改善項目を中心に、なぜこの全体方針にしたかを説明する(特定の項目名を必ず挙げる必要はない)。頻度については、全体としてどう設計したか(例:刺激系ケアを分散させる方針か、毎日ケアを優先する方針か)には触れてよいが、個別の頻度設定の詳細理由(例:成分Xがなぜ週n回か)には触れない(そちらは各stepのuse_days_reasonで別途扱うため重複させない)
+
+【routine_strategy 出力例】
+(例: バリア機能・皮脂バランスの改善優先度が高いケース)
+overall_policy: バリア機能の回復を最優先し、刺激を抑えながら皮脂バランスも整える。
+morning_policy: 紫外線対策と皮脂コントロールに絞り、刺激の少ない最低限のケアにとどめる。
+night_policy: 保湿・バリア強化を中心とした集中ケアを行い、日中受けた刺激をケアする。
+weekly_policy: 週1〜2回のパックでバリア機能の底上げを図り、毎日の刺激蓄積を避ける。
+reason: 優先度の高いバリア機能と皮脂バランスの改善を軸に、朝は刺激を抑えた最低限のケア、夜はセラミドや鎮静成分による集中ケアという役割分担にした。皮脂分泌が活発な一方で保湿不足も見られるため、皮脂を抑えすぎず保湿とのバランスを重視する方針とした。週間ケアは肌への負担を考慮し、毎日ではなく集中ケアとして頻度を絞る設計にしている。
+(この例と同程度の具体性・文の数を目安にする。項目名や文面をそのまま流用せず、実際のスコア・優先順位に基づいて書くこと)
 
 avoid_combinations(3件以上必須):
 [{{families:[タグA,タグB], scope:"same_session"/"any", reason:"この肌スコア・経験値に言及した理由", severity:"hard"/"soft"}}]

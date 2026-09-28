@@ -325,6 +325,63 @@ class BuildWhyBestTextSafetyTests(unittest.TestCase):
         self.assertIn("という点は比較した候補にも見られますが", why_best)
         self.assertNotIn("含むは比較した候補", why_best)
 
+    def test_availability_alone_is_not_cited_as_decisive_reason(self):
+        """common_availability(入手性)が唯一の決定的優位ruleであっても、
+        「なぜ1位か」の理由として引用しないこと(_NON_CITABLE_REASON_RULES)。
+        2026-09、実機監査で「入手性が容易である点により1位になっている」
+        という指摘を受けた回帰テスト。スコア自体には影響しないため
+        (base_scoreは事前計算済みの値をそのまま使う)、決定的優位が
+        無い場合の中立文言にフォールバックする。"""
+        candidates = [
+            _candidate("商品A", base_score=80, candidate_score_reasons=[
+                _reason("common_availability", "日本での入手性が確認されている",
+                        feature="amazon、rakuten", condition="", points=5),
+            ]),
+            _candidate("競合B", base_score=80, candidate_score_reasons=[]),
+        ]
+        result = app.build_candidate_comparison_notes(candidates, {}, {})
+        self.assertEqual(
+            result["why_best"],
+            "比較した候補との間に明確な優位点は確認できませんでした。総合スコアの僅差で選ばれています。",
+        )
+
+    def test_availability_alone_is_not_cited_as_partial_advantage_reason(self):
+        """common_availabilityは部分優位フォールバック(2位・3位のうち一部
+        にだけ優位)の理由としても引用しないこと。他に引用可能な決め手が
+        無ければ中立文言になる。"""
+        candidates = [
+            _candidate("商品A", base_score=80, candidate_score_reasons=[
+                _reason("common_availability", "日本での入手性が確認されている",
+                        feature="amazon", condition="", points=5),
+            ]),
+            _candidate("競合B", base_score=80, candidate_score_reasons=[]),
+            _candidate("競合C", base_score=80, candidate_score_reasons=[
+                _reason("common_availability", "日本での入手性が確認されている",
+                        feature="amazon", condition="", points=5),
+            ]),
+        ]
+        result = app.build_candidate_comparison_notes(candidates, {}, {})
+        self.assertEqual(
+            result["why_best"],
+            "比較した候補との間に明確な優位点は確認できませんでした。総合スコアの僅差で選ばれています。",
+        )
+
+    def test_availability_does_not_block_other_citable_decisive_reasons(self):
+        """common_availabilityの除外は、他の引用可能な決定的優位ruleには
+        影響しないこと(除外対象を広げすぎていないことの確認)。"""
+        candidates = [
+            _candidate("商品A", base_score=80, candidate_score_reasons=[
+                _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                        feature="niacinamide", condition="niacinamide", points=25),
+                _reason("common_availability", "日本での入手性が確認されている",
+                        feature="amazon", condition="", points=5),
+            ]),
+            _candidate("競合B", base_score=50, candidate_score_reasons=[]),
+        ]
+        result = app.build_candidate_comparison_notes(candidates, {}, {})
+        self.assertIn("ナイアシンアミド", result["why_best"])
+        self.assertNotIn("入手性", result["why_best"])
+
 
 class DiffsFromBestSafetyTests(unittest.TestCase):
     """build_candidate_comparison_notes()のdiffs(「1位との違い」)へ

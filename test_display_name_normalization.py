@@ -324,6 +324,17 @@ class RoutineStrategyPromptOverallReasonGuidanceTests(unittest.TestCase):
         self.assertIn("互いにどう役割分担しているか", prompt)
 
 
+    def test_prompt_contains_worked_example_with_target_depth(self):
+        prompt = app.build_analysis_prompt(self._USER_DATA)
+        self.assertIn("routine_strategy 出力例", prompt)
+        self.assertIn("刺激を抑えた最低限のケア", prompt)
+        self.assertIn("集中ケアとして頻度を絞る", prompt)
+
+    def test_phase2_prompt_contains_worked_example(self):
+        prompt = app.build_analysis_prompt_phase2(self._USER_DATA, {})
+        self.assertIn("routine_strategy 出力例", prompt)
+
+
 def _real_candidate(name, price_ref, item_code, score=90, brand="テストブランド"):
     """商品比較表テスト用: 実売(rakuten_criteria)候補を1件作る。
     brandはデフォルトで非空にしている(空文字だとpreserve_ranked_top_candidates
@@ -335,6 +346,74 @@ def _real_candidate(name, price_ref, item_code, score=90, brand="テストブラ
         "score": score, "base_score": score, "improve_score": 0, "routine_score": 0,
         "active_ingredients": [], "main_functions": [],
     }
+
+
+class SearchRakutenForStepListingDedupTests(unittest.TestCase):
+    """search_rakuten_for_step()内のcollect()が、出品単位(item_code優先、
+    無ければrakuten_link、それも無ければ商品名正規化)で重複除去すること。
+
+    2026-09、実機診断で「商品比較欄が変わらない」ことが確認された根本
+    原因: 前回実装した商品比較表専用の別ショップ判定(preserve_ranked_
+    top_candidates側)は、search_rakuten_for_step()のcollect()が商品名
+    だけで既に別ショップ出品を1件に潰した"後"のデータを受け取っていた
+    ため、そもそも別ショップ出品がスコアリング段階まで届いていなかった。
+    この回帰テストはより手前のcollect()自体が出品単位で残すことを確認する。"""
+
+    def _fake_search(self, results_by_keyword_substr):
+        def _search(keyword, category):
+            for substr, results in results_by_keyword_substr.items():
+                if substr in keyword:
+                    return results
+            return []
+        return _search
+
+    def test_same_product_name_different_item_code_both_kept(self):
+        results = [
+            {"name": "商品A", "rakuten_title": "商品A", "item_code": "shop1:item1",
+             "rakuten_link": "https://item.rakuten.co.jp/shop1/item1/", "price_ref": 1000},
+            {"name": "商品A", "rakuten_title": "商品A", "item_code": "shop2:item2",
+             "rakuten_link": "https://item.rakuten.co.jp/shop2/item2/", "price_ref": 1200},
+        ]
+        step = {"category": "化粧水", "purpose": "保湿", "ingredient_focus": ""}
+        with patch("app._rakuten_criteria_search_single", side_effect=self._fake_search({"化粧水": results})):
+            all_results = app.search_rakuten_for_step(step, {})
+        self.assertEqual(len(all_results), 2)
+        prices = sorted(r["price_ref"] for r in all_results)
+        self.assertEqual(prices, [1000, 1200])
+
+    def test_same_item_code_returned_twice_is_deduped(self):
+        """同一出品(item_codeが同じ)がQ1・Q2両方の検索結果に含まれていても
+        1件にまとめること(重複除去自体は維持される)。"""
+        same_item = {"name": "商品A", "rakuten_title": "商品A", "item_code": "shop1:item1",
+                      "rakuten_link": "https://item.rakuten.co.jp/shop1/item1/", "price_ref": 1000}
+        step = {"category": "化粧水", "purpose": "保湿", "ingredient_focus": "ナイアシンアミド"}
+        with patch("app._rakuten_criteria_search_single", return_value=[dict(same_item)]):
+            all_results = app.search_rakuten_for_step(step, {})
+        self.assertEqual(len(all_results), 1)
+
+    def test_falls_back_to_rakuten_link_when_item_code_missing(self):
+        results = [
+            {"name": "商品A", "rakuten_title": "商品A", "item_code": "",
+             "rakuten_link": "https://item.rakuten.co.jp/shop1/item1/", "price_ref": 1000},
+            {"name": "商品A", "rakuten_title": "商品A", "item_code": "",
+             "rakuten_link": "https://item.rakuten.co.jp/shop2/item2/", "price_ref": 1200},
+        ]
+        step = {"category": "化粧水", "purpose": "保湿", "ingredient_focus": ""}
+        with patch("app._rakuten_criteria_search_single", side_effect=self._fake_search({"化粧水": results})):
+            all_results = app.search_rakuten_for_step(step, {})
+        self.assertEqual(len(all_results), 2)
+
+    def test_falls_back_to_normalized_name_when_no_identifier_available(self):
+        """item_code/rakuten_linkのどちらも取得できない場合のみ、従来通り
+        商品名の正規化で重複除去する(安全側のフォールバック)。"""
+        results = [
+            {"name": "商品A", "rakuten_title": "商品A", "item_code": "", "rakuten_link": "", "price_ref": 1000},
+            {"name": "商品A", "rakuten_title": "商品A", "item_code": "", "rakuten_link": "", "price_ref": 1200},
+        ]
+        step = {"category": "化粧水", "purpose": "保湿", "ingredient_focus": ""}
+        with patch("app._rakuten_criteria_search_single", side_effect=self._fake_search({"化粧水": results})):
+            all_results = app.search_rakuten_for_step(step, {})
+        self.assertEqual(len(all_results), 1)
 
 
 class ComparisonTableSameProductDifferentShopTests(unittest.TestCase):
