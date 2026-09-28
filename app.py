@@ -17553,7 +17553,10 @@ def _build_why_best_text(best, others, step, best_label):
                 shared_label = info["label"]
                 break
 
-        selected = decisive[:2]
+        # 件数上限は設けず、見つかった決定的優位・回避項目を全て使う(2026-09、
+        # 実機診断で「機械的でテンプレート」「2位・3位それぞれとの実際の差を
+        # 知りたい」との指摘を受け、[:2]による情報の切り捨てをやめた)。
+        selected = decisive
         gain_phrases = []
         avoidance_phrases = []
         for d in selected:
@@ -17572,15 +17575,31 @@ def _build_why_best_text(best, others, step, best_label):
                 else:
                     gain_phrases.append(d["label"])
 
+        # 比較対象を明示する。「比較した候補」という曖昧な言い方ではなく、
+        # 実際に2位・3位のどちらと比べているかを名指しする(点数そのものは
+        # 表示しない、あくまで自然文での言及)。decisiveな差は定義上
+        # others全員に対して優位なため、対象は常に2位・3位(othersが1件
+        # のみなら2位のみ)になる。
+        other_labels = ["2位", "3位"][:len(others)]
+        if len(other_labels) > 1:
+            target_compare = "・".join(other_labels) + "のいずれと比べても"
+            target_seen = "・".join(other_labels) + "のいずれにも見られた"
+        elif other_labels:
+            target_compare = f"{other_labels[0]}と比べても"
+            target_seen = f"{other_labels[0]}にも見られた"
+        else:
+            target_compare = "比較した候補より"
+            target_seen = "比較した候補に見られた"
+
         clauses = []
         if gain_phrases:
-            clauses.append(f"{best_label}は{'、'.join(gain_phrases)}で比較した候補より優位")
+            clauses.append(f"{best_label}は{target_compare}{'、'.join(gain_phrases)}で優位")
         if avoidance_phrases:
             avoidance_text = "、".join(avoidance_phrases)
             if gain_phrases:
-                clauses.append(f"比較した候補に見られた{avoidance_text}の影響も受けていません")
+                clauses.append(f"{target_seen}{avoidance_text}の影響も受けていません")
             else:
-                clauses.append(f"{best_label}は比較した候補に見られた{avoidance_text}の影響を受けていません")
+                clauses.append(f"{best_label}は{target_seen}{avoidance_text}の影響を受けていません")
 
         decisive_sentence = "、".join(clauses) + "。この差が選ばれた理由です。"
 
@@ -17601,8 +17620,10 @@ def _build_why_best_text(best, others, step, best_label):
     other_labels = ["2位", "3位"][:len(others)]
     partial_matches = _find_partial_advantage_reasons(best_agg, others_agg_list, other_labels)
     if partial_matches:
+        # decisiveティアと同様、件数上限は設けず見つかった部分優位ruleを
+        # 全て使う(2026-09、[:2]による情報の切り捨てをやめた)。
         phrases = []
-        for rule, info, beaten_labels, _gap_sum in partial_matches[:2]:
+        for rule, info, beaten_labels, _gap_sum in partial_matches:
             feature_text = "・".join(_safe_display_labels(info["feature"], limit=2))
             if feature_text and feature_text != info["label"]:
                 reason_phrase = f"{info['label']}({feature_text})"
@@ -18052,6 +18073,30 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
             step["_comparison_candidates"] = comparison_candidates
         else:
             step.pop("_comparison_candidates", None)
+
+        # 候補が各段階でどれだけ失われているかを可視化するための計測ログ。
+        # 「商品比較の件数が少なすぎる」問題の対策(クエリ拡張/取得件数増/
+        # フィルタ見直し)を検討する前に、実際にどこで候補が最も失われて
+        # いるか(検索自体が少ないのか、フィルタで弾かれているのか、
+        # 重複除去で潰れているのか)を先に特定するために追加した(2026-09)。
+        # raw=preserve_ranked_top_candidatesに渡された時点(検索・
+        # NGワード/カテゴリ不一致フィルタ・出品単位の重複除去済み、
+        # search_rakuten_for_step側の[RAKUTEN FOR STEP]ログと対応)。
+        # recommend_list=汎用名除外・identity単位の重複除去(推薦用)後。
+        # comparison_list=商品比較表専用リスト(出品単位の重複除去のみ)。
+        # comparison_real_priced=そのうちai_virtualでなく価格が確認できる件数
+        # (実際に商品比較表へ表示される件数)。
+        _real_priced_count = sum(
+            1 for c in comparison_candidates if _is_real_priced_candidate(c)
+        ) if comparison_candidates else 0
+        print(
+            f"[CANDIDATE FUNNEL] step={_step_cat!r} "
+            f"raw={len(raw_candidates)} "
+            f"recommend_list={len(normalized_candidates)} "
+            f"comparison_list={len(comparison_candidates)} "
+            f"comparison_real_priced={_real_priced_count}",
+            flush=True
+        )
 
         if normalized_candidates:
             # 楽天検索由来の候補は仕様上ブランド欄が常に空文字になる。
@@ -20110,12 +20155,21 @@ def get_analysis_schema_phase2():
             },
             "morning_order": {"type": "array", "items": {"type": "string"}},
             "night_order": {"type": "array", "items": {"type": "string"}},
-            "reason": {"type": "string"}
+            # reasonを1つの自由記述フィールドのままにすると、要素(優先度の高い
+            # 改善項目への言及/頻度設計の考え方)のどちらかが薄くなりがちだった
+            # (2026-09、実機診断で「週間ルーティンの理由欄の内容が不十分」との
+            # 指摘を繰り返し受けた)。2つの独立した必須フィールドに分割し、
+            # それぞれ単体では省略できない形にする。表示時はFlask側で自然に
+            # 連結し、Android側には従来通り単一のreason文字列として渡す
+            # (Android側の変更は不要)。
+            "reason_priority_focus": {"type": "string"},
+            "reason_frequency_design": {"type": "string"}
         },
         "required": [
             "strategy_type","overall_policy","morning_policy","night_policy","weekly_policy",
             "active_care_frequency","recovery_care_frequency","rotation_targets",
-            "avoid_combinations","synergy_combinations","morning_order","night_order","reason"
+            "avoid_combinations","synergy_combinations","morning_order","night_order",
+            "reason_priority_focus","reason_frequency_design"
         ]
     }
     supplement_schema = {
@@ -20876,7 +20930,8 @@ rotation_targets: ローテーション対象成分配列
 morning_order: 朝の使用順序配列(ブースターは化粧水前)
 night_order: 夜の使用順序配列
 ※パックを使う日は、原則「化粧水の後・美容液の前」に配置する。ただしメーカーが使用順を指定している製品はその順に従う。
-reason: このルーティン全体をこの方針にした理由を2〜3文で。優先度の高い改善項目を中心に、なぜこの全体方針にしたかを説明する(特定の項目名を必ず挙げる必要はない)。頻度については、全体としてどう設計したか(例:刺激系ケアを分散させる方針か、毎日ケアを優先する方針か)には触れてよいが、個別の頻度設定の詳細理由(例:成分Xがなぜ週n回か)には触れない(そちらは各stepのuse_days_reasonで別途扱うため重複させない)
+reason_priority_focus: 優先度の高い改善項目を中心に、なぜこの全体方針にしたかを2文以上で説明する(特定の項目名を必ず挙げる必要はない。実際のスコア・優先順位に基づいた具体的な内容にすること。「肌に合う」「効果的」等の抽象的な言い回しだけで終わらせない)。
+reason_frequency_design: 頻度を全体としてどう設計したかの考え方を1〜2文で説明する(例:刺激系ケアを分散させる方針か、毎日ケアを優先する方針か)。個別の頻度設定の詳細理由(例:成分Xがなぜ週n回か)には触れない(そちらは各stepのuse_days_reasonで別途扱うため重複させない)。
 
 【routine_strategy 出力例】
 (例: バリア機能・皮脂バランスの改善優先度が高いケース)
@@ -20884,7 +20939,8 @@ overall_policy: バリア機能の回復を最優先し、刺激を抑えなが�
 morning_policy: 紫外線対策と皮脂コントロールに絞り、刺激の少ない最低限のケアにとどめる。
 night_policy: 保湿・バリア強化を中心とした集中ケアを行い、日中受けた刺激をケアする。
 weekly_policy: 週1〜2回のパックでバリア機能の底上げを図り、毎日の刺激蓄積を避ける。
-reason: 優先度の高いバリア機能と皮脂バランスの改善を軸に、朝は刺激を抑えた最低限のケア、夜はセラミドや鎮静成分による集中ケアという役割分担にした。皮脂分泌が活発な一方で保湿不足も見られるため、皮脂を抑えすぎず保湿とのバランスを重視する方針とした。週間ケアは肌への負担を考慮し、毎日ではなく集中ケアとして頻度を絞る設計にしている。
+reason_priority_focus: 優先度の高いバリア機能と皮脂バランスの改善を軸に、朝は刺激を抑えた最低限のケア、夜はセラミドや鎮静成分による集中ケアという役割分担にした。皮脂分泌が活発な一方で保湿不足も見られるため、皮脂を抑えすぎず保湿とのバランスを重視する方針とした。
+reason_frequency_design: 週間ケアは肌への負担を考慮し、毎日ではなく集中ケアとして頻度を絞る設計にしている。
 (この例と同程度の具体性・文の数を目安にする。項目名や文面をそのまま流用せず、実際のスコア・優先順位に基づいて書くこと)
 
 avoid_combinations(3件以上必須):
@@ -21512,6 +21568,25 @@ def run_phase1_ensemble(user_data, front_img, left_img, right_img, n=PHASE1_ENSE
     return final
 
 
+def assemble_routine_strategy_reason(routine_strategy):
+    """
+    routine_strategy.reasonの組み立て。スキーマ上はGeminiにreason_priority_
+    focus/reason_frequency_designという2つの独立必須フィールドとして出力させ
+    ている(1つの自由記述reasonフィールドのままだと、優先度の高い改善項目
+    への言及と頻度設計の考え方のどちらかが薄くなりがちだったため。2026-09、
+    実機診断で「週間ルーティンの理由欄の内容が不十分」との指摘を繰り返し
+    受けた)。Android側の既存フィールド(routine_strategy.reason、単一文字列)
+    は変更しないため、ここで自然に連結した1つの文字列へ組み立て直す。
+    routine_strategyがdictでない場合は何もしない(in-placeで変更するだけで
+    戻り値は使わない)。
+    """
+    if not isinstance(routine_strategy, dict):
+        return
+    reason_priority = str(routine_strategy.pop("reason_priority_focus", "") or "").strip()
+    reason_frequency = str(routine_strategy.pop("reason_frequency_design", "") or "").strip()
+    routine_strategy["reason"] = " ".join(p for p in (reason_priority, reason_frequency) if p)
+
+
 def analyze_skin_with_gemini(user_data, front_img, left_img, right_img, force_refresh=False):
 
     if DEV_MODE:
@@ -21619,6 +21694,8 @@ def analyze_skin_with_gemini(user_data, front_img, left_img, right_img, force_re
     # ===== マージ =====
     data = {**phase1, **phase2}
     data.setdefault("warnings", [])
+
+    assemble_routine_strategy_reason(data.get("routine_strategy"))
 
     # 無料ユーザー用: スコア昇順の改善優先順位リストを生成
     data["improvement_priority"] = build_improvement_priority(data.get("scores", {}))

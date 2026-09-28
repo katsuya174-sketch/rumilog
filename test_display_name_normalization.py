@@ -299,30 +299,39 @@ class RoutineStrategyPromptOverallReasonGuidanceTests(unittest.TestCase):
       (優先度の高い項目を中心に、という柔軟な表現にする)。
     - 個別の頻度設定の詳細理由(use_days_reason/frequency_reason_note側の
       役割)をreasonに重複させない。
+
+    2026-09、実機診断で「具体例を1つ追加しただけでは改善しない」ことが
+    確認されたため、reasonを1つの自由記述フィールドのままにせず、
+    reason_priority_focus/reason_frequency_designという2つの独立必須
+    フィールドに分割した(get_analysis_schema_phase2()参照)。要素の
+    どちらかを省略できない構造にすることで、Geminiの遵守を強制する狙い。
     """
 
     _USER_DATA = {"concerns": [], "age": 30, "budget": 5000, "exp": "beginner", "oil": "oily", "sens": "normal"}
 
     def test_full_prompt_contains_overall_reason_guidance(self):
+        # build_analysis_prompt()/get_analysis_schema()は実際には呼ばれて
+        # いない未使用コード(get_analysis_schema_phase2()が実際に使われる
+        # スキーマ)だが、将来復活する可能性に備え文言の存在だけ確認する。
         prompt = app.build_analysis_prompt(self._USER_DATA)
         self.assertIn("全体方針を一文で", prompt)
-        self.assertIn("このルーティン全体をこの方針にした理由", prompt)
         self.assertIn("優先度の高い改善項目を中心に", prompt)
         # 「優先順位1位に必ず言及」という硬直した表現は含まれないこと
         self.assertNotIn("優先順位1位に必ず言及", prompt)
-        # 個別頻度理由の詳細をreasonに含めないことの明示
-        self.assertIn("個別の頻度設定の詳細理由", prompt)
         self.assertIn("use_days_reason", prompt)
 
-    def test_phase2_prompt_contains_overall_reason_guidance(self):
+    def test_phase2_prompt_contains_split_reason_field_guidance(self):
+        """実際に使われるbuild_analysis_prompt_phase2()の指示。"""
         prompt = app.build_analysis_prompt_phase2(self._USER_DATA, {})
         self.assertIn("全体方針を一文で", prompt)
-        self.assertIn("このルーティン全体をこの方針にした理由", prompt)
+        self.assertIn("reason_priority_focus:", prompt)
+        self.assertIn("reason_frequency_design:", prompt)
+        self.assertIn("優先度の高い改善項目を中心に", prompt)
+        self.assertIn("use_days_reason", prompt)
 
     def test_prompt_contains_morning_night_weekly_role_division_guidance(self):
         prompt = app.build_analysis_prompt(self._USER_DATA)
         self.assertIn("互いにどう役割分担しているか", prompt)
-
 
     def test_prompt_contains_worked_example_with_target_depth(self):
         prompt = app.build_analysis_prompt(self._USER_DATA)
@@ -333,6 +342,36 @@ class RoutineStrategyPromptOverallReasonGuidanceTests(unittest.TestCase):
     def test_phase2_prompt_contains_worked_example(self):
         prompt = app.build_analysis_prompt_phase2(self._USER_DATA, {})
         self.assertIn("routine_strategy 出力例", prompt)
+
+
+class AssembleRoutineStrategyReasonTests(unittest.TestCase):
+    """assemble_routine_strategy_reason(): reason_priority_focus/
+    reason_frequency_designの2つの独立フィールドを、Android側の既存
+    フィールド(routine_strategy.reason、単一文字列)へ自然に連結する。"""
+
+    def test_both_parts_present_are_joined_with_space(self):
+        rs = {"reason_priority_focus": "優先度説明。", "reason_frequency_design": "頻度説明。"}
+        app.assemble_routine_strategy_reason(rs)
+        self.assertEqual(rs["reason"], "優先度説明。 頻度説明。")
+        self.assertNotIn("reason_priority_focus", rs)
+        self.assertNotIn("reason_frequency_design", rs)
+
+    def test_missing_frequency_part_still_produces_valid_reason(self):
+        rs = {"reason_priority_focus": "優先度説明のみ。", "reason_frequency_design": ""}
+        app.assemble_routine_strategy_reason(rs)
+        self.assertEqual(rs["reason"], "優先度説明のみ。")
+
+    def test_none_routine_strategy_does_not_raise(self):
+        app.assemble_routine_strategy_reason(None)
+
+    def test_non_dict_routine_strategy_does_not_raise(self):
+        app.assemble_routine_strategy_reason("not a dict")
+
+    def test_other_routine_strategy_fields_are_preserved(self):
+        rs = {"reason_priority_focus": "a", "reason_frequency_design": "b", "overall_policy": "x", "morning_order": ["1"]}
+        app.assemble_routine_strategy_reason(rs)
+        self.assertEqual(rs["overall_policy"], "x")
+        self.assertEqual(rs["morning_order"], ["1"])
 
 
 def _real_candidate(name, price_ref, item_code, score=90, brand="テストブランド"):

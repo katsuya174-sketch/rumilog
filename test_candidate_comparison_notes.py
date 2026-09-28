@@ -874,5 +874,101 @@ class PartialAdvantageFallbackTests(unittest.TestCase):
         self.assertNotIn("3位", why_best)
 
 
+class DecisiveReasonUncappedAndTargetNamingTests(unittest.TestCase):
+    """_build_why_best_text(): decisiveティアの件数上限([:2])を撤廃し、
+    見つかった決定的優位を全て使うこと。また「比較した候補」という曖昧な
+    言い方ではなく、実際に2位・3位のどちらと比べているかを明示すること。
+    2026-09、実機診断で「機械的でテンプレート」「2位・3位それぞれとの
+    実際の差を知りたい」との指摘を受けた回帰テスト。点数そのもの
+    (+◯◯点等)は表示しないことも確認する。"""
+
+    def test_three_or_more_decisive_reasons_are_all_included(self):
+        candidates = [
+            _candidate("商品A", base_score=80, candidate_score_reasons=[
+                _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                        feature="niacinamide", points=25),
+                _reason("ingredient_focus_support_match", "今回重視する成分を補助成分として含む",
+                        feature="retinol", points=10),
+                _reason("common_skin_type_match", "今回の肌質に合う", feature="oily", points=6),
+            ]),
+            _candidate("競合B", base_score=50, candidate_score_reasons=[]),
+            _candidate("競合C", base_score=50, candidate_score_reasons=[]),
+        ]
+        notes = app.build_candidate_comparison_notes(candidates, {}, {})
+        why_best = notes["why_best"]
+        self.assertIn("ナイアシンアミド", why_best)
+        self.assertIn("レチノール", why_best)
+        self.assertIn("今回の肌質に合う", why_best)
+
+    def test_two_others_names_both_as_target(self):
+        candidates = [
+            _candidate("商品A", base_score=80, candidate_score_reasons=[
+                _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                        feature="niacinamide", points=25),
+            ]),
+            _candidate("競合B", base_score=50, candidate_score_reasons=[]),
+            _candidate("競合C", base_score=50, candidate_score_reasons=[]),
+        ]
+        notes = app.build_candidate_comparison_notes(candidates, {}, {})
+        why_best = notes["why_best"]
+        self.assertIn("2位・3位のいずれと比べても", why_best)
+
+    def test_single_other_names_only_that_one_as_target(self):
+        """比較対象が2位のみ(3位が存在しない)の場合、「2位・3位の
+        いずれと比べても」ではなく「2位と比べても」になること(存在しない
+        3位を誤って言及しない)。"""
+        candidates = [
+            _candidate("商品A", base_score=80, candidate_score_reasons=[
+                _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                        feature="niacinamide", points=25),
+            ]),
+            _candidate("競合B", base_score=50, candidate_score_reasons=[]),
+        ]
+        notes = app.build_candidate_comparison_notes(candidates, {}, {})
+        why_best = notes["why_best"]
+        self.assertIn("2位と比べても", why_best)
+        self.assertNotIn("3位", why_best)
+
+    def test_no_numeric_point_values_are_shown(self):
+        """理由は自然文のみで、点数(+25点等)は表示しないこと。"""
+        candidates = [
+            _candidate("商品A", base_score=80, candidate_score_reasons=[
+                _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                        feature="niacinamide", points=25),
+            ]),
+            _candidate("競合B", base_score=50, candidate_score_reasons=[]),
+        ]
+        notes = app.build_candidate_comparison_notes(candidates, {}, {})
+        why_best = notes["why_best"]
+        self.assertNotIn("25点", why_best)
+        self.assertNotIn("+25", why_best)
+
+    def test_partial_advantage_tier_also_uncapped(self):
+        """部分優位ティア(_find_partial_advantage_reasons)も件数上限を
+        撤廃し、見つかった全ての部分優位を使うこと。"""
+        candidates = [
+            _candidate("商品A", base_score=80, candidate_score_reasons=[
+                # 2位にだけ優位(3位は同点)
+                _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                        feature="niacinamide", points=25),
+                # 3位にだけ優位(2位は同点)
+                _reason("ingredient_focus_support_match", "今回重視する成分を補助成分として含む",
+                        feature="retinol", points=10),
+            ]),
+            _candidate("競合B", base_score=50, candidate_score_reasons=[
+                _reason("ingredient_focus_support_match", "今回重視する成分を補助成分として含む",
+                        feature="retinol", points=10),
+            ]),
+            _candidate("競合C", base_score=50, candidate_score_reasons=[
+                _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                        feature="niacinamide", points=25),
+            ]),
+        ]
+        notes = app.build_candidate_comparison_notes(candidates, {}, {})
+        why_best = notes["why_best"]
+        self.assertIn("ナイアシンアミド", why_best)
+        self.assertIn("レチノール", why_best)
+
+
 if __name__ == "__main__":
     unittest.main()
