@@ -36,13 +36,18 @@ def _candidate(
     support_ingredients=None,
     main_functions=None,
     concerns=None,
-    source="db",
+    source="rakuten_criteria",
     candidate_score_reasons=None,
 ):
     """normalize_candidate()通過後の形(必要フィールドのみ)を模したdict。
     candidate_score_reasonsは採点根拠トレース(score_product()等の副産物)を
     模したリスト。[{"axis","rule","label","matched_product_feature",
-    "matched_user_condition","points"}, ...]。"""
+    "matched_user_condition","points"}, ...]。
+    sourceのデフォルトは"rakuten_criteria"(Phase3でDB経由の固定候補が
+    廃止されたため、現在の実運用で実際に使われる実売候補のsource)。
+    build_candidate_comparison_table()は価格・コスパ比較をsourceが
+    rakuten_criteria/verified_cacheの候補のみに限定するため、この
+    デフォルトを使う既存テストは変更後も引き続き意味のある検証になる。"""
     return {
         "brand": brand,
         "name": name,
@@ -611,7 +616,7 @@ class NormalizeCandidateFieldRetentionTests(unittest.TestCase):
                     "improve_score": 0,
                     "routine_score": 0,
                     "price_ref": 2500,
-                    "source": "db",
+                    "source": "rakuten_criteria",
                     "_base_reasons": [
                         _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
                                 feature="ナイアシンアミド", points=25),
@@ -625,7 +630,7 @@ class NormalizeCandidateFieldRetentionTests(unittest.TestCase):
                     "improve_score": 0,
                     "routine_score": 0,
                     "price_ref": 2000,
-                    "source": "db",
+                    "source": "rakuten_criteria",
                     "_base_reasons": [],
                 },
             ],
@@ -658,9 +663,9 @@ class NormalizeCandidateFieldRetentionTests(unittest.TestCase):
             "brand": "ブランドA",
             "top_candidates": [
                 {"brand": "ブランドA", "name": "1位美容液", "score": 90, "base_score": 90,
-                 "improve_score": 0, "routine_score": 0, "price_ref": 3000, "source": "db"},
+                 "improve_score": 0, "routine_score": 0, "price_ref": 3000, "source": "rakuten_criteria"},
                 {"brand": "ブランドB", "name": "2位美容液", "score": 70, "base_score": 70,
-                 "improve_score": 0, "routine_score": 0, "price_ref": 2000, "source": "db"},
+                 "improve_score": 0, "routine_score": 0, "price_ref": 2000, "source": "rakuten_criteria"},
             ],
         }
         result_step = app.finalize_step_data(dict(step), {"oil": "oily", "concerns": []})

@@ -149,12 +149,15 @@ class CandidateComparisonTableNameCleaningTests(unittest.TestCase):
     (勝者だけでなく比較候補の表示品質も統一する)。"""
 
     def test_non_winner_candidate_names_are_cleaned(self):
+        # build_candidate_comparison_table()は実売候補(rakuten_criteria/
+        # verified_cache)のみを対象にするため、sourceを明示する。
         top_candidates = [
-            {"name": "1位商品", "price_ref": 1000, "score": 100},
+            {"name": "1位商品", "price_ref": 1000, "score": 100, "source": "rakuten_criteria"},
             {
                 "name": "【｜9/19 00〜9/30 59】【期間限定】The Ordinary N10+Z1フェイスセラム",
                 "price_ref": 900,
                 "score": 90,
+                "source": "rakuten_criteria",
             },
         ]
         table = app.build_candidate_comparison_table(top_candidates)

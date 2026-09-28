@@ -5768,11 +5768,19 @@ def _rakuten_criteria_search_single(keyword, category):
             inferred = infer_ingredients_from_rakuten_title(item_name)
 
             results.append({
-                # 先にクリーニング(宣伝文句・装飾記号の除去)してから短くする。
-                # クリーニング前に50文字で切ると、"ウォッシングフォーム"が
-                # "ウォッシン"のように途中で切れてキーワード判定に
-                # 使われるべき語が失われることがあった。
-                "name": clean_display_product_name(item_name)[:60],
+                # 販促文言除去(normalize_display_product_name、
+                # clean_display_product_nameより強力に楽天タイトル特有の
+                # 販促パターンを除去する)を完全な元タイトルに対して先に
+                # 適用してから60文字上限を掛ける。旧実装は
+                # clean_display_product_name(軽量版)+60文字トリムを先に
+                # 行っていたため、販促文言が先頭にある実タイトル(例:
+                # 「59まで！【公式】オルナオーガニック【楽天】乳液...」)で
+                # 60文字の枠が販促文言だけで埋まり、本来の商品名部分が
+                # 一文字も残らないままtop_candidates[].nameに保存される
+                # 実障害があった(診断20260927050949108625等で確認)。
+                # why_best/商品比較表はこのnameをそのまま使うため、この順序
+                # 修正だけでそれらの表示も連動して改善される。
+                "name": normalize_display_product_name(item_name)[:60],
                 "brand": "",
                 "category": category,
                 "active_ingredients": inferred,
@@ -8414,23 +8422,141 @@ _SELECTION_REASON_SCHEMA = {
     }
 }
 
-_INGREDIENT_LABEL_JA = {
-    "retinol": "レチノール", "retinal": "レチナール", "vitamin_c": "ビタミンC",
-    "niacinamide": "ナイアシンアミド", "azelaic_acid": "アゼライン酸",
-    "tranexamic_acid": "トラネキサム酸", "ceramide": "セラミド",
-    "hyaluronic_acid": "ヒアルロン酸", "peptide": "ペプチド", "pdrn": "PDRN",
-    "aha": "AHA(グリコール酸等)", "bha": "BHA(サリチル酸等)",
-    "pha": "PHA", "cica": "CICA(ツボクサ)", "centella": "センテラ",
-    "glycerin": "グリセリン", "collagen": "コラーゲン",
+# =====================================================================
+# 内部識別子 → ユーザー表示/Gemini入力用の安全な日本語ラベル変換の境界。
+#
+# 方針(診断20260927050949108625/20260928022558595699の実機監査で判明した
+# 「salicylic_acid」「oil_control」「sensitive_ok=yes」等の内部キー漏出への
+# 対応): candidate_score_reasons等の内部トレース値(raw)は一切書き換えない。
+# ユーザー文章・Geminiプロンプトへ実際に渡す直前(表示/入力の境界)でだけ
+# この関数を通し、変換できない内部キーはNoneを返して呼び出し側が表示から
+# 除外する(continued_care/_extract_ingredient_focus_labels、
+# build_improvement_reason_detailsと同じ安全側方針。rawキーへの
+# .get(key, key)フォールバックは行わない)。
+#
+# 新規の巨大辞書は作らず、既存の表示ラベル資産を優先して再利用する:
+#   1. ingredient_map(constants.py) — normalize_ingredient_tag()で
+#      "hyaluronic"→"hyaluronic_acid"等の内部エイリアスを正規化してから参照。
+#   2. _CONCERN_LABEL_MAP(商品側concernタグ)
+#   3. MAIN_FUNCTION_MAP(constants.py、main_functions)
+#   4. _NIGHT_IRRITANT_GROUP_LABELS(synergy familyの一部、retinoid/
+#      aha_bha/strong_vitamin_c/azelaic)
+# 上記のいずれにも無い、真に閉じた語彙(skin_type・sensitive_ok等の
+# 「key=value」形式のスコア理由条件)だけを最小限の新規マップで補う。
+# =====================================================================
+_SKIN_TYPE_DISPLAY_LABELS = {
+    "dry": "乾燥肌", "oily": "脂性肌", "mixed": "混合肌",
+    "combination": "混合肌", "normal": "普通肌", "sensitive": "敏感肌",
 }
+
+# apply_common_score_rules()等が_record()のmatched_user_condition/
+# matched_product_featureへ記録する「key=value」形式の内部条件。
+# 実際に使われている値をapp.py全体からgrepして網羅した閉じたリストであり、
+# Gemini等の自由入力から来る値ではないため、これだけは決め打ちで安全。
+_SCORE_CONDITION_DISPLAY_LABELS = {
+    "sensitive_ok=yes": "敏感肌向け", "sensitive_ok=no": "刺激性あり",
+    "sensitive_ok=unknown": "敏感肌適性不明", "sens=high": "敏感肌",
+    "oil=oily": "脂性肌", "oil=dry": "乾燥肌",
+    "exp=beginner": "レチノール未経験",
+    "makeup_level=heavy": "しっかりメイク", "makeup_level=light": "ナチュラルメイク",
+    "morning_cleanse=yes": "朝の洗顔",
+}
+
+
+def _safe_display_label(raw_value):
+    """
+    内部キー・内部条件文字列を、ユーザー文章/Geminiプロンプトへ渡せる
+    安全な日本語ラベルへ変換する。変換できなければNoneを返す
+    (rawキーへのフォールバックはしない=呼び出し側で表示から除外する)。
+    """
+    if raw_value is None:
+        return None
+    text = str(raw_value).strip()
+    if not text:
+        return None
+
+    lowered = text.lower()
+
+    # 既に「key=value」形式の閉じた内部条件文字列。
+    mapped = _SCORE_CONDITION_DISPLAY_LABELS.get(lowered)
+    if mapped:
+        return mapped
+
+    # "×"で結合されたsynergy family対(例: "ceramide×barrier")は、
+    # 単一の内部識別子の形([a-z0-9_]+)をしていないため次のfullmatch判定
+    # ではじかれる前に個別処理する。両辺それぞれをこの関数自身で再帰的に
+    # 変換し、どちらか一方でも変換できなければ全体を破棄する
+    # (片側だけ翻訳されて「セラミド×unknown_raw」のような中途半端な
+    # 表示になることを避ける)。
+    if "×" in text:
+        parts = [p for p in text.split("×") if p]
+        if len(parts) >= 2:
+            translated_parts = [_safe_display_label(p) for p in parts]
+            if all(translated_parts):
+                return "×".join(translated_parts)
+        return None
+
+    # [a-z0-9_]のみで構成される内部識別子の形をしていない場合(日本語・
+    # スペース・記号混じり等)は、既に表示可能な文字列とみなしそのまま返す
+    # (自由記述の販促文言除去はここでは行わない=別関数の責務)。
+    if not re.fullmatch(r"[a-z0-9_]+", lowered):
+        return text
+
+    # 1. synergy family(既存_NIGHT_IRRITANT_GROUP_LABELS。retinoid/
+    #    aha_bha/strong_vitamin_c/azelaic等)。閉じた語彙の完全一致なので、
+    #    後段のnormalize_ingredient_tag()による部分一致より先に試す
+    #    (例: "strong_vitamin_c"がingredient_map側の緩い"vitamin_c"部分
+    #    一致に吸収され、「高濃度」という意味が失われるのを防ぐ)。
+    mapped = _NIGHT_IRRITANT_GROUP_LABELS.get(lowered)
+    if mapped:
+        return mapped
+
+    # 2. 商品側concernタグ(既存_CONCERN_LABEL_MAP)。
+    mapped = _CONCERN_LABEL_MAP.get(lowered)
+    if mapped:
+        return mapped
+
+    # 3. main_functions(既存MAIN_FUNCTION_MAP)。
+    mapped = MAIN_FUNCTION_MAP.get(lowered)
+    if mapped:
+        return mapped
+
+    # 4. skin_type。
+    mapped = _SKIN_TYPE_DISPLAY_LABELS.get(lowered)
+    if mapped:
+        return mapped
+
+    # 5. 成分(既存normalize_ingredient_tag()でエイリアスを正規化してから
+    #    既存ingredient_mapを参照。新規の成分辞書は作らない)。部分一致を
+    #    含む緩い判定のため最後に試す。
+    normalized_ingredient = normalize_ingredient_tag(lowered) or lowered
+    mapped = ingredient_map.get(normalized_ingredient)
+    if mapped:
+        return mapped
+
+    # どの表示ラベル資産でも変換できない内部キーは、raw表示せず除外する。
+    return None
+
+
+def _safe_display_labels(raw_values, limit=None):
+    """_safe_display_labelを複数値へ適用し、変換できたものだけを順序維持で返す。"""
+    result = []
+    for v in raw_values or []:
+        label = _safe_display_label(v)
+        if label and label not in result:
+            result.append(label)
+        if limit and len(result) >= limit:
+            break
+    return result
+
 
 def _fmt_candidate_for_gemini(c, rank):
     """top_candidatesの1件をGemini向け短文に整形"""
     name = c.get("name", "不明")
     brand = c.get("brand", "")
     label = f"{brand} {name}".strip() if brand else name
-    ings = [_INGREDIENT_LABEL_JA.get(i, i) for i in (c.get("active_ingredients") or [])[:4]]
-    funcs = (c.get("main_functions") or [])[:2]
+    ings = _safe_display_labels(c.get("active_ingredients") or [], limit=4)
+    funcs = _safe_display_labels(c.get("main_functions") or [], limit=2)
     score_total = c.get("score", 0)
     score_base = c.get("base_score", 0)
     score_improve = c.get("improve_score", 0)
@@ -8482,7 +8608,9 @@ def gemini_generate_selection_reasons(data, user_data):
         for rank, c in enumerate(top[:3], 1):
             candidates_text.append(_fmt_candidate_for_gemini(c, rank))
             for ing in (c.get("active_ingredients") or []):
-                allowed_ings.add(_INGREDIENT_LABEL_JA.get(ing, ing))
+                label = _safe_display_label(ing)
+                if label:
+                    allowed_ings.add(label)
         if not candidates_text:
             candidates_text.append(f"1位: {step.get('product','')} / 候補なし")
 
@@ -15467,8 +15595,13 @@ def build_selection_reason_from_scores(product, step, user_data):
     support_ingredients = as_list(product.get("support_ingredients", []))
     main_functions = as_list(product.get("main_functions", []))
 
+    # このルールベース理由生成はgemini_generate_selection_reasons()が
+    # 失敗した場合のフォールバック経路。ingredient_focus/main_functionsは
+    # Rakuten/仮想候補由来で内部キーのまま渡ってくることがあるため、
+    # rawキーへのフォールバックはせず_safe_display_labelで安全に変換する
+    # (変換できなければ以降の各分岐が自然にスキップされる)。
     normalized_focus = normalize_ingredient_tag(ingredient_focus)
-    focus_label = ingredient_map.get(normalized_focus, ingredient_focus)
+    focus_label = _safe_display_label(ingredient_focus)
 
     concern_words = []
     for word in ["毛穴", "赤み", "乾燥", "保湿", "バリア", "くすみ", "透明感", "色素沈着", "ニキビ", "ハリ", "ざらつき"]:
@@ -15501,8 +15634,9 @@ def build_selection_reason_from_scores(product, step, user_data):
         else:
             ingredient_points.append(f"{focus_label}を意識したケアに合わせやすい")
 
-    if main_functions:
-        ingredient_points.append(f"{main_functions[0]}の役割も期待できる")
+    main_function_label = _safe_display_labels(main_functions, limit=1)
+    if main_function_label:
+        ingredient_points.append(f"{main_function_label[0]}の役割も期待できる")
 
     ingredient_points = list(dict.fromkeys([p for p in ingredient_points if p]))
 
@@ -17247,7 +17381,10 @@ def _build_why_best_text(best, others, step, best_label):
         gain_phrases = []
         avoidance_phrases = []
         for d in selected:
-            feature_text = "・".join(d["feature"][:2])
+            # d["feature"]はcandidate_score_reasonsのmatched_product_feature
+            # (内部トレース値、rawのまま)。表示直前でだけ安全な日本語へ変換し、
+            # 変換できないものは除外する(rawキーへフォールバックしない)。
+            feature_text = "・".join(_safe_display_labels(d["feature"], limit=2))
             if d["kind"] == "avoidance":
                 if feature_text and feature_text != d["label"]:
                     avoidance_phrases.append(f"「{d['label']}」({feature_text})")
@@ -17357,15 +17494,23 @@ def build_candidate_comparison_notes(top_candidates, step=None, user_data=None):
         if score_gap > 0:
             parts.append(f"総合スコアが{score_gap}点差")
 
+        # matched_product_feature同様、activ_ingredients/main_functionsも
+        # rawの内部キーのまま保持し、表示直前でだけ_safe_display_labelを
+        # 通す。翻訳できる項目が1つも無ければ、raw文字列を出さずこの
+        # 節自体を省略する(rawキーへのフォールバックはしない)。
         best_actives = [a for a in (best.get("active_ingredients") or []) if a]
         cand_actives = set(a for a in (cand.get("active_ingredients") or []) if a)
-        unique_to_best = [a for a in best_actives if a not in cand_actives]
+        unique_to_best = _safe_display_labels(
+            [a for a in best_actives if a not in cand_actives], limit=1
+        )
         if unique_to_best:
-            parts.append(f"{ingredient_map.get(unique_to_best[0], unique_to_best[0])}を含む点が異なる")
+            parts.append(f"{unique_to_best[0]}を含む点が異なる")
         else:
             best_functions = [f for f in (best.get("main_functions") or []) if f]
             cand_functions = set(f for f in (cand.get("main_functions") or []) if f)
-            unique_function = [f for f in best_functions if f not in cand_functions]
+            unique_function = _safe_display_labels(
+                [f for f in best_functions if f not in cand_functions], limit=1
+            )
             if unique_function:
                 parts.append(f"{unique_function[0]}という特徴が異なる")
 
@@ -17409,22 +17554,45 @@ def build_candidate_comparison_table(top_candidates, diffs=None):
 
     rank_to_diff_label = {2: "2位", 3: "3位"}
 
+    # 「価格・コスパ比較」は実売候補(rakuten_criteria/verified_cache)だけを
+    # 対象にする。ai_virtualはGeminiが生成した仮想候補で、実売価格を
+    # 持ちえない(price_ref=0が仕様どおりの値であり、データ欠落ではない)。
+    # 実売でない候補を「不明」として価格比較へ混在させない
+    # (診断20260927050949108625/20260928022558595699の実機監査で判明)。
+    # なお、この絞り込みはこの比較表(candidate_comparison_table)専用。
+    # why_best(build_candidate_comparison_notes)側のbest(=step["product"]と
+    # 一致させる必要がある1位)には影響しない。
+    _REAL_SOURCE_TYPES = ("rakuten_criteria", "verified_cache")
+    original_best = top_candidates[0] if isinstance(top_candidates[0], dict) else None
+    real_candidates = [
+        (orig_idx, cand) for orig_idx, cand in enumerate(top_candidates[:3], start=1)
+        if isinstance(cand, dict) and cand.get("source") in _REAL_SOURCE_TYPES
+    ]
+
     rows = []
-    for idx, cand in enumerate(top_candidates[:3], start=1):
-        if not isinstance(cand, dict):
-            continue
+    for new_idx, (orig_idx, cand) in enumerate(real_candidates, start=1):
         price = safe_price(cand.get("price_ref", 0))
         score = _safe_num(cand.get("score", 0))
         cost_perf = round(score / price * 1000, 1) if price > 0 else None
+        # diff_from_bestはbuild_candidate_comparison_notes()がoriginal_best
+        # (=filter前のtop_candidates[0])とtop_candidates[1:3]を比較して
+        # 生成したテキスト。ai_virtual除外で表内の順位が繰り上がっても、
+        # 「1位」が元々実売候補(original_best自身)のときだけ意味が一致する
+        # ため、その場合に限りorig_idxベースで引き継ぐ。1位自体が
+        # ai_virtualだった場合は、この表の1位が実際のwhy_best対象と
+        # 一致しなくなるため、誤解を招く比較文を出さず空文字にする。
+        diff_text = ""
+        if original_best is not None and original_best.get("source") in _REAL_SOURCE_TYPES:
+            diff_text = diff_by_label.get(rank_to_diff_label.get(orig_idx, ""), "")
         rows.append({
-            "rank": idx,
+            "rank": new_idx,
             "brand": cand.get("brand", ""),
             "name": normalize_display_product_name(str(cand.get("name", "") or "")),
             "price": price,
             "score": round(score, 1),
             "cost_perf": cost_perf,
             "is_best_value": False,
-            "diff_from_best": diff_by_label.get(rank_to_diff_label.get(idx, ""), ""),
+            "diff_from_best": diff_text,
         })
 
     valid_cost_perf = [r["cost_perf"] for r in rows if r["cost_perf"] is not None]
