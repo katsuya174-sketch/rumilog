@@ -256,6 +256,33 @@ class GeminiCleanRakutenProductNamesTopCandidateSyncTests(unittest.TestCase):
         self.assertIn("オルナオーガニック", notes["why_best"])
 
 
+class GeminiNameCleanPromptSeoKeywordGuidanceTests(unittest.TestCase):
+    """_GEMINI_NAME_CLEAN_PROMPT_PREFIXに、成分・特徴の列挙とSEOキーワード
+    列挙を区別する判断基準が含まれていること。
+
+    実際の出力品質(Geminiが正しく判断するか)はプロンプトエンジニアリング
+    の性質上、モックでは検証できない(実際のGemini呼び出しが必要)。ここでは
+    プロンプト文言自体が意図通り存在すること・将来の編集で誤って削除
+    されないことだけを保証する回帰テスト。2026-09、実機診断
+    20260928083119852553で「シムホワイト377 ナイアシンアミド ビタミンC
+    誘導体 FGF FGF フラーレン セラミド レチノール 透明感アップ」のような
+    成分羅列タイトルがほぼそのまま残っていたことへの対応。"""
+
+    def test_prompt_contains_seo_keyword_vs_formal_name_judgment_criterion(self):
+        prompt = app._GEMINI_NAME_CLEAN_PROMPT_PREFIX
+        self.assertIn("SEOキーワード", prompt)
+        # 「個数」だけによる絶対ルールにしない(正式名称に複数成分が
+        # 組み込まれているケースを壊さない)ことを明示した判断基準文言。
+        self.assertIn("判断基準は個数そのものではなく", prompt)
+
+    def test_prompt_contains_seo_keyword_example_pair(self):
+        prompt = app._GEMINI_NAME_CLEAN_PROMPT_PREFIX
+        # 成分列挙を削除すべき例
+        self.assertIn("シムホワイト377", prompt)
+        # 成分1つが正式名称を構成し保持すべき例
+        self.assertIn("アゼライン酸化粧水", prompt)
+
+
 class DeviceContextSentenceDoublePeriodTests(unittest.TestCase):
     """device_selection_reason生成時の二重句点バグの回帰テスト。"""
 

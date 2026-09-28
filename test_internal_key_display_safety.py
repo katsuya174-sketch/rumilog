@@ -90,6 +90,51 @@ class SafeDisplayLabelUnitTests(unittest.TestCase):
         self.assertEqual(len(result), 2)
 
 
+class SafeDisplayLabelCompositeTagTests(unittest.TestCase):
+    """_safe_display_label(): "、"/":" で連結された複合値の翻訳。
+    2026-09、実機診断20260928083119852553で"pores、oil_control"
+    "niacinamide:medium"等が生のまま漏出することが判明した回帰テスト。
+    内部構造化値(閉じた語彙の連結)と自由文(通常の日本語の読点・コロン)の
+    境界を壊さないことも合わせて確認する。"""
+
+    def test_comma_joined_concern_tags_are_translated(self):
+        self.assertEqual(app._safe_display_label("pores、oil_control"), "毛穴ケア・皮脂抑制")
+
+    def test_comma_joined_availability_channels_are_translated(self):
+        self.assertEqual(
+            app._safe_display_label("drugstore、amazon、rakuten"),
+            "ドラッグストア・Amazon・楽天",
+        )
+
+    def test_ingredient_strength_colon_format_is_translated(self):
+        self.assertEqual(app._safe_display_label("niacinamide:medium"), "ナイアシンアミド・標準濃度")
+        self.assertEqual(app._safe_display_label("retinol:high"), "レチノール・高濃度")
+
+    def test_comma_joined_value_with_one_untranslatable_part_is_dropped_entirely(self):
+        """片側だけ翻訳された中途半端な表示("毛穴ケア・unknown_xyz")には
+        しない(×連結と同じ安全側の原則)。"""
+        self.assertIsNone(app._safe_display_label("pores、totally_unknown_xyz"))
+
+    def test_colon_format_with_unknown_strength_level_is_dropped(self):
+        """右辺がhigh/medium/low以外の未知の値は捏造せず破棄する。"""
+        self.assertIsNone(app._safe_display_label("niacinamide:extreme"))
+
+    def test_ordinary_japanese_sentence_with_comma_is_unaffected(self):
+        """通常の日本語文中の読点は、内部識別子の連結ではないため、
+        従来通りそのまま(区切り文字を変えずに)返ること
+        (内部構造化値と自由文の境界を壊さない)。"""
+        text = "バリア機能を強化し、肌を整える"
+        self.assertEqual(app._safe_display_label(text), text)
+
+    def test_ordinary_japanese_sentence_with_colon_is_unaffected(self):
+        text = "使用方法: 朝晩1回"
+        self.assertEqual(app._safe_display_label(text), text)
+
+    def test_safe_display_labels_translates_composite_values_in_list(self):
+        result = app._safe_display_labels(["pores、oil_control", "niacinamide:medium"])
+        self.assertEqual(result, ["毛穴ケア・皮脂抑制", "ナイアシンアミド・標準濃度"])
+
+
 class FmtCandidateForGeminiSafetyTests(unittest.TestCase):
     """_fmt_candidate_for_gemini(): Gemini入力プロンプトへ内部キーが
     漏れないこと。"""
@@ -256,6 +301,29 @@ class BuildWhyBestTextSafetyTests(unittest.TestCase):
         self.assertNotIn("niacinamide×azelaic", result["why_best"])
         self.assertIn("ナイアシンアミド", result["why_best"])
         self.assertIn("アゼライン酸", result["why_best"])
+
+    def test_shared_label_grammar_uses_nominalizer_before_particle(self):
+        """shared_labelが動詞終止形で終わる場合でも、「含むという点は」の
+        ように名詞化して自然な文になること(「含むは」という破格を避ける)。
+        2026-09、実機診断20260928083119852553で確認した文法不自然さの
+        回帰テスト。"""
+        candidates = [
+            _candidate("商品A", base_score=80, candidate_score_reasons=[
+                _reason("ingredient_focus_active_match", "今回重視する成分を主成分として含む",
+                        feature="niacinamide", condition="niacinamide", points=25),
+                _reason("ingredient_focus_support_match", "今回重視する成分を補助成分として含む",
+                        feature="retinol", condition="retinol", points=10),
+            ]),
+            _candidate("競合B", base_score=50, candidate_score_reasons=[
+                _reason("ingredient_focus_support_match", "今回重視する成分を補助成分として含む",
+                        feature="retinol", condition="retinol", points=10),
+            ]),
+            _candidate("競合C", base_score=50, candidate_score_reasons=[]),
+        ]
+        result = app.build_candidate_comparison_notes(candidates, {}, {})
+        why_best = result["why_best"]
+        self.assertIn("という点は比較した候補にも見られますが", why_best)
+        self.assertNotIn("含むは比較した候補", why_best)
 
 
 class DiffsFromBestSafetyTests(unittest.TestCase):

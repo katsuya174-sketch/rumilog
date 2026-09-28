@@ -7281,6 +7281,27 @@ _GEMINI_NAME_CLEAN_PROMPT_PREFIX = """\
   - 製品名とは独立した汎用キャッチコピー（「うるおい」「美白効果」「エイジングケア」などの後付け説明文。ただし製品名に組み込まれている語は除かない）
   - 記号・装飾（★☆◆◇▼▽●○■□ など単体で意味を持たないもの）
 
+【成分・特徴の列挙とSEOキーワードの区別】
+商品を識別する正式名称・シリーズ名・型番・容量等は保持する。一方、正式名称の
+後ろなどに検索対策として列挙された複数の成分名・効能表現・特徴・販促キーワードは
+削除する。特に3つ以上の成分・特徴が連続して列挙されている場合はSEOキーワードで
+ある可能性が高いものとして扱う。ただし、それらが正式な商品名そのものを構成して
+いると判断できる場合（例: ブランドの正式なシリーズ名に複数成分が組み込まれている
+場合）は保持する。判断基準は個数そのものではなく、「商品を識別するために必要な
+正式名称の一部か、それとも購入ページで検索露出のために後付けされたキーワード
+列挙か」である。
+
+  入力: シムホワイト377 ナイアシンアミド ビタミンC誘導体 FGF フラーレン セラミド レチノール 透明感アップ
+  出力: シムホワイト377
+    ← 「シムホワイト377」が正式な製品名。後続の成分列挙(4つ以上)と
+      「透明感アップ」という効能訴求は、検索対策で付加されたキーワードと
+      判断し削除する。
+
+  入力: o.cos アゼライン酸化粧水 100mL 送料無料
+  出力: o.cos アゼライン酸化粧水
+    ← 「アゼライン酸化粧水」は成分名1つのみで正式な製品名を構成しており
+      (⑥に該当)、列挙ではないため保持する。
+
 【製品ライン名を保持すべき具体例（重要）】
   ※「ピール」「クリア」「ブライト」等の語が含まれていても、製品を区別する固有名なら削除しない
   入力: ロゼット ゴマージュ クリアピール 90g 送料無料 ポイント3倍 楽天1位
@@ -8468,6 +8489,19 @@ _SKIN_TYPE_DISPLAY_LABELS = {
     "combination": "混合肌", "normal": "普通肌", "sensitive": "敏感肌",
 }
 
+# get_strength_score()が使うingredient_strengthの閉じた語彙(high/medium/low
+# の3値のみ)と完全一致。"ingredient_tag:strength"形式(例:
+# "niacinamide:medium")の右辺だけを変換するために使う。
+_STRENGTH_LEVEL_DISPLAY_LABELS = {
+    "high": "高濃度", "medium": "標準濃度", "low": "低濃度",
+}
+
+# get_availability_score()が使うavailability_japanの閉じた語彙と完全一致。
+_AVAILABILITY_CHANNEL_DISPLAY_LABELS = {
+    "drugstore": "ドラッグストア", "variety_shop": "バラエティショップ",
+    "amazon": "Amazon", "rakuten": "楽天", "qoo10": "Qoo10", "official": "公式店舗",
+}
+
 # apply_common_score_rules()等が_record()のmatched_user_condition/
 # matched_product_featureへ記録する「key=value」形式の内部条件。
 # 実際に使われている値をapp.py全体からgrepして網羅した閉じたリストであり、
@@ -8515,6 +8549,44 @@ def _safe_display_label(raw_value):
                 return "×".join(translated_parts)
         return None
 
+    # "、"で結合された複数の内部タグ(例: "pores、oil_control"。concern一致・
+    # availability等、複数タグをまとめて1つのmatched_product_featureとして
+    # 記録する_record()呼び出し側の都合による)。
+    # 内部構造化値と自由文の境界を壊さないよう、分割後の**全要素**が内部
+    # 識別子の形([a-z0-9_]+)をしている場合に限定して扱う。通常の日本語文
+    # (例: "バリア機能を強化し、肌を整える")の読点はこの条件を満たさない
+    # ため、判定せずそのまま下のregex判定へフォールスルーする(=従来通り
+    # 自由文としてそのまま返る)。全要素が内部識別子の形でも、いずれか
+    # 一方でも変換できなければ全体を破棄する(×と同じ、中途半端な表示を
+    # 避ける安全側の原則)。
+    if "、" in text:
+        parts = [p.strip() for p in text.split("、") if p.strip()]
+        if len(parts) >= 2 and all(re.fullmatch(r"[a-z0-9_]+", p.lower()) for p in parts):
+            translated_parts = [_safe_display_label(p) for p in parts]
+            if all(translated_parts):
+                return "・".join(translated_parts)
+            return None
+
+    # ":"で結合された"タグ:強度"形式(例: "niacinamide:medium"、
+    # ingredient_focus_active_strengthが配合強度を記録する際の形式)。
+    # 同様に境界を壊さないよう、ちょうど2要素かつ両辺が内部識別子の形の
+    # 場合に限定する(例: "使用方法: 朝晩1回"のような自由文中のコロンは
+    # 左辺が[a-z0-9_]+にならないため、判定せずフォールスルーする)。
+    # 右辺はget_strength_score()と同じ閉じた語彙(high/medium/low)でのみ
+    # 変換し、閉じた語彙に無い値は捏造せず全体を破棄する。
+    if ":" in text:
+        parts = text.split(":")
+        if (
+            len(parts) == 2
+            and re.fullmatch(r"[a-z0-9_]+", parts[0].strip().lower())
+            and re.fullmatch(r"[a-z0-9_]+", parts[1].strip().lower())
+        ):
+            tag_label = _safe_display_label(parts[0].strip())
+            strength_label = _STRENGTH_LEVEL_DISPLAY_LABELS.get(parts[1].strip().lower())
+            if tag_label and strength_label:
+                return f"{tag_label}・{strength_label}"
+            return None
+
     # [a-z0-9_]のみで構成される内部識別子の形をしていない場合(日本語・
     # スペース・記号混じり等)は、既に表示可能な文字列とみなしそのまま返す
     # (自由記述の販促文言除去はここでは行わない=別関数の責務)。
@@ -8542,6 +8614,11 @@ def _safe_display_label(raw_value):
 
     # 4. skin_type。
     mapped = _SKIN_TYPE_DISPLAY_LABELS.get(lowered)
+    if mapped:
+        return mapped
+
+    # 4.5. availability_japan(get_availability_score()と同じ閉じた語彙)。
+    mapped = _AVAILABILITY_CHANNEL_DISPLAY_LABELS.get(lowered)
     if mapped:
         return mapped
 
@@ -17438,7 +17515,12 @@ def _build_why_best_text(best, others, step, best_label):
         decisive_sentence = "、".join(clauses) + "。この差が選ばれた理由です。"
 
         if shared_label:
-            return f"{shared_label}は比較した候補にも見られますが、{decisive_sentence}"
+            # shared_labelは動詞・形容詞終止形で終わるrule labelのことが
+            # 多く(例:「〜を含む」「〜合う」「〜しやすい」)、直後に「は」を
+            # そのまま続けると「含むは」のように名詞化されておらず破格に
+            # なる。「という点」を挟むことで、labelの品詞によらず自然に
+            # 読める(2026-09、実機診断20260928083119852553で確認)。
+            return f"{shared_label}という点は比較した候補にも見られますが、{decisive_sentence}"
         return decisive_sentence
 
     # 全候補に対する決定的な決め手が一つも無い場合、「一部の候補に対して
