@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2026-07-30 17:44+0900\n"
+"POT-Creation-Date: 2026-09-12 13:51+0900\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,110 +17,375 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.18.0\n"
 
-#: app.py:17711
+#: app.py:16912
+#, python-format
+msgid "肌質(oil_status)の値が不正です: %(value)r"
+msgstr ""
+
+#: app.py:16916
+#, python-format
+msgid "敏感度(sensitivity)の値が不正です: %(value)r"
+msgstr ""
+
+#: app.py:16920
+#, python-format
+msgid "レチノール使用経験(retinol_exp)の値が不正です: %(value)r"
+msgstr ""
+
+#: app.py:16924
+#, python-format
+msgid "肌の悩み(concerns)の値が不正です: %(value)r"
+msgstr ""
+
+#: app.py:16964
+msgid "画像が暗すぎます。明るい場所で撮り直してください。"
+msgstr ""
+
+#: app.py:16966
+msgid "画像が明るすぎます。直射日光を避けて撮り直してください。"
+msgstr ""
+
+#: app.py:16971
+msgid "画像がぼやけています。カメラを安定させて撮り直してください。"
+msgstr ""
+
+#: app.py:16984
+msgid "正面画像を選択してください"
+msgstr ""
+
+#: app.py:16987
+msgid "左頬画像を選択してください"
+msgstr ""
+
+#: app.py:16990
+msgid "右頬画像を選択してください"
+msgstr ""
+
+#: app.py:16993 templates/lab.html:838 templates/lab.html:872
+#: templates/lab.html:1070
+msgid "正面"
+msgstr ""
+
+#: app.py:16994 templates/history.html:575 templates/lab.html:839
+#: templates/lab.html:879 templates/lab.html:1080 templates/result.html:910
+msgid "左頬"
+msgstr ""
+
+#: app.py:16995 templates/history.html:578 templates/lab.html:840
+#: templates/lab.html:886 templates/lab.html:1090 templates/result.html:917
+msgid "右頬"
+msgstr ""
+
+#: app.py:17001
+#, python-format
+msgid "【%(label)s画像】%(message)s"
+msgstr ""
+
+#: app.py:19461
+msgid "分析中にエラーが発生しました。時間をおいて再度お試しください。"
+msgstr ""
+
+#: app.py:19464
+msgid "現在、分析サービスを一時停止しています。ご不便をおかけして申し訳ありません。復旧までしばらくお待ちください。"
+msgstr ""
+
+#: app.py:19466
+msgid "現在分析が混み合っています。少し時間をおいて再度お試しください。"
+msgstr ""
+
+#: app.py:19468
+msgid "現在分析利用が集中しています。しばらくしてから再度お試しください。"
+msgstr ""
+
+#: app.py:19497
+msgid "現在、今月の分析上限に達しています。来月以降に再度お試しください。"
+msgstr ""
+
+#: app.py:19686
+msgid "商品選定中にエラーが発生しました。時間をおいて再度お試しください。"
+msgstr ""
+
+#: app.py:19924 app.py:20104
 #, python-format
 msgid "今月の分析回数（月%(limit)s回）に達しました。来月また利用できます。"
 msgstr ""
 
-#: app.py:17723
+#: app.py:19936 app.py:20113
 #, python-format
 msgid "無料分析は月%(limit)s回までです。続けて利用するには有料プランをご利用ください。"
 msgstr ""
 
-#: app.py:17734 app.py:17735
+#: app.py:19947 app.py:19948 app.py:20123
 msgid "本日の分析回数の上限に達しました。明日またお試しください。"
 msgstr ""
 
-#: app.py:18392
+#: app.py:20491
 msgid "決済処理中にエラーが発生しました。しばらくしてから再度お試しください。"
 msgstr ""
 
-#: app.py:18533
+#: app.py:20695
 msgid "内容を入力してください。"
 msgstr ""
 
-#: app.py:18555
+#: app.py:20730
 msgid "メールアドレスを入力してください。"
 msgstr ""
 
-#: app.py:18571
-msgid "入力されたメールアドレスに紐づくプレミアム会員が見つかりませんでした。ご登録時のアドレスをご確認ください。"
+#: app.py:20750
+msgid "このリンクは無効または期限切れです。もう一度お試しください。"
 msgstr ""
 
-#: app.py:18575
+#: app.py:20754
 msgid "決済システムへの接続に失敗しました。"
 msgstr ""
 
-#: app.py:18587 app.py:18614
+#: app.py:20795
+msgid "入力されたメールアドレスに紐づくプレミアム会員が見つかりませんでした。ご登録時のアドレスをご確認ください。"
+msgstr ""
+
+#: app.py:20808 app.py:20834
 msgid "カスタマーポータルへの接続に失敗しました。しばらく経ってからお試しください。"
 msgstr ""
 
-#: app.py:18603
+#: app.py:20823
 msgid "カスタマー情報が見つかりません。サポートにお問い合わせください。"
 msgstr ""
 
-#: app.py:18646
+#: app.py:20866
 msgid "よく提案される商品（全ユーザー集計）"
 msgstr ""
 
-#: app.py:18651 templates/history.html:387
+#: app.py:20871 templates/history.html:387
 msgid "よく提案される商品"
 msgstr ""
 
-#: app.py:18678
+#: app.py:20898
 msgid "リンクがありません"
 msgstr ""
 
-#: app.py:18691
+#: app.py:20911
 msgid "許可されていないリンクです"
 msgstr ""
 
-#: app.py:18693
+#: app.py:20913
 msgid "無効なURLです"
 msgstr ""
 
-#: app.py:18991
+#: app.py:21210 app.py:21822
 msgid "メールアドレスを正しく入力してください"
 msgstr ""
 
-#: app.py:18994
+#: app.py:21213 app.py:21826
 msgid "エラーが発生しました。しばらく後でお試しください"
 msgstr ""
 
-#: app.py:19004
+#: app.py:21245 app.py:21840
 msgid "このリンクは無効または期限切れです。再度ログインしてください"
 msgstr ""
 
-#: app.py:19007
-msgid "ログインに失敗しました。再度お試しください"
+#: app.py:21797
+msgid "指定された診断結果が見つかりません"
 msgstr ""
 
-#: app.py:19430
+#: app.py:21836
+msgid "トークンが必要です"
+msgstr ""
+
+#: app.py:21866
+msgid "キーが必要です"
+msgstr ""
+
+#: app.py:21870
+msgid "無効なキーです"
+msgstr ""
+
+#: app.py:21933
+msgid "ログインが必要です"
+msgstr ""
+
+#: app.py:21940
+#, python-format
+msgid "アカウント削除に失敗しました: %(detail)s"
+msgstr ""
+
+#: app.py:21960
+msgid "signed_transactionが必要です"
+msgstr ""
+
+#: app.py:21964
+msgid "App Store決済の検証設定が未完了です"
+msgstr ""
+
+#: app.py:21972 app.py:22101
+#, python-format
+msgid "購入情報を検証できませんでした: %(detail)s"
+msgstr ""
+
+#: app.py:21976 app.py:22084 app.py:22113
+msgid "不明な商品IDです"
+msgstr ""
+
+#: app.py:21979
+msgid "この購入は無効化されています"
+msgstr ""
+
+#: app.py:21982 app.py:22133
+msgid "このサブスクリプションは期限切れです"
+msgstr ""
+
+#: app.py:21993 app.py:22149
+msgid "購入情報の保存に失敗しました。しばらくしてから再度お試しください。"
+msgstr ""
+
+#: app.py:22080
+msgid "purchase_tokenとproduct_idが必要です"
+msgstr ""
+
+#: app.py:22088
+msgid "Google Play決済の検証設定が未完了です"
+msgstr ""
+
+#: app.py:22106
+#, python-format
+msgid "購入情報の検証中にエラーが発生しました: %(detail)s"
+msgstr ""
+
+#: app.py:22117
+msgid "このサブスクリプションは有効ではありません"
+msgstr ""
+
+#: app.py:22126
+msgid "購入情報を検証できませんでした"
+msgstr ""
+
+#: app.py:22189
 msgid "結果が見つかりません"
 msgstr ""
 
-#: app.py:19437
+#: app.py:22196
 msgid "エラーが発生しました"
 msgstr ""
 
-#: app.py:19443
+#: app.py:22202
 msgid "現在アクセスが集中しているため、少し時間を空けてから再度お試しください。"
 msgstr ""
 
-#: app.py:19446
+#: app.py:22205
 msgid "現在分析が混み合っています。少し時間を空けてから再度お試しください。"
 msgstr ""
 
-#: app.py:19449
+#: app.py:22208
 msgid "分析処理に時間がかかっています。通信環境を確認して、再度お試しください。"
 msgstr ""
 
-#: app.py:19452
+#: app.py:22211
 msgid "通信エラーが発生しました。時間を空けて再度お試しください。"
 msgstr ""
 
-#: app.py:19454
+#: app.py:22213
 msgid "分析中に一時的なエラーが発生しました。少し時間を空けて再度お試しください。"
+msgstr ""
+
+#: templates/account_deletion.html:8
+msgid "アカウント削除 | るみろぐ"
+msgstr ""
+
+#: templates/account_deletion.html:67
+msgid "るみろぐ アカウント削除のご案内"
+msgstr ""
+
+#: templates/account_deletion.html:68
+msgid "最終更新日：2026年9月4日"
+msgstr ""
+
+#: templates/account_deletion.html:72
+msgid "このページについて"
+msgstr ""
+
+#: templates/account_deletion.html:73
+msgid "このページは、スキンケアAI分析アプリ「るみろぐ」のアカウントおよびデータの削除をリクエストするための案内です。アプリをインストールしていない方・ログインできない方でも、以下の方法でリクエストいただけます。"
+msgstr ""
+
+#: templates/account_deletion.html:77
+msgid "削除対象となるデータ"
+msgstr ""
+
+#: templates/account_deletion.html:79
+msgid "<strong>メールアドレス・アカウント情報</strong>"
+msgstr ""
+
+#: templates/account_deletion.html:80
+msgid "<strong>診断履歴</strong>（スコア・商品提案を含む）"
+msgstr ""
+
+#: templates/account_deletion.html:81
+msgid "<strong>premium_key</strong> など、アカウントに紐づく有効化情報"
+msgstr ""
+
+#: templates/account_deletion.html:86
+msgid "削除のリクエスト方法"
+msgstr ""
+
+#: templates/account_deletion.html:87
+#, python-format
+msgid "以下のいずれかの方法で、「%(keyword)s」であることを明記のうえご連絡ください。"
+msgstr ""
+
+#: templates/account_deletion.html:87 templates/account_deletion.html:88
+msgid "アカウント削除希望"
+msgstr ""
+
+#: templates/account_deletion.html:89
+msgid "または"
+msgstr ""
+
+#: templates/account_deletion.html:89
+msgid "お問い合わせフォーム"
+msgstr ""
+
+#: templates/account_deletion.html:90
+msgid "本人確認のため、登録済みのメールアドレスからご連絡ください。アプリをお持ちの方は、アプリ内の「アカウント削除」機能からも同様に削除いただけます。"
+msgstr ""
+
+#: templates/account_deletion.html:94
+msgid "Google Playの定期購入について"
+msgstr ""
+
+#: templates/account_deletion.html:95
+msgid ""
+"アカウントを削除しても、Google Playの定期購入（サブスクリプション）は自動的には解約されません。定期購入の解約は、Google "
+"Playの「定期購入」設定から別途行ってください。"
+msgstr ""
+
+#: templates/account_deletion.html:99
+msgid "削除にかかる期間"
+msgstr ""
+
+#: templates/account_deletion.html:101
+msgid "ご連絡を受けてから<strong>30日以内</strong>に、該当するデータをすべて削除します。"
+msgstr ""
+
+#: templates/account_deletion.html:102
+msgid "削除後、premium_keyは無効化され、プレミアム機能は利用できなくなります。"
+msgstr ""
+
+#: templates/account_deletion.html:103
+msgid "法令上の保存義務がある情報（決済に関する記録など）を除き、削除後に保持するデータはありません。"
+msgstr ""
+
+#: templates/account_deletion.html:108 templates/data_deletion.html:103
+#: templates/privacy_policy.html:173 templates/terms_of_service.html:167
+msgid "お問い合わせ"
+msgstr ""
+
+#: templates/account_deletion.html:109
+msgid "アカウント削除やプライバシーに関するご質問は、上記メールアドレスまでお気軽にお問い合わせください。"
+msgstr ""
+
+#: templates/account_deletion.html:112 templates/data_deletion.html:107
+#: templates/login.html:162 templates/privacy_policy.html:180
+#: templates/terms_of_service.html:172
+msgid "トップに戻る"
 msgstr ""
 
 #: templates/data_deletion.html:8
@@ -192,18 +457,8 @@ msgstr ""
 msgid "法令上の保存義務がある情報（決済に関する記録など）は、必要な期間に限り保持する場合があります。"
 msgstr ""
 
-#: templates/data_deletion.html:103 templates/privacy_policy.html:173
-#: templates/terms_of_service.html:167
-msgid "お問い合わせ"
-msgstr ""
-
 #: templates/data_deletion.html:104
 msgid "データ削除やプライバシーに関するご質問は、上記メールアドレスまでお気軽にお問い合わせください。"
-msgstr ""
-
-#: templates/data_deletion.html:107 templates/login.html:162
-#: templates/privacy_policy.html:180 templates/terms_of_service.html:172
-msgid "トップに戻る"
 msgstr ""
 
 #: templates/error.html:9
@@ -473,16 +728,6 @@ msgstr ""
 msgid "左右差分析"
 msgstr ""
 
-#: templates/history.html:575 templates/lab.html:839 templates/lab.html:879
-#: templates/lab.html:1080 templates/result.html:910
-msgid "左頬"
-msgstr ""
-
-#: templates/history.html:578 templates/lab.html:840 templates/lab.html:886
-#: templates/lab.html:1090 templates/result.html:917
-msgid "右頬"
-msgstr ""
-
 #: templates/history.html:586
 msgid "肌年齢推定・左右差分析"
 msgstr ""
@@ -637,10 +882,6 @@ msgstr ""
 
 #: templates/lab.html:835
 msgid "正面・左頬・右頬の3枚を登録します"
-msgstr ""
-
-#: templates/lab.html:838 templates/lab.html:872 templates/lab.html:1070
-msgid "正面"
 msgstr ""
 
 #: templates/lab.html:850
@@ -960,7 +1201,7 @@ msgstr ""
 msgid "スマホ・PCどちらからでも同じ履歴を確認できます。"
 msgstr ""
 
-#: templates/login.html:144 templates/portal_by_email.html:116
+#: templates/login.html:144 templates/portal_by_email.html:125
 msgid "メールアドレス"
 msgstr ""
 
@@ -980,23 +1221,39 @@ msgstr ""
 msgid "サブスクリプション管理 | るみろぐ"
 msgstr ""
 
-#: templates/portal_by_email.html:109
-msgid "サブスクリプション管理"
-msgstr ""
-
-#: templates/portal_by_email.html:111
-msgid "ご登録時のメールアドレスを入力すると、"
+#: templates/portal_by_email.html:110
+msgid "確認メールを送信しました"
 msgstr ""
 
 #: templates/portal_by_email.html:112
-msgid "解約・プラン変更ページに移動します。"
+msgid " 宛に確認メールを送信しました。"
+msgstr ""
+
+#: templates/portal_by_email.html:113
+msgid "メール内のリンクをタップすると、解約・プラン変更ページに移動します。"
+msgstr ""
+
+#: templates/portal_by_email.html:114
+msgid "リンクの有効期限は15分間です。"
+msgstr ""
+
+#: templates/portal_by_email.html:118
+msgid "サブスクリプション管理"
 msgstr ""
 
 #: templates/portal_by_email.html:120
-msgid "管理ページへ進む"
+msgid "ご登録時のメールアドレスを入力すると、"
 msgstr ""
 
-#: templates/portal_by_email.html:127
+#: templates/portal_by_email.html:121
+msgid "本人確認用のリンクをメールでお送りします。"
+msgstr ""
+
+#: templates/portal_by_email.html:129
+msgid "確認メールを送信する"
+msgstr ""
+
+#: templates/portal_by_email.html:137
 msgid "分析ページに戻る"
 msgstr ""
 
