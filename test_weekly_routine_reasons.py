@@ -766,6 +766,116 @@ class FrequencyReasonNoteTests(unittest.TestCase):
         app.build_weekly_usage_plan(data)
         self.assertEqual(data["frequency_reason_note"], "")
 
+    def test_weekday_mention_violation_is_dropped_entirely_when_single_sentence(self):
+        """use_days_reasonはプロンプトで「曜日への言及は避ける」と明示して
+        いるが、Geminiがこれに違反して曜日名を含めることが実機診断で確認
+        された(例:「週に一度の集中ケアとしてバリア機能を底上げするため
+        日曜に設定しました」)。1文全体が曜日言及と不可分な場合、頻度理由
+        として独立して成立する記述が残らないため、理由を捏造せず空文字に
+        すること(=その分の理由はfrequency_reason_noteに出ない)。"""
+        data = _empty_data(weekly_care=[
+            {"category": "パック", "product": "バリアパック", "use_days": ["日"],
+             "use_days_reason": "週に一度の集中ケアとしてバリア機能を底上げするため日曜に設定しました。"},
+        ])
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        self.assertEqual(data["frequency_reason_note"], "")
+
+    def test_weekday_mention_violation_is_stripped_leaving_valid_sentence(self):
+        """複数文のうち曜日へ言及している文だけを取り除き、頻度理由として
+        独立して成立する文が残っていればそれを採用すること(全体を丸ごと
+        破棄しない部分補正)。"""
+        data = _empty_data(weekly_care=[
+            {"category": "パック", "product": "バリアパック", "use_days": ["日"],
+             "use_days_reason": "バリア機能の底上げのため週1回としています。日曜に設定しました。"},
+        ])
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        note = data["frequency_reason_note"]
+        self.assertIn("バリア機能の底上げのため週1回としています。", note)
+        self.assertNotIn("日曜", note)
+
+    def test_weekday_mention_violation_does_not_affect_other_steps(self):
+        """曜日言及違反の検知・補正は違反したstepだけに限定され、他のstepの
+        正当なuse_days_reasonには影響しないこと。"""
+        data = _empty_data(
+            night={"steps": [
+                {"category": "美容液", "product": "レチノール美容液", "use_days": ["月", "水", "金"],
+                 "use_days_reason": "レチノールは刺激があるため週3回としています。"},
+            ]},
+            weekly_care=[
+                {"category": "パック", "product": "バリアパック", "use_days": ["日"],
+                 "use_days_reason": "週に一度の集中ケアとしてバリア機能を底上げするため日曜に設定しました。"},
+            ],
+        )
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        note = data["frequency_reason_note"]
+        self.assertIn("レチノールは刺激があるため週3回としています。", note)
+        self.assertNotIn("日曜", note)
+
+    def test_day_placement_reason_is_included_when_present(self):
+        """day_placement_reasonは、use_days_reasonと異なり曜日言及を禁止
+        しない(曜日配置そのものの根拠を書かせるための専用フィールドのため)。
+        use_days_reasonと自然に連結してfrequency_reason_noteへ含めること。"""
+        data = _empty_data(weekly_care=[
+            {"category": "パック", "product": "バリアパック", "use_days": ["日"],
+             "use_days_reason": "バリア機能の底上げのため週1回としています。",
+             "day_placement_reason": "レチノール美容液の使用日と重ならないよう日曜に配置しています。"},
+        ])
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        note = data["frequency_reason_note"]
+        self.assertIn("バリア機能の底上げのため週1回としています。", note)
+        self.assertIn("レチノール美容液の使用日と重ならないよう日曜に配置しています。", note)
+
+    def test_day_placement_reason_alone_is_included_without_use_days_reason(self):
+        """use_days_reasonが無くても、day_placement_reasonだけで単独で
+        含まれること(2つのフィールドは独立している)。"""
+        data = _empty_data(weekly_care=[
+            {"category": "パック", "product": "バリアパック", "use_days": ["日"],
+             "day_placement_reason": "ピーリングの翌日を避けて日曜に配置しています。"},
+        ])
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        self.assertIn("ピーリングの翌日を避けて日曜に配置しています。", data["frequency_reason_note"])
+
+    def test_day_placement_reason_empty_when_not_meaningfully_decided(self):
+        """意図した配置判断が無い場合、day_placement_reasonは空のまま
+        (Geminiが出力しない)想定であり、その場合は表示に影響しないこと。"""
+        data = _empty_data(weekly_care=[
+            {"category": "パック", "product": "バリアパック", "use_days": ["日"],
+             "use_days_reason": "バリア機能の底上げのため週1回としています。",
+             "day_placement_reason": ""},
+        ])
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        self.assertEqual(
+            data["frequency_reason_note"], "バリア機能の底上げのため週1回としています。"
+        )
+
+    def test_day_placement_reason_excluded_when_step_conflict_modified(self):
+        """resolverが実際に曜日を変更したstepのday_placement_reasonは、
+        変更前の曜日配置を前提に書かれており最終結果と矛盾するため、
+        use_days_reasonと同じ基準で除外すること。"""
+        data = _empty_data(
+            weekly_care=[
+                {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["土"],
+                 "ingredient_focus": "aha",
+                 "day_placement_reason": "レチノールと同日を避けて土曜に配置しています。"},
+            ],
+            night={"steps": [
+                {"category": "美容液", "product": "レチノール美容液", "use_days": ["土"],
+                 "ingredient_focus": "retinol"},
+            ]},
+        )
+        log = []
+        data = app.resolve_weekly_care_day_conflicts(data, conflict_log=log)
+        self.assertEqual(len(log), 1)
+        data["routine_conflict_log"] = log
+        app.build_weekly_usage_plan(data)
+        self.assertNotIn("レチノールと同日を避けて土曜に配置しています。", data["frequency_reason_note"])
+
     def test_excludes_step_modified_by_conflict_resolver(self):
         """resolverが実際に曜日を変更したstepは、Gemini由来のuse_days_reason
         (変更前の曜日を前提に書かれている)が最終結果と矛盾するため、
@@ -775,12 +885,12 @@ class FrequencyReasonNoteTests(unittest.TestCase):
             night={"steps": [
                 {"category": "美容液", "product": "レチノール美容液", "use_days": ["土"],
                  "ingredient_focus": "retinol",
-                 "use_days_reason": "中濃度処方のため週1回、土曜日を選んでいます"},
+                 "use_days_reason": "中濃度処方のため週1回としています。"},
             ]},
             weekly_care=[
                 {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["土"],
                  "ingredient_focus": "aha",
-                 "use_days_reason": "中濃度AHAのため週1回、土曜日を選んでいます"},
+                 "use_days_reason": "中濃度AHAのため週1回としています。"},
             ],
         )
         log = []
@@ -793,9 +903,9 @@ class FrequencyReasonNoteTests(unittest.TestCase):
         app.build_weekly_usage_plan(data)
 
         # ピーリング(曜日変更された側)のuse_days_reasonは頻度理由に出ない。
-        self.assertNotIn("中濃度AHAのため週1回、土曜日を選んでいます。", data["frequency_reason_note"])
+        self.assertNotIn("中濃度AHAのため週1回としています。", data["frequency_reason_note"])
         # 変更されなかったレチノール美容液の理由はそのまま出る。
-        self.assertIn("中濃度処方のため週1回、土曜日を選んでいます。", data["frequency_reason_note"])
+        self.assertIn("中濃度処方のため週1回としています。", data["frequency_reason_note"])
         # 安全調整理由側には、resolverの実際の調整理由が別途記録されている。
         self.assertTrue(data["routine_reason_notes"])
 

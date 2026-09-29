@@ -634,6 +634,42 @@ class ComparisonTableSameProductDifferentShopTests(unittest.TestCase):
         self.assertIn("_comparison_candidates", result)
         self.assertEqual(len(result["candidate_comparison_table"]), 3)
 
+    def test_comparison_table_not_discarded_when_initial_rank_one_mismatches(self):
+        """比較表専用リストと推薦リストの1位が初回構築時に食い違っても
+        (識別キーが空になる候補が比較表側の1位に混入する等)、比較表を
+        丸ごと破棄せず、1位だけ表示側に揃えて残りの実売候補は活かすこと。
+
+        2026-09、実機診断で「実売候補は5〜6件あるはずなのに商品比較表が
+        全く表示されない」ことが報告され、原因はこの1位不一致検知時の
+        「安全側でリスト全体を破棄する」設計にあった(候補が少ないのでは
+        なく、推薦リストへフォールバックして商品比較専用リストが持つ
+        追加の実売候補・別ショップ出品を失っていた)。
+
+        「・-ー」のような記号のみの商品名はbuild_candidate_identity_keys()が
+        空集合を返すため推薦リストから除外されるが、item_codeを持つため
+        比較表専用リストには残り、たまたま1位に来ると不一致を起こす
+        (raw_candidatesの並び順への依存を再現する意図的な構成)。
+        """
+        step = {
+            "category": "化粧水", "purpose": "保湿", "product": "", "brand": "",
+            "top_candidates": [
+                _real_candidate("・-ー", 999, "weird1", score=95),
+                _real_candidate("商品B", 1500, "shop1:item2", score=60),
+                _real_candidate("商品B", 1600, "shop2:item2b", score=59),
+                _real_candidate("商品C", 2000, "item3", score=55),
+            ],
+        }
+        result = app.finalize_step_data(step, {})
+        # 推薦リストからは記号のみの名前が除外され、実在の2商品が残る。
+        self.assertEqual(
+            [c["name"] for c in result["top_candidates"]], ["商品B", "商品C"]
+        )
+        # 比較表は「1位不一致だから全部破棄」ではなく、1位を推薦リストの
+        # 1位(商品B)へ揃えた上で、商品Bの別ショップ出品(1600円)と商品Cを
+        # 失わずに保持すること。
+        rows = [(r["name"], r["price"]) for r in result["candidate_comparison_table"]]
+        self.assertEqual(rows, [("商品B", 1500), ("商品B", 1600), ("商品C", 2000)])
+
 
 class DeviceContextSentenceDoublePeriodTests(unittest.TestCase):
     """device_selection_reason生成時の二重句点バグの回帰テスト。"""

@@ -28,7 +28,7 @@ from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.pool import PoolError as _Psycopg2PoolError
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v18"  # routine_strategy.reasonをreason_priority_focus/reason_frequency_designの2フィールドに分割(スキーマ変更のため必須)
+ANALYSIS_CACHE_VERSION = "v19"  # step_schemaにday_placement_reasonを追加(スキーマ変更のため必須)
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
@@ -4727,19 +4727,19 @@ def _build_device_selection_reason(
 
     説明の優先順位: (1)今回の肌悩み・選ばれた方式の関係(category_purpose/
     category_reason、Step1がすでに判断済みの内容をそのまま引用) →
-    (2)この商品の説明で確認できる関連特徴(_extract_device_appeal_features、
-    商品説明に実在する記載のみ。「〜に関する記載を確認できます」という
-    範囲を超えない表現に留め、「効果がある」とは断定しない) →
-    (3)刺激・安全面／レビュー・評価／価格・予算(既存の候補間比較ロジック、
-    parts)。
+    (2)肌悩み適合が決定的な場合のみ、その事実(比較候補より一致項目が
+    多かったこと) → (3)敏感肌向けの刺激語回避(肌への配慮そのものであり、
+    肌悩み適合が決定的でない場合も引き続き理由として使う)。
 
-    肌悩み適合ボーナス(_user_priority_feature_labels×
-    _extract_device_appeal_features、_fit_score()に加点済み)が「取得した
-    候補全体」に対して勝者だけの明確な優位だった場合のみ、その事実を
-    レビュー・価格等のparts説明より先に述べる。優位差がない(全候補が同数、
-    または一致自体がない)場合は、この理由を1位の決定理由として書かず、
-    従来通り(2)の「商品説明で確認できる特徴」を事実の記載としてのみ添える
-    (順位の理由としては述べない、二重説明も避ける)。
+    【重要】肌悩み適合が決定的でない場合、「商品説明にこの語の記載が
+    確認できる」(_extract_device_appeal_features)や「レビュー評価/件数が
+    高い」「価格が安い」「予算内に収まっている」を選定理由として書かない。
+    これらは商品が実在検索条件に一致した事実や商流上の指標であって、
+    「肌スコア改善に最も寄与するか」を示すものではないため
+    (2026-09、実機診断で「価格が抑えられている」「商品説明に記載がある」
+    だけを理由にしている、という指摘を繰り返し受けた)。肌悩み適合が
+    決定的な場合のみ、レビュー・価格・予算は「加えて」の補足情報として
+    追加してよい(主理由ではなく副次的な事実として)。
     """
     priority_labels = _user_priority_feature_labels(user_data)
 
@@ -4769,17 +4769,31 @@ def _build_device_selection_reason(
         and other_concern_bonuses and winner_concern_bonus > max(other_concern_bonuses)
     )
 
-    parts = []
+    # 敏感肌の刺激語回避は、価格・レビュー・入手性とは異なり「肌への配慮」
+    # そのものであるため、肌悩み適合が決定的でない場合も引き続き理由として
+    # 述べる。一方、レビュー・価格等の商流上の指標(commercial_parts)は
+    # 「肌スコア改善への寄与」を示さないため、肌悩み適合が決定的な場合の
+    # 補足情報としてのみ使い、単独の主理由としては使わない。
+    safety_parts = []
+    if is_high_sensitivity and device_type in _STIMULATING_DEVICE_TYPES:
+        def _has_intensity_keyword(item):
+            text = f"{item.get('itemName', '')} {item.get('itemCaption', '')}"
+            return any(w in text for w in _DEVICE_INTENSITY_KEYWORDS)
+
+        if not _has_intensity_keyword(winner) and any(_has_intensity_keyword(o) for o in others):
+            safety_parts.append("「業務用」「高出力」等の強い表現がなく、敏感肌向けの条件に合っている")
+
+    commercial_parts = []
 
     winner_review_avg = safe_price(winner.get("reviewAverage", 0))
     other_review_avgs = [safe_price(o.get("reviewAverage", 0)) for o in others]
     if other_review_avgs and winner_review_avg > max(other_review_avgs):
-        parts.append(f"レビュー評価が{winner_review_avg}と他候補より高い")
+        commercial_parts.append(f"レビュー評価が{winner_review_avg}と他候補より高い")
 
     winner_review_count = safe_price(winner.get("reviewCount", 0))
     other_review_counts = [safe_price(o.get("reviewCount", 0)) for o in others]
     if other_review_counts and winner_review_count > max(other_review_counts):
-        parts.append(f"レビュー件数が{winner_review_count}件と他候補より多い")
+        commercial_parts.append(f"レビュー件数が{winner_review_count}件と他候補より多い")
 
     winner_price = safe_price(winner.get("itemPrice", 0))
     other_prices = [
@@ -4787,7 +4801,7 @@ def _build_device_selection_reason(
         if safe_price(o.get("itemPrice", 0)) > 0
     ]
     if winner_price > 0 and other_prices and winner_price < min(other_prices):
-        parts.append("価格が候補内で最も抑えられている")
+        commercial_parts.append("価格が候補内で最も抑えられている")
 
     if budget_value and winner_price > 0:
         winner_ratio = winner_price / budget_value
@@ -4796,15 +4810,7 @@ def _build_device_selection_reason(
             for o in others if safe_price(o.get("itemPrice", 0)) > 0
         )
         if winner_ratio <= 1.5 and other_over_budget:
-            parts.append("予算の範囲内に収まっている")
-
-    if is_high_sensitivity and device_type in _STIMULATING_DEVICE_TYPES:
-        def _has_intensity_keyword(item):
-            text = f"{item.get('itemName', '')} {item.get('itemCaption', '')}"
-            return any(w in text for w in _DEVICE_INTENSITY_KEYWORDS)
-
-        if not _has_intensity_keyword(winner) and any(_has_intensity_keyword(o) for o in others):
-            parts.append("「業務用」「高出力」等の強い表現がなく、敏感肌向けの条件に合っている")
+            commercial_parts.append("予算の範囲内に収まっている")
 
     context_sentence = _device_context_sentence(category_purpose, category_reason, device_type)
 
@@ -4814,24 +4820,24 @@ def _build_device_selection_reason(
             f"商品説明では、今回優先している{concern_labels_text}に関する記載が確認でき、"
             f"比較候補より今回の肌悩みとの一致項目が多かったため優先しました。"
         )
-        if parts:
-            comparison_sentence += "加えて、" + "、".join(parts) + "点でも他候補より優位でした。"
-        # concern_decisive時はcomparison_sentenceで既に特徴へ言及済みのため、
-        # _device_feature_sentence()との重複記載は避ける。
-        feature_sentence = ""
+        all_parts = safety_parts + commercial_parts
+        if all_parts:
+            comparison_sentence += "加えて、" + "、".join(all_parts) + "点でも他候補より優位でした。"
+    elif safety_parts:
+        # 肌悩み適合が決定的でない場合、商品説明への記載確認やレビュー・
+        # 価格(commercial_parts)は主理由として述べない。肌への配慮
+        # (safety_parts)のみ、引き続き理由として使う。
+        comparison_sentence = "今回取得した候補の中で、" + "、".join(safety_parts) + "点が他候補より優位だったため、この製品を選びました。"
     else:
-        feature_sentence = _device_feature_sentence(winner_features_ordered)
         comparison_sentence = ""
-        if parts:
-            comparison_sentence = "今回取得した候補の中で、" + "、".join(parts) + "点が他候補より優位だったため、この製品を選びました。"
 
-    if not context_sentence and not feature_sentence and not comparison_sentence:
+    if not context_sentence and not comparison_sentence:
         return _DEVICE_SELECTION_REASON_FALLBACK
 
     if not comparison_sentence:
-        comparison_sentence = "レビュー・価格等では他候補との明確な優位差は確認できませんでした。"
+        comparison_sentence = "今回取得した候補の中で、肌悩みとの明確な適合優位は確認できませんでした。"
 
-    return context_sentence + feature_sentence + comparison_sentence
+    return context_sentence + comparison_sentence
 
 
 def _device_context_sentence(category_purpose, category_reason, device_type):
@@ -5029,6 +5035,15 @@ def _build_supplement_selection_reason(pool_sorted, supplement_type, keyword_var
     other_matches = [_supplement_matches_keywords(o, keyword_variants) for o in others]
     ingredient_decisive = bool(keyword_variants and winner_matches and not any(other_matches))
 
+    if not ingredient_decisive:
+        # 成分一致が決定的でない場合、レビュー・価格・予算は「肌スコア改善
+        # への寄与」を示さないため選定理由として書かない(美容機器と同じ方針。
+        # 2026-09、実機診断で「価格が抑えられている」ことだけを理由に
+        # している、という指摘を繰り返し受けた)。サプリメントには美容機器の
+        # safety_parts(敏感肌配慮)に相当する軸が無いため、この場合は
+        # 中立的なフォールバックのみを返す。
+        return _SUPPLEMENT_SELECTION_REASON_FALLBACK
+
     parts = []
 
     winner_review_avg = safe_price(winner.get("reviewAverage", 0))
@@ -5058,19 +5073,13 @@ def _build_supplement_selection_reason(pool_sorted, supplement_type, keyword_var
         if winner_ratio <= 1.5 and other_over_budget:
             parts.append("予算の範囲内に収まっている")
 
-    if ingredient_decisive:
-        comparison_sentence = (
-            f"商品説明で今回の対象成分({supplement_type})に関する記載が確認でき、"
-            f"比較候補にはこの記載がなかったため優先しました。"
-        )
-        if parts:
-            comparison_sentence += "加えて、" + "、".join(parts) + "点でも他候補より優位でした。"
-        return comparison_sentence
-
-    if not parts:
-        return _SUPPLEMENT_SELECTION_REASON_FALLBACK
-
-    return "今回取得した候補の中で、" + "、".join(parts) + "点が他候補より優位だったため、この製品を選びました。"
+    comparison_sentence = (
+        f"商品説明で今回の対象成分({supplement_type})に関する記載が確認でき、"
+        f"比較候補にはこの記載がなかったため優先しました。"
+    )
+    if parts:
+        comparison_sentence += "加えて、" + "、".join(parts) + "点でも他候補より優位でした。"
+    return comparison_sentence
 
 
 def select_best_supplement_candidate(scored_items, supplement_type, ingredient_focus, user_data, budget_value):
@@ -15805,6 +15814,12 @@ _PURPOSE_KEYWORD_LABELS = [
     ("毛穴", "毛穴ケア"), ("赤み", "赤み鎮静"), ("乾燥", "乾燥対策"),
     ("バリア", "バリア強化"), ("くすみ", "くすみ改善"), ("美白", "美白"),
     ("色素沈着", "色素沈着"), ("ニキビ", "ニキビ対策"), ("ハリ", "ハリ補給"),
+    # EMS(_DEVICE_PURPOSE_LABELS["EMS"]="フェイスラインの引き締め")が
+    # 既存キーワードに1つも一致せずconcern_tagsが空になっていたバグの修正。
+    # 「引き締め」はハリ・弾力の低下を指す訴求のため、ハリ補給と同じ
+    # ラベルに正規化する(_DEVICE_EXPECTED_IMPROVEMENT_AREAS["EMS"]も
+    # ["ハリ"]で一致させている)。
+    ("引き締め", "ハリ補給"),
     ("ざらつき", "質感改善"), ("皮脂", "皮脂コントロール"),
 ]
 
@@ -18163,36 +18178,54 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
             if len(normalized_candidates) >= 6:
                 break
 
-        # 比較表専用リストの1位が推薦用リストの1位と一致する場合のみ、
-        # candidate_comparison_table/why_bestで整合性を持って使える
-        # (別出品扱いにした候補が紛れ込んで1位がすり替わっていないことの保証)。
-        # 一致しない場合(理論上ほぼ起きないが、安全側として)は使わない。
-        if (
-            comparison_candidates
-            and normalized_candidates
-            and comparison_candidates[0].get("name") == normalized_candidates[0].get("name")
-            and comparison_candidates[0].get("brand") == normalized_candidates[0].get("brand")
-        ):
-            # 1位はnormalized_candidates[0]と同一のdictオブジェクトを共有させる。
+        # 比較表専用リストの1位を、表示上の1位(normalized_candidates[0]、
+        # =step["product"]と一致する商品)へ必ず揃える。
+        # 比較表専用リストと推薦リストは重複除去基準が異なるため、まれに
+        # 1位の商品が食い違うことがある(例: 比較表側の基準では通るが、
+        # 推薦側の識別キーが空になり弾かれてしまう候補が比較表側の1位に
+        # 来ていた場合等)。以前は食い違いを検知するとリスト全体を安全側で
+        # 破棄していたが、実売候補が5〜6件あっても商品比較表(および
+        # 同じデータを参照するwhy_best)が0件になる不具合の原因になって
+        # いた(2026-09、実機診断で確認)。1位だけ表示側に強制的に合わせ、
+        # 2位以降のデータは破棄せずそのまま活かす。
+        if normalized_candidates and comparison_candidates:
+            _top = normalized_candidates[0]
+            _mismatched = (
+                comparison_candidates[0].get("name") != _top.get("name")
+                or comparison_candidates[0].get("brand") != _top.get("brand")
+            )
+            if _mismatched:
+                print(
+                    f"[COMPARISON TOP REALIGNED] step={_step_cat!r} "
+                    f"comparison_top={comparison_candidates[0].get('name','')!r} "
+                    f"recommend_top={_top.get('name','')!r}",
+                    flush=True
+                )
+            # 1位はnormalized_candidates[0]と同一のdictオブジェクトを共有
+            # させる(一致・不一致を問わず、常に表示上の1位で置き換える)。
             # normalize_candidate()は呼び出すたびに新しいdictを作るため、
             # 共有しないとgemini_clean_rakuten_product_names()がtop_candidates[0]
             # へ適用した商品名整形が_comparison_candidates側には反映されず、
             # 商品比較表の1位だけ楽天の生タイトルのままになってしまう。
-            comparison_candidates[0] = normalized_candidates[0]
+            # 2位以降(同一商品の別ショップ出品を含む)はそのまま保持する
+            # (name/brand一致でフィルタすると、勝者商品の他ショップ出品まで
+            # 誤って削除してしまうため、出品identifier一致でのみ重複除去する)。
+            comparison_candidates[0] = _top
+            _top_listing_id = _top.get("item_code") or _top.get("rakuten_link")
+            if _top_listing_id:
+                comparison_candidates = [comparison_candidates[0]] + [
+                    c for c in comparison_candidates[1:]
+                    if (c.get("item_code") or c.get("rakuten_link")) != _top_listing_id
+                ]
+            else:
+                # 出品identifierが無い候補(db由来等)は、_top自身(同一
+                # オブジェクト)が2位以降に紛れ込んでいた場合のみ除去する。
+                comparison_candidates = [comparison_candidates[0]] + [
+                    c for c in comparison_candidates[1:] if c is not _top
+                ]
             step["_comparison_candidates"] = comparison_candidates
         else:
             step.pop("_comparison_candidates", None)
-            # 商品比較表が「候補は十分あるのに表示されない」原因切り分け用の
-            # 計測ログ。ロジックは変更していない(既存のelse分岐のまま)。
-            if comparison_candidates or normalized_candidates:
-                print(
-                    f"[COMPARISON DROPPED] step={_step_cat!r} "
-                    f"comparison_top={comparison_candidates[0].get('name','') if comparison_candidates else None!r} "
-                    f"recommend_top={normalized_candidates[0].get('name','') if normalized_candidates else None!r} "
-                    f"comparison_empty={not comparison_candidates} "
-                    f"recommend_empty={not normalized_candidates}",
-                    flush=True
-                )
 
         # 候補が各段階でどれだけ失われているかを可視化するための計測ログ。
         # 「商品比較の件数が少なすぎる」問題の対策(クエリ拡張/取得件数増/
@@ -20254,7 +20287,8 @@ def get_analysis_schema_phase2():
             "use_timing": {"type": "string"},
             "product_candidates": {"type": "array", "items": product_candidate_schema},
             "selection_reason": {"type": "string"},
-            "use_days_reason": {"type": "string"}
+            "use_days_reason": {"type": "string"},
+            "day_placement_reason": {"type": "string"}
         },
         "required": ["category","role","purpose","ingredient_focus","risk_note","priority","use_days","use_timing","product_candidates"]
     }
@@ -21023,6 +21057,25 @@ use_days_reasonに記述すること。商品カテゴリ名を文中に含め�
    アプリ側では理由を表示しない。use_days_reasonへ多くの労力をかける必要はなく、
    簡潔で構わない。労力は頻度を絞ったstep(use_daysが具体的な曜日のリストになる
    もの)のuse_days_reasonに重点的に使うこと。
+
+【day_placement_reason（曜日配置そのものの根拠、任意）】
+上記3.の通り、use_days_reasonには曜日への言及を含めない。しかし「他の
+成分との衝突回避のためこの曜日にした」のような、曜日そのものの配置判断に
+意味のある根拠がある場合は、それをuse_days_reasonに混ぜず、別フィールドの
+day_placement_reasonへ書くこと。
+
+記述する条件(必ず遵守):
+- 他のstep(night/weekly_careの他の項目)との組み合わせ・間隔を実際に考慮して
+  この曜日にした場合のみ記述する(例: 「レチノール美容液と同日に重ならない
+  よう配置」「ピーリングの翌日を避けて配置」等、具体的にどのstepとの関係かが
+  分かる内容にすること)。
+- 単に他のstepの曜日と偶然重ならなかっただけ、または特に意図した配置判断が
+  無い場合は、day_placement_reason自体を出力しないか空文字にすること。
+  存在しない配慮を捏造して埋めてはならない。
+- このフィールドが後でresolver(安全のための自動曜日調整ロジック)によって
+  上書きされる可能性があることを踏まえ、断定的な安全性の主張はしない
+  (「安全に配置した」ではなく「〜と間隔を空けるため」等、行った配置の
+  事実のみを述べる)。
 
 【product_candidates】
 各stepに必ず3件出力(2件以下禁止・4件可)。現行販売中の正式名称が確実な商品のみ。stepのcategoryと完全一致必須。
@@ -22486,13 +22539,50 @@ def _step_conflict_modified(step, conflict_log):
     return False
 
 
+_WEEKDAY_MENTION_PATTERN = re.compile(r"[月火水木金土日]曜|曜日")
+
+
+def _sanitize_use_days_reason(raw_reason):
+    """
+    use_days_reasonはプロンプトで「頻度(回数)の理由のみを書き、曜日への
+    言及は避ける」と明示しているが、Geminiがこれに従わず「日曜に設定
+    しました」等、曜日名を含めてしまうケースが実機診断で確認された
+    (2026-09)。違反を検知・ログするだけでは再発を防げないため、文単位で
+    検証し、曜日へ言及している文だけを取り除く(可能なら部分補正、
+    全文が違反していれば空文字にする=データを捏造しない)。
+
+    曜日変更そのものの理由はconflict_log(resolverが実際に行った調整の
+    構造化ログ)側で別途扱うため、この関数は「頻度としてそれ単体で
+    成立する文かどうか」だけを見る。文が本当に無効か(頻度理由として
+    意味をなさないか)の判定はできないため、曜日言及の有無という
+    機械的に判定可能な基準のみを用いる。
+    """
+    text = str(raw_reason or "").strip()
+    if not text:
+        return ""
+    sentences = [s.strip() for s in text.split("。") if s.strip()]
+    valid_sentences = [s for s in sentences if not _WEEKDAY_MENTION_PATTERN.search(s)]
+    violated = len(valid_sentences) != len(sentences)
+    if violated:
+        print(
+            f"[USE_DAYS_REASON WEEKDAY VIOLATION] raw={text!r} "
+            f"kept={valid_sentences!r}",
+            flush=True
+        )
+    if not valid_sentences:
+        return ""
+    return "。".join(valid_sentences) + "。"
+
+
 def _compose_frequency_reason_note(night_steps, weekly_steps, conflict_log):
     """
-    Geminiがuse_daysと同じ出力で返したuse_days_reasonを集約し、
-    箇条書きにせず自然な地の文として1つの文字列にまとめる。
+    Geminiがuse_daysと同じ出力で返したuse_days_reason・day_placement_reasonを
+    集約し、箇条書きにせず自然な地の文として1つの文字列にまとめる。
     理由内容そのものの追加・言い換え・推測はしない(整形のみ)。
     resolverが最終的に曜日を変更したstepは対象から除外する
-    (安全調整理由(routine_reason_notes)側でのみ説明されるため)。
+    (安全調整理由(routine_reason_notes)側でのみ説明されるため。
+    day_placement_reasonは曜日配置そのものの根拠のため、resolverが曜日を
+    変更した時点で前提が崩れており、use_days_reasonと同じ基準で除外する)。
 
     表示対象は「ユーザーが見て、なぜこの使い方なのか疑問に思う可能性が
     ある判断」に限定する。クレンジング・洗顔・通常の化粧水/乳液/クリーム
@@ -22511,15 +22601,23 @@ def _compose_frequency_reason_note(night_steps, weekly_steps, conflict_log):
         # ここでの判定は「非空リストかどうか」だけで一貫して行える。
         if not step.get("use_days"):
             continue
-        raw_reason = step.get("use_days_reason")
-        if not raw_reason:
-            continue
         if _step_conflict_modified(step, conflict_log):
             continue
-        sentence = _ensure_sentence_ending(raw_reason)
-        if sentence and sentence not in seen:
-            seen.add(sentence)
-            sentences.append(sentence)
+
+        sanitized_reason = _sanitize_use_days_reason(step.get("use_days_reason"))
+        # day_placement_reasonは曜日配置そのものの根拠を書かせるフィールド
+        # のため、use_days_reasonと異なり曜日言及を禁止しない(_sanitize_
+        # use_days_reasonを通さない)。
+        placement_reason = str(step.get("day_placement_reason") or "").strip()
+
+        combined = " ".join(
+            _ensure_sentence_ending(p) for p in (sanitized_reason, placement_reason) if p
+        )
+        if not combined:
+            continue
+        if combined not in seen:
+            seen.add(combined)
+            sentences.append(combined)
     return "".join(sentences)
 
 

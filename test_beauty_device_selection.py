@@ -66,8 +66,10 @@ def test_no_rakuten_api_call_is_made_inside_selection():
         app_module.fetch_rakuten_candidates = original
 
 
-def test_selection_reason_reflects_actual_review_average_advantage():
-    """勝者のレビュー評価が他候補より本当に高い場合のみ、その事実を含めること。"""
+def test_selection_reason_does_not_cite_review_advantage_without_concern_match():
+    """肌悩み適合が決定的でない場合、レビュー評価の優位を選定理由として
+    書かないこと(2026-09、実機診断で「価格が抑えられている」等の商流上の
+    指標だけを理由にしている、という指摘を繰り返し受けたための修正)。"""
     scored_items = [
         (50, make_item("RF美顔器A", 8000, 100, 4.9, "A")),
         (50, make_item("RF美顔器B", 8000, 100, 3.0, "B")),
@@ -76,12 +78,13 @@ def test_selection_reason_reflects_actual_review_average_advantage():
         scored_items, "RF", {"sensitivity": "low"}, budget_value=0
     )
     assert best_item["itemCode"] == "A"
-    assert "4.9" in reason
-    assert "レビュー評価" in reason
+    assert reason == app_module._DEVICE_SELECTION_REASON_FALLBACK
+    assert "レビュー評価" not in reason
 
 
-def test_selection_reason_reflects_actual_price_advantage():
-    """勝者の価格が他候補より本当に安い場合のみ、その事実を含めること。"""
+def test_selection_reason_does_not_cite_price_advantage_without_concern_match():
+    """肌悩み適合が決定的でない場合、価格の優位を選定理由として書かない
+    こと(前回指摘: 価格が抑えられてただけでは選定理由にしない)。"""
     scored_items = [
         (50, make_item("RF美顔器A", 5000, 100, 4.0, "A")),
         (10, make_item("RF美顔器B", 9000, 100, 4.0, "B")),
@@ -90,7 +93,8 @@ def test_selection_reason_reflects_actual_price_advantage():
         scored_items, "RF", {"sensitivity": "low"}, budget_value=0
     )
     assert best_item["itemCode"] == "A"
-    assert "価格" in reason
+    assert reason == app_module._DEVICE_SELECTION_REASON_FALLBACK
+    assert "価格" not in reason
 
 
 def test_selection_reason_does_not_claim_advantage_on_tie():
@@ -222,9 +226,10 @@ def test_extraction_is_deterministic_for_same_input():
     assert len(results) == 1
 
 
-def test_device_selection_reason_includes_confirmed_feature_wording():
-    """特徴を含める場合、断定的な効果表現ではなく「記載を確認できます」という
-    範囲を超えない表現になること。"""
+def test_device_selection_reason_does_not_cite_feature_mention_without_concern_match():
+    """肌悩み適合が決定的でない場合、「商品説明に記載がある」だけを選定
+    理由として書かないこと(前回指摘: 商品説明にその改善項目が記載されて
+    いただけでは不十分。ただ選ばれればいいというものではない)。"""
     scored_items = [
         (50, make_item("毛穴ケアRF美顔器", 8000, 200, 4.9, "A", caption="毛穴の目立ちが気になる方に")),
         (40, make_item("シンプルRF美顔器", 7000, 50, 3.5, "B")),
@@ -233,8 +238,8 @@ def test_device_selection_reason_includes_confirmed_feature_wording():
         scored_items, "RF", {"sensitivity": "low"}, budget_value=10000,
     )
     assert best_item["itemCode"] == "A"
-    assert "毛穴ケア" in reason
-    assert "記載を確認できます" in reason
+    assert reason == app_module._DEVICE_SELECTION_REASON_FALLBACK
+    assert "記載を確認できます" not in reason
     assert "効果がある" not in reason
     assert "改善します" not in reason
 
@@ -254,9 +259,9 @@ def test_device_selection_reason_cites_category_context_without_overriding_it():
     assert "たるみ・ハリ不足の改善に有効なため" in reason
 
 
-def test_review_and_price_logic_unchanged_when_features_present():
-    """特徴抽出を追加しても、既存のレビュー/価格比較ロジック自体(_fit_scoreの
-    ランキング)は変更されていないこと(勝者・比較文の同時共存を確認)。"""
+def test_review_and_price_not_cited_when_concern_data_absent():
+    """concernsが未選択で肌悩み適合の判定材料自体が無い場合、レビュー・価格を
+    選定理由として書かず中立的なフォールバックになること。"""
     scored_items = [
         (50, make_item("毛穴ケアRF美顔器A", 8000, 300, 4.9, "A", caption="毛穴ケアに")),
         (40, make_item("毛穴ケアRF美顔器B", 9000, 50, 3.0, "B", caption="毛穴ケアに")),
@@ -265,8 +270,9 @@ def test_review_and_price_logic_unchanged_when_features_present():
         scored_items, "RF", {"sensitivity": "low"}, budget_value=0,
     )
     assert best_item["itemCode"] == "A"
-    assert "レビュー評価" in reason
-    assert "レビュー件数" in reason
+    assert reason == app_module._DEVICE_SELECTION_REASON_FALLBACK
+    assert "レビュー評価" not in reason
+    assert "レビュー件数" not in reason
 
 
 def test_extraction_does_not_affect_ranking_winner():
@@ -378,9 +384,10 @@ def test_concern_match_does_not_double_count_synonyms():
     assert best_item["itemCode"] == "SINGLE"
 
 
-def test_concern_match_tied_falls_back_to_review_price_reason():
-    """肌悩み一致数が候補間で同じ場合、device_selection_reasonの決定理由は
-    肌悩み適合ではなく実際のレビュー・価格差になること(差を捏造しない)。"""
+def test_concern_match_tied_falls_back_to_neutral_reason():
+    """肌悩み一致数が候補間で同じ(決定的でない)場合、肌悩み適合を理由に
+    書かないのはもちろん、レビュー・価格も選定理由として書かず中立的な
+    フォールバックになること(前回指摘: 商流上の指標を主理由にしない)。"""
     user_data = {"sensitivity": "low", "concerns": ["pores"]}
     item_a = make_item("毛穴ケアRF美顔器A", 8000, 300, 4.9, "A", caption="毛穴ケアに")
     item_b = make_item("毛穴ケアRF美顔器B", 9000, 50, 3.0, "B", caption="毛穴ケアに")
@@ -389,9 +396,10 @@ def test_concern_match_tied_falls_back_to_review_price_reason():
         scored_items, "RF", user_data, budget_value=0,
     )
     assert best_item["itemCode"] == "A"
+    assert reason == app_module._DEVICE_SELECTION_REASON_FALLBACK
     assert "肌悩みとの一致項目が多かったため優先しました" not in reason
-    assert "レビュー評価" in reason
-    assert "レビュー件数" in reason
+    assert "レビュー評価" not in reason
+    assert "レビュー件数" not in reason
 
 
 def test_device_selection_reason_leads_with_concern_match_when_decisive():
@@ -519,9 +527,12 @@ def test_supplement_ingredient_match_wins_over_large_review_advantage():
     assert "ビタミンC" in reason
 
 
-def test_supplement_selection_reason_reflects_actual_review_advantage_when_ingredient_tied():
-    """成分一致が同点の場合、決定理由は実際のレビュー差になること
-    (成分一致を優位と偽らない)。"""
+def test_supplement_selection_reason_falls_back_to_neutral_when_ingredient_tied():
+    """成分一致が同点(決定的でない)場合、成分一致を優位と偽らないのは
+    もちろん、レビューも選定理由として書かず中立的なフォールバックに
+    なること(前回指摘: 商流上の指標を主理由にしない。サプリメントには
+    美容機器のsafety_partsに相当する軸が無いため、成分一致が決定的で
+    ない場合は常に中立フォールバックになる)。"""
     item_a = make_supplement_item("ビタミンCサプリA", 2000, 100, 4.9, "A", caption="ビタミンC配合")
     item_b = make_supplement_item("ビタミンCサプリB", 2000, 100, 3.0, "B", caption="ビタミンC配合")
     scored_items = [(50, item_a), (50, item_b)]
@@ -529,8 +540,9 @@ def test_supplement_selection_reason_reflects_actual_review_advantage_when_ingre
         scored_items, "ビタミンC", ["vitamin_c"], {}, budget_value=0,
     )
     assert best_item["itemCode"] == "A"
+    assert reason == app_module._SUPPLEMENT_SELECTION_REASON_FALLBACK
     assert "対象成分" not in reason
-    assert "レビュー評価" in reason
+    assert "レビュー評価" not in reason
 
 
 def test_supplement_selection_reason_does_not_claim_advantage_on_tie():
@@ -565,6 +577,16 @@ def test_enrich_beauty_devices_adds_concern_tags_and_expected_improvement_areas(
     step = enriched["beauty_devices"][0]
     assert step["concern_tags"], "LEDのpurposeから悩みタグが抽出されること"
     assert step["expected_improvement_areas"] == ["赤み", "ニキビ"]
+
+
+def test_enrich_beauty_devices_ems_concern_tags_not_empty():
+    """回帰テスト: _DEVICE_PURPOSE_LABELS["EMS"]="フェイスラインの引き締め"が
+    _PURPOSE_KEYWORD_LABELSのどのキーワードにも一致せず、EMSだけ
+    concern_tagsが空になっていたバグの修正確認。"""
+    data = {"beauty_devices": [{"device_type": "EMS", "reason": "フェイスラインのたるみ改善に有効なため"}]}
+    enriched = app_module.enrich_beauty_devices(data, {})
+    step = enriched["beauty_devices"][0]
+    assert step["concern_tags"] == ["ハリ補給"]
 
 
 def test_enrich_supplements_adds_concern_tags_and_expected_improvement_areas():
