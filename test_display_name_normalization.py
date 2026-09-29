@@ -670,6 +670,33 @@ class ComparisonTableSameProductDifferentShopTests(unittest.TestCase):
         rows = [(r["name"], r["price"]) for r in result["candidate_comparison_table"]]
         self.assertEqual(rows, [("商品B", 1500), ("商品B", 1600), ("商品C", 2000)])
 
+    def test_comparison_table_skips_virtual_candidates_ranked_above_real_ones(self):
+        """build_candidate_comparison_table()は「上位3件に絞ってから実売
+        判定」ではなく「全件から実売候補に絞ってから上位3件を取る」順序で
+        あること。
+
+        2026-09、実機診断で各stepのcomparison_real_priced(実売候補数)が
+        3件以上あるにもかかわらず商品比較表が全く表示されない事例が
+        報告された。原因は、ランキング上位3件の中にai_virtual(非実売)
+        候補が混ざっていると、実売候補が全体で何件あってもテーブルには
+        上位3枠の中の実売分しか反映されず、1件以下になって非表示になる
+        ことだった。この回帰テストは、2位・3位がai_virtualでも、
+        4位・5位の実売候補がテーブルに繰り上がることを確認する。
+        """
+        top_candidates = [
+            _real_candidate("商品A", 1000, "item1", score=95),
+            {"name": "仮想候補B", "brand": "テストブランド", "source": "ai_virtual",
+             "price_ref": 0, "score": 90},
+            {"name": "仮想候補C", "brand": "テストブランド", "source": "ai_virtual",
+             "price_ref": 0, "score": 85},
+            _real_candidate("商品D", 1500, "item4", score=80),
+            _real_candidate("商品E", 2000, "item5", score=75),
+        ]
+        rows = app.build_candidate_comparison_table(top_candidates)
+        names = [r["name"] for r in rows]
+        self.assertEqual(names, ["商品A", "商品D", "商品E"])
+        self.assertGreater(len(rows), 1, "実売候補が3件以上あるのにテーブルが1件以下になっている")
+
 
 class DeviceContextSentenceDoublePeriodTests(unittest.TestCase):
     """device_selection_reason生成時の二重句点バグの回帰テスト。"""

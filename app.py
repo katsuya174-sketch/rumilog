@@ -28,7 +28,7 @@ from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.pool import PoolError as _Psycopg2PoolError
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v19"  # step_schemaにday_placement_reasonを追加(スキーマ変更のため必須)
+ANALYSIS_CACHE_VERSION = "v20"  # day_placement_related_ingredient_focus/day_placement_relation_typeを追加(スキーマ変更のため必須)
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
@@ -17928,11 +17928,20 @@ def build_candidate_comparison_table(top_candidates, diffs=None):
     # なお、この絞り込みはこの比較表(candidate_comparison_table)専用。
     # why_best(build_candidate_comparison_notes)側のbest(=step["product"]と
     # 一致させる必要がある1位)には影響しない。
+    #
+    # 実売候補への絞り込みは「上位3件を取ってから」ではなく「全件から
+    # 絞り込んでから上位3件を取る」順序で行う。以前は上位3件に絞ってから
+    # 実売判定していたため、non-real(ai_virtual)候補がランキング上位3件に
+    # 混ざっていると、実売候補が全体で3〜6件あってもテーブルが1件以下に
+    # なり非表示になる不具合があった(2026-09、実機診断で確認。
+    # comparison_real_pricedが3件以上あるのに商品比較が全く表示されない
+    # 事例)。orig_idxは絞り込み前の元の順位を保持し、diff_from_bestの
+    # 引き当て(2位・3位の比較文)には従来通りその元の順位を使う。
     original_best = top_candidates[0] if isinstance(top_candidates[0], dict) else None
     real_candidates = [
-        (orig_idx, cand) for orig_idx, cand in enumerate(top_candidates[:3], start=1)
+        (orig_idx, cand) for orig_idx, cand in enumerate(top_candidates, start=1)
         if _is_real_priced_candidate(cand)
-    ]
+    ][:3]
 
     rows = []
     for new_idx, (orig_idx, cand) in enumerate(real_candidates, start=1):
@@ -20288,7 +20297,9 @@ def get_analysis_schema_phase2():
             "product_candidates": {"type": "array", "items": product_candidate_schema},
             "selection_reason": {"type": "string"},
             "use_days_reason": {"type": "string"},
-            "day_placement_reason": {"type": "string"}
+            "day_placement_reason": {"type": "string"},
+            "day_placement_related_ingredient_focus": {"type": "string"},
+            "day_placement_relation_type": {"type": "string"}
         },
         "required": ["category","role","purpose","ingredient_focus","risk_note","priority","use_days","use_timing","product_candidates"]
     }
@@ -21058,20 +21069,33 @@ use_days_reasonに記述すること。商品カテゴリ名を文中に含め�
    簡潔で構わない。労力は頻度を絞ったstep(use_daysが具体的な曜日のリストになる
    もの)のuse_days_reasonに重点的に使うこと。
 
-【day_placement_reason（曜日配置そのものの根拠、任意）】
+【day_placement_reason / day_placement_related_ingredient_focus /
+  day_placement_relation_type（曜日配置そのものの根拠、任意）】
 上記3.の通り、use_days_reasonには曜日への言及を含めない。しかし「他の
 成分との衝突回避のためこの曜日にした」のような、曜日そのものの配置判断に
-意味のある根拠がある場合は、それをuse_days_reasonに混ぜず、別フィールドの
-day_placement_reasonへ書くこと。
+意味のある根拠がある場合は、それをuse_days_reasonに混ぜず、以下の3項目
+セットで別フィールドへ書くこと。この主張は表示前にコード側でuse_days
+同士を突合して事実確認され、事実と矛盾する場合は理由ごと不採用になる
+(もっともらしいが事実と異なる説明を防ぐため)。3項目は必ずセットで
+出力し、一部だけの出力はしないこと。
+
+- day_placement_reason: 曜日配置の理由を1文で(例: 「レチノール美容液と
+  同日に重ならないよう配置しています」)。
+- day_placement_related_ingredient_focus: 関係する相手stepの
+  ingredient_focusの値をそのまま記入する(相手stepが実際に持つ値と
+  完全に一致させること。「美容液」等のカテゴリ名では対象を一意に特定
+  できないため不可)。
+- day_placement_relation_type: 関係の種類を次のいずれかで固定して記入する。
+  - "avoid_same_day": 相手stepと同じ曜日を避けている場合
+  - "avoid_consecutive_day": 相手stepと連続した曜日(前日・翌日)を避けている場合
 
 記述する条件(必ず遵守):
 - 他のstep(night/weekly_careの他の項目)との組み合わせ・間隔を実際に考慮して
-  この曜日にした場合のみ記述する(例: 「レチノール美容液と同日に重ならない
-  よう配置」「ピーリングの翌日を避けて配置」等、具体的にどのstepとの関係かが
-  分かる内容にすること)。
-- 単に他のstepの曜日と偶然重ならなかっただけ、または特に意図した配置判断が
-  無い場合は、day_placement_reason自体を出力しないか空文字にすること。
-  存在しない配慮を捏造して埋めてはならない。
+  この曜日にした場合のみ記述する。単に他のstepの曜日と偶然重ならなかった
+  だけ、または特に意図した配置判断が無い場合は、3項目とも出力しないか
+  空文字にすること。存在しない配慮を捏造して埋めてはならない。
+- 実際にはこれから確定するuse_days同士が矛盾する組み合わせ(例:
+  「重ならないよう」と書きながら実際は同じ曜日)を出力しないこと。
 - このフィールドが後でresolver(安全のための自動曜日調整ロジック)によって
   上書きされる可能性があることを踏まえ、断定的な安全性の主張はしない
   (「安全に配置した」ではなく「〜と間隔を空けるため」等、行った配置の
@@ -22539,39 +22563,74 @@ def _step_conflict_modified(step, conflict_log):
     return False
 
 
-_WEEKDAY_MENTION_PATTERN = re.compile(r"[月火水木金土日]曜|曜日")
+_DAY_PLACEMENT_RELATION_TYPES = {"avoid_same_day", "avoid_consecutive_day"}
 
 
-def _sanitize_use_days_reason(raw_reason):
+def _weekday_index(day):
+    try:
+        return _ALL_DAYS.index(day)
+    except ValueError:
+        return None
+
+
+def _weekdays_are_adjacent(days_a, days_b):
     """
-    use_days_reasonはプロンプトで「頻度(回数)の理由のみを書き、曜日への
-    言及は避ける」と明示しているが、Geminiがこれに従わず「日曜に設定
-    しました」等、曜日名を含めてしまうケースが実機診断で確認された
-    (2026-09)。違反を検知・ログするだけでは再発を防げないため、文単位で
-    検証し、曜日へ言及している文だけを取り除く(可能なら部分補正、
-    全文が違反していれば空文字にする=データを捏造しない)。
-
-    曜日変更そのものの理由はconflict_log(resolverが実際に行った調整の
-    構造化ログ)側で別途扱うため、この関数は「頻度としてそれ単体で
-    成立する文かどうか」だけを見る。文が本当に無効か(頻度理由として
-    意味をなさないか)の判定はできないため、曜日言及の有無という
-    機械的に判定可能な基準のみを用いる。
+    週間ルーティンは毎週繰り返される前提のため、隣接判定は月〜日の直線
+    ではなく円環(土-日-月...)で行う。
     """
-    text = str(raw_reason or "").strip()
-    if not text:
-        return ""
-    sentences = [s.strip() for s in text.split("。") if s.strip()]
-    valid_sentences = [s for s in sentences if not _WEEKDAY_MENTION_PATTERN.search(s)]
-    violated = len(valid_sentences) != len(sentences)
-    if violated:
-        print(
-            f"[USE_DAYS_REASON WEEKDAY VIOLATION] raw={text!r} "
-            f"kept={valid_sentences!r}",
-            flush=True
-        )
-    if not valid_sentences:
-        return ""
-    return "。".join(valid_sentences) + "。"
+    indices_a = [i for i in (_weekday_index(d) for d in days_a) if i is not None]
+    indices_b = [i for i in (_weekday_index(d) for d in days_b) if i is not None]
+    for ia in indices_a:
+        for ib in indices_b:
+            diff = abs(ia - ib)
+            if diff in (1, len(_ALL_DAYS) - 1):
+                return True
+    return False
+
+
+def _day_placement_reason_is_consistent(step, all_steps):
+    """
+    day_placement_reason(曜日配置そのものの根拠)は、Geminiの自由記述を
+    そのまま信用せず、実際のuse_days同士を突合して矛盾していないかを
+    検証してから採用する。
+
+    「曜日名が含まれているかどうか」のような表面的な言語パターンでの
+    判定は、「週末に配置し、一週間の肌疲れをケアします」のような、
+    曜日には触れているが具体的な根拠を伴わない循環的な説明を素通り
+    させてしまい、逆に「関係性を示す語の有無」で判定しても、その主張が
+    事実かどうかまでは検証できない(実際には重なっているのに「重ならない
+    ように」と書かれていても文面上は正しく見えてしまう)。そのため、
+    Geminiにday_placement_related_ingredient_focus(関係するステップの
+    ingredient_focusタグ、既存スキーマの値でstep間を一意に識別する)と
+    day_placement_relation_type(avoid_same_day/avoid_consecutive_dayの
+    いずれか)を構造化して出力させ、実際のuse_days同士がその主張と矛盾
+    しないかをコード側で機械的に検証する。検証できない(関連タグ・関係
+    種別が無い、関連ステップが実在しない)場合は根拠不明として不採用と
+    する(捏造しない)。
+    """
+    related_tag = str(step.get("day_placement_related_ingredient_focus") or "").strip()
+    relation_type = str(step.get("day_placement_relation_type") or "").strip()
+    if not related_tag or relation_type not in _DAY_PLACEMENT_RELATION_TYPES:
+        return False
+
+    this_days = set(step.get("use_days") or [])
+    related_steps = [
+        s for s in all_steps
+        if isinstance(s, dict) and s is not step
+        and str(s.get("ingredient_focus") or "").strip() == related_tag
+    ]
+    if not related_steps:
+        return False
+
+    for other in related_steps:
+        other_days = set(other.get("use_days") or [])
+        if relation_type == "avoid_same_day":
+            if this_days & other_days:
+                return False
+        elif relation_type == "avoid_consecutive_day":
+            if _weekdays_are_adjacent(this_days, other_days):
+                return False
+    return True
 
 
 def _compose_frequency_reason_note(night_steps, weekly_steps, conflict_log):
@@ -22591,9 +22650,10 @@ def _compose_frequency_reason_note(night_steps, weekly_steps, conflict_log):
     制限されている(=毎日ではない、頻度を絞った)stepだけを対象とする。
     どのstepも対象外の場合は空文字を返す(捏造しない)。
     """
+    all_steps = list(night_steps) + list(weekly_steps)
     seen = set()
     sentences = []
-    for step in list(night_steps) + list(weekly_steps):
+    for step in all_steps:
         if not isinstance(step, dict):
             continue
         # use_daysが空([])=毎日使用は自明な判断のため理由欄には出さない。
@@ -22604,14 +22664,18 @@ def _compose_frequency_reason_note(night_steps, weekly_steps, conflict_log):
         if _step_conflict_modified(step, conflict_log):
             continue
 
-        sanitized_reason = _sanitize_use_days_reason(step.get("use_days_reason"))
-        # day_placement_reasonは曜日配置そのものの根拠を書かせるフィールド
-        # のため、use_days_reasonと異なり曜日言及を禁止しない(_sanitize_
-        # use_days_reasonを通さない)。
+        # use_days_reasonの内容そのものは検証・加工しない(頻度理由として
+        # 何を書くかはプロンプト側の責務であり、キーワードの有無で本文を
+        # 削ると「週末」等の言い換えをすり抜けられるだけでなく、正当な
+        # 記述まで壊しうる)。day_placement_reasonのみ、実データとの
+        # 整合性を検証してから採用する。
+        raw_reason = str(step.get("use_days_reason") or "").strip()
         placement_reason = str(step.get("day_placement_reason") or "").strip()
+        if placement_reason and not _day_placement_reason_is_consistent(step, all_steps):
+            placement_reason = ""
 
         combined = " ".join(
-            _ensure_sentence_ending(p) for p in (sanitized_reason, placement_reason) if p
+            _ensure_sentence_ending(p) for p in (raw_reason, placement_reason) if p
         )
         if not combined:
             continue

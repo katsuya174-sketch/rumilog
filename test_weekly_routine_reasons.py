@@ -766,79 +766,152 @@ class FrequencyReasonNoteTests(unittest.TestCase):
         app.build_weekly_usage_plan(data)
         self.assertEqual(data["frequency_reason_note"], "")
 
-    def test_weekday_mention_violation_is_dropped_entirely_when_single_sentence(self):
-        """use_days_reasonはプロンプトで「曜日への言及は避ける」と明示して
-        いるが、Geminiがこれに違反して曜日名を含めることが実機診断で確認
-        された(例:「週に一度の集中ケアとしてバリア機能を底上げするため
-        日曜に設定しました」)。1文全体が曜日言及と不可分な場合、頻度理由
-        として独立して成立する記述が残らないため、理由を捏造せず空文字に
-        すること(=その分の理由はfrequency_reason_noteに出ない)。"""
+    def test_use_days_reason_content_is_not_filtered_or_stripped(self):
+        """use_days_reasonの本文は検証・加工せずそのまま採用すること。
+        以前は曜日名(「日曜」等)を含む文を検知・削除していたが、この
+        方式は「週末」のような言い換えをすり抜けられる上、正当な記述まで
+        壊しうるため撤回した(2026-09、ユーザー指摘)。曜日配置そのものの
+        根拠はday_placement_reason(実データとの整合性検証つき)へ役割を
+        分離し、use_days_reasonの内容そのものはプロンプトの指示に委ねる。"""
         data = _empty_data(weekly_care=[
             {"category": "パック", "product": "バリアパック", "use_days": ["日"],
-             "use_days_reason": "週に一度の集中ケアとしてバリア機能を底上げするため日曜に設定しました。"},
+             "use_days_reason": "週末に配置し、一週間の肌疲れをケアします。"},
         ])
         data["routine_conflict_log"] = []
         app.build_weekly_usage_plan(data)
-        self.assertEqual(data["frequency_reason_note"], "")
+        self.assertEqual(
+            data["frequency_reason_note"], "週末に配置し、一週間の肌疲れをケアします。"
+        )
 
-    def test_weekday_mention_violation_is_stripped_leaving_valid_sentence(self):
-        """複数文のうち曜日へ言及している文だけを取り除き、頻度理由として
-        独立して成立する文が残っていればそれを採用すること(全体を丸ごと
-        破棄しない部分補正)。"""
-        data = _empty_data(weekly_care=[
-            {"category": "パック", "product": "バリアパック", "use_days": ["日"],
-             "use_days_reason": "バリア機能の底上げのため週1回としています。日曜に設定しました。"},
-        ])
-        data["routine_conflict_log"] = []
-        app.build_weekly_usage_plan(data)
-        note = data["frequency_reason_note"]
-        self.assertIn("バリア機能の底上げのため週1回としています。", note)
-        self.assertNotIn("日曜", note)
-
-    def test_weekday_mention_violation_does_not_affect_other_steps(self):
-        """曜日言及違反の検知・補正は違反したstepだけに限定され、他のstepの
-        正当なuse_days_reasonには影響しないこと。"""
+    def test_day_placement_reason_accepted_when_consistent_with_actual_use_days(self):
+        """day_placement_reasonは、day_placement_related_ingredient_focus/
+        day_placement_relation_typeが実際のuse_daysと矛盾しない場合のみ
+        採用されること(avoid_same_day: 相手stepと実際に曜日が重ならない)。"""
         data = _empty_data(
-            night={"steps": [
-                {"category": "美容液", "product": "レチノール美容液", "use_days": ["月", "水", "金"],
-                 "use_days_reason": "レチノールは刺激があるため週3回としています。"},
-            ]},
             weekly_care=[
                 {"category": "パック", "product": "バリアパック", "use_days": ["日"],
-                 "use_days_reason": "週に一度の集中ケアとしてバリア機能を底上げするため日曜に設定しました。"},
+                 "use_days_reason": "バリア機能の底上げのため週1回としています。",
+                 "day_placement_reason": "レチノール美容液の使用日と重ならないよう日曜に配置しています。",
+                 "day_placement_related_ingredient_focus": "retinol",
+                 "day_placement_relation_type": "avoid_same_day"},
             ],
+            night={"steps": [
+                {"category": "美容液", "product": "レチノール美容液", "use_days": ["月", "水", "金"],
+                 "ingredient_focus": "retinol"},
+            ]},
         )
-        data["routine_conflict_log"] = []
-        app.build_weekly_usage_plan(data)
-        note = data["frequency_reason_note"]
-        self.assertIn("レチノールは刺激があるため週3回としています。", note)
-        self.assertNotIn("日曜", note)
-
-    def test_day_placement_reason_is_included_when_present(self):
-        """day_placement_reasonは、use_days_reasonと異なり曜日言及を禁止
-        しない(曜日配置そのものの根拠を書かせるための専用フィールドのため)。
-        use_days_reasonと自然に連結してfrequency_reason_noteへ含めること。"""
-        data = _empty_data(weekly_care=[
-            {"category": "パック", "product": "バリアパック", "use_days": ["日"],
-             "use_days_reason": "バリア機能の底上げのため週1回としています。",
-             "day_placement_reason": "レチノール美容液の使用日と重ならないよう日曜に配置しています。"},
-        ])
         data["routine_conflict_log"] = []
         app.build_weekly_usage_plan(data)
         note = data["frequency_reason_note"]
         self.assertIn("バリア機能の底上げのため週1回としています。", note)
         self.assertIn("レチノール美容液の使用日と重ならないよう日曜に配置しています。", note)
 
-    def test_day_placement_reason_alone_is_included_without_use_days_reason(self):
-        """use_days_reasonが無くても、day_placement_reasonだけで単独で
-        含まれること(2つのフィールドは独立している)。"""
+    def test_day_placement_reason_rejected_when_contradicts_actual_same_day_overlap(self):
+        """avoid_same_dayを主張していても、実際には相手stepと同じ曜日に
+        なっている場合は、もっともらしい誤情報として不採用にすること
+        (前回指摘: 「重ならないよう」と書いてあっても実際は重なっている
+        ケースを見逃さない)。"""
+        data = _empty_data(
+            weekly_care=[
+                {"category": "パック", "product": "バリアパック", "use_days": ["日"],
+                 "use_days_reason": "バリア機能の底上げのため週1回としています。",
+                 "day_placement_reason": "レチノール美容液の使用日と重ならないよう日曜に配置しています。",
+                 "day_placement_related_ingredient_focus": "retinol",
+                 "day_placement_relation_type": "avoid_same_day"},
+            ],
+            night={"steps": [
+                # 実際にはレチノールも日曜を含んでおり、主張と矛盾している。
+                {"category": "美容液", "product": "レチノール美容液", "use_days": ["日", "水"],
+                 "ingredient_focus": "retinol"},
+            ]},
+        )
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        note = data["frequency_reason_note"]
+        self.assertIn("バリア機能の底上げのため週1回としています。", note)
+        self.assertNotIn("重ならないよう", note)
+
+    def test_day_placement_reason_accepted_when_consecutive_day_actually_avoided(self):
+        """avoid_consecutive_dayは、相手stepの曜日と連続(前日・翌日、週を
+        またぐ円環も含む)していない場合のみ採用すること。"""
+        data = _empty_data(
+            weekly_care=[
+                {"category": "パック", "product": "バリアパック", "use_days": ["水"],
+                 "day_placement_reason": "ピーリングの翌日を避けて水曜に配置しています。",
+                 "day_placement_related_ingredient_focus": "aha",
+                 "day_placement_relation_type": "avoid_consecutive_day"},
+                {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["月"],
+                 "ingredient_focus": "aha"},
+            ],
+        )
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        self.assertIn("ピーリングの翌日を避けて水曜に配置しています。", data["frequency_reason_note"])
+
+    def test_day_placement_reason_rejected_when_actually_consecutive_day(self):
+        """avoid_consecutive_dayを主張していても、実際には相手stepの翌日に
+        なっている場合は不採用にすること。"""
+        data = _empty_data(
+            weekly_care=[
+                {"category": "パック", "product": "バリアパック", "use_days": ["火"],
+                 "day_placement_reason": "ピーリングの翌日を避けて配置しています。",
+                 "day_placement_related_ingredient_focus": "aha",
+                 "day_placement_relation_type": "avoid_consecutive_day"},
+                # 実際には火曜(パック)は月曜(ピーリング)の翌日で連続している。
+                {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["月"],
+                 "ingredient_focus": "aha"},
+            ],
+        )
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        self.assertNotIn("ピーリングの翌日を避けて配置しています。", data["frequency_reason_note"])
+
+    def test_day_placement_reason_rejected_without_structured_relation_fields(self):
+        """day_placement_reasonの本文があっても、day_placement_related_
+        ingredient_focus/day_placement_relation_typeが無ければ検証できない
+        ため不採用にすること(捏造防止。言語パターンでの判定はせず、
+        構造化フィールドが無い=根拠不明として扱う)。"""
         data = _empty_data(weekly_care=[
             {"category": "パック", "product": "バリアパック", "use_days": ["日"],
-             "day_placement_reason": "ピーリングの翌日を避けて日曜に配置しています。"},
+             "use_days_reason": "バリア機能の底上げのため週1回としています。",
+             "day_placement_reason": "週末に配置し、一週間の肌疲れをケアします。"},
         ])
         data["routine_conflict_log"] = []
         app.build_weekly_usage_plan(data)
-        self.assertIn("ピーリングの翌日を避けて日曜に配置しています。", data["frequency_reason_note"])
+        self.assertEqual(
+            data["frequency_reason_note"], "バリア機能の底上げのため週1回としています。"
+        )
+
+    def test_day_placement_reason_rejected_when_related_step_does_not_exist(self):
+        """day_placement_related_ingredient_focusが、実際のどのstepの
+        ingredient_focusとも一致しない場合(存在しない相手を主張している)
+        不採用にすること。"""
+        data = _empty_data(weekly_care=[
+            {"category": "パック", "product": "バリアパック", "use_days": ["日"],
+             "day_placement_reason": "レチノールと重ならないよう配置しています。",
+             "day_placement_related_ingredient_focus": "retinol",
+             "day_placement_relation_type": "avoid_same_day"},
+        ])
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        self.assertEqual(data["frequency_reason_note"], "")
+
+    def test_day_placement_reason_alone_is_included_without_use_days_reason(self):
+        """use_days_reasonが無くても、整合性検証を通過したday_placement_
+        reasonだけで単独で含まれること(2つのフィールドは独立している)。"""
+        data = _empty_data(
+            weekly_care=[
+                {"category": "パック", "product": "バリアパック", "use_days": ["水"],
+                 "day_placement_reason": "ピーリングの翌日を避けて水曜に配置しています。",
+                 "day_placement_related_ingredient_focus": "aha",
+                 "day_placement_relation_type": "avoid_consecutive_day"},
+                {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["月"],
+                 "ingredient_focus": "aha"},
+            ],
+        )
+        data["routine_conflict_log"] = []
+        app.build_weekly_usage_plan(data)
+        self.assertIn("ピーリングの翌日を避けて水曜に配置しています。", data["frequency_reason_note"])
 
     def test_day_placement_reason_empty_when_not_meaningfully_decided(self):
         """意図した配置判断が無い場合、day_placement_reasonは空のまま
@@ -857,7 +930,8 @@ class FrequencyReasonNoteTests(unittest.TestCase):
     def test_day_placement_reason_excluded_when_step_conflict_modified(self):
         """resolverが実際に曜日を変更したstepのday_placement_reasonは、
         変更前の曜日配置を前提に書かれており最終結果と矛盾するため、
-        use_days_reasonと同じ基準で除外すること。"""
+        use_days_reasonと同じ基準で除外すること(整合性検証よりも前段で
+        除外されるため、構造化フィールドが無くても本テストは成立する)。"""
         data = _empty_data(
             weekly_care=[
                 {"category": "ピーリング", "product": "AHAピーリング", "use_days": ["土"],
