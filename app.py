@@ -7324,6 +7324,31 @@ def attach_affiliate_links_to_all_steps(data, affiliate_ai_db, user_data=None, b
 # 楽天商品名 Gemini 整形キャッシュ（同一タイトルを複数回処理しない）
 _rakuten_name_clean_cache: dict = {}
 
+# 楽天商品タイトルに残る販促文言。_rule_based_clean_rakuten_title()
+# (単独タイトルのルールベース整形)専用。単独商品の正当なバリエーション
+# (容量違い等)を壊さないよう、ここには容量・数量表記を含めない。
+_RAKUTEN_TITLE_JUNK_PATTERNS = [
+    r'送料無料', r'ポイント\s*\d+\s*[倍%]?', r'レビュー(?:特典|プレゼント|で(?:もらえる|プレ))',
+    r'(?:メーカー|国内)?公式', r'正規(?:品|代理店|輸入品)', r'国内正規',
+    r'(?:期間|数量|在庫)?限定', r'タイムセール', r'スーパーSALE?', r'クーポン(?:使用可)?',
+    r'\d+\s*%\s*OFF', r'\d+\s*円\s*(?:OFF|引き|割引)',
+    r'お買い?得', r'特価', r'激安', r'最安値?',
+    r'あす楽(?:対応)?', r'即日(?:出荷|発送)', r'翌日(?:配送|お届け)', r'最短翌日',
+    r'楽天\d+冠', r'ランキング\s*\d+\s*位', r'売れ筋',
+    r'新品', r'未使用',
+]
+
+# 商品比較表で同一商品が複数ショップから出品されている場合の代表表示名
+# 選定(_rakuten_name_junk_match_count参照)専用の追加パターン。容量・数量
+# 表記やプチプラ等はグループ化(=同一商品と既に確認済み)の中でだけノイズ
+# として扱う。単独タイトルの整形(_rule_based_clean_rakuten_title)には
+# 含めない(容量違いが商品バリエーションそのものを区別するケースを
+# 壊さないため。2026-09、ユーザー指摘)。
+_RAKUTEN_GROUP_REPRESENTATIVE_EXTRA_PATTERNS = [
+    r'大容量', r'徳用', r'プチプラ', r'高コスパ', r'お試し',
+    r'\d+\s*(?:ml|mL|g|枚|包|回分|day|Day|本)\b',
+]
+
 
 def _rule_based_clean_rakuten_title(title: str) -> str:
     """ルールベースで楽天商品名をクリーニング（Gemini失敗・部分欠損時のフォールバック）"""
@@ -7339,23 +7364,23 @@ def _rule_based_clean_rakuten_title(title: str) -> str:
     # 先頭の装飾記号
     t = re.sub(r'^[\s　★☆◆◇▼▽△▲●○■□♪♦♥❤✨💕🌸]+', '', t)
     # 各種マーケティング文言（順番に除去）
-    _junk = [
-        r'送料無料', r'ポイント\s*\d+\s*[倍%]?', r'レビュー(?:特典|プレゼント|で(?:もらえる|プレ))',
-        r'(?:メーカー|国内)?公式', r'正規(?:品|代理店|輸入品)', r'国内正規',
-        r'(?:期間|数量|在庫)?限定', r'タイムセール', r'スーパーSALE?', r'クーポン(?:使用可)?',
-        r'\d+\s*%\s*OFF', r'\d+\s*円\s*(?:OFF|引き|割引)',
-        r'お買い?得', r'特価', r'激安', r'最安値?',
-        r'あす楽(?:対応)?', r'即日(?:出荷|発送)', r'翌日(?:配送|お届け)', r'最短翌日',
-        r'楽天\d+冠', r'ランキング\s*\d+\s*位', r'売れ筋',
-        r'新品', r'未使用',
-    ]
-    for p in _junk:
+    for p in _RAKUTEN_TITLE_JUNK_PATTERNS:
         t = re.sub(p, '', t)
     # 連続スペース・全角スペースを整理
     t = re.sub(r'[\s　]+', ' ', t).strip()
     # 残った先頭・末尾の記号・区切り文字を除去
     t = t.strip('/ ・|｜,，、。　 ')
     return t if t.strip() else title
+
+
+def _rakuten_name_junk_match_count(name: str) -> int:
+    """整形済み商品名に、なお販促・容量訴求語が何個残っているかを数える。
+    商品比較表で同一商品が複数出品されている場合の代表名選定にのみ使う
+    (残存ノイズが少ないほど正式名に近いとみなす)。単独タイトルの
+    クリーニング判定には使わない。"""
+    text = str(name or "")
+    patterns = _RAKUTEN_TITLE_JUNK_PATTERNS + _RAKUTEN_GROUP_REPRESENTATIVE_EXTRA_PATTERNS
+    return sum(1 for p in patterns if re.search(p, text))
 
 
 _GEMINI_NAME_CLEAN_PROMPT_PREFIX = """\
@@ -8568,7 +8593,85 @@ def gemini_clean_rakuten_product_names(data):
     if dedup_removed:
         print(f"[NAME CLEAN] クリーニング後重複除去 {dedup_removed}件", flush=True)
 
+    _unify_comparison_candidate_display_names(all_steps)
+
     return data
+
+
+def _unify_comparison_candidate_display_names(all_steps):
+    """
+    商品比較表専用リスト(_comparison_candidates)は、同一商品が複数
+    ショップから出品されている場合、行(出品)ごとに別インスタンスとして
+    保持し、価格差を見せるためにあえて統合しない設計になっている。
+    しかし各行の商品名クリーニングは行ごとに独立して行われるため、
+    同じ商品でも一方は「ブランド 商品名」だけに整形され、もう一方には
+    「大容量」「プチプラ」等の販促語や成分名が残ったままになり、表示の
+    詳しさが不揃いになる問題があった(2026-09、ユーザー指摘)。
+
+    グループ化(同一商品判定)は、代表名選定で使うノイズパターンを
+    あらかじめ除去した上での識別キー(normalize_product_identity、
+    preserve_ranked_top_candidates側のbuild_candidate_identity_keysと
+    同じ正規化関数)で行う。ノイズ語の残存量が行ごとに違う(=この関数が
+    対応しているバグそのもの)ため、ノイズを含んだままのキーで比較すると
+    同一商品なのに一致しない。グループ内では最も残存ノイズが少ない
+    「元の」名前を代表として選び(ノイズ除去済みの文字列は識別にのみ
+    使い、表示には使わない)、グループ全行のname/brandをその代表へ
+    統一する。price_ref/score/item_code等の出品固有データ(=商品比較表が
+    別行として見せたい情報そのもの)は変更しない。
+
+    代表名の選定基準(必ずこの優先順位で一意に決まる):
+      1. 残存ノイズ語(_rakuten_name_junk_match_count)が最も少ない
+      2. 同点なら文字数が短い
+      3. それでも同点なら文字列の辞書順で先頭
+    """
+    def _grouping_identity(cand):
+        name = str(cand.get("name", "") or "")
+        for p in (_RAKUTEN_TITLE_JUNK_PATTERNS + _RAKUTEN_GROUP_REPRESENTATIVE_EXTRA_PATTERNS):
+            name = re.sub(p, '', name)
+        return normalize_product_identity(cand.get("brand", ""), name)
+
+    unified_groups = 0
+    for step in all_steps:
+        if not isinstance(step, dict):
+            continue
+        cands = step.get("_comparison_candidates")
+        if not isinstance(cands, list) or len(cands) <= 1:
+            continue
+
+        groups: dict = {}
+        for cand in cands:
+            if not isinstance(cand, dict):
+                continue
+            identity = _grouping_identity(cand)
+            if not identity:
+                continue
+            groups.setdefault(identity, []).append(cand)
+
+        for members in groups.values():
+            if len(members) <= 1:
+                continue
+            names = {str(c.get("name", "") or "") for c in members}
+            if len(names) <= 1:
+                continue  # 既に同じ表示名なら統一不要
+
+            def _representative_sort_key(c):
+                name = str(c.get("name", "") or "")
+                return (_rakuten_name_junk_match_count(name), len(name), name)
+
+            winner = min(members, key=_representative_sort_key)
+            winner_name = winner.get("name", "")
+            winner_brand = winner.get("brand", "")
+            for c in members:
+                c["name"] = winner_name
+                c["brand"] = winner_brand
+            unified_groups += 1
+            print(
+                f"[COMPARISON NAME UNIFIED] group_size={len(members)} "
+                f"representative={winner_name!r}",
+                flush=True
+            )
+    if unified_groups:
+        print(f"[NAME CLEAN] 商品比較表の表示名統一 {unified_groups}グループ", flush=True)
 
 
 # ===== Gemini 選定理由・比較文生成 =====
@@ -17209,6 +17312,14 @@ def _aggregate_reasons_by_rule(candidate_score_reasons):
                 "label": r.get("label", ""),
                 "feature": [],
                 "matched_user_condition": r.get("matched_user_condition", ""),
+                # axis("base"/"improve"/"routine")は初出の値を採用する。
+                # 1つのruleは1つの採点関数(score_product/score_routine_balance/
+                # build_improvement_reason_details)でのみ発行される前提のため
+                # axisは常に1値に定まる(test_aggregate_reasons_preserves_axis_
+                # per_rule等で固定)。「base」「improve」は共に商品固有の優位性
+                # (成分・処方等)、「routine」は他ステップとの組み合わせ評価で、
+                # why_bestの文章生成でこの2種類を別の文に分けるために使う。
+                "axis": r.get("axis", ""),
             }
         agg[rule]["points"] += points
         feature = r.get("matched_product_feature", "")
@@ -17240,6 +17351,7 @@ def _find_decisive_score_reasons(best_agg, others_agg_list):
                 "label": info["label"],
                 "feature": info["feature"],
                 "matched_user_condition": info["matched_user_condition"],
+                "axis": info.get("axis", ""),
                 "points": info["points"],
                 "gap": round(info["points"] - best_other, 1),
                 "kind": "gain",
@@ -17302,6 +17414,7 @@ def _find_penalty_avoidance_reasons(best_agg, others_agg_list):
                 "label": info_for_label["label"],
                 "feature": info_for_label["feature"],
                 "matched_user_condition": info_for_label["matched_user_condition"],
+                "axis": info_for_label.get("axis", ""),
                 "points": best_points,
                 "gap": round(best_points - worst_other, 1),
                 "kind": "avoidance",
@@ -17324,6 +17437,24 @@ _UNIVERSAL_SHARED_RULES = {"product_category_base_fit"}
 # 一切手を加えず、決定的優位・部分優位の理由として引用する対象からだけ
 # 除外する(candidate_score_reasons自体には残るため、根拠トレースは失わない)。
 _NON_CITABLE_REASON_RULES = {"common_availability", "common_budget_fit"}
+
+# score_routine_balance()のruleのうち、真に「他ステップとの組み合わせ・
+# 関係」を評価しているものだけを列挙する。同じscore_routine_balance()
+# 内でもroutine_purpose_*(ステップ自身のpurposeとの成分適合)や
+# routine_irritation_high_penalty(商品自体の刺激リスク)は、routine_context
+# (他ステップの情報)を一切参照せず、候補自身の性質だけで決まる
+# candidate-intrinsicな理由であり、ここには含めない(2026-09、実機診断
+# 「商品固有の優位性とルーティン内の組み合わせ評価が一文に混在して
+# 分かりにくい」への対応で、両者を文章として分離するために必要な区別。
+# 単純にaxis=="routine"で分けると上記のcandidate-intrinsicな理由まで
+# 誤って「組み合わせ評価」として分類してしまうため、rule名を明示的に
+# 列挙する)。
+_ROUTINE_COMBINATION_RULES = {
+    "routine_conflict_hard_block",
+    "routine_conflict_soft_penalty",
+    "routine_non_focus_overlap_penalty",
+    "routine_synergy_bonus",
+}
 
 
 def _merge_duplicate_reason_phrases(decisive):
@@ -17349,6 +17480,7 @@ def _merge_duplicate_reason_phrases(decisive):
                 "feature": d["feature"],
                 "matched_user_condition": d["matched_user_condition"],
                 "kind": d["kind"],
+                "axis": d.get("axis", ""),
                 "gap": 0.0,
                 "rules": [],
             }
@@ -17401,6 +17533,7 @@ def _merge_presence_absence_pairs(decisive):
                 "feature": g["feature"] or a["feature"],
                 "matched_user_condition": condition,
                 "kind": "gain",  # 統合後は加点として(肯定的に)説明する
+                "axis": g.get("axis", "") or a.get("axis", ""),
                 "gap": g["gap"] + a["gap"],
                 "rules": g["rules"] + a["rules"],
             })
@@ -17677,27 +17810,19 @@ def _build_why_best_text(best, others, step, best_label):
                 shared_label = info["label"]
                 break
 
-        # 件数上限は設けず、見つかった決定的優位・回避項目を全て使う(2026-09、
-        # 実機診断で「機械的でテンプレート」「2位・3位それぞれとの実際の差を
-        # 知りたい」との指摘を受け、[:2]による情報の切り捨てをやめた)。
-        selected = decisive
-        gain_phrases = []
-        avoidance_phrases = []
-        for d in selected:
-            # d["feature"]はcandidate_score_reasonsのmatched_product_feature
-            # (内部トレース値、rawのまま)。表示直前でだけ安全な日本語へ変換し、
-            # 変換できないものは除外する(rawキーへフォールバックしない)。
-            feature_text = "・".join(_safe_display_labels(d["feature"], limit=2))
-            if d["kind"] == "avoidance":
-                if feature_text and feature_text != d["label"]:
-                    avoidance_phrases.append(f"「{d['label']}」({feature_text})")
-                else:
-                    avoidance_phrases.append(f"「{d['label']}」")
-            else:
-                if feature_text and feature_text != d["label"]:
-                    gain_phrases.append(f"{d['label']}({feature_text})")
-                else:
-                    gain_phrases.append(d["label"])
+        # 商品固有の優位性(成分・処方等、この商品自体が持つ差。
+        # score_routine_balance()内のroutine_purpose_*/irritation関連の
+        # ように、他ステップを一切参照せず候補自身の性質だけで決まる
+        # ものも含む)と、他ステップとの組み合わせ・関係を実際に評価した
+        # もの(_ROUTINE_COMBINATION_RULES)は、順位差としての性質が異なる
+        # ため別の文で説明する(2026-09、実機診断で「商品そのものの
+        # 優位性とルーティン適合性が一文に混在して分かりにくい」との
+        # 指摘を受けた)。
+        def _is_routine_combination(d):
+            return any(r in _ROUTINE_COMBINATION_RULES for r in d["rules"])
+
+        candidate_decisive = [d for d in decisive if not _is_routine_combination(d)]
+        routine_decisive = [d for d in decisive if _is_routine_combination(d)]
 
         # 比較対象を明示する。「比較した候補」という曖昧な言い方ではなく、
         # 実際に2位・3位のどちらと比べているかを名指しする(点数そのものは
@@ -17715,26 +17840,71 @@ def _build_why_best_text(best, others, step, best_label):
             target_compare = "比較した候補より"
             target_seen = "比較した候補に見られた"
 
-        clauses = []
-        if gain_phrases:
-            clauses.append(f"{best_label}は{target_compare}{'、'.join(gain_phrases)}で優位")
-        if avoidance_phrases:
-            avoidance_text = "、".join(avoidance_phrases)
-            if gain_phrases:
-                clauses.append(f"{target_seen}{avoidance_text}の影響も受けていません")
-            else:
-                clauses.append(f"{best_label}は{target_seen}{avoidance_text}の影響を受けていません")
+        def _reason_phrases(items):
+            # d["feature"]はcandidate_score_reasonsのmatched_product_feature
+            # (内部トレース値、rawのまま)。表示直前でだけ安全な日本語へ変換し、
+            # 変換できないものは除外する(rawキーへフォールバックしない)。
+            gain_phrases = []
+            avoidance_phrases = []
+            for d in items:
+                feature_text = "・".join(_safe_display_labels(d["feature"], limit=2))
+                if d["kind"] == "avoidance":
+                    if feature_text and feature_text != d["label"]:
+                        avoidance_phrases.append(f"「{d['label']}」({feature_text})")
+                    else:
+                        avoidance_phrases.append(f"「{d['label']}」")
+                else:
+                    if feature_text and feature_text != d["label"]:
+                        gain_phrases.append(f"{d['label']}({feature_text})")
+                    else:
+                        gain_phrases.append(d["label"])
+            return gain_phrases, avoidance_phrases
 
-        decisive_sentence = "、".join(clauses) + "。この差が選ばれた理由です。"
+        # 件数上限は設けず、見つかった決定的優位・回避項目を全て使う(2026-09、
+        # 実機診断で「機械的でテンプレート」「2位・3位それぞれとの実際の差を
+        # 知りたい」との指摘を受け、[:2]による情報の切り捨てをやめた)。
+        candidate_gain, candidate_avoidance = _reason_phrases(candidate_decisive)
+        routine_gain, routine_avoidance = _reason_phrases(routine_decisive)
 
-        if shared_label:
-            # shared_labelは動詞・形容詞終止形で終わるrule labelのことが
-            # 多く(例:「〜を含む」「〜合う」「〜しやすい」)、直後に「は」を
-            # そのまま続けると「含むは」のように名詞化されておらず破格に
-            # なる。「という点」を挟むことで、labelの品詞によらず自然に
-            # 読める(2026-09、実機診断20260928083119852553で確認)。
-            return f"{shared_label}という点は比較した候補にも見られますが、{decisive_sentence}"
-        return decisive_sentence
+        sentences = []
+
+        if candidate_gain or candidate_avoidance:
+            clauses = []
+            if candidate_gain:
+                clauses.append(f"{best_label}は{target_compare}{'、'.join(candidate_gain)}で優位")
+            if candidate_avoidance:
+                avoidance_text = "、".join(candidate_avoidance)
+                if candidate_gain:
+                    clauses.append(f"{target_seen}{avoidance_text}の影響も受けていません")
+                else:
+                    clauses.append(f"{best_label}は{target_seen}{avoidance_text}の影響を受けていません")
+            candidate_sentence = "、".join(clauses) + "。"
+            if shared_label:
+                # shared_labelは動詞・形容詞終止形で終わるrule labelのことが
+                # 多く(例:「〜を含む」「〜合う」「〜しやすい」)、直後に「は」を
+                # そのまま続けると「含むは」のように名詞化されておらず破格に
+                # なる。「という点」を挟むことで、labelの品詞によらず自然に
+                # 読める(2026-09、実機診断20260928083119852553で確認)。
+                candidate_sentence = f"{shared_label}という点は比較した候補にも見られますが、{candidate_sentence}"
+            sentences.append(candidate_sentence)
+
+        # ルーティン内の組み合わせ評価は、商品自体の優位性とは独立した文
+        # として添える(商品比較とルーティン適合性の意味を混在させない)。
+        if routine_gain or routine_avoidance:
+            routine_clauses = []
+            if routine_gain:
+                routine_clauses.append("、".join(routine_gain) + "という組み合わせも考慮されています")
+            if routine_avoidance:
+                routine_clauses.append("、".join(routine_avoidance) + "の影響を避けられています")
+            sentences.append("また、現在のルーティンでは" + "、".join(routine_clauses) + "。")
+
+        if not sentences:
+            # candidate_decisive/routine_decisiveへの分割後にどちらも空に
+            # なることは、decisiveが非空である前提上は起きないはずだが、
+            # 万一に備えた安全側のフォールバック(架空の理由は作らない)。
+            return "比較した候補との間に明確な優位点は確認できませんでした。総合スコアの僅差で選ばれています。"
+
+        return "".join(sentences) + "この差が選ばれた理由です。"
 
     # 全候補に対する決定的な決め手が一つも無い場合、「一部の候補に対して
     # だけ」実際に優位だったruleを、対象を明示したうえで次善の理由として

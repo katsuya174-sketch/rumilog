@@ -10,6 +10,7 @@ routine_score/final scoreが完全に一致することを全段階で確認す�
 
 import os
 import unittest
+from unittest.mock import patch
 
 os.environ.setdefault("DATABASE_URL", "postgresql://localhost/rumilog_test")
 
@@ -589,6 +590,189 @@ class WhyBestUsesRealScoreReasonsTests(unittest.TestCase):
         self.assertNotIn("は比較した候補にも見られますが", why_best)
         self.assertIn("敏感肌向け", why_best)
         self.assertIn("敏感肌向け", why_best)
+
+
+class WhyBestSeparatesCandidateAndRoutineCombinationTests(unittest.TestCase):
+    """
+    why_bestが、商品固有の優位性(成分・処方等、その商品自体が持つ差)と、
+    現在のルーティン内の他ステップとの組み合わせ評価(_ROUTINE_COMBINATION_
+    RULES: routine_synergy_bonus/routine_conflict_*/routine_non_focus_
+    overlap_penalty)を、一文に混在させず別の文で説明すること。
+
+    2026-09、実機診断で「毛穴に合う主成分を含む(レチノール)、他ステップの
+    成分と相乗効果が期待できる組み合わせ(セラミド×ナイアシンアミド)で
+    優位」のように、商品固有の優位性とルーティン適合性が一文に混在して
+    分かりにくいとの指摘を受けた対応の回帰テスト。
+    """
+
+    def _candidate(self, name, base_score, reasons):
+        return {
+            "brand": "", "name": name, "score": base_score, "base_score": base_score,
+            "improve_score": 0, "routine_score": 0, "source": "db", "price_ref": 2000,
+            "active_ingredients": [], "support_ingredients": [], "main_functions": [],
+            "skin_types": [], "concerns": [], "texture": "", "formulation": [],
+            "candidate_score_reasons": reasons,
+        }
+
+    def test_candidate_and_routine_reasons_are_split_into_separate_sentences(self):
+        best = self._candidate("ピュアフェイスホワイト保湿クリーム", 90, [
+            _reason("ingredient_focus_active_match", "毛穴に合う主成分を含む", feature="レチノール", points=25),
+            _reason(
+                "routine_synergy_bonus", "他ステップの成分と相乗効果が期待できる組み合わせ",
+                feature="セラミド×ナイアシンアミド", points=20, axis="routine",
+            ),
+        ])
+        second = self._candidate("2位商品", 60, [])
+        third = self._candidate("3位商品", 55, [])
+        result = app.build_candidate_comparison_notes([best, second, third], {}, {})
+        why_best = result["why_best"]
+
+        self.assertIn("レチノール", why_best)
+        self.assertIn("セラミド×ナイアシンアミド", why_best)
+        # 商品固有の優位性とルーティン適合性が別の文(句点で区切られる)に
+        # なっていること。ルーティン文は独立した導入句を持つ。
+        self.assertIn("また、現在のルーティンでは", why_best)
+        sentence_with_retinol = next(s for s in why_best.split("。") if "レチノール" in s)
+        self.assertNotIn("セラミド", sentence_with_retinol)
+
+    def test_routine_purpose_fit_reason_stays_in_candidate_sentence_not_routine_sentence(self):
+        """score_routine_balance()由来でも、routine_purpose_*(ステップ自身の
+        purposeとの成分適合、他ステップを一切参照しない)はcandidate-intrinsic
+        として扱い、「また、現在のルーティンでは」文には分類しないこと。
+        (axis=="routine"だけで判定すると誤ってルーティン文に分類してしまう
+        ため、rule名で明示的に区別している設計の回帰テスト)"""
+        best = self._candidate("A商品", 90, [
+            _reason(
+                "routine_purpose_retinoid_pores", "毛穴・ハリに合うレチノイド系成分",
+                feature="retinoid", points=12, axis="routine",
+            ),
+        ])
+        second = self._candidate("2位商品", 70, [])
+        third = self._candidate("3位商品", 65, [])
+        result = app.build_candidate_comparison_notes([best, second, third], {}, {})
+        why_best = result["why_best"]
+        self.assertIn("毛穴・ハリに合うレチノイド系成分", why_best)
+        self.assertNotIn("また、現在のルーティンでは", why_best)
+
+    def test_routine_combination_only_without_candidate_reason(self):
+        """商品固有の決め手が無く、ルーティンの組み合わせ評価だけが決め手の
+        場合、ルーティン文のみが単独で出力されること(空の商品固有文を
+        作らない)。"""
+        best = self._candidate("A商品", 90, [
+            _reason(
+                "routine_synergy_bonus", "他ステップの成分と相乗効果が期待できる組み合わせ",
+                feature="ビタミンC×ナイアシンアミド", points=20, axis="routine",
+            ),
+        ])
+        second = self._candidate("2位商品", 70, [])
+        result = app.build_candidate_comparison_notes([best, second], {}, {})
+        why_best = result["why_best"]
+        self.assertTrue(why_best.startswith("また、現在のルーティンでは"))
+        self.assertIn("ビタミンC×ナイアシンアミド", why_best)
+
+
+class AggregateReasonsPreservesAxisPerRuleTests(unittest.TestCase):
+    """_aggregate_reasons_by_rule()がaxisをrule単位で保持すること、および
+    「1 rule = 1 axis」が実データ上保証されていることの回帰テスト
+    (2026-09、why_bestの商品固有優位性/ルーティン適合性の分離に必要な
+    前提としてユーザーから明示的に要求された)。"""
+
+    def test_axis_is_preserved_per_rule(self):
+        agg = app._aggregate_reasons_by_rule([
+            _reason("ingredient_focus_active_match", "主成分を含む", feature="レチノール", points=25, axis="base"),
+            _reason("routine_synergy_bonus", "相乗効果", feature="A×B", points=20, axis="routine"),
+        ])
+        self.assertEqual(agg["ingredient_focus_active_match"]["axis"], "base")
+        self.assertEqual(agg["routine_synergy_bonus"]["axis"], "routine")
+
+    def test_each_production_rule_name_maps_to_exactly_one_axis(self):
+        """score_product()/build_improvement_reason_details()(axis="base"/
+        "improve")とscore_routine_balance()(axis="routine")が、実際に
+        同じrule名を異なるaxisで発行することが無いこと。1つのruleが複数の
+        axisにまたがると、_build_why_best_text()の商品固有/ルーティン
+        判定(_ROUTINE_COMBINATION_RULESとの照合)の前提が崩れる。"""
+        seen_axis_by_rule = {}
+        conflicts = []
+
+        def _collect(reasons):
+            for r in reasons or []:
+                rule = r.get("rule", "")
+                axis = r.get("axis", "")
+                if not rule:
+                    continue
+                prior = seen_axis_by_rule.get(rule)
+                if prior is not None and prior != axis:
+                    conflicts.append((rule, prior, axis))
+                else:
+                    seen_axis_by_rule[rule] = axis
+
+        def _run(purpose, families, strength, irritation_risk, routine_context, ingredient_focus=""):
+            reasons = []
+            product = {
+                "active_ingredients": families, "support_ingredients": [],
+                "formulation": [], "texture": "",
+            }
+            with patch(
+                "app.infer_active_profile",
+                return_value={"families": families, "strength": strength, "irritation_risk": irritation_risk},
+            ):
+                app.score_routine_balance(
+                    {"purpose": purpose, "ingredient_focus": ingredient_focus}, product,
+                    routine_context=routine_context, reasons=reasons,
+                )
+            _collect(reasons)
+
+        # purpose別の成分適合(routine_purpose_*)・刺激リスク
+        # (routine_irritation_high_penalty)を広く条件を振って収集する。
+        for purpose in ["ニキビ跡", "色素沈着", "毛穴", "ハリ", ""]:
+            for families in [["vitamin_c"], ["retinoid"], ["azelaic"], ["niacinamide"], ["peptide"], []]:
+                for strength in ["low", "high"]:
+                    for irritation_risk in ["low", "high"]:
+                        _run(purpose, families, strength, irritation_risk, routine_context=None)
+
+        # routine_conflict_soft_penalty: 候補自身がavoid_rulesの片方の
+        # familyを持ち、他ステップ(existing_families)がもう片方を持つ場合。
+        _run(
+            "", ["retinoid"], "low", "low",
+            routine_context={
+                "families": ["azelaic"], "global_families": [],
+                "avoid_rules": [{"families": ["retinoid", "azelaic"], "severity": "soft", "scope": "same_session"}],
+            },
+        )
+
+        # routine_conflict_hard_block: severity="hard"版(即-9999で除外される
+        # ため、returnより前のreasons.append自体は実行される)。
+        _run(
+            "", ["retinoid"], "low", "low",
+            routine_context={
+                "families": ["azelaic"], "global_families": [],
+                "avoid_rules": [{"families": ["retinoid", "azelaic"], "severity": "hard", "scope": "same_session"}],
+            },
+        )
+
+        # routine_non_focus_overlap_penalty: 候補の非focus成分(active_
+        # ingredients)が他ステップのfocusと重複する場合。
+        _run(
+            "", ["vitamin_c"], "low", "low",
+            ingredient_focus="niacinamide",
+            routine_context={"families": [], "global_families": [], "assigned_focus_tags": ["vitamin_c"]},
+        )
+
+        # routine_synergy_bonus: 候補のfamilyが他ステップのfamilyとGemini由来の
+        # synergy_rulesに一致する場合。
+        _run(
+            "", ["niacinamide"], "low", "low",
+            routine_context={
+                "families": ["vitamin_c"], "global_families": [],
+                "synergy_rules": [{"families": ["niacinamide", "vitamin_c"], "bonus": "high"}],
+            },
+        )
+
+        self.assertEqual(conflicts, [], f"同じrule名が複数のaxisで発行されている: {conflicts}")
+        # _ROUTINE_COMBINATION_RULES全件が実際にaxis="routine"で観測され、
+        # テスト自体が意味のあるデータを集められていることを保証する。
+        for rule in app._ROUTINE_COMBINATION_RULES:
+            self.assertEqual(seen_axis_by_rule.get(rule), "routine", f"{rule}が観測できていない")
 
 
 # =========================================================

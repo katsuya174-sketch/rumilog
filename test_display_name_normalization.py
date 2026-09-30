@@ -455,6 +455,32 @@ class SearchRakutenForStepListingDedupTests(unittest.TestCase):
         self.assertEqual(len(all_results), 1)
 
 
+class RakutenNameJunkScoringScopeTests(unittest.TestCase):
+    """_rakuten_name_junk_match_count()(商品比較表の代表名選定専用)と
+    _rule_based_clean_rakuten_title()(単独タイトルの汎用クリーニング)の
+    役割分離の回帰テスト。容量・数量表記は同一商品と確認できたグループ内
+    でのみノイズ扱いし、単独タイトルの整形では除去しない(2026-09、
+    ユーザー指摘: 容量違いが商品バリエーションそのものを区別するケースを
+    壊さないため)。"""
+
+    def test_junk_match_count_counts_capacity_and_price_appeal_terms(self):
+        self.assertEqual(app._rakuten_name_junk_match_count("ピュアメデル 保湿クリーム"), 0)
+        self.assertGreater(app._rakuten_name_junk_match_count("ピュアメデル 保湿クリーム 大容量"), 0)
+        self.assertGreater(app._rakuten_name_junk_match_count("ピュアメデル 保湿クリーム プチプラ"), 0)
+        self.assertGreater(app._rakuten_name_junk_match_count("ピュアメデル 保湿クリーム 200ml"), 0)
+
+    def test_rule_based_title_cleaning_does_not_strip_capacity(self):
+        """単独タイトルのルールベース整形は、容量表記を除去しないこと
+        (200ml版・400ml版が実際に別商品として並ぶケースを壊さないため)。"""
+        cleaned = app._rule_based_clean_rakuten_title("ピュアメデル 保湿クリーム 200ml")
+        self.assertIn("200ml", cleaned)
+
+    def test_rule_based_title_cleaning_still_strips_original_junk(self):
+        """既存の販促語除去(送料無料等)の挙動は変更していないこと。"""
+        cleaned = app._rule_based_clean_rakuten_title("送料無料 ピュアメデル 保湿クリーム")
+        self.assertNotIn("送料無料", cleaned)
+
+
 class ComparisonTableSameProductDifferentShopTests(unittest.TestCase):
     """preserve_ranked_top_candidates()/build_candidate_comparison_table():
     同一商品が複数の楽天ショップから別価格で出品されている場合、推薦用の
@@ -633,6 +659,45 @@ class ComparisonTableSameProductDifferentShopTests(unittest.TestCase):
         app._refresh_candidate_comparison_after_swap(result, {})
         self.assertIn("_comparison_candidates", result)
         self.assertEqual(len(result["candidate_comparison_table"]), 3)
+
+    def test_comparison_table_unifies_display_name_for_same_product_different_shops(self):
+        """同一商品が複数ショップから出品されている場合、各行のクリーニング
+        結果が不揃い(一方は「ブランド 商品名」のみ、もう一方に「大容量」
+        「プチプラ」等の販促語が残る)になっても、商品比較表では両行とも
+        最も残存ノイズが少ない名前へ統一されること(2026-09、ユーザー
+        指摘: 同じ商品なのに表示の詳しさが違って見える不具合)。
+        価格・item_code等の出品固有データは変更しないこと。"""
+        raw_title_a = "【公式】ピュアメデル 保湿クリーム 大容量 プチプラ"
+        raw_title_b = "ピュアメデル 保湿クリーム"
+        step = {
+            "category": "化粧水", "purpose": "保湿", "product": raw_title_a, "brand": "",
+            "product_source": "rakuten_criteria", "rakuten_title": raw_title_a,
+            "top_candidates": [
+                _real_candidate(raw_title_a, 1000, "shop1:item1", score=90),
+                _real_candidate(raw_title_b, 1200, "shop2:item2", score=89),
+            ],
+        }
+        result = app.finalize_step_data(step, {})
+        self.assertEqual(len(result["candidate_comparison_table"]), 2)
+
+        data = {"morning": {"steps": [result]}, "night": {"steps": []}, "weekly_care": []}
+        with patch(
+            "app.call_gemini_with_retry",
+            # Geminiの整形結果自体が不揃い(1行目に「大容量」が残存)な
+            # ケースを再現する。
+            return_value=_FakeGeminiResponse(
+                "1. ピュアメデル 保湿クリーム 大容量\n2. ピュアメデル 保湿クリーム"
+            ),
+        ):
+            data = app.gemini_clean_rakuten_product_names(data)
+        step_after = data["morning"]["steps"][0]
+        app._refresh_candidate_comparison_after_swap(step_after, {})
+        rows = step_after["candidate_comparison_table"]
+        self.assertEqual(len(rows), 2)
+        names = {row["name"] for row in rows}
+        self.assertEqual(names, {"ピュアメデル 保湿クリーム"}, "両行とも残存ノイズの少ない方へ統一されること")
+        prices = sorted(row["price"] for row in rows)
+        self.assertEqual(prices, [1000, 1200], "価格等の出品固有データは変更しないこと")
 
     def test_comparison_table_not_discarded_when_initial_rank_one_mismatches(self):
         """比較表専用リストと推薦リストの1位が初回構築時に食い違っても
