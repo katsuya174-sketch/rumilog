@@ -28,7 +28,7 @@ from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.pool import PoolError as _Psycopg2PoolError
 import hashlib
 GEMINI_ANALYSIS_CACHE = {}
-ANALYSIS_CACHE_VERSION = "v20"  # day_placement_related_ingredient_focus/day_placement_relation_typeを追加(スキーマ変更のため必須)
+ANALYSIS_CACHE_VERSION = "v22"  # 2段階処方(deferred_steps、高刺激系統を1種に制限)を追加(レスポンス形状・ルーティン生成ロジック変更のため必須)
 DATABASE_URL = os.getenv("DATABASE_URL")
 RAKUTEN_COOLDOWN_UNTIL = 0
 _rakuten_item_cache = {}
@@ -3885,6 +3885,306 @@ def upsert_verified_product_cache(product):
         flush=True
     )
 
+
+# ===== 商品マスタ(product_master) =====
+# verified_products_cache.json(フラットファイル、全件読み書き・インデックス無し)を
+# Postgresへ段階的に昇格させるための基盤。既存のgemini_analysis_cache/
+# rakuten_search_cache等と同じDATABASE_URL接続を再利用し、新規の外部サービス・
+# 追加課金は発生させない。
+#
+# キー設計(ユーザーとの合意事項): brand+name+categoryを永続的な主キーにはしない
+# (商品名表記は変動するため)。内部のproduct_id(SERIAL)を主キーとし、
+# identity_key(brand+name+categoryの正規化)はあくまで同一商品照合用の
+# ユニークインデックスとして使う。JAN等の強い識別子があれば別途jan_codeへ
+# 保持する(無ければNULL)。
+#
+# この時点では診断パイプライン(select_best_market_candidate等)への配線は
+# まだ行わない(スキーマ・移行・CRUDをまず確定させる段階)。
+
+def _normalize_product_master_identity_key(brand, name, category):
+    """product_masterの同一商品照合キー。make_verified_product_key()と
+    同じnormalize_product_identity()を使うが、あちらはverified_products_cache
+    (ファイル)専用のキー生成であり、別物として独立させる。"""
+    identity = normalize_product_identity(brand or "", name or "")
+    category_norm = normalize_candidate_category(category or "", fallback=category or "")
+    if not identity or not category_norm:
+        return ""
+    return f"{identity}|{category_norm}"
+
+
+def init_product_master_table():
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+        CREATE TABLE IF NOT EXISTS product_master (
+            product_id SERIAL PRIMARY KEY,
+            identity_key TEXT NOT NULL,
+            jan_code TEXT,
+            brand TEXT NOT NULL,
+            name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            price_ref INTEGER,
+            active_ingredients JSONB,
+            support_ingredients JSONB,
+            signature_ingredients JSONB,
+            concerns JSONB,
+            skin_types JSONB,
+            sensitive_ok TEXT,
+            retinol_level INTEGER,
+            main_functions JSONB,
+            ingredient_focus JSONB,
+            ingredient_strength JSONB,
+            formulation JSONB,
+            technology JSONB,
+            texture TEXT,
+            contraindications JSONB,
+            uv_level JSONB,
+            availability_japan JSONB,
+            last_known_image TEXT,
+            last_known_rakuten_link TEXT,
+            rakuten_title TEXT,
+            item_code TEXT,
+            shop_name TEXT,
+            data_source TEXT NOT NULL DEFAULT 'diagnosis_time',
+            verified_at TIMESTAMP NOT NULL,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_product_master_identity
+            ON product_master (identity_key)
+        """)
+        cur.execute("""
+            CREATE INDEX IF NOT EXISTS idx_product_master_category
+            ON product_master (category)
+        """)
+        cur.execute("""
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_product_master_jan
+            ON product_master (jan_code) WHERE jan_code IS NOT NULL
+        """)
+        conn.commit()
+        print("[PRODUCT MASTER TABLE READY]", flush=True)
+    except Exception as e:
+        if conn: conn.rollback()
+        print("[PRODUCT MASTER TABLE ERROR]", e, flush=True)
+    finally:
+        if conn: conn.close()
+
+
+def _product_master_upsert_sql(product, identity_key, jan_code, brand, name, category, data_source, verified_at):
+    return ("""
+        INSERT INTO product_master (
+            identity_key, jan_code, brand, name, category, price_ref,
+            active_ingredients, support_ingredients, signature_ingredients,
+            concerns, skin_types, sensitive_ok, retinol_level, main_functions,
+            ingredient_focus, ingredient_strength, formulation, technology,
+            texture, contraindications, uv_level, availability_japan,
+            last_known_image, last_known_rakuten_link, rakuten_title,
+            item_code, shop_name, data_source, verified_at
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        )
+        ON CONFLICT (identity_key) DO UPDATE SET
+            brand = EXCLUDED.brand,
+            name = EXCLUDED.name,
+            price_ref = EXCLUDED.price_ref,
+            active_ingredients = EXCLUDED.active_ingredients,
+            support_ingredients = EXCLUDED.support_ingredients,
+            signature_ingredients = EXCLUDED.signature_ingredients,
+            concerns = EXCLUDED.concerns,
+            skin_types = EXCLUDED.skin_types,
+            sensitive_ok = EXCLUDED.sensitive_ok,
+            retinol_level = EXCLUDED.retinol_level,
+            main_functions = EXCLUDED.main_functions,
+            ingredient_focus = EXCLUDED.ingredient_focus,
+            ingredient_strength = EXCLUDED.ingredient_strength,
+            formulation = EXCLUDED.formulation,
+            technology = EXCLUDED.technology,
+            texture = EXCLUDED.texture,
+            contraindications = EXCLUDED.contraindications,
+            uv_level = EXCLUDED.uv_level,
+            availability_japan = EXCLUDED.availability_japan,
+            last_known_image = EXCLUDED.last_known_image,
+            last_known_rakuten_link = EXCLUDED.last_known_rakuten_link,
+            rakuten_title = EXCLUDED.rakuten_title,
+            item_code = EXCLUDED.item_code,
+            shop_name = EXCLUDED.shop_name,
+            verified_at = GREATEST(product_master.verified_at, EXCLUDED.verified_at),
+            updated_at = NOW()
+        RETURNING product_id
+    """, (
+        identity_key, jan_code, brand, name, category,
+        safe_price(product.get("price_ref", 0)) or None,
+        json.dumps(product.get("active_ingredients") or []),
+        json.dumps(product.get("support_ingredients") or []),
+        json.dumps(product.get("signature_ingredients") or []),
+        json.dumps(product.get("concerns") or []),
+        json.dumps(product.get("skin_types") or []),
+        str(product.get("sensitive_ok", "unknown") or "unknown"),
+        safe_retinol_level(product.get("retinol_level", 0)),
+        json.dumps(product.get("main_functions") or []),
+        json.dumps(product.get("ingredient_focus") or []),
+        json.dumps(product.get("ingredient_strength") or {}),
+        json.dumps(product.get("formulation") or []),
+        json.dumps(product.get("technology") or []),
+        str(product.get("texture", "") or ""),
+        json.dumps(product.get("contraindications") or []),
+        json.dumps(product.get("uv_level") or {}),
+        json.dumps(product.get("availability_japan") or []),
+        str(product.get("image", "") or ""),
+        str(product.get("rakuten_link", "") or ""),
+        str(product.get("rakuten_title", "") or ""),
+        str(product.get("item_code", "") or ""),
+        str(product.get("shop_name", "") or ""),
+        data_source,
+        verified_at,
+    ))
+
+
+def upsert_product_master(product, data_source="diagnosis_time", conn=None, cur=None):
+    """
+    product(verified_products_cache.json互換の辞書)をproduct_masterへ
+    upsertし、product_idを返す。identity_key(brand+name+categoryの正規化)
+    で同一商品を照合するが、主キーはproduct_id(SERIAL)。
+
+    conn/curを渡した場合(バッチ移行等、呼び出し側がトランザクションを
+    制御する場合)は、そのカーソルでSQLを実行するだけでcommit/rollback/
+    closeは一切行わない(呼び出し側の責務)。例外は呼び出し側へそのまま
+    伝播させる。
+    渡さない場合は、この呼び出し内で接続〜commit/rollback〜closeまで
+    完結する単発アップサート用(例外は内部で捕捉し、失敗時はNoneを返す)。
+    """
+    if not isinstance(product, dict):
+        return None
+
+    brand = str(product.get("brand", "") or "").strip()
+    name = str(product.get("name", "") or "").strip()
+    category = normalize_candidate_category(
+        product.get("category", ""), fallback=product.get("category", "")
+    )
+    identity_key = _normalize_product_master_identity_key(brand, name, category)
+    if not identity_key:
+        return None
+
+    verified_at_raw = product.get("verified_at")
+    verified_at = (
+        datetime.fromtimestamp(verified_at_raw)
+        if isinstance(verified_at_raw, (int, float)) and verified_at_raw > 0
+        else datetime.utcnow()
+    )
+    jan_code = str(product.get("jan_code", "") or "").strip() or None
+
+    sql, params = _product_master_upsert_sql(
+        product, identity_key, jan_code, brand, name, category, data_source, verified_at
+    )
+
+    if conn is not None and cur is not None:
+        cur.execute(sql, params)
+        row = cur.fetchone()
+        return row[0] if row else None
+
+    owned_conn = None
+    try:
+        owned_conn = psycopg2.connect(DATABASE_URL)
+        owned_cur = owned_conn.cursor()
+        owned_cur.execute(sql, params)
+        row = owned_cur.fetchone()
+        owned_conn.commit()
+        return row[0] if row else None
+    except Exception as e:
+        if owned_conn: owned_conn.rollback()
+        print(f"[PRODUCT MASTER UPSERT ERROR] {repr(e)}", flush=True)
+        return None
+    finally:
+        if owned_conn: owned_conn.close()
+
+
+def migrate_verified_products_cache_to_product_master(dry_run=True):
+    """
+    verified_products_cache.json(フラットファイル)からproduct_master
+    (Postgres)への移行。identity_keyでON CONFLICT DO UPDATEするため冪等。
+
+    dry_run=True(既定): 実際の書き込みは一切行わず、件数・重複・識別キー
+    欠落のみを集計して返す(「まずdry-runで確認→問題なければ本実行」という
+    合意された運用に対応)。
+    dry_run=False: 実際にproduct_masterへupsertする(1行ごとにcommit/
+    rollbackするため、1行の失敗が他行の移行を止めない)。
+    """
+    items = load_verified_products_cache()
+    result = {
+        "dry_run": dry_run,
+        "total_in_file": len(items),
+        "would_migrate": 0,
+        "migrated": 0,
+        "skipped_missing_identity": 0,
+        "duplicate_identity_keys_in_file": [],
+        "row_errors": [],
+    }
+    if not items:
+        return result
+
+    seen = {}
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        identity_key = _normalize_product_master_identity_key(
+            item.get("brand", ""), item.get("name", ""), item.get("category", "")
+        )
+        if not identity_key:
+            result["skipped_missing_identity"] += 1
+            continue
+        if identity_key in seen:
+            result["duplicate_identity_keys_in_file"].append(identity_key)
+            # 同一identity_keyが複数ある場合、verified_atが新しい方を採用する。
+            if safe_price(item.get("verified_at", 0)) <= safe_price(seen[identity_key].get("verified_at", 0)):
+                continue
+        seen[identity_key] = item
+
+    valid_items = list(seen.values())
+    result["would_migrate"] = len(valid_items)
+
+    if dry_run:
+        return result
+
+    conn = None
+    cur = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        for item in valid_items:
+            try:
+                product_id = upsert_product_master(
+                    item, data_source="migrated_json", conn=conn, cur=cur
+                )
+                if product_id is not None:
+                    conn.commit()
+                    result["migrated"] += 1
+                else:
+                    conn.rollback()
+                    result["row_errors"].append(f"{item.get('name','')}: upsert returned no product_id")
+            except Exception as row_error:
+                conn.rollback()
+                result["row_errors"].append(f"{item.get('name','')}: {repr(row_error)}")
+    except Exception as e:
+        result["row_errors"].append(f"connection error: {repr(e)}")
+    finally:
+        if cur: cur.close()
+        if conn: conn.close()
+
+    print(f"[PRODUCT MASTER MIGRATE] {result}", flush=True)
+    return result
+
+
+# スキーマ作成のみ(CREATE TABLE IF NOT EXISTS、冪等)。他のinit_*_table()と
+# 同じく起動のたびに実行して問題ない。verified_products_cache.jsonからの
+# データ移行(migrate_verified_products_cache_to_product_master)は、
+# 合意通り自動実行せず/admin/migrate-product-masterから手動実行する。
+init_product_master_table()
+
+
 _KATAKANA_ROMAJI_MAP = {
     'ア': 'a',  'イ': 'i',  'ウ': 'u',  'エ': 'e',  'オ': 'o',
     'カ': 'ka', 'キ': 'ki', 'ク': 'ku', 'ケ': 'ke', 'コ': 'ko',
@@ -4633,6 +4933,79 @@ def fetch_rakuten_item(product_name, category="", brand="", ingredient_focus="",
 
     _rakuten_item_cache[cache_key] = result
     return result
+
+
+# ===== itemCode検索の実環境検証(Phase 2本実装前の事前確認専用) =====
+# 保存済みのitem_code(shop:itemId形式、楽天APIのitemCodeフィールドの値を
+# 一切加工せずそのまま使う)で楽天Ichiba Item Search APIを呼べるかを確認する。
+# keywordは併用しない。既存の診断フロー(fetch_rakuten_candidates等)からは
+# 一切呼ばれない(/admin/verify-item-code-search経由の検証専用)。
+def fetch_rakuten_item_by_item_code(item_code):
+    """
+    戻り値: {"http_status": int, "ok": bool, "rakuten_error": str|None,
+             "item": dict|None}
+    rakuten_error/itemにAPIキー等の秘密情報は含まれない(リクエストパラメータ
+    自体を一切ログ・レスポンスに含めないため、ここでログに出すのは
+    item_code・HTTPステータス・レスポンス本文のみ)。
+    """
+    if not item_code:
+        return {"http_status": 0, "ok": False, "rakuten_error": "item_code is required", "item": None}
+
+    endpoint = "https://openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260401"
+    headers = {
+        "Referer": SITE_URL or "https://lumilog.jp",
+        "Origin": SITE_URL or "https://lumilog.jp",
+        "User-Agent": "Mozilla/5.0",
+    }
+    params = {
+        "applicationId": RAKUTEN_APP_ID,
+        "accessKey": RAKUTEN_ACCESS_KEY,
+        "itemCode": item_code,
+        "elements": "itemName,itemPrice,itemUrl,itemCode,availability,mediumImageUrls",
+        "hits": 1,
+        "format": "json",
+        "formatVersion": 2,
+    }
+    if RAKUTEN_AFFILIATE_ID:
+        params["affiliateId"] = RAKUTEN_AFFILIATE_ID
+
+    try:
+        wait_for_rakuten_rate_limit()
+        res = requests.get(endpoint, params=params, headers=headers, timeout=(2, 4))
+    except Exception as e:
+        print(f"[ITEM CODE VERIFY] request exception for item_code={item_code}: {repr(e)}", flush=True)
+        return {"http_status": 0, "ok": False, "rakuten_error": repr(e), "item": None}
+
+    print(f"[ITEM CODE VERIFY] item_code={item_code} status={res.status_code}", flush=True)
+
+    if res.status_code != 200:
+        print(f"[ITEM CODE VERIFY] error body: {res.text[:500]}", flush=True)
+        return {
+            "http_status": res.status_code,
+            "ok": False,
+            "rakuten_error": res.text[:1000],
+            "item": None,
+        }
+
+    try:
+        payload = res.json()
+    except Exception as e:
+        return {
+            "http_status": res.status_code,
+            "ok": False,
+            "rakuten_error": f"JSON decode error: {repr(e)}",
+            "item": None,
+        }
+
+    items = payload.get("Items", []) if isinstance(payload, dict) else []
+    first_item = items[0] if items else None
+
+    return {
+        "http_status": res.status_code,
+        "ok": bool(first_item),
+        "rakuten_error": None if first_item else "no items in response",
+        "item": first_item,
+    }
 
 
 _STIMULATING_DEVICE_TYPES = {"RF", "EMS", "超音波洗浄"}
@@ -7943,6 +8316,150 @@ def _evaluate_retinoid_aha_bha_weekly_combination(data, user_data=None, conflict
             })
 
 
+# ===== 2段階処方: hydration/barrierともに50以下の場合、既存プロンプト
+# 【商品選定時の刺激配慮】の「高刺激成分は1種のみに絞る」を決定論的に実施する。
+# 商品候補は削除せず、night から外した分を data["deferred_steps"] へ保持する
+# (「今使うもの」と「肌状態が整ってから導入するもの」を分ける、2段階処方の
+# 核となる仕組み)。
+#
+# B×C(レチノイド×AHA/BHA)は既存の_evaluate_retinoid_aha_bha_weekly_
+# combination()(頻度調整・両方維持、テスト済み)が既に対応済みのため、
+# 「専用の決定論的ルールが存在する組み合わせは専用ルールを優先する」という
+# 方針に従い、本ロジックの対象から除外する。
+
+_HIGH_STIM_FAMILY_LABELS = {
+    "A": "高濃度ビタミンC",
+    "B": "レチノイド",
+    "C": "AHA/BHA/SA",
+    "D": "アゼライン酸",
+    "E": "高濃度ナイアシンアミド",
+}
+
+# 各系統が主に対応する肌悩み(Phase1の10スコア軸のkeyと同じ語彙)。
+# 既存のingredient-concernsマッピング(_RAKUTEN_INGREDIENT_METADATA等の
+# retinol/vitamin_c/bha/aha/azelaic_acid/niacinamideのconcerns)に基づく。
+# 新しい恣意的な閾値は作らず、優先順位での「適合度」判定にのみ使う。
+_HIGH_STIM_FAMILY_SCORE_KEYS = {
+    "A": {"dullness", "tone_evenness", "firmness"},
+    "B": {"firmness", "texture", "pores", "dullness", "tone_evenness"},
+    "C": {"pores", "acne", "texture", "oil_balance", "dullness"},
+    "D": {"acne", "redness", "dullness", "tone_evenness"},
+    "E": {"pores", "dullness", "tone_evenness", "oil_balance", "barrier"},
+}
+
+
+def _classify_high_stim_family(step):
+    """刺激累積管理ルールのA〜E区分に従い、stepが該当する高刺激系統を
+    判定する(既存の_RETINOID_ONLY_TAGS/_AHA_BHA_NON_PHA_TAGS/
+    high_stim_tagsと同じ定義)。該当しなければNoneを返す。"""
+    if not isinstance(step, dict):
+        return None
+    focus = _resolve_focus_tags(step.get("ingredient_focus"))
+    strength = step.get("ingredient_strength")
+    strength = strength if isinstance(strength, dict) else {}
+
+    if focus & _RETINOID_ONLY_TAGS:
+        return "B"
+    if focus & _AHA_BHA_NON_PHA_TAGS:
+        return "C"
+    if "azelaic_acid" in focus:
+        return "D"
+    if "vitamin_c" in focus and str(strength.get("vitamin_c", "")).lower() in ("high", "strong"):
+        return "A"
+    if "niacinamide" in focus and str(strength.get("niacinamide", "")).lower() in ("high", "strong"):
+        return "E"
+    return None
+
+
+def _irritation_risk_rank(step):
+    """infer_active_profile()のirritation_risk/strengthを比較可能な数値化
+    したもの(低いほど低刺激)。安全リスク比較・同率時の低刺激側タイブレーク
+    にのみ使う。"""
+    profile = infer_active_profile(step)
+    order = {"low": 0, "medium": 1, "high": 2}
+    return (
+        order.get(profile.get("irritation_risk", "low"), 0)
+        + order.get(profile.get("strength", "low"), 0)
+    )
+
+
+def restrict_high_stim_families_for_fragile_skin(data, user_data=None):
+    """
+    hydration/barrierスコアがともに50以下の場合、night内の高刺激系統
+    (A〜E)を1種に制限する。2種以上残る場合、Phase1改善優先順位
+    (premium_improvement_priority)→各系統の適合度→現在のbarrier/
+    hydration/sensに対する刺激リスク→同程度なら低刺激側、の順で
+    1系統だけを残し、それ以外のstepは削除せずdata["deferred_steps"]へ
+    移す(deferred_reason/deferred_familyを付与する)。
+    """
+    if not isinstance(data, dict):
+        return data
+    scores = data.get("scores") or {}
+    hydration = scores.get("hydration")
+    barrier = scores.get("barrier")
+    if hydration is None or barrier is None:
+        return data
+    if not (hydration <= 50 and barrier <= 50):
+        return data
+
+    night = data.get("night")
+    if not isinstance(night, dict):
+        return data
+    night_steps = night.get("steps")
+    if not isinstance(night_steps, list):
+        return data
+
+    classified = [(f, s) for f, s in ((_classify_high_stim_family(s), s) for s in night_steps) if f]
+    if len(classified) < 2:
+        return data
+
+    b_steps = [s for f, s in classified if f == "B"]
+    c_steps = [s for f, s in classified if f == "C"]
+    # B×Cは専用ロジック(_evaluate_retinoid_aha_bha_weekly_combination)に
+    # 委ねるため、両方が存在する場合に限りそのstepを対象から除外する。
+    excluded_ids = set()
+    if b_steps and c_steps:
+        excluded_ids = {id(s) for s in b_steps} | {id(s) for s in c_steps}
+
+    candidates = [(f, s) for f, s in classified if id(s) not in excluded_ids]
+    present_families = {f for f, _ in candidates}
+    if len(present_families) < 2:
+        return data
+
+    priority_ranks = build_impact_priority_ranks(data.get("premium_improvement_priority"))
+
+    def family_best_rank(family):
+        keys = _HIGH_STIM_FAMILY_SCORE_KEYS.get(family, set())
+        ranks = [priority_ranks.get(k, 999) for k in keys]
+        return min(ranks) if ranks else 999
+
+    best_by_family = {}
+    for family, step in candidates:
+        key = (family_best_rank(family), _irritation_risk_rank(step))
+        if family not in best_by_family or key < best_by_family[family][0]:
+            best_by_family[family] = (key, step)
+
+    kept_family = min(best_by_family, key=lambda f: best_by_family[f][0])
+
+    deferred_steps = list(data.get("deferred_steps") or [])
+    removed_ids = set()
+    for family, step in candidates:
+        if family == kept_family:
+            continue
+        removed_ids.add(id(step))
+        deferred_entry = dict(step)
+        deferred_entry["deferred_family"] = family
+        deferred_entry["deferred_family_label"] = _HIGH_STIM_FAMILY_LABELS.get(family, family)
+        deferred_entry["deferred_reason"] = (
+            "現在は使用を控え、肌状態が改善した場合に導入を検討します。"
+        )
+        deferred_steps.append(deferred_entry)
+
+    night["steps"] = [s for s in night_steps if id(s) not in removed_ids]
+    data["deferred_steps"] = deferred_steps
+    return data
+
+
 # 「成分名+カテゴリ名」パターン検出用カテゴリ集合
 # 例: "セラミド 乳液" "ナイアシンアミド 美容液" "ビタミンC 化粧水"
 _SKINCARE_CATEGORY_SUFFIXES = {
@@ -9967,6 +10484,114 @@ def score_signature_ingredients(product, step, reasons=None):
     return score
 
 
+# ===== 問診: 苦手な成分・トラブル経験 / 妊娠・授乳中の安全配慮 =====
+# AAD(米国皮膚科学会)/ACOG(米国産科婦人科学会)等で一般的に言及される知見に基づく
+# 保守的な既定値であり、医学的な断定を行うものではない(除外されない場合は
+# 必ずcontraindications経由で医師相談の注意文を添える)。
+# 濃度(%)そのものはデータとして保持していないため、ingredient_strengthの
+# high/medium/low区分を濃度の代理指標として扱う。
+_PREGNANCY_RETINOID_ACTIVE_KEYS = {"retinol", "retinal"}
+_SALICYLIC_BHA_ACTIVE_KEYS = {"bha", "salicylic_acid"}
+_AHA_ACTIVE_KEYS = {"aha", "glycolic_acid", "lactic_acid"}
+
+
+def _product_active_ingredient_set(product):
+    return {str(x).strip().lower() for x in (product.get("active_ingredients") or []) if x}
+
+
+def _product_ingredient_strength_map(product):
+    strength_map = product.get("ingredient_strength") or {}
+    if not isinstance(strength_map, dict):
+        return {}
+    return strength_map
+
+
+def _product_has_ingredient_concern_tag(product, tag):
+    """問診の「苦手な成分」タグ(alcohol/fragrance/uv_absorber/vitamin_c)に
+    該当する商品かどうかを既存フィールドから判定する。
+    alcohol/fragranceは「○○フリー」の明示が無い場合を「含む可能性あり」として
+    保守的に扱う(フリー表示の無い商品すべてを指すため、strict_avoid適用は
+    ユーザーが明確に使用回避を希望した場合にのみ使う設計になっている)。"""
+    if tag == "alcohol":
+        formulation = [str(x) for x in (product.get("formulation") or [])]
+        return "alcohol_free" not in formulation
+    if tag == "fragrance":
+        formulation = [str(x) for x in (product.get("formulation") or [])]
+        return "fragrance_free" not in formulation
+    if tag == "uv_absorber":
+        focus = [str(x).lower() for x in (product.get("ingredient_focus") or [])]
+        support = [str(x).lower() for x in (product.get("support_ingredients") or [])]
+        return (
+            "uv_filter" in focus
+            or "uv_filter" in _product_active_ingredient_set(product)
+            or "uv_filter" in support
+        )
+    if tag == "vitamin_c":
+        return "vitamin_c" in _product_active_ingredient_set(product)
+    return False
+
+
+def is_excluded_for_pregnancy(product):
+    """妊娠中の安全配慮によりハード除外すべき商品か判定する。
+    retinoid系(レチノール/レチナール)は常に除外。サリチル酸/BHAは
+    ingredient_strengthがhigh(高濃度相当)の場合のみ除外する。
+    AHA(グリコール酸等)は除外対象にせず、医師相談表示のみとする
+    (ACOGは局所使用のサリチル酸/グリコール酸を妊娠中使用可能なOTC成分として
+    挙げており、AHA一律除外の根拠はないため)。"""
+    actives = _product_active_ingredient_set(product)
+    if actives & _PREGNANCY_RETINOID_ACTIVE_KEYS:
+        return True
+    if actives & _SALICYLIC_BHA_ACTIVE_KEYS:
+        strength_map = _product_ingredient_strength_map(product)
+        if strength_map.get("salicylic_acid") == "high" or strength_map.get("bha") == "high":
+            return True
+    return False
+
+
+def get_pregnancy_breastfeeding_caution_tags(product, user_data):
+    """妊娠・授乳中で除外はしないが医師相談等の注意喚起を添えるべき場合に、
+    contraindicationsへ追加するタグのリストを返す(ラベルはconstants.pyの
+    contraindications_labelsを参照)。"""
+    tags = []
+    actives = _product_active_ingredient_set(product)
+    pregnant = bool(user_data.get("pregnant"))
+
+    if pregnant:
+        if actives & _SALICYLIC_BHA_ACTIVE_KEYS:
+            strength_map = _product_ingredient_strength_map(product)
+            if strength_map.get("salicylic_acid") != "high" and strength_map.get("bha") != "high":
+                tags.append("pregnancy_salicylic_bha_consult")
+        if actives & _AHA_ACTIVE_KEYS:
+            tags.append("pregnancy_aha_consult")
+
+    if bool(user_data.get("breastfeeding")):
+        if actives & (_PREGNANCY_RETINOID_ACTIVE_KEYS | _SALICYLIC_BHA_ACTIVE_KEYS):
+            tags.append("breastfeeding_consult")
+
+    return tags
+
+
+def _ingredient_concern_hard_exclude_match(product, user_data):
+    """問診の「苦手な成分」のうち、ハード除外すべき条件に一致するか判定する。
+    - strict_avoid(明確な使用回避希望)に該当する成分を含む場合。
+    - reaction_history(過去に刺激・トラブル)にビタミンCがあり、かつ
+      ingredient_strengthが高濃度(high)と判定されている場合のみ
+      (濃度不明・低中濃度は除外せず、apply_common_score_rules側の
+      強い減点にとどめる)。"""
+    strict_avoid = set(user_data.get("strict_avoid", []) or [])
+    for tag in strict_avoid:
+        if _product_has_ingredient_concern_tag(product, tag):
+            return True
+
+    reaction_history = set(user_data.get("reaction_history", []) or [])
+    if "vitamin_c" in reaction_history and _product_has_ingredient_concern_tag(product, "vitamin_c"):
+        strength_map = _product_ingredient_strength_map(product)
+        if strength_map.get("vitamin_c") == "high":
+            return True
+
+    return False
+
+
 def apply_common_score_rules(product, step, user_data, budget_value, concern_tags, ingredient_tag, reasons=None):
     """
     カテゴリ共通スコア
@@ -10265,6 +10890,41 @@ def apply_common_score_rules(product, step, user_data, budget_value, concern_tag
     # ここではまだ使わない
     # name / brand / image はスコアに直接使わない
     # -------------------------------------------------
+
+    # -------------------------------------------------
+    # 13. 苦手な成分・トラブル経験(避けたい/過去の刺激)
+    #     ハード除外(strict_avoid・ビタミンC高濃度×過去の刺激)はscore_product側で
+    #     既に除外済みのため、ここでは減点のみを扱う。
+    # -------------------------------------------------
+    reaction_history = set(user_data.get("reaction_history", []) or [])
+    avoid_preference = set(user_data.get("avoid_preference", []) or [])
+
+    for tag in reaction_history:
+        if _product_has_ingredient_concern_tag(product, tag):
+            score -= 25
+            _record("ingredient_reaction_history_penalty", "過去に刺激・トラブル歴がある成分を含む",
+                    tag, "reaction_history", -25)
+
+    for tag in avoid_preference:
+        if tag in reaction_history:
+            continue  # より強いreaction_history側で既に評価済み
+        if _product_has_ingredient_concern_tag(product, tag):
+            score -= 8
+            _record("ingredient_avoid_preference_penalty", "避けたい成分として挙げられている",
+                    tag, "avoid_preference", -8)
+
+    # -------------------------------------------------
+    # 14. 妊娠・授乳中の安全配慮(医師相談を推奨するcontraindicationsタグを付与)
+    #     ハード除外(retinoid×妊娠、高濃度サリチル酸/BHA×妊娠)はscore_product側で
+    #     既に除外済みのため、ここでは除外しない成分への注意喚起のみを扱う。
+    # -------------------------------------------------
+    if user_data.get("pregnant") or user_data.get("breastfeeding"):
+        caution_tags = get_pregnancy_breastfeeding_caution_tags(product, user_data)
+        if caution_tags:
+            existing_contra = list(product.get("contraindications") or [])
+            new_tags = [t for t in caution_tags if t not in existing_contra]
+            if new_tags:
+                product["contraindications"] = existing_contra + new_tags
 
     return score
 
@@ -11203,6 +11863,26 @@ def score_product(product, step, user_data, budget_value, reasons=None):
     ):
         print(
             f"[SCORE REJECT generic-name] cat={step.get('category','')!r} "
+            f"brand={product.get('brand','')!r} name={product.get('name','')!r}",
+            flush=True
+        )
+        return -9999
+
+    # ===== 問診: 妊娠中の安全配慮によるハード除外 =====
+    # AAD/ACOGの一般的な知見に基づく保守的な既定値(医学的断定ではない)。
+    if user_data.get("pregnant") and is_excluded_for_pregnancy(product):
+        print(
+            f"[SCORE REJECT pregnancy-safety] cat={step.get('category','')!r} "
+            f"brand={product.get('brand','')!r} name={product.get('name','')!r}",
+            flush=True
+        )
+        return -9999
+
+    # ===== 問診: 苦手な成分・トラブル経験によるハード除外 =====
+    # (明確な使用回避希望、またはビタミンC高濃度×過去の刺激歴)
+    if _ingredient_concern_hard_exclude_match(product, user_data):
+        print(
+            f"[SCORE REJECT ingredient-concern] cat={step.get('category','')!r} "
             f"brand={product.get('brand','')!r} name={product.get('name','')!r}",
             flush=True
         )
@@ -20200,6 +20880,12 @@ def extract_user_data(request):
         "exp": request.form.get("retinol_exp", ""),
         "budget": request.form.get("budget", ""),
         "concerns": request.form.getlist("concerns"),
+        "uv_frequency": request.form.get("uv_frequency", ""),
+        "avoid_preference": request.form.getlist("avoid_preference"),
+        "reaction_history": request.form.getlist("reaction_history"),
+        "strict_avoid": request.form.getlist("strict_avoid"),
+        "pregnant": request.form.get("pregnant", "") == "yes",
+        "breastfeeding": request.form.get("breastfeeding", "") == "yes",
         "record_date": datetime.today().strftime("%Y-%m-%d")
     }
 
@@ -20211,10 +20897,17 @@ QUESTIONNAIRE_VALID_OIL_STATUS = {"", "dry", "oily", "mixed", "normal"}
 QUESTIONNAIRE_VALID_SENSITIVITY = {"", "low", "middle", "high"}
 QUESTIONNAIRE_VALID_RETINOL_EXP = {"beginner", "middle", "high"}
 QUESTIONNAIRE_VALID_CONCERNS = {"acne", "pores", "spots", "aging", "dryness", "redness"}
+QUESTIONNAIRE_VALID_UV_FREQUENCY = {"", "rarely", "sometimes", "daily"}
+# 「苦手な成分」の3段階(avoid_preference/reaction_history/strict_avoid)はすべて
+# 同じ成分語彙を共有する。alcohol/fragrance/uv_absorberは「○○フリー」表示の
+# 有無、vitamin_cはactive_ingredientsで商品側を判定する(is_excluded_for_pregnancy
+# 等と同じ _product_has_ingredient_concern_tag を参照)。
+QUESTIONNAIRE_VALID_INGREDIENT_CONCERNS = {"alcohol", "fragrance", "uv_absorber", "vitamin_c"}
 
 
 def validate_questionnaire_values(user_data):
-    """問診項目(oil_status/sensitivity/retinol_exp/concerns)がlab.htmlの
+    """問診項目(oil_status/sensitivity/retinol_exp/concerns/uv_frequency/
+    avoid_preference/reaction_history/strict_avoid)がlab.htmlの
     正式なvalueかどうかを検証する。不正な場合は (False, message) を返す。"""
     oil = user_data.get("oil", "")
     if oil not in QUESTIONNAIRE_VALID_OIL_STATUS:
@@ -20231,6 +20924,19 @@ def validate_questionnaire_values(user_data):
     for concern in user_data.get("concerns", []):
         if concern not in QUESTIONNAIRE_VALID_CONCERNS:
             return False, gettext("肌の悩み(concerns)の値が不正です: %(value)r", value=concern)
+
+    uv_frequency = user_data.get("uv_frequency", "")
+    if uv_frequency not in QUESTIONNAIRE_VALID_UV_FREQUENCY:
+        return False, gettext("日焼け止め使用頻度(uv_frequency)の値が不正です: %(value)r", value=uv_frequency)
+
+    for field_name, label in (
+        ("avoid_preference", "避けたい成分(avoid_preference)"),
+        ("reaction_history", "過去に刺激・トラブルが出た成分(reaction_history)"),
+        ("strict_avoid", "明確に使用を避けたい成分(strict_avoid)"),
+    ):
+        for tag in user_data.get(field_name, []):
+            if tag not in QUESTIONNAIRE_VALID_INGREDIENT_CONCERNS:
+                return False, gettext("%(label)s の値が不正です: %(value)r", label=label, value=tag)
 
     return True, ""
 
@@ -20889,11 +21595,15 @@ def get_analysis_schema():
 def build_analysis_prompt_phase1(user_data):
     """Phase 1: 肌スコア・分析・改善方針のみ。画像3枚で呼ぶ。出力は小さい。"""
     _concerns_ja = ', '.join([_CONCERN_LABELS_JA.get(c, c) for c in (user_data.get('concerns') or [])]) or '未回答'
+    _uv_freq_label = {"rarely": "ほぼ塗らない", "sometimes": "時々塗る", "daily": "毎日塗る"}.get(
+        user_data.get('uv_frequency', ''), "未回答"
+    )
     return f"""肌分析AIです。3枚の肌画像（1:正面 2:左頬 3:右頬）を分析し、肌スコアと改善方針のみJSONで返す。ルーティン・商品候補は出力しない。
 
 【ユーザー情報】
 年齢:{user_data['age']} 皮脂:{user_data['oil']} 敏感度:{user_data['sens']} 予算:{user_data['budget']}
 悩み:{_concerns_ja}
+日焼け止め使用頻度:{_uv_freq_label}
 
 【スコア(0-100)】画像の視覚的事実のみ採点。推測・主観禁止。同一画像→必ず同一値。
 各スコアは下記の視覚的アンカーに忠実に対応させること。
@@ -20946,6 +21656,7 @@ ai_improvement_strategy: 改善優先順位を戦略的に10項目分出力。�
   ・ユーザーの悩みとの一致度
   各itemはスコアラベル名(日本語)、scoreはそのスコア値、reason は「なぜその順番か」を30〜50字で具体的に記述。
 root_causes: 肌悩みの根本原因を2〜4個。表面的な症状ではなく「なぜそうなっているか」の構造的原因を推定する。各要素は cause(原因を10〜25字)/evidence(画像やスコアから読み取れる根拠を20〜40字)/priority(重要度1が最優先の整数)/care_direction(その原因に対するケアの方向性を20〜40字)。例: cause="皮脂過剰による毛穴詰まり" evidence="Tゾーンのテカリと鼻周りの毛穴の開きが顕著" priority=1 care_direction="皮脂コントロールと角質ケアで毛穴の詰まりを防ぐ"。
+※日焼け止め使用頻度が低い場合でも、それだけを唯一の根本原因と断定しないこと。画像所見(色ムラ・くすみ等)と合わせて、UV対策不足を悪化要因・改善余地の一つとして扱うにとどめる。
 skin_type_analysis: ユーザーの申告(皮脂:{user_data['oil']} 敏感度:{user_data['sens']})と画像を総合した肌タイプ分析。skin_type(乾燥肌/脂性肌/混合肌/普通肌/敏感肌 等の短い分類)/summary(その肌タイプと判断した理由を30〜50字)/traits(肌の特徴を3〜5個の配列、各10〜20字)。
 
 JSONのみ返す。説明・Markdown・前置き禁止。JSONキーは英語、値は日本語。"""
@@ -21004,14 +21715,28 @@ def build_analysis_prompt_phase2(user_data, phase1):
     _min_score = min(_all_score_vals) if _all_score_vals else None
 
     _supp_level  = _score_level(_min_score)
+    _uv_freq_label = {"rarely": "ほぼ塗らない", "sometimes": "時々塗る", "daily": "毎日塗る"}.get(
+        user_data.get('uv_frequency', ''), "未回答"
+    )
+    _safety_lines = []
+    if user_data.get("pregnant"):
+        _safety_lines.append(
+            "妊娠中と回答されているため、レチノール・レチナール(レチノイド系)を含む成分・商品は、"
+            "全てのstep・ingredient_focusで一切提案しないこと。他の有効成分で代替すること。"
+        )
+    _safety_block = (
+        "\n【安全配慮（必須・厳守）】\n" + "\n".join(_safety_lines) + "\n"
+        if _safety_lines else ""
+    )
     return f"""日本の市販スキンケアと肌分析に詳しい美容アドバイザーです。
 肌分析済みの結果をもとに、ルーティン構成と商品候補のみJSONで返す。画像分析は完了済み。
 
 【ユーザー情報】
 年齢:{user_data['age']} 皮脂:{user_data['oil']} 敏感度:{user_data['sens']} レチノール経験:{user_data['exp']} 予算:{user_data['budget']}
 悩み:{_concerns_ja}
+日焼け止め使用頻度:{_uv_freq_label}
 ※悩みを優先してステップ構成する。
-
+{_safety_block}
 【肌スコア(画像分析済)】
 {_score_line}
 
@@ -23501,6 +24226,12 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
     # 最も保守的な範囲へ調整する(固定の「最低休息日」等は発明しない)。
     _evaluate_retinoid_aha_bha_weekly_combination(data, user_data=user_data, conflict_log=routine_conflict_log)
 
+    # 2段階処方: hydration/barrierともに50以下で、B×C(専用ロジック対応済み)
+    # 以外の高刺激系統が2種以上残る場合、1種に制限しそれ以外をdeferred_steps
+    # へ保留する(商品は削除しない)。use_days確定前(=day_conflict解決より前)
+    # に実行し、保留分を後続の曜日衝突解決の対象から外す。
+    data = restrict_high_stim_families_for_fragile_skin(data, user_data=user_data)
+
     data = resolve_weekly_care_day_conflicts(data, conflict_log=routine_conflict_log)
     # 夜ルーティン内のレチノイド×BHA/SA洗顔料の曜日衝突を解消
     data = resolve_night_irritant_conflicts(data, conflict_log=routine_conflict_log)
@@ -24211,6 +24942,36 @@ def admin_migrate_premium_keys():
     if request.args.get("key") != os.getenv("ADMIN_KEY", "") or not os.getenv("ADMIN_KEY", ""):
         return "403 Forbidden", 403
     result = _migrate_premium_keys_from_json()
+    return jsonify(result)
+
+@app.route("/admin/migrate-product-master", methods=["POST"])
+def admin_migrate_product_master():
+    """
+    verified_products_cache.json → product_master(Postgres)への手動移行。
+    合意通り、起動時の自動実行は行わない(ここからの手動実行のみ)。
+    既定はdry_run=true(件数・重複・欠落のみ確認、書き込みなし)。実際に
+    書き込むには ?dry_run=false を明示的に指定する。
+    """
+    if request.args.get("key") != os.getenv("ADMIN_KEY", "") or not os.getenv("ADMIN_KEY", ""):
+        return "403 Forbidden", 403
+    dry_run = request.args.get("dry_run", "true").lower() != "false"
+    result = migrate_verified_products_cache_to_product_master(dry_run=dry_run)
+    return jsonify(result)
+
+@app.route("/admin/verify-item-code-search")
+def admin_verify_item_code_search():
+    """
+    Phase 2(product_masterの最終候補リフレッシュ)実装前の実環境検証専用。
+    保存済みのitem_code(?item_code=shop:itemId)で楽天APIのitemCode検索が
+    実際に機能するか(200で商品が返るか)を確認する。keywordは使わない。
+    既存の診断フローには一切接続しない(検証目的のみ)。
+    """
+    if request.args.get("key") != os.getenv("ADMIN_KEY", "") or not os.getenv("ADMIN_KEY", ""):
+        return "403 Forbidden", 403
+    item_code = request.args.get("item_code", "").strip()
+    if not item_code:
+        return jsonify({"error": "item_code query parameter is required"}), 400
+    result = fetch_rakuten_item_by_item_code(item_code)
     return jsonify(result)
 
 @app.route("/admin/db-stats")

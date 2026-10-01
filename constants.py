@@ -701,6 +701,9 @@ contraindications_labels = {
     "fungal_acne_caution": "脂質リッチなため肌質によっては合わない可能性があります",
     "heavy_makeup_not_enough": "濃いメイクには洗浄力が物足りない可能性があります",
     "rinse_required": "洗い流しを丁寧に行ってください",
+    "pregnancy_salicylic_bha_consult": "妊娠中はサリチル酸・BHA配合のため医師にご相談ください",
+    "pregnancy_aha_consult": "妊娠中はAHA配合のため医師にご相談ください",
+    "breastfeeding_consult": "授乳中は医師にご相談ください",
 
 }
 signature_ingredient_labels = {
@@ -1346,6 +1349,9 @@ ALLOWED_TAGS = {
         "fungal_acne_caution",
         "heavy_makeup_not_enough",
         "rinse_required",
+        "pregnancy_salicylic_bha_consult",
+        "pregnancy_aha_consult",
+        "breastfeeding_consult",
     },
 }
 print("loaded constants")
