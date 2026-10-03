@@ -2130,7 +2130,13 @@ def _enrich_db_products_images():
                 print(f"[ENRICH DB IMAGES] Rate limit, waiting {_wait:.1f}s", flush=True)
                 _time.sleep(_wait)
 
-            # itemCode APIは400を返し続けるため、商品名でキーワード検索する
+            # products.jsonのこの画像補完ジョブはitem_codeを保持していない
+            # ため商品名でキーワード検索する。なお「itemCode APIは400を返す」
+            # という以前のコメントは2026-10のitemCode検索実環境検証
+            # (fetch_rakuten_item_by_item_code、shop:itemId形式)でHTTP 200
+            # が確認でき、事実と異なっていたため削除した(itemCode検索自体は
+            # 正しい形式で機能する。product_master側の最終候補リフレッシュ
+            # ではitemCode検索を使っている)。
             _result = fetch_rakuten_item(
                 product_name=_name,
                 category=_category,
@@ -4176,6 +4182,202 @@ def migrate_verified_products_cache_to_product_master(dry_run=True):
 
     print(f"[PRODUCT MASTER MIGRATE] {result}", flush=True)
     return result
+
+
+def accumulate_verified_product(step, rakuten_item):
+    """
+    楽天由来・実在確認済み(build_verified_product_from_step内部の
+    is_same_verified_rakuten_product()による確認)の商品が最終選定された
+    場合、旧verified_products_cache.jsonとproduct_masterの両方へ保存する
+    (移行期間中の並行書き込み、合意事項)。この確認ゲートを必ず通すため、
+    誤った選定結果がそのまま品質問題として自己増殖するリスクを抑えている。
+
+    build_verified_product_from_step()がNoneを返す場合(実在確認に失敗
+    した場合)は何もしない。例外は内部で捕捉し、呼び出し元(アフィリエイト
+    リンク付与等)の処理を止めない。
+
+    戻り値: 保存したverified_product辞書、またはNone(保存しなかった場合)。
+    """
+    try:
+        verified_product = build_verified_product_from_step(step, rakuten_item)
+        if not verified_product:
+            return None
+        upsert_verified_product_cache(verified_product)
+        upsert_product_master(verified_product, data_source="diagnosis_time")
+        return verified_product
+    except Exception as e:
+        print("[VERIFIED CACHE UPSERT ERROR]", e, flush=True)
+        return None
+
+
+# ===== Phase 2: 診断パイプラインへの接続 =====
+# 楽天広範囲検索(search_rakuten_for_step、常時・最大2クエリ)をスキップする
+# 最適化を有効化するか。既定False(=従来通り常に楽天ライブ検索を実行する)。
+# product_master候補自体は、このフラグに関わらず常にcombined_productsへ
+# 追加のみされる(段階導入: まず追加のみで安全性を確認し、スキップ最適化は
+# このフラグをTrueにした環境でのみ有効化する)。
+PRODUCT_MASTER_SKIP_RAKUTEN_ENABLED = os.getenv("PRODUCT_MASTER_SKIP_RAKUTEN_ENABLED", "false").strip().lower() == "true"
+
+# 「十分」と判定する有効かつ関連性のある候補数。後から調整できるよう定数化する。
+PRODUCT_MASTER_SUFFICIENT_CANDIDATE_COUNT = 3
+
+# 成分等の低頻度変動データを「要再検証」とみなす目安(180日)。期限切れだけを
+# 理由に候補から除外はしない(合意事項)。Phase 3の再検証パイプライン用の
+# フラグ付与にのみ用いる。
+PRODUCT_MASTER_REVERIFY_AFTER_SECONDS = 60 * 60 * 24 * 180
+
+_PRODUCT_MASTER_ROW_COLUMNS = (
+    "product_id", "brand", "name", "category", "price_ref",
+    "active_ingredients", "support_ingredients", "signature_ingredients",
+    "concerns", "skin_types", "sensitive_ok", "retinol_level", "main_functions",
+    "ingredient_focus", "ingredient_strength", "formulation", "technology",
+    "texture", "contraindications", "uv_level", "availability_japan",
+    "last_known_image", "last_known_rakuten_link", "rakuten_title",
+    "item_code", "shop_name", "data_source", "verified_at",
+)
+
+
+def _product_master_row_to_product(row):
+    """product_masterのSELECT結果(_PRODUCT_MASTER_ROW_COLUMNS順)を、
+    score_product()等の既存候補スコアリングがそのまま扱える辞書形状へ
+    変換する(verified_products_cache由来の候補と同じフィールド名)。
+    _source_hintは既存の"verified_cache"をそのまま使う(availability加点・
+    Gemini再評価要否等、既存の各分岐をあえて増やさず継承させるため)。"""
+    d = dict(zip(_PRODUCT_MASTER_ROW_COLUMNS, row))
+    verified_at = d.pop("verified_at")
+    product_id = d.pop("product_id")
+    d["price_ref"] = d.get("price_ref") or 0
+    d["price"] = d["price_ref"]
+    d["image"] = d.pop("last_known_image", "") or ""
+    d["rakuten_link"] = d.pop("last_known_rakuten_link", "") or ""
+    d["availability_japan"] = d.get("availability_japan") or []
+    d["_product_master_id"] = product_id
+    d["_source_hint"] = "verified_cache"
+    d["_source"] = "product_master"
+    if verified_at is not None:
+        age_seconds = (datetime.utcnow() - verified_at).total_seconds()
+        d["_needs_reverification"] = age_seconds > PRODUCT_MASTER_REVERIFY_AFTER_SECONDS
+    else:
+        d["_needs_reverification"] = False
+    return d
+
+
+def query_product_master_candidates(category, limit=30):
+    """
+    診断step1件分のカテゴリに合致するproduct_master候補を取得する。
+    DB接続失敗時は空リストを返す(呼び出し元は従来通り他の候補ソースへ
+    フォールバックできる)。
+    """
+    category_norm = normalize_candidate_category(category or "", fallback=category or "")
+    if not category_norm:
+        return []
+
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            f"SELECT {', '.join(_PRODUCT_MASTER_ROW_COLUMNS)} "
+            "FROM product_master WHERE category = %s "
+            "ORDER BY verified_at DESC LIMIT %s",
+            (category_norm, limit),
+        )
+        rows = cur.fetchall()
+        return [_product_master_row_to_product(row) for row in rows]
+    except Exception as e:
+        print(f"[PRODUCT MASTER QUERY ERROR] {repr(e)}", flush=True)
+        return []
+    finally:
+        if conn: conn.close()
+
+
+def _is_relevant_scored_candidate(base_score, base_reasons, ingredient_tag):
+    """score_product()の採点結果から、候補が「ハード除外されておらず、かつ
+    (ingredient_focusが指定されている場合は)実際に関連性が確認できる」かを
+    判定する。新しい採点基準は作らず、score_product/apply_common_score_rules
+    が既に記録している理由(ingredient_focus_active_match/
+    ingredient_focus_support_match)をそのまま使う。"""
+    if base_score <= -9000:
+        return False
+    if not ingredient_tag:
+        return True
+    rules = {r.get("rule") for r in (base_reasons or []) if isinstance(r, dict)}
+    return bool(rules & {"ingredient_focus_active_match", "ingredient_focus_support_match"})
+
+
+def _merge_product_master_with_live_candidate(master_product, live_product):
+    """
+    同一商品(item_codeが一致)がproduct_masterと楽天ライブ候補の両方に
+    見つかった場合のフィールド単位マージ(合意事項)。
+    - 成分・濃度・禁忌・formulation等の低頻度変動データ → master優先(変更しない)
+    - 価格・URL・画像・availability等の高頻度変動データ → ライブ優先(上書き)
+    score_product()に入る前のこの段階でマージすることで、予算適合度等の
+    採点にもその回の最新価格が反映される(最終選定後のrefresh_selected_
+    candidate_price()は、この段階でマージされなかった場合の最終確認として
+    引き続き機能する)。
+    """
+    merged = dict(master_product)
+    live_price = safe_price(live_product.get("price", 0) or live_product.get("price_ref", 0))
+    if live_price > 0:
+        merged["price"] = live_price
+        merged["price_ref"] = live_price
+    if live_product.get("rakuten_link"):
+        merged["rakuten_link"] = live_product["rakuten_link"]
+    if live_product.get("image"):
+        merged["image"] = live_product["image"]
+    if live_product.get("availability_japan"):
+        merged["availability_japan"] = live_product["availability_japan"]
+    if live_product.get("item_code"):
+        merged["item_code"] = live_product["item_code"]
+    if live_product.get("shop_name"):
+        merged["shop_name"] = live_product["shop_name"]
+    if live_product.get("rakuten_title"):
+        merged["rakuten_title"] = live_product["rakuten_title"]
+    merged["_source_hint"] = "verified_cache"
+    merged["_source"] = "product_master"
+    merged["_merged_with_live_candidate"] = True
+    return merged
+
+
+def refresh_selected_candidate_price(product):
+    """
+    最終選定された候補1件に限り、保存済みitem_codeで楽天APIのitemCode検索
+    (実環境で検証済み)を実行し、価格・URL・画像をライブ値で上書きする。
+    item_codeが無い/検索失敗の場合は既存値(last known、product_master
+    由来ならそのキャッシュ値)を変更せず、フォールバックをログに残す。
+    既存の診断フローの一部として呼ばれるが、失敗しても例外は投げず
+    product自体は変更前の状態のまま返す(診断全体を止めない)。
+    """
+    item_code = str(product.get("item_code", "") or "").strip()
+    if not item_code:
+        return product
+
+    result = fetch_rakuten_item_by_item_code(item_code)
+    if not result.get("ok"):
+        print(
+            f"[PRODUCT MASTER PRICE REFRESH FALLBACK] item_code={item_code} "
+            f"http_status={result.get('http_status')} reason={result.get('rakuten_error')} "
+            "-> last known値を使用",
+            flush=True,
+        )
+        return product
+
+    item = result.get("item") or {}
+    if item.get("itemPrice"):
+        product["price"] = safe_price(item.get("itemPrice", 0))
+        product["price_ref"] = product["price"]
+    if item.get("itemUrl"):
+        product["rakuten_link"] = item["itemUrl"]
+    images = item.get("mediumImageUrls") or []
+    if images:
+        first_image = images[0]
+        if isinstance(first_image, dict):
+            first_image = first_image.get("imageUrl", "")
+        if first_image:
+            product["image"] = first_image
+
+    print(f"[PRODUCT MASTER PRICE REFRESH OK] item_code={item_code}", flush=True)
+    return product
 
 
 # スキーマ作成のみ(CREATE TABLE IF NOT EXISTS、冪等)。他のinit_*_table()と
@@ -7466,17 +7668,9 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
             rakuten_item.get("bundle_quantity", 1)
         )
 
-        try:
-            verified_product = build_verified_product_from_step(
-                step,
-                rakuten_item
-            )
-
-            if verified_product:
-                upsert_verified_product_cache(verified_product)
-
-        except Exception as e:
-            print("[VERIFIED CACHE UPSERT ERROR]", e, flush=True)
+        # 旧verified_products_cache.json/product_masterへの並行蓄積
+        # (accumulate_verified_product、合意事項)。
+        accumulate_verified_product(step, rakuten_item)
 
     else:
         step["rakuten_link"] = existing_rakuten_link
@@ -14029,9 +14223,76 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         seen_product_keys.add(product_key)
         combined_products.append(source_product)
 
-    # Phase 2: criteria-based Rakuten search（常時実行・最大3クエリ）
+    # Phase 2: product_master(永続商品マスタ)候補を追加する。identity_keyは
+    # make_verified_product_key()と同じ正規化ロジックのため、db_products/
+    # verified_productsと重複する場合はここで自然に除外される(先勝ち)。
+    n_before_master = len(combined_products)
+    master_products = query_product_master_candidates(category)
+    for mp in master_products:
+        mp_key = make_verified_product_key(mp)
+        if mp_key and mp_key not in seen_product_keys:
+            seen_product_keys.add(mp_key)
+            combined_products.append(mp)
+    n_product_master = len(combined_products) - n_before_master
+
+    # 「十分」判定: PRODUCT_MASTER_SKIP_RAKUTEN_ENABLEDが有効な場合のみ、
+    # product_master由来候補を先にscore_product()で採点し、ハード除外
+    # されておらず関連性も確認できる候補がPRODUCT_MASTER_SUFFICIENT_
+    # CANDIDATE_COUNT件以上あれば楽天広範囲検索をスキップする。無効時は
+    # 従来通り常に実行する(段階導入、既定は従来の挙動を完全維持)。
+    step_ingredient_tag = normalize_ingredient_tag(step.get("ingredient_focus", "") or "")
+    skip_rakuten = False
+    if PRODUCT_MASTER_SKIP_RAKUTEN_ENABLED and n_product_master > 0:
+        relevant_count = 0
+        for mp in combined_products[n_before_master:n_before_master + n_product_master]:
+            _reasons = []
+            _score = score_product(mp, step, user_data, budget_value, reasons=_reasons)
+            if _is_relevant_scored_candidate(_score, _reasons, step_ingredient_tag):
+                relevant_count += 1
+        skip_rakuten = relevant_count >= PRODUCT_MASTER_SUFFICIENT_CANDIDATE_COUNT
+        print(
+            f"[PRODUCT MASTER SUFFICIENCY] step={step.get('step_name') or step.get('name')!r} "
+            f"category={category} relevant_master_candidates={relevant_count} "
+            f"threshold={PRODUCT_MASTER_SUFFICIENT_CANDIDATE_COUNT} skip_rakuten={skip_rakuten}",
+            flush=True,
+        )
+
+    # criteria-based Rakuten search（product_masterで不十分な場合のみ、
+    # またはPRODUCT_MASTER_SKIP_RAKUTEN_ENABLEDが無効なら常時実行）
     n_db_before = len(combined_products)
-    criteria_products = search_rakuten_for_step(step, improvement_plan)
+    if skip_rakuten:
+        criteria_products = []
+    else:
+        criteria_products = search_rakuten_for_step(step, improvement_plan)
+
+    # product_masterとライブ候補が同一商品(item_code一致)の場合、ここで
+    # フィールド単位マージする(score_product()に入る前。合意事項)。
+    # マージした分はcombined_products内の該当product_masterエントリを
+    # マージ結果へ置き換え、ライブ側は別候補として重複追加しない。
+    master_by_item_code = {}
+    if n_product_master:
+        for mp in combined_products[n_before_master:n_before_master + n_product_master]:
+            _ic = str(mp.get("item_code") or "").strip()
+            if _ic:
+                master_by_item_code[_ic] = mp
+
+    n_merged = 0
+    remaining_criteria_products = []
+    for cp in criteria_products:
+        cp_item_code = str(cp.get("item_code") or "").strip()
+        master_match = master_by_item_code.get(cp_item_code) if cp_item_code else None
+        if master_match is not None:
+            merged = _merge_product_master_with_live_candidate(master_match, cp)
+            for idx, existing in enumerate(combined_products):
+                if existing is master_match:
+                    combined_products[idx] = merged
+                    break
+            master_by_item_code[cp_item_code] = merged
+            n_merged += 1
+        else:
+            remaining_criteria_products.append(cp)
+    criteria_products = remaining_criteria_products
+
     for cp in criteria_products:
         cp_key = normalize_product_name(cp.get("rakuten_title", "") or cp.get("name", ""))
         if cp_key and cp_key not in seen_product_keys:
@@ -14041,7 +14302,9 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     _step_name = str(step.get("step_name") or step.get("name") or "")
     print(
         f"[SELECT_CANDIDATE] step={_step_name!r} category={category} / "
-        f"db+verified={n_db_before} / rakuten_criteria={n_rakuten_criteria} / "
+        f"db+verified={n_before_master} / product_master={n_product_master} / "
+        f"merged_with_live={n_merged} / "
+        f"rakuten_criteria={n_rakuten_criteria} (skipped={skip_rakuten}) / "
         f"combined_total={len(combined_products)} / ai_candidates={len(candidates)}",
         flush=True
     )
@@ -23126,6 +23389,12 @@ def apply_db_product_to_step(step, product, user_data, premium_improvement_prior
     if product is None:
         apply_category_fallback_to_step(step, user_data, premium_improvement_priority)
         return
+
+    # product_master由来の最終選定候補のみ、保存済みitem_codeで価格・URL・
+    # 画像をライブ値へリフレッシュする(広範囲検索は行わず、選ばれた1件のみ)。
+    # 失敗時は既存値(product_masterのキャッシュ値)のまま変更しない。
+    if product.get("_source") == "product_master":
+        refresh_selected_candidate_price(product)
 
     category = step.get("category", "")
 
