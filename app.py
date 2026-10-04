@@ -4405,6 +4405,41 @@ def refresh_selected_candidate_price(product):
     return product
 
 
+def update_product_master_item_code_fields(product_id, item_code, price, url, image="", rakuten_title="", shop_name=""):
+    """Step3: item_code解決バッチ専用の更新。
+    成分(active_ingredients等)・formulation等の低頻度フィールドは一切変更せず、
+    item_code/price_ref/last_known_rakuten_link/last_known_image/rakuten_title/
+    shop_nameのみを更新する(upsert_product_master()の全列upsertは使わない)。
+    """
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute(
+            """
+            UPDATE product_master
+            SET item_code = %s, price_ref = %s, last_known_rakuten_link = %s,
+                last_known_image = %s, rakuten_title = %s, shop_name = %s,
+                updated_at = NOW()
+            WHERE product_id = %s
+            """,
+            (
+                str(item_code or ""), safe_price(price) or None, str(url or ""),
+                str(image or ""), str(rakuten_title or ""), str(shop_name or ""),
+                product_id,
+            ),
+        )
+        updated = cur.rowcount > 0
+        conn.commit()
+        return updated
+    except Exception as e:
+        if conn: conn.rollback()
+        print(f"[PRODUCT MASTER ITEM CODE UPDATE ERROR] {repr(e)}", flush=True)
+        return False
+    finally:
+        if conn: conn.close()
+
+
 # スキーマ作成のみ(CREATE TABLE IF NOT EXISTS、冪等)。他のinit_*_table()と
 # 同じく起動のたびに実行して問題ない。verified_products_cache.jsonからの
 # データ移行(migrate_verified_products_cache_to_product_master)は、

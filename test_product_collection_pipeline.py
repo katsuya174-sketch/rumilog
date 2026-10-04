@@ -948,5 +948,295 @@ class BatchResumeTests(unittest.TestCase, DbCleanupMixin):
         self.assertEqual(len(results), 1)  # 2件目は実行されない
 
 
+def _rakuten_item(item_code="shop1:1001", item_name="テスト美容液", price=2000, url="https://item.rakuten.co.jp/shop1/1001/",
+                   images=None, caption="", shop_name="shop1"):
+    return {
+        "itemCode": item_code,
+        "itemName": item_name,
+        "itemPrice": price,
+        "itemUrl": url,
+        "itemCaption": caption,
+        "shopName": shop_name,
+        "mediumImageUrls": images if images is not None else [{"imageUrl": "https://img.example/1.jpg"}],
+    }
+
+
+class ResolveItemCodeForProductTests(unittest.TestCase):
+    """Step3-B: brand+product_nameでの楽天候補検索→確信を持てる場合のみ
+    1件に絞る照合ロジック。実楽天APIは呼ばない(app.fetch_rakuten_candidates
+    をモックする)。"""
+
+    def test_zero_candidates_returns_not_found(self):
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[]):
+            result = pipeline.resolve_item_code_for_product("TestBrand", "テスト美容液", "美容液")
+        self.assertEqual(result["status"], "not_found")
+
+    def test_429_exhausted_search_is_handled_gracefully_as_not_found(self):
+        # fetch_rakuten_candidates自体の429retry/cooldownは既存実装側の責務。
+        # 持続的な429で最終的に[]が返るケースでも、ここで例外にならず
+        # not_foundとして安全に扱われることを確認する。
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[]) as mock_fetch:
+            result = pipeline.resolve_item_code_for_product("TestBrand", "テスト美容液", "美容液")
+        mock_fetch.assert_called_once()
+        self.assertEqual(result["status"], "not_found")
+
+    def test_wrong_product_title_is_rejected_as_not_found(self):
+        # 別商品(ブランド・商品名ともに一致しないタイトル)が万一候補に
+        # 混入しても、is_same_verified_rakuten_product()の再確認で弾かれる。
+        wrong_item = _rakuten_item(item_name="全く別のブランドの日焼け止めクリーム")
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[(50, wrong_item)]):
+            result = pipeline.resolve_item_code_for_product("TestBrand", "テスト美容液", "美容液")
+        self.assertEqual(result["status"], "not_found")
+        self.assertEqual(result.get("reason"), "title_mismatch")
+
+    def test_set_product_is_excluded_as_not_found(self):
+        set_item = _rakuten_item(item_name="TestBrand テスト美容液 スペシャルセット 3点セット")
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[(50, set_item)]):
+            result = pipeline.resolve_item_code_for_product("TestBrand", "テスト美容液", "美容液")
+        self.assertEqual(result["status"], "not_found")
+        self.assertEqual(result.get("reason"), "only_set_items")
+
+    def test_single_matching_candidate_is_confirmed(self):
+        item = _rakuten_item(item_name="TestBrand テスト美容液 30mL")
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[(50, item)]):
+            result = pipeline.resolve_item_code_for_product("TestBrand", "テスト美容液", "美容液")
+        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(result["item"]["itemCode"], "shop1:1001")
+
+    def test_multiple_same_product_candidates_without_jan_use_merchant_tiebreak(self):
+        # 同一商品(タイトル一致・セット除外通過済み)が複数店舗に残った場合、
+        # 別商品の可能性は無い前提のため、既存タイブレーク基準で代表1件に
+        # 自動確定する(以前のambiguous仕様から変更)。
+        item1 = _rakuten_item(item_code="shop1:1001", item_name="TestBrand テスト美容液 30mL")
+        item2 = _rakuten_item(item_code="shop2:2002", item_name="TestBrand テスト美容液 詰め替え用")
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[(50, item1), (45, item2)]):
+            result = pipeline.resolve_item_code_for_product("TestBrand", "テスト美容液", "美容液")
+        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(result["disambiguated_by"], "merchant_tiebreak")
+        self.assertEqual(result["item"]["itemCode"], "shop1:1001")  # スコアが高い方(既存タイブレーク基準)
+
+    def test_set_item_mixed_in_is_excluded_before_merchant_tiebreak(self):
+        # セット商品がスコア最高でも、タイブレーク対象には含めない
+        # (セット除外後の単品候補だけでタイブレークする)。
+        single_a = _rakuten_item(item_code="shop1:1001", item_name="TestBrand テスト美容液 30mL")
+        set_item = _rakuten_item(item_code="shop9:9999", item_name="TestBrand テスト美容液 3点セット")
+        single_b = _rakuten_item(item_code="shop2:2002", item_name="TestBrand テスト美容液 詰め替え用")
+        with patch.object(
+            app, "fetch_rakuten_candidates",
+            return_value=[(50, single_a), (55, set_item), (45, single_b)],
+        ):
+            result = pipeline.resolve_item_code_for_product("TestBrand", "テスト美容液", "美容液")
+        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(result["disambiguated_by"], "merchant_tiebreak")
+        self.assertNotEqual(result["item"]["itemCode"], "shop9:9999")
+        self.assertEqual(result["item"]["itemCode"], "shop1:1001")
+
+    def test_jan_disambiguates_multiple_candidates(self):
+        item1 = _rakuten_item(item_code="shop1:1001", item_name="TestBrand テスト美容液 30mL", caption="JAN:4912345678901")
+        item2 = _rakuten_item(item_code="shop2:2002", item_name="TestBrand テスト美容液 詰め替え用")
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[(50, item1), (45, item2)]):
+            result = pipeline.resolve_item_code_for_product(
+                "TestBrand", "テスト美容液", "美容液", jan_code="4912345678901",
+            )
+        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(result["item"]["itemCode"], "shop1:1001")
+        self.assertEqual(result["disambiguated_by"], "jan_code")
+
+    def test_jan_matching_more_than_one_candidate_falls_back_to_merchant_tiebreak(self):
+        # JANで一意に決まらない場合のみ店舗タイブレークに落ちる。
+        item1 = _rakuten_item(item_code="shop1:1001", item_name="TestBrand テスト美容液", caption="JAN:4912345678901")
+        item2 = _rakuten_item(item_code="shop2:2002", item_name="TestBrand テスト美容液", caption="JAN:4912345678901")
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[(50, item1), (45, item2)]):
+            result = pipeline.resolve_item_code_for_product(
+                "TestBrand", "テスト美容液", "美容液", jan_code="4912345678901",
+            )
+        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(result["disambiguated_by"], "merchant_tiebreak")
+
+    def test_missing_jan_does_not_drop_candidates(self):
+        # JAN記載なしの候補を、JAN不明であることを理由に落とさない。
+        item = _rakuten_item(item_name="TestBrand テスト美容液 30mL", caption="")
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[(50, item)]):
+            result = pipeline.resolve_item_code_for_product("TestBrand", "テスト美容液", "美容液", jan_code=None)
+        self.assertEqual(result["status"], "confirmed")
+
+
+class VerifyAndResolveItemCodeTests(unittest.TestCase, DbCleanupMixin):
+    """resolve確定後のfetch_rakuten_item_by_item_code再確認とDB更新。
+    成分・formulation等は変更しないことを確認する(実楽天APIは呼ばない)。"""
+
+    TEST_SUFFIX = "_ItemCodeTest"
+
+    def setUp(self):
+        app.init_product_master_table()
+        self._cleanup_item_code_rows()
+
+    def tearDown(self):
+        self._cleanup_item_code_rows()
+
+    def _cleanup_item_code_rows(self):
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM product_master WHERE name LIKE %s", (f"%{self.TEST_SUFFIX}%",))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _insert_product(self, suffix):
+        return app.upsert_product_master({
+            "brand": "TestBrand", "name": f"テスト美容液{suffix}", "category": "美容液",
+            "active_ingredients": ["ツボクサエキス"], "formulation": ["nano"],
+            "jan_code": "4912345678901",
+        }, data_source="ai_precollected")
+
+    def test_title_mismatch_resolution_never_calls_fetch_by_item_code(self):
+        # 明らかな別商品(タイトル不一致)は選択対象外のままfetch_rakuten_item_by_item_codeも呼ばれない。
+        product_id = self._insert_product(self.TEST_SUFFIX + "1")
+        wrong_item = _rakuten_item(item_name="全く別のブランドの日焼け止めクリーム")
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[(50, wrong_item)]), \
+             patch.object(app, "fetch_rakuten_item_by_item_code") as mock_verify:
+            result = pipeline.verify_and_resolve_item_code(
+                product_id, "TestBrand", f"テスト美容液{self.TEST_SUFFIX}1", "美容液",
+            )
+        mock_verify.assert_not_called()
+        self.assertEqual(result["status"], "not_found")
+
+    def test_merchant_tiebreak_confirmation_then_fetch_failure_does_not_update_db(self):
+        # 同一商品・複数店舗でタイブレークにより1件に確定した後、
+        # itemCode再検証に失敗した場合はDBを更新しない。
+        product_id = self._insert_product(self.TEST_SUFFIX + "1b")
+        item1 = _rakuten_item(item_code="shop1:1001", item_name=f"TestBrand テスト美容液{self.TEST_SUFFIX}1b 30mL")
+        item2 = _rakuten_item(item_code="shop2:2002", item_name=f"TestBrand テスト美容液{self.TEST_SUFFIX}1b 詰め替え")
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[(50, item1), (45, item2)]), \
+             patch.object(app, "fetch_rakuten_item_by_item_code",
+                           return_value={"ok": False, "http_status": 404, "rakuten_error": "not found", "item": None}) as mock_verify:
+            result = pipeline.verify_and_resolve_item_code(
+                product_id, "TestBrand", f"テスト美容液{self.TEST_SUFFIX}1b", "美容液",
+            )
+        mock_verify.assert_called_once_with("shop1:1001")  # タイブレークで選ばれた代表1件のみ再検証
+        self.assertEqual(result["status"], "verification_failed")
+
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT item_code FROM product_master WHERE product_id = %s", (product_id,))
+            self.assertEqual(cur.fetchone()[0], "")
+        finally:
+            conn.close()
+
+    def test_fetch_failure_does_not_update_db(self):
+        product_id = self._insert_product(self.TEST_SUFFIX + "2")
+        item = _rakuten_item(item_name=f"TestBrand テスト美容液{self.TEST_SUFFIX}2 30mL")
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[(50, item)]), \
+             patch.object(app, "fetch_rakuten_item_by_item_code",
+                           return_value={"ok": False, "http_status": 404, "rakuten_error": "not found", "item": None}):
+            result = pipeline.verify_and_resolve_item_code(
+                product_id, "TestBrand", f"テスト美容液{self.TEST_SUFFIX}2", "美容液",
+            )
+        self.assertEqual(result["status"], "verification_failed")
+
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT item_code FROM product_master WHERE product_id = %s", (product_id,))
+            self.assertEqual(cur.fetchone()[0], "")
+        finally:
+            conn.close()
+
+    def test_successful_verification_updates_item_code_price_url_image_only(self):
+        product_id = self._insert_product(self.TEST_SUFFIX + "3")
+        item = _rakuten_item(item_name=f"TestBrand テスト美容液{self.TEST_SUFFIX}3 30mL")
+        verified_item = {
+            "itemPrice": 2480, "itemUrl": "https://item.rakuten.co.jp/shop1/1001/",
+            "mediumImageUrls": [{"imageUrl": "https://img.example/verified.jpg"}],
+        }
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[(50, item)]), \
+             patch.object(app, "fetch_rakuten_item_by_item_code",
+                           return_value={"ok": True, "http_status": 200, "rakuten_error": None, "item": verified_item}):
+            result = pipeline.verify_and_resolve_item_code(
+                product_id, "TestBrand", f"テスト美容液{self.TEST_SUFFIX}3", "美容液",
+            )
+        self.assertEqual(result["status"], "resolved")
+
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT item_code, price_ref, last_known_rakuten_link, last_known_image, "
+                "active_ingredients, formulation FROM product_master WHERE product_id = %s",
+                (product_id,),
+            )
+            row = cur.fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row[0], "shop1:1001")
+        self.assertEqual(row[1], 2480)
+        self.assertEqual(row[2], "https://item.rakuten.co.jp/shop1/1001/")
+        self.assertEqual(row[3], "https://img.example/verified.jpg")
+        self.assertEqual(row[4], ["ツボクサエキス"])  # 成分は不変
+        self.assertEqual(row[5], ["nano"])  # formulationも不変
+
+    def test_merchant_tiebreak_success_leaves_ingredients_formulation_jan_unchanged(self):
+        product_id = self._insert_product(self.TEST_SUFFIX + "3b")
+        item1 = _rakuten_item(item_code="shop1:1001", item_name=f"TestBrand テスト美容液{self.TEST_SUFFIX}3b 30mL")
+        item2 = _rakuten_item(item_code="shop2:2002", item_name=f"TestBrand テスト美容液{self.TEST_SUFFIX}3b 詰め替え")
+        verified_item = {
+            "itemPrice": 1980, "itemUrl": "https://item.rakuten.co.jp/shop1/1001/",
+            "mediumImageUrls": [{"imageUrl": "https://img.example/verified.jpg"}],
+        }
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[(50, item1), (45, item2)]), \
+             patch.object(app, "fetch_rakuten_item_by_item_code",
+                           return_value={"ok": True, "http_status": 200, "rakuten_error": None, "item": verified_item}):
+            result = pipeline.verify_and_resolve_item_code(
+                product_id, "TestBrand", f"テスト美容液{self.TEST_SUFFIX}3b", "美容液",
+            )
+        self.assertEqual(result["status"], "resolved")
+        self.assertEqual(result["disambiguated_by"], "merchant_tiebreak")
+
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT item_code, active_ingredients, formulation, jan_code "
+                "FROM product_master WHERE product_id = %s", (product_id,),
+            )
+            row = cur.fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row[0], "shop1:1001")
+        self.assertEqual(row[1], ["ツボクサエキス"])  # 成分不変
+        self.assertEqual(row[2], ["nano"])  # formulation不変
+        self.assertEqual(row[3], "4912345678901")  # JAN不変
+
+    def test_not_found_resolution_never_calls_fetch_by_item_code(self):
+        product_id = self._insert_product(self.TEST_SUFFIX + "4")
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[]), \
+             patch.object(app, "fetch_rakuten_item_by_item_code") as mock_verify:
+            result = pipeline.verify_and_resolve_item_code(
+                product_id, "TestBrand", f"テスト美容液{self.TEST_SUFFIX}4", "美容液",
+            )
+        mock_verify.assert_not_called()
+        self.assertEqual(result["status"], "not_found")
+
+
+class SelectItemCodePilotCandidatesTests(unittest.TestCase):
+    """実APIパイロット対象選定(読み取り専用、楽天APIは呼ばない)。"""
+
+    def test_returns_only_rows_with_jan_code(self):
+        candidates = pipeline.select_item_code_pilot_candidates(count=5)
+        for c in candidates:
+            self.assertTrue(c["jan_code"])
+
+    def test_returns_at_most_requested_count(self):
+        candidates = pipeline.select_item_code_pilot_candidates(count=3)
+        self.assertLessEqual(len(candidates), 3)
+
+    def test_prefers_category_diversity(self):
+        candidates = pipeline.select_item_code_pilot_candidates(count=5)
+        categories = [c["category"] for c in candidates]
+        self.assertEqual(len(categories), len(set(categories)))
+
+
 if __name__ == "__main__":
     unittest.main()

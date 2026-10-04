@@ -968,6 +968,13 @@ def reflect_staging_to_product_master(staging_id, dry_run=True):
             "formulation": [f.get("feature") for f in (payload.get("formulation_features") or [])],
             "verified_at": time.time(),
         }
+        # JANはcitation確認済み(sanitize_stage2_payloadがStage1実citationに
+        # 文字列として存在する場合のみ採用、それ以外は"unknown"に強制済み)の
+        # 値のみをproduct_masterへ反映する。未確認("unknown"/空)はNoneのまま
+        # (upsert_product_master側でNULLになる)にして無理に埋めない。
+        jan_code = str(payload.get("jan_code", "") or "").strip()
+        if jan_code and jan_code.lower() != "unknown":
+            product_for_master["jan_code"] = jan_code
 
         identity_key = app._normalize_product_master_identity_key(brand, product_name, category)
         cur.execute("SELECT product_id FROM product_master WHERE identity_key = %s", (identity_key,))
@@ -1021,3 +1028,212 @@ def reflect_batch_to_product_master(batch_id, dry_run=True):
         {"staging_id": sid, **reflect_staging_to_product_master(sid, dry_run=dry_run)}
         for sid in staging_ids
     ]
+
+
+# ===== Step 3: item_code取得(設計のみだった前段からの実装) =====
+# 楽天実APIを呼ぶのは app.fetch_rakuten_candidates()/app.fetch_rakuten_item_by_item_code()
+# の内部のみ(いずれも既存・実運用済みの関数をそのまま再利用し、新しい照合
+# ロジックは作らない)。本モジュールのここから下の関数は、呼び出し元が
+# 明示的に実行するまでは一切呼ばれない(このファイルのimport自体は実APIに
+# 到達しない)。
+
+
+def resolve_item_code_for_product(brand, product_name, category, jan_code=None):
+    """brand+product_nameで楽天候補を検索し、確信を持って1件に絞れる場合のみ
+    その候補を返す。
+
+    既存処理の再利用(新規の照合ロジックは作らない):
+    - app.fetch_rakuten_candidates(): キーワード検索・レート制限待機・429retry/
+      cooldown・ジャンル絞り込みに加え、内部で既に
+      app.is_same_verified_rakuten_product()による商品名一致判定と
+      app.score_rakuten_item()によるスコアリングを適用済み。
+    - app._is_rakuten_set_item(): セット/まとめ買い商品の除外。
+    - app._select_single_or_set_best(): 同一商品を複数店舗が販売している場合の
+      代表1店舗選択(スコア→レビュー数→画像有無→評価→価格の既存タイブレーク
+      基準をそのまま使う。判定基準自体は変更しない)。
+
+    戻り値:
+      {"status": "not_found"}                                   候補0件/商品名不一致/全件セット
+      {"status": "confirmed", "item": {...}}                     候補1件に自然に確定
+      {"status": "confirmed", "item": {...}, "disambiguated_by": "jan_code"}            JANで一意に確定
+      {"status": "confirmed", "item": {...}, "disambiguated_by": "merchant_tiebreak"}   同一商品・複数店舗を既存タイブレークで代表1件に確定
+
+    is_same_verified_rakuten_product()とセット/まとめ買い除外を通過した候補
+    だけが対象(商品同一性の判定基準自体は緩めない)。それでも複数候補が
+    残る場合は「同一商品を複数店舗が販売している」ケースとみなし、JAN本文
+    一致で一意に決まればJANを優先、決まらない場合のみ既存タイブレークで
+    代表店舗を1件選ぶ(disambiguated_by="merchant_tiebreak")。
+    JANは「追加検証材料」であり、JAN記載が無いことを理由に候補を落とす
+    ことはしない(候補が最初から1件に絞れている場合はJANを見ずに確定する)。
+    """
+    scored_items = app.fetch_rakuten_candidates(
+        product_name=product_name, category=category, brand=brand
+    )
+    diag = {"initial_candidate_count": len(scored_items), "title_matched_count": 0, "single_item_count": 0}
+    if not scored_items:
+        return {"status": "not_found", **diag}
+
+    # fetch_rakuten_candidates()は内部で既にis_same_verified_rakuten_product()
+    # による商品名一致判定を適用済みだが、item_codeをproduct_masterへ永続保存
+    # する用途は診断時の一時表示より誤紐付けの許容度が低いため、ここでも
+    # 同じ既存関数で二重に確認する(別の照合ロジックは作らない)。
+    title_matched_pairs = [
+        (score, item) for score, item in scored_items
+        if app.is_same_verified_rakuten_product(
+            product_name=product_name,
+            rakuten_title=str(item.get("itemName", "") or ""),
+            brand=brand,
+        )
+    ]
+    diag["title_matched_count"] = len(title_matched_pairs)
+    if not title_matched_pairs:
+        return {"status": "not_found", "reason": "title_mismatch", **diag}
+
+    single_pairs = [
+        (score, item) for score, item in title_matched_pairs
+        if not app._is_rakuten_set_item(str(item.get("itemName", "") or ""))
+    ]
+    diag["single_item_count"] = len(single_pairs)
+    if not single_pairs:
+        return {"status": "not_found", "reason": "only_set_items", **diag}
+
+    if len(single_pairs) == 1:
+        return {"status": "confirmed", "item": single_pairs[0][1], **diag}
+
+    single_items = [item for _, item in single_pairs]
+
+    jan_str = str(jan_code or "").strip()
+    jan_matches = []
+    if jan_str:
+        for item in single_items:
+            text = str(item.get("itemName", "") or "") + " " + str(item.get("itemCaption", "") or "")
+            if jan_str in text:
+                jan_matches.append(item)
+
+    if len(jan_matches) == 1:
+        return {"status": "confirmed", "item": jan_matches[0], "disambiguated_by": "jan_code", **diag}
+
+    # JANで一意に決まらない場合のみ、同一商品・複数店舗の代表1件を既存の
+    # タイブレーク基準で選ぶ(別商品の可能性がある候補はここには残っていない
+    # 前提=is_same_verified_rakuten_product+セット除外を通過済みのため)。
+    best_item = app._select_single_or_set_best(single_pairs)
+    tiebreak_pool = [
+        {
+            "item_code": item.get("itemCode", ""), "score": score,
+            "shop_name": item.get("shopName", ""),
+            "review_count": item.get("reviewCount", 0), "review_average": item.get("reviewAverage", 0),
+            "has_image": bool(item.get("mediumImageUrls") or item.get("smallImageUrls")),
+            "price": item.get("itemPrice", 0),
+        }
+        for score, item in single_pairs
+    ]
+    return {
+        "status": "confirmed", "item": best_item, "disambiguated_by": "merchant_tiebreak",
+        "candidate_count": len(single_pairs), "tiebreak_pool": tiebreak_pool,
+        **diag,
+    }
+
+
+def verify_and_resolve_item_code(product_id, brand, product_name, category, jan_code=None):
+    """resolve_item_code_for_product()で1件に確定した候補のみ、
+    app.fetch_rakuten_item_by_item_code()で実在・価格・URLを再確認し、
+    検証成功した場合だけproduct_masterのitem_code/価格/URL/画像を更新する
+    (成分・formulation等の低頻度フィールドは一切変更しない)。
+    最終status: resolved(更新成功) / ambiguous / not_found / verification_failed。
+    resolved以外はいずれも書き込まず、呼び出し元がneeds_review/未取得の
+    ままproduct_masterを変更しないことを保証する。
+    """
+    resolution = resolve_item_code_for_product(brand, product_name, category, jan_code=jan_code)
+    if resolution["status"] != "confirmed":
+        return resolution
+
+    diag = {k: v for k, v in resolution.items() if k not in ("status", "item", "disambiguated_by")}
+    disambiguated_by = resolution.get("disambiguated_by")
+
+    candidate = resolution["item"]
+    item_code = str(candidate.get("itemCode", "") or "").strip()
+    if not item_code:
+        return {"status": "verification_failed", "reason": "missing_item_code_in_candidate", **diag}
+
+    verify_result = app.fetch_rakuten_item_by_item_code(item_code)
+    if not verify_result.get("ok"):
+        return {
+            "status": "verification_failed", "item_code": item_code,
+            "http_status": verify_result.get("http_status"),
+            "reason": verify_result.get("rakuten_error") or verify_result.get("http_status"),
+            **diag,
+        }
+
+    verified_item = verify_result.get("item") or {}
+    price = app.safe_price(verified_item.get("itemPrice", 0))
+    url = str(verified_item.get("itemUrl", "") or "")
+    if price <= 0 or not url:
+        return {"status": "verification_failed", "item_code": item_code, "reason": "missing_price_or_url", **diag}
+
+    images = verified_item.get("mediumImageUrls") or []
+    image = ""
+    if images:
+        first_image = images[0]
+        image = first_image.get("imageUrl", "") if isinstance(first_image, dict) else first_image
+
+    candidate_title = str(candidate.get("itemName", "") or "")
+    candidate_shop = str(candidate.get("shopName", "") or "")
+    updated = app.update_product_master_item_code_fields(
+        product_id, item_code=item_code, price=price, url=url, image=image,
+        rakuten_title=candidate_title,
+        shop_name=candidate_shop,
+    )
+    if not updated:
+        return {"status": "error", "reason": "db_update_failed", **diag}
+
+    return {
+        "status": "resolved", "item_code": item_code, "price": price, "url": url,
+        "image": image, "rakuten_title": candidate_title, "shop_name": candidate_shop,
+        "disambiguated_by": disambiguated_by, "http_status": verify_result.get("http_status"),
+        **diag,
+    }
+
+
+def select_item_code_pilot_candidates(count=5):
+    """Step3の実APIパイロット対象として、JANが判明しておりカテゴリが
+    分散した商品をproduct_masterから選ぶ(読み取り専用、楽天APIは呼ばない)。
+    """
+    conn = psycopg2.connect(app.DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT product_id, brand, name, category, jan_code
+            FROM product_master
+            WHERE data_source = 'ai_precollected' AND jan_code IS NOT NULL
+            ORDER BY category, product_id
+        """)
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    selected = []
+    seen_categories = set()
+    for product_id, brand, name, category, jan_code in rows:
+        if category in seen_categories:
+            continue
+        selected.append({
+            "product_id": product_id, "brand": brand, "name": name,
+            "category": category, "jan_code": jan_code,
+        })
+        seen_categories.add(category)
+        if len(selected) >= count:
+            break
+
+    if len(selected) < count:
+        chosen_ids = {item["product_id"] for item in selected}
+        for product_id, brand, name, category, jan_code in rows:
+            if product_id in chosen_ids:
+                continue
+            selected.append({
+                "product_id": product_id, "brand": brand, "name": name,
+                "category": category, "jan_code": jan_code,
+            })
+            if len(selected) >= count:
+                break
+
+    return selected
