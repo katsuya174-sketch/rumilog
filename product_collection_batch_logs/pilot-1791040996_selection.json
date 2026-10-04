@@ -1,0 +1,412 @@
+{
+  "batch_id": "pilot-1791040996",
+  "logged_at": "2026-10-03T15:23:19.786760",
+  "count": 50,
+  "products": [
+    {
+      "brand": "ORBIS",
+      "name": "ORBIS ザ クレンジングオイル",
+      "category": "クレンジング",
+      "active_ingredients": []
+    },
+    {
+      "brand": "Anua",
+      "name": "アヌア ドクダミポアコントロールクレンジングオイル",
+      "category": "クレンジング",
+      "active_ingredients": [
+        "heartleaf"
+      ]
+    },
+    {
+      "brand": "シュウ ウエムラ",
+      "name": "シュウ ウエムラ アルティム8∞ スブリム ビューティ クレンジング オイル n",
+      "category": "クレンジング",
+      "active_ingredients": [
+        "plant_oil",
+        "jojoba_oil"
+      ]
+    },
+    {
+      "brand": "ONE BY KOSE",
+      "name": "ONE BY KOSE ボアクリア オイル",
+      "category": "クレンジング",
+      "active_ingredients": [
+        "ester_oil"
+      ]
+    },
+    {
+      "brand": "SKIN1004",
+      "name": "SKIN1004 センテラ ライトクレンジングオイル",
+      "category": "クレンジング",
+      "active_ingredients": [
+        "cica"
+      ]
+    },
+    {
+      "brand": "N organic",
+      "name": "N organic Basic スージング クレンジングジェル",
+      "category": "クレンジング",
+      "active_ingredients": [
+        "vitamin_c",
+        "vitamin_e"
+      ]
+    },
+    {
+      "brand": "キュレル",
+      "name": "キュレル 潤浸保湿 泡洗顔料",
+      "category": "洗顔",
+      "active_ingredients": []
+    },
+    {
+      "brand": "ドクターケイ",
+      "name": "ドクターケイ ABC-Gピールウォッシュ",
+      "category": "洗顔",
+      "active_ingredients": [
+        "glycolic_acid",
+        "niacinamide",
+        "vitamin_c"
+      ]
+    },
+    {
+      "brand": "オルビス",
+      "name": "オルビス ユードット フォーミングウォッシュ",
+      "category": "洗顔",
+      "active_ingredients": [
+        "dipotassium_glycyrrhizate"
+      ]
+    },
+    {
+      "brand": "DoMeCare",
+      "name": "DoMeCare マイクロクレイウォッシュ",
+      "category": "洗顔",
+      "active_ingredients": [
+        "clay"
+      ]
+    },
+    {
+      "brand": "アテニア",
+      "name": "アテニア ドレスリフト フェイシャルウォッシュ",
+      "category": "洗顔",
+      "active_ingredients": [
+        "collagen",
+        "probiotic_ferment"
+      ]
+    },
+    {
+      "brand": "ドクターシーラボ",
+      "name": "ドクターシーラボ VC 100 KEANA ウォッシング フォーム",
+      "category": "洗顔",
+      "active_ingredients": [
+        "vitamin_c"
+      ]
+    },
+    {
+      "brand": "ファンケル",
+      "name": "ファンケル 洗顔パウダー",
+      "category": "洗顔",
+      "active_ingredients": [
+        "enzyme"
+      ]
+    },
+    {
+      "brand": "COSRX",
+      "name": "COSRX RX ザ・6 ペプチド スキン ブースターセラム",
+      "category": "美容液",
+      "active_ingredients": [
+        "peptide"
+      ]
+    },
+    {
+      "brand": "無印良品",
+      "name": "無印良品 発酵導入美容液",
+      "category": "美容液",
+      "active_ingredients": [
+        "probiotic_ferment"
+      ]
+    },
+    {
+      "brand": "FATUITE",
+      "name": "FATUITE ブライテスト ファーストエッセンスa",
+      "category": "美容液",
+      "active_ingredients": [
+        "niacinamide",
+        "probiotic_ferment"
+      ]
+    },
+    {
+      "brand": "KINUI",
+      "name": "KINUI タマヌピュアオイルセラム",
+      "category": "美容液",
+      "active_ingredients": [
+        "plant_oil"
+      ]
+    },
+    {
+      "brand": "ONE BY KOSE",
+      "name": "ONE BY KOSE セラムヴェール ディープリペア",
+      "category": "美容液",
+      "active_ingredients": [
+        "rice_power_no11"
+      ]
+    },
+    {
+      "brand": "SK-II",
+      "name": "SK-II フェイシャル トリートメント エッセンス",
+      "category": "化粧水",
+      "active_ingredients": [
+        "probiotic_ferment"
+      ]
+    },
+    {
+      "brand": "dプログラム",
+      "name": "dプログラム モイストケア ローション EX",
+      "category": "化粧水",
+      "active_ingredients": [
+        "tranexamic_acid"
+      ]
+    },
+    {
+      "brand": "ANUA",
+      "name": "ANUA ドクダミ 77スージングトナー",
+      "category": "化粧水",
+      "active_ingredients": [
+        "heartleaf"
+      ]
+    },
+    {
+      "brand": "キュレル",
+      "name": "キュレル 潤浸保湿 化粧水III とてもしっとり",
+      "category": "化粧水",
+      "active_ingredients": [
+        "ceramide"
+      ]
+    },
+    {
+      "brand": "肌ラボ",
+      "name": "肌ラボ 極潤 ヒアルロン液",
+      "category": "化粧水",
+      "active_ingredients": [
+        "hyaluronic_acid"
+      ]
+    },
+    {
+      "brand": "無印良品",
+      "name": "無印良品 化粧水 敏感肌用 高保湿",
+      "category": "化粧水",
+      "active_ingredients": []
+    },
+    {
+      "brand": "オルビス",
+      "name": "オルビス クリアフル ローション M",
+      "category": "化粧水",
+      "active_ingredients": [
+        "dipotassium_glycyrrhizate"
+      ]
+    },
+    {
+      "brand": "Obagi",
+      "name": "Obagi オバジC クリアアドバンスドローション",
+      "category": "化粧水",
+      "active_ingredients": [
+        "vitamin_c"
+      ]
+    },
+    {
+      "brand": "トゥヴェール",
+      "name": "トゥヴェール  バランシングGAローション",
+      "category": "化粧水",
+      "active_ingredients": [
+        "glycolic_acid",
+        "niacinamide"
+      ]
+    },
+    {
+      "brand": "Anua",
+      "name": "Anua PDRNヒアルロン酸カプセル100セラム",
+      "category": "美容液",
+      "active_ingredients": [
+        "hyaluronic_acid"
+      ]
+    },
+    {
+      "brand": "COSRX",
+      "name": "COSRX  ザ  ビタミンC23 セラム",
+      "category": "美容液",
+      "active_ingredients": [
+        "vitamin_c"
+      ]
+    },
+    {
+      "brand": "キュレル",
+      "name": "キュレル 潤浸保湿  角層深部バリア美容液",
+      "category": "美容液",
+      "active_ingredients": [
+        "ceramide"
+      ]
+    },
+    {
+      "brand": "COSRX",
+      "name": "COSRX ザ・アルファ アルブチン2ニキビ跡ケア セラム ",
+      "category": "美容液",
+      "active_ingredients": [
+        "alpha_arbutin",
+        "niacinamide"
+      ]
+    },
+    {
+      "brand": "イニスフリー",
+      "name": "イニスフリー レチノール PDRN  アドバンスド  セラム",
+      "category": "美容液",
+      "active_ingredients": [
+        "retinol",
+        "pdrn"
+      ]
+    },
+    {
+      "brand": "トゥヴェール",
+      "name": "トゥヴェール ナノエマルジョン",
+      "category": "乳液",
+      "active_ingredients": [
+        "ceramide"
+      ]
+    },
+    {
+      "brand": "ファンケル",
+      "name": "ファンケル エンリッチプラス  乳液  II しっとり  ",
+      "category": "乳液",
+      "active_ingredients": [
+        "niacinamide"
+      ]
+    },
+    {
+      "brand": "ドクターシーラボ",
+      "name": "ドクターシーラボ VC100 エマルジョン EX",
+      "category": "乳液",
+      "active_ingredients": [
+        "vitamin_c"
+      ]
+    },
+    {
+      "brand": "WHITH WHITE",
+      "name": "WHITH WHITE 薬用美白乳液",
+      "category": "乳液",
+      "active_ingredients": [
+        "placenta",
+        "dipotassium_glycyrrhizate"
+      ]
+    },
+    {
+      "brand": "AESTURA",
+      "name": "AESTURA アトバリア 365 クリーム",
+      "category": "クリーム",
+      "active_ingredients": [
+        "ceramide"
+      ]
+    },
+    {
+      "brand": "LANEIGE",
+      "name": "LANEIGE  バウンシースリーピングマスク",
+      "category": "クリーム",
+      "active_ingredients": [
+        "peptide"
+      ]
+    },
+    {
+      "brand": "オルビス",
+      "name": "オルビスユー ジェルモイスチャライザー",
+      "category": "クリーム",
+      "active_ingredients": [
+        "dipotassium_glycyrrhizate"
+      ]
+    },
+    {
+      "brand": "ラロッシュポゼ",
+      "name": "ラロッシュポゼ シカプラスト リペアクリーム B5+",
+      "category": "クリーム",
+      "active_ingredients": [
+        "panthenol"
+      ]
+    },
+    {
+      "brand": "ソフィーナip",
+      "name": "ソフィーナip ゴールデンタイムリペア  深夜浸透クリーム",
+      "category": "クリーム",
+      "active_ingredients": [
+        "probiotic_ferment"
+      ]
+    },
+    {
+      "brand": "アリィー",
+      "name": "アリィー クロノビューティ  ジェルUV  EX",
+      "category": "日焼け止め",
+      "active_ingredients": [
+        "uv_filter"
+      ]
+    },
+    {
+      "brand": "LuLuLun",
+      "name": "LuLuLun  フェイスマスク  ハイドラVマスク",
+      "category": "パック",
+      "active_ingredients": [
+        "vitamin_c"
+      ]
+    },
+    {
+      "brand": "RISM",
+      "name": "RISM デイリーケアマスク プレシャス",
+      "category": "パック",
+      "active_ingredients": [
+        "niacinamide"
+      ]
+    },
+    {
+      "brand": "The Ordinary",
+      "name": "The Ordinary AHA 30% + BHA 2% Peeling Solution",
+      "category": "ピーリング",
+      "active_ingredients": [
+        "aha",
+        "bha"
+      ]
+    },
+    {
+      "brand": "Anua",
+      "name": "Anua ドクダミLHAピーリングジェル",
+      "category": "ピーリング",
+      "active_ingredients": [
+        "lha"
+      ]
+    },
+    {
+      "brand": "Aurelie",
+      "name": "Aurelie モイストオイルインクレンジングウォーター",
+      "category": "クレンジング",
+      "active_ingredients": []
+    },
+    {
+      "brand": "ファンケル",
+      "name": "ファンケル マイルド クレンジング オイル",
+      "category": "クレンジング",
+      "active_ingredients": [
+        "ester_oil",
+        "plant_oil"
+      ]
+    },
+    {
+      "brand": "アテニア",
+      "name": "アテニア スキンクリア クレンズ オイル アロマタイプ",
+      "category": "クレンジング",
+      "active_ingredients": [
+        "cica"
+      ]
+    },
+    {
+      "brand": "ドクターケイ",
+      "name": "ドクターケイ 薬用Cクリアクレンジングジェル",
+      "category": "クレンジング",
+      "active_ingredients": [
+        "vitamin_c",
+        "niacinamide"
+      ]
+    }
+  ]
+}
