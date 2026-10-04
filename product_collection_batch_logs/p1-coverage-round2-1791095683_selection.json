@@ -1,0 +1,43 @@
+{
+  "batch_id": "p1-coverage-round2-1791095683",
+  "logged_at": "2026-10-04T06:35:05.519269",
+  "count": 6,
+  "products": [
+    {
+      "brand": "松山油脂",
+      "name": "松山油脂 保湿浸透水バランシング",
+      "category": "化粧水",
+      "active_ingredients": []
+    },
+    {
+      "brand": "魔女工場",
+      "name": "魔女工場 ガラクナイアシン2.0エッセンス",
+      "category": "美容液",
+      "active_ingredients": []
+    },
+    {
+      "brand": "JUMISO",
+      "name": "JUMISO ナイアシンアミド20セラム",
+      "category": "美容液",
+      "active_ingredients": []
+    },
+    {
+      "brand": "クレラシル",
+      "name": "クレラシル 薬用洗顔クリーム マイルドタイプ",
+      "category": "洗顔",
+      "active_ingredients": []
+    },
+    {
+      "brand": "富士フイルム",
+      "name": "富士フイルム ルナメアAC ファイバーフォーム",
+      "category": "洗顔",
+      "active_ingredients": []
+    },
+    {
+      "brand": "ラロッシュポゼ",
+      "name": "ラロッシュポゼ エファクラ フォーミング クレンザー",
+      "category": "洗顔",
+      "active_ingredients": []
+    }
+  ]
+}

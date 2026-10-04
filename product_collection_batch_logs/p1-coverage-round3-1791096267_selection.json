@@ -1,0 +1,19 @@
+{
+  "batch_id": "p1-coverage-round3-1791096267",
+  "logged_at": "2026-10-04T06:44:33.947310",
+  "count": 2,
+  "products": [
+    {
+      "brand": "センカ",
+      "name": "センカ プレミアムパーフェクトホイップ クリア",
+      "category": "洗顔",
+      "active_ingredients": []
+    },
+    {
+      "brand": "ビフェスタ",
+      "name": "ビフェスタ 泡ピーリング洗顔 ポアクリア",
+      "category": "洗顔",
+      "active_ingredients": []
+    }
+  ]
+}

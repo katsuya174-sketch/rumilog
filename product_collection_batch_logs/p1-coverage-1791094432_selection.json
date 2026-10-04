@@ -1,0 +1,79 @@
+{
+  "batch_id": "p1-coverage-1791094432",
+  "logged_at": "2026-10-04T06:14:14.648010",
+  "count": 12,
+  "products": [
+    {
+      "brand": "CeraVe",
+      "name": "CeraVe PMフェイシャル モイスチャライジング ローション",
+      "category": "化粧水",
+      "active_ingredients": []
+    },
+    {
+      "brand": "CEZANNE",
+      "name": "CEZANNE スキンコンディショナー 高保湿",
+      "category": "化粧水",
+      "active_ingredients": []
+    },
+    {
+      "brand": "ONE THING",
+      "name": "ONE THING ナイアシンアミド化粧水",
+      "category": "化粧水",
+      "active_ingredients": []
+    },
+    {
+      "brand": "medicube",
+      "name": "medicube アゼライン酸ナイアシンアミド クリアトナー",
+      "category": "化粧水",
+      "active_ingredients": []
+    },
+    {
+      "brand": "メラノCC",
+      "name": "メラノCC 薬用しみ集中対策 プレミアム美容液",
+      "category": "美容液",
+      "active_ingredients": []
+    },
+    {
+      "brand": "Anua",
+      "name": "Anua レチノール0.3 ナイアシンリニューイングセラム",
+      "category": "美容液",
+      "active_ingredients": []
+    },
+    {
+      "brand": "明色化粧品",
+      "name": "明色化粧品 メディショットNA15 リンクル濃美容液",
+      "category": "美容液",
+      "active_ingredients": []
+    },
+    {
+      "brand": "成分エディター",
+      "name": "成分エディター シルクペプチドEGFハートフィット ボリュームアンプル",
+      "category": "美容液",
+      "active_ingredients": []
+    },
+    {
+      "brand": "ドクターペプチ",
+      "name": "ドクターペプチ ペプチドボリュームエッセンス",
+      "category": "美容液",
+      "active_ingredients": []
+    },
+    {
+      "brand": "クレラシル",
+      "name": "クレラシル 薬用洗顔クリーム マイルドタイプ",
+      "category": "洗顔",
+      "active_ingredients": []
+    },
+    {
+      "brand": "ノブ",
+      "name": "ノブ ACアクティブ ウォッシングフォーム",
+      "category": "洗顔",
+      "active_ingredients": []
+    },
+    {
+      "brand": "富士フイルム",
+      "name": "富士フイルム ルナメアAC ファイバーフォーム",
+      "category": "洗顔",
+      "active_ingredients": []
+    }
+  ]
+}
