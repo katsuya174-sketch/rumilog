@@ -235,6 +235,49 @@ class ProductMasterRealDbTests(unittest.TestCase):
         row = self._fetch(identity_key)
         self.assertEqual(row[5], "migrated_json")
 
+    def _fetch_tags(self, identity_key):
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT active_ingredients, active_ingredient_tags "
+                "FROM product_master WHERE identity_key = %s",
+                (identity_key,),
+            )
+            return cur.fetchone()
+        finally:
+            conn.close()
+
+    def test_upsert_computes_active_ingredient_tags_from_raw_ingredient_names(self):
+        # Phase 3(ai_precollected)相当: 生の原文成分名のみを保存する場合でも、
+        # upsert_product_master()がapp.compute_ingredient_tags()で統制タグを
+        # 自動算出して別列へ保存すること(原文のactive_ingredientsは不変)。
+        product = _test_product(
+            self.TEST_SUFFIX + "TagsRaw",
+            active_ingredients=["ツボクサエキス", "ダマスクバラ花エキス"],
+            ingredient_focus=[],
+        )
+        app.upsert_product_master(product, data_source="ai_precollected")
+        identity_key = app._normalize_product_master_identity_key(
+            product["brand"], product["name"], product["category"]
+        )
+        active_ingredients, active_ingredient_tags = self._fetch_tags(identity_key)
+        self.assertEqual(active_ingredients, ["ツボクサエキス", "ダマスクバラ花エキス"])
+        self.assertEqual(active_ingredient_tags, ["centella_extract"])
+
+    def test_upsert_does_not_force_tag_for_unrecognized_ingredient(self):
+        product = _test_product(
+            self.TEST_SUFFIX + "TagsUnknown",
+            active_ingredients=["謎の未知成分エキスXYZ"],
+            ingredient_focus=[],
+        )
+        app.upsert_product_master(product, data_source="ai_precollected")
+        identity_key = app._normalize_product_master_identity_key(
+            product["brand"], product["name"], product["category"]
+        )
+        _, active_ingredient_tags = self._fetch_tags(identity_key)
+        self.assertEqual(active_ingredient_tags, [])
+
 
 if __name__ == "__main__":
     unittest.main()

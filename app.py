@@ -3933,6 +3933,7 @@ def init_product_master_table():
             category TEXT NOT NULL,
             price_ref INTEGER,
             active_ingredients JSONB,
+            active_ingredient_tags JSONB,
             support_ingredients JSONB,
             signature_ingredients JSONB,
             concerns JSONB,
@@ -3958,6 +3959,12 @@ def init_product_master_table():
             updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         """)
+        # 既存テーブルへのマイグレーション(CREATE TABLE IF NOT EXISTSは既存
+        # テーブルの列追加には効かないため、ALTER TABLEで別途安全に追加する)。
+        cur.execute("""
+            ALTER TABLE product_master
+            ADD COLUMN IF NOT EXISTS active_ingredient_tags JSONB
+        """)
         cur.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_product_master_identity
             ON product_master (identity_key)
@@ -3980,10 +3987,16 @@ def init_product_master_table():
 
 
 def _product_master_upsert_sql(product, identity_key, jan_code, brand, name, category, data_source, verified_at):
+    # active_ingredient_tags: 既存診断ロジック(score_product等)が比較に使う
+    # normalize_ingredient_tag()の統制タグ集合。呼び出し元(pipeline.py等)が
+    # 個別に正規化しなくても、upsert_product_master()を通る全ての商品で
+    # 一貫して再計算される(二重の正規化ロジックを作らず、常にここ一箇所で
+    # compute_ingredient_tags()=normalize_ingredient_tag()の集合として算出する)。
+    active_ingredient_tags = compute_ingredient_tags(product.get("active_ingredients") or [])
     return ("""
         INSERT INTO product_master (
             identity_key, jan_code, brand, name, category, price_ref,
-            active_ingredients, support_ingredients, signature_ingredients,
+            active_ingredients, active_ingredient_tags, support_ingredients, signature_ingredients,
             concerns, skin_types, sensitive_ok, retinol_level, main_functions,
             ingredient_focus, ingredient_strength, formulation, technology,
             texture, contraindications, uv_level, availability_japan,
@@ -3991,13 +4004,14 @@ def _product_master_upsert_sql(product, identity_key, jan_code, brand, name, cat
             item_code, shop_name, data_source, verified_at
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON CONFLICT (identity_key) DO UPDATE SET
             brand = EXCLUDED.brand,
             name = EXCLUDED.name,
             price_ref = EXCLUDED.price_ref,
             active_ingredients = EXCLUDED.active_ingredients,
+            active_ingredient_tags = EXCLUDED.active_ingredient_tags,
             support_ingredients = EXCLUDED.support_ingredients,
             signature_ingredients = EXCLUDED.signature_ingredients,
             concerns = EXCLUDED.concerns,
@@ -4025,6 +4039,7 @@ def _product_master_upsert_sql(product, identity_key, jan_code, brand, name, cat
         identity_key, jan_code, brand, name, category,
         safe_price(product.get("price_ref", 0)) or None,
         json.dumps(product.get("active_ingredients") or []),
+        json.dumps(active_ingredient_tags),
         json.dumps(product.get("support_ingredients") or []),
         json.dumps(product.get("signature_ingredients") or []),
         json.dumps(product.get("concerns") or []),
@@ -4234,6 +4249,7 @@ _PRODUCT_MASTER_ROW_COLUMNS = (
     "texture", "contraindications", "uv_level", "availability_japan",
     "last_known_image", "last_known_rakuten_link", "rakuten_title",
     "item_code", "shop_name", "data_source", "verified_at",
+    "active_ingredient_tags",
 )
 
 
@@ -4251,6 +4267,15 @@ def _product_master_row_to_product(row):
     d["image"] = d.pop("last_known_image", "") or ""
     d["rakuten_link"] = d.pop("last_known_rakuten_link", "") or ""
     d["availability_japan"] = d.get("availability_japan") or []
+    # active_ingredient_tags(normalize_ingredient_tag()の統制タグ集合)を
+    # active_ingredientsへ合流させる(生の原文成分名は削除せず残したまま)。
+    # score_product/apply_common_score_rules等の既存の「ingredient_tag in
+    # product_actives」判定が、DB列を直接変更せずにそのまま機能するようにする
+    # ための読み出し時の変換であり、新しい照合ロジックは追加しない。
+    active_ingredient_tags = d.pop("active_ingredient_tags", None) or []
+    if active_ingredient_tags:
+        raw_actives = list(d.get("active_ingredients") or [])
+        d["active_ingredients"] = list(dict.fromkeys(raw_actives + active_ingredient_tags))
     d["_product_master_id"] = product_id
     d["_source_hint"] = "verified_cache"
     d["_source"] = "product_master"
@@ -10502,6 +10527,19 @@ def normalize_ingredient_tag(text):
 
     return None
 
+
+def compute_ingredient_tags(ingredient_names):
+    """生の成分名(日本語表記等)のリストを、既存スコアリングが比較に使う
+    normalize_ingredient_tag()の統制タグ集合に変換する(別の正規化ロジックは
+    作らず、既存のnormalize_ingredient_tag()をそのまま再利用する)。
+    タグ化できない(未知の)成分は無理にタグ化せず、そのまま落とす。"""
+    tags = set()
+    for name in (ingredient_names or []):
+        tag = normalize_ingredient_tag(str(name) if name is not None else "")
+        if tag:
+            tags.add(tag)
+    return sorted(tags)
+
 # =========================================================
 # SCORE BLOCK START
 # 貼る場所:
@@ -11603,11 +11641,28 @@ NON_COSMETIC_KEYWORDS = [
     "supplement",
 ]
 
+# 「カプセル」は経口カプセルサプリだけでなく、「カプセル配合美容液」等、
+# 外用化粧品の商品名表現としても使われるため単独一致では除外しない。
+# 商品名に化粧品の製品種別語が明示されている場合は、外用化粧品と判断する。
+_COSMETIC_PRODUCT_TYPE_WORDS_FOR_CAPSULE_OVERRIDE = [
+    "美容液", "セラム", "serum", "クリーム", "cream", "化粧水", "ローション", "lotion",
+    "乳液", "エマルジョン", "emulsion", "エッセンス", "essence", "オイル", "oil",
+    "ジェル", "gel", "トナー", "toner", "ミスト", "mist", "パック", "マスク", "mask",
+    "洗顔", "クレンジング",
+]
+
+
 def is_non_cosmetic(product):
     name = str(product.get("name", "") or product.get("product", "")).lower()
     category = str(product.get("category", "") or "").lower()
 
-    if any(keyword.lower() in name for keyword in NON_COSMETIC_KEYWORDS):
+    for keyword in NON_COSMETIC_KEYWORDS:
+        if keyword.lower() not in name:
+            continue
+        if keyword == "カプセル" and any(
+            w.lower() in name for w in _COSMETIC_PRODUCT_TYPE_WORDS_FOR_CAPSULE_OVERRIDE
+        ):
+            continue
         return True
 
     if category in ["food", "supplement", "drink", "食品", "サプリ", "健康食品"]:

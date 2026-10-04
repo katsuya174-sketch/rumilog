@@ -948,11 +948,18 @@ def reflect_staging_to_product_master(staging_id, dry_run=True):
             i for i in (payload.get("active_ingredients") or [])
             if str(i.get("ingredient", "") or "").strip().lower() != "unknown"
         ]
+        active_ingredients = [i.get("ingredient") for i in real_ingredients]
         product_for_master = {
             "brand": brand,
             "name": product_name,
             "category": category,
-            "active_ingredients": [i.get("ingredient") for i in real_ingredients],
+            "active_ingredients": active_ingredients,
+            # 既存診断ロジック(normalize_ingredient_tag)が比較に使う統制タグ。
+            # 別の正規化ロジックは作らず、app.compute_ingredient_tags()
+            # (=normalize_ingredient_tag()の集合)をそのまま再利用する。
+            # upsert_product_master()側でも同じ関数から再計算されるため、
+            # ここでの値は主にdry-runプレビューの可視化用。
+            "active_ingredient_tags": app.compute_ingredient_tags(active_ingredients),
             "ingredient_strength": {
                 i.get("ingredient"): i.get("concentration")
                 for i in real_ingredients

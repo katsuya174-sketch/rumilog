@@ -150,6 +150,62 @@ class SelectBestMarketCandidateProductMasterSufficiencyTests(unittest.TestCase):
         self.assertIn(self.TEST_SUFFIX, result.get("name", ""))
 
 
+class RawIngredientNameSufficiencyBackfillTests(unittest.TestCase):
+    """Phase 2+3統合検証で判明した不整合の回帰テスト: Phase3(ai_precollected)
+    のように生の原文成分名(例: ツボクサエキス)しか持たない候補でも、
+    active_ingredient_tagsのバックフィルによりingredient_focus一致・
+    sufficient判定が機能するようになったことを確認する。"""
+
+    TEST_CATEGORY = "美容液"
+    TEST_SUFFIX = "_RawTagBackfillTest"
+
+    @classmethod
+    def setUpClass(cls):
+        app.init_product_master_table()
+
+    def setUp(self):
+        self._cleanup()
+
+    def tearDown(self):
+        self._cleanup()
+
+    def _cleanup(self):
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM product_master WHERE name LIKE %s", (f"%{self.TEST_SUFFIX}%",))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _insert_raw_ingredient_candidates(self, count, raw_ingredient="ツボクサエキス"):
+        for i in range(count):
+            item = _product_master_item(f"{self.TEST_SUFFIX}{i}", ingredient_focus="", category=self.TEST_CATEGORY)
+            item["active_ingredients"] = [raw_ingredient]
+            item["ingredient_focus"] = []
+            app.upsert_product_master(item, data_source="ai_precollected")
+
+    def test_raw_japanese_ingredient_name_now_counts_as_relevant_and_sufficient(self):
+        self._insert_raw_ingredient_candidates(app.PRODUCT_MASTER_SUFFICIENT_CANDIDATE_COUNT)
+        step = {"category": self.TEST_CATEGORY, "purpose": "鎮静ケア", "ingredient_focus": "ツボクサ"}
+        with patch.object(app, "PRODUCT_MASTER_SKIP_RAKUTEN_ENABLED", True), \
+             patch.object(app, "search_rakuten_for_step", return_value=[]) as mock_search:
+            app.select_best_market_candidate(
+                step, db_products=[], user_data={"oil": "normal", "sens": "low", "exp": "middle"},
+                budget_value=3000, verified_products=[],
+            )
+        mock_search.assert_not_called()
+
+    def test_candidates_returned_with_tag_merged_into_active_ingredients(self):
+        self._insert_raw_ingredient_candidates(1)
+        candidates = app.query_product_master_candidates(self.TEST_CATEGORY)
+        matching = [c for c in candidates if self.TEST_SUFFIX in c.get("name", "")]
+        self.assertEqual(len(matching), 1)
+        actives = matching[0]["active_ingredients"]
+        self.assertIn("ツボクサエキス", actives)
+        self.assertIn("centella_extract", actives)
+
+
 class RefreshSelectedCandidatePriceTests(unittest.TestCase):
     def test_success_overwrites_price_link_image(self):
         product = {"item_code": "shop:123", "price": 1000, "price_ref": 1000, "rakuten_link": "", "image": ""}

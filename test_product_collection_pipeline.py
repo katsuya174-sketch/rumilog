@@ -578,6 +578,47 @@ class DryRunDoesNotUpdateTests(unittest.TestCase, DbCleanupMixin):
         self.assertEqual(result["action"], "update")
         self.assertEqual(result["existing_product_id"], existing_id)
 
+    def test_dry_run_preview_includes_normalized_ingredient_tags(self):
+        # Phase2+3統合検証で判明した構造的不整合の修正: 生の原文成分名のみでも
+        # 既存のnormalize_ingredient_tag()を再利用した統制タグがdry-run結果に
+        # 含まれ、原文のactive_ingredientsは変更されないことを確認する。
+        batch_id = f"{self.TEST_BATCH_PREFIX}dryrun8"
+        staging_id = self._insert_staging(batch_id, payload={
+            "active_ingredients": [
+                {"ingredient": "ツボクサエキス", "concentration": "unknown"},
+                {"ingredient": "ダマスクバラ花エキス", "concentration": "unknown"},
+            ],
+            "formulation_features": [],
+        })
+
+        result = pipeline.reflect_staging_to_product_master(staging_id, dry_run=True)
+
+        self.assertEqual(
+            result["product"]["active_ingredients"],
+            ["ツボクサエキス", "ダマスクバラ花エキス"],
+        )
+        self.assertEqual(result["product"]["active_ingredient_tags"], ["centella_extract"])
+
+    def test_real_run_persists_active_ingredient_tags_column(self):
+        batch_id = f"{self.TEST_BATCH_PREFIX}dryrun9"
+        staging_id = self._insert_staging(batch_id, payload={
+            "active_ingredients": [{"ingredient": "ツボクサエキス", "concentration": "unknown"}],
+            "formulation_features": [],
+        })
+
+        pipeline.reflect_staging_to_product_master(staging_id, dry_run=False)
+
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT active_ingredient_tags FROM product_master WHERE name = %s",
+                ("TestProduct_PMCollectionTest",),
+            )
+            self.assertEqual(cur.fetchone()[0], ["centella_extract"])
+        finally:
+            conn.close()
+
 
 class StagingAndFieldSourcesWriteTests(unittest.TestCase, DbCleanupMixin):
     def setUp(self):
