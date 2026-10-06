@@ -478,5 +478,77 @@ class BuildRakutenSearchKeywordsAliasFallbackTests(unittest.TestCase):
         self.assertEqual(len(alias_based), 1)
 
 
+class CleanserBarKeywordTests(unittest.TestCase):
+    """is_wrong_cleanser_candidate()/CLEANSER_KEYWORDS: 固形石鹸・ピーリング
+    バー系の複合語を安全に認識する(裸の「バー」は追加しない、Step28)。"""
+
+    STEP_洗顔 = {"category": "洗顔"}
+
+    def test_sansoritto_skin_peel_bar_not_hard_excluded(self):
+        self.assertFalse(app.is_wrong_cleanser_candidate(
+            {"name": "サンソリット スキンピールバー AHA"}, self.STEP_洗顔
+        ))
+
+    def test_normal_cleanser_products_unaffected(self):
+        self.assertFalse(app.is_wrong_cleanser_candidate(
+            {"name": "ビオレu 泡立てネット付き洗顔フォーム"}, self.STEP_洗顔
+        ))
+        self.assertFalse(app.is_wrong_cleanser_candidate(
+            {"name": "ロート製薬 肌ラボ 極潤 泡洗顔料"}, self.STEP_洗顔
+        ))
+        self.assertFalse(app.is_wrong_cleanser_candidate(
+            {"name": "AHAクリアソープ(ピーリング石鹸)"}, self.STEP_洗顔
+        ))
+
+    def test_bar_containing_unrelated_loanwords_still_excluded(self):
+        # 「バリア」「カバー」「オーバー」等は裸の「バー」部分一致を追加して
+        # いないため、従来通りhard-excludeされる(誤acceptしない)
+        self.assertTrue(app.is_wrong_cleanser_candidate(
+            {"name": "ノブ バリアケア保湿クリーム"}, self.STEP_洗顔
+        ))
+        self.assertTrue(app.is_wrong_cleanser_candidate(
+            {"name": "資生堂 アクアレーベル カバーファンデーション"}, self.STEP_洗顔
+        ))
+        self.assertTrue(app.is_wrong_cleanser_candidate(
+            {"name": "オーバーナイトリペアセラム"}, self.STEP_洗顔
+        ))
+
+    def test_generic_soap_and_cleansing_bar_terms_accepted(self):
+        self.assertFalse(app.is_wrong_cleanser_candidate(
+            {"name": "無添加ソープバー"}, self.STEP_洗顔
+        ))
+        self.assertFalse(app.is_wrong_cleanser_candidate(
+            {"name": "クレンジングバー チャコール"}, self.STEP_洗顔
+        ))
+        self.assertFalse(app.is_wrong_cleanser_candidate(
+            {"name": "毛穴ケア ピールバー"}, self.STEP_洗顔
+        ))
+
+    def test_existing_toner_keyword_rejection_unchanged(self):
+        self.assertTrue(app.is_wrong_cleanser_candidate(
+            {"name": "化粧水 さっぱりタイプ"}, self.STEP_洗顔
+        ))
+
+    def test_non_facewash_category_unaffected(self):
+        self.assertFalse(app.is_wrong_cleanser_candidate(
+            {"name": "サンソリット スキンピールバー AHA"}, {"category": "美容液"}
+        ))
+
+    def test_sansoritto_no_longer_hard_excluded_by_score_product(self):
+        product = {
+            "brand": "サンソリット", "name": "サンソリット スキンピールバー AHA",
+            "category": "洗顔", "price_ref": 1800, "price": 1800,
+            "active_ingredients": ["glycolic_acid"], "support_ingredients": [],
+            "signature_ingredients": [], "concerns": [], "skin_types": [],
+            "sensitive_ok": "unknown", "retinol_level": 0, "main_functions": [],
+            "ingredient_focus": [], "ingredient_strength": {}, "formulation": [],
+            "technology": [], "texture": "", "contraindications": [], "uv_level": {},
+            "availability_japan": [], "image": "", "rakuten_link": "",
+        }
+        step = {"category": "洗顔", "purpose": "", "ingredient_focus": "glycolic_acid"}
+        score = app.score_product(product, step, {"oil": "normal", "sens": "low"}, 3000)
+        self.assertGreater(score, -9000)
+
+
 if __name__ == "__main__":
     unittest.main()
