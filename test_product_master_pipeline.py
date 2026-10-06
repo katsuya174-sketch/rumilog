@@ -445,5 +445,122 @@ class AccumulateVerifiedProductTests(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class IngredientFocusTagCorrectionTests(unittest.TestCase):
+    """P2 Step5: select_best_market_candidate()の最終スコアに加えた
+    ingredient_focus実保持(+15)/非保持(-15)の対称補正の回帰テスト。
+    本番52件のdプログラム/アテニア等そのものではなく、同じ構造(正タグ保持だが
+    concern/function網羅性が低い候補 vs 別タグ保持でconcern/functionが豊富な
+    「ゼネラリスト」候補)を再現した合成データで検証する(ローカルテストDBには
+    本番データが無いため)。"""
+
+    TEST_CATEGORY = "美容液"
+    TEST_SUFFIX = "_IngFocusCorrectionTest"
+
+    @classmethod
+    def setUpClass(cls):
+        app.init_product_master_table()
+
+    def setUp(self):
+        self._cleanup()
+
+    def tearDown(self):
+        self._cleanup()
+
+    def _cleanup(self):
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM product_master WHERE name LIKE %s", (f"%{self.TEST_SUFFIX}%",))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _insert(self, suffix, active_ingredients, category=None):
+        app.upsert_product_master({
+            "brand": "テストブランド", "name": f"テスト商品{suffix}{self.TEST_SUFFIX}",
+            "category": category or self.TEST_CATEGORY,
+            "active_ingredients": active_ingredients,
+        }, data_source="ai_precollected")
+
+    def _select(self, category, ingredient_focus_text, purpose, improvement_plan=None):
+        step = {"category": category, "purpose": purpose, "ingredient_focus": ingredient_focus_text}
+        with patch.object(app, "search_rakuten_for_step", return_value=[]):
+            return app.select_best_market_candidate(
+                step, db_products=[], user_data={"oil": "normal", "sens": "normal"},
+                budget_value=3000, verified_products=[], improvement_plan=improvement_plan or {},
+            )
+
+    def test_correct_tag_holder_wins_against_tag_rich_generalist(self):
+        # 正タグ(トラネキサム酸)のみを持つ「狭い」候補
+        self._insert("Narrow", ["トラネキサム酸"])
+        # 別タグ(セラミド+ナイアシンアミド+アゼライン酸)を持つ「ゼネラリスト」候補
+        # (concern/function enrichmentで多数のconcernsを得て、本来無関係な
+        # improvement_planにも引っかかりやすい)
+        self._insert("Generalist", ["セラミド", "ナイアシンアミド", "アゼライン酸"])
+
+        result = self._select(
+            self.TEST_CATEGORY, "トラネキサム酸", "くすみ・色素沈着が気になる",
+            improvement_plan={"summary": "くすみ・色素沈着が気になる。美白ケアを重視したい。"},
+        )
+        self.assertIn("Narrow", result.get("name", ""))
+        self.assertIn("トラネキサム酸", result.get("active_ingredients", []))
+
+    def test_tag_unspecified_score_matches_uncorrected_formula(self):
+        # ingredient_focus未指定時は補正が一切適用されず、従来の
+        # base*base_weight + improve*improve_weight + routine*routine_weight
+        # のみでスコアが決まること。
+        self._insert("NoFocus", ["セラミド"])
+        result = self._select(self.TEST_CATEGORY, "", "乾燥が気になる")
+        self.assertIsNotNone(result)
+
+        base_weight, improve_weight = app.get_dynamic_score_weights(
+            {"category": self.TEST_CATEGORY, "purpose": "乾燥が気になる", "ingredient_focus": ""},
+            {"oil": "normal", "sens": "normal"},
+        )
+        routine_weight = app.get_routine_score_weight({"category": self.TEST_CATEGORY, "purpose": "乾燥が気になる"})
+        expected = round(
+            result["_base_score"] * base_weight
+            + result["_improve_score"] * improve_weight
+            + result["_routine_score"] * routine_weight,
+            1,
+        )
+        self.assertEqual(result["_score"], expected)
+
+    def test_no_tag_holder_exists_selection_still_succeeds(self):
+        # 対象タグ(ペプチド)を保持する候補が1件も無くても、選定自体は
+        # 失敗せず(Noneにならず)、何らかの候補が返ること。
+        self._insert("NoHolderA", ["セラミド"])
+        self._insert("NoHolderB", ["ナイアシンアミド"])
+        result = self._select(self.TEST_CATEGORY, "ペプチド", "ハリ不足が気になる")
+        self.assertIsNotNone(result)
+
+    def test_hard_exclude_still_applied_even_with_correction(self):
+        # pregnancy等の既存hard excludeは補正の影響を受けず、正タグを持つ
+        # 商品でも安全性ルールで除外されたままであること。
+        self._insert("PregnancyUnsafe", ["レチノール"])
+        # pregnant=Trueでhard excludeされることを確認(除外後は候補が無いため
+        # select_best_market_candidateはNoneを返す=安全側)
+        step = {"category": self.TEST_CATEGORY, "purpose": "ハリ不足が気になる", "ingredient_focus": "レチノール"}
+        with patch.object(app, "search_rakuten_for_step", return_value=[]):
+            pregnant_result = app.select_best_market_candidate(
+                step, db_products=[], user_data={"oil": "normal", "sens": "normal", "pregnant": True},
+                budget_value=3000, verified_products=[],
+            )
+        self.assertIsNone(pregnant_result)
+
+    def test_known_case_salon_collagen_pattern(self):
+        # Step3/4で確認した「洗顔×collagen」と同構造の合成版:
+        # 正タグ(コラーゲン)のみの狭い候補 vs 別タグ(セラミド+グルタチオン+
+        # グリコール酸)を持つゼネラリスト候補。
+        self._insert("CollagenNarrowCleanser", ["コラーゲン"], category="洗顔")
+        self._insert("CleanserGeneralist", ["セラミド", "グルタチオン", "グリコール酸"], category="洗顔")
+
+        result = self._select(
+            "洗顔", "コラーゲン", "ハリ不足が気になる(洗顔)",
+            improvement_plan={"summary": "ハリ不足が気になる。ハリを重視したい。"},
+        )
+        self.assertIn("CollagenNarrowCleanser", result.get("name", ""))
+
+
 if __name__ == "__main__":
     unittest.main()

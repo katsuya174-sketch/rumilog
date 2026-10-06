@@ -14540,6 +14540,17 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
             routine_score * routine_weight
         )
 
+        # P2 Step5: ingredient_focusが明示されている場合のみ、対象タグの実保持/
+        # 非保持に対称的な補正を加える(tag未指定時は完全に従来挙動。
+        # ingredient_focus_active_match等の既存base_score側ロジックは変更せず、
+        # 最終合算スコアにのみ適用する。合意事項: combined方式+15/-15)。
+        _ingredient_focus_tag = normalize_ingredient_tag(step.get("ingredient_focus", "") or "")
+        if _ingredient_focus_tag:
+            if _ingredient_focus_tag in (product.get("active_ingredients") or []):
+                final_score += 15
+            else:
+                final_score -= 15
+
         product["_score"] = round(final_score, 1)
         product["_base_score"] = round(base_score, 1)
         product["_improve_score"] = round(improve_score, 1)
