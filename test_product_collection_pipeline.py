@@ -1238,5 +1238,53 @@ class SelectItemCodePilotCandidatesTests(unittest.TestCase):
         self.assertEqual(len(categories), len(set(categories)))
 
 
+class Stage1PromptIngredientNameDepthTests(unittest.TestCase):
+    """build_stage1_prompt(): trade name/複合原料名(Matrixyl等)で調査を
+    終了せず、構成INCI成分名まで探すよう指示する一般ルールが追加されて
+    いること(Step34)。peptide専用ではなく成分種別に依存しない文言か、
+    既存の安全条件を維持したままの追加かを確認する。"""
+
+    def test_prompt_instructs_full_ingredient_list_priority(self):
+        prompt = pipeline.build_stage1_prompt("KISOCARE", "キソ マトリックスセラム PE")
+        self.assertIn("全成分", prompt)
+        self.assertIn("INCI", prompt)
+
+    def test_prompt_instructs_not_stopping_at_trade_name(self):
+        prompt = pipeline.build_stage1_prompt("テストブランド", "テスト商品")
+        self.assertIn("trade name", prompt)
+        self.assertIn("終了しない", prompt)
+
+    def test_prompt_mentions_matrixyl_argireline_as_examples_not_hardcoded_rule(self):
+        prompt = pipeline.build_stage1_prompt("テストブランド", "テスト商品")
+        self.assertIn("Matrixyl", prompt)
+        self.assertIn("Argireline", prompt)
+
+    def test_prompt_is_not_peptide_specific(self):
+        # ペプチド専用ルールにしない: レチノール・ビタミンC等、他の成分
+        # 種別にも適用される一般ルールであることを明記した文言を含む
+        prompt = pipeline.build_stage1_prompt("テストブランド", "テスト商品")
+        self.assertIn("ペプチド系成分に限らず", prompt)
+        self.assertIn("レチノール", prompt)
+        self.assertIn("ビタミンC", prompt)
+
+    def test_prompt_still_forbids_guessing_unconfirmed_constituents(self):
+        prompt = pipeline.build_stage1_prompt("テストブランド", "テスト商品")
+        self.assertIn("推測で補わず", prompt)
+        self.assertIn("不明", prompt)
+
+    def test_prompt_instructs_listing_multiple_constituents_individually(self):
+        prompt = pipeline.build_stage1_prompt("テストブランド", "テスト商品")
+        self.assertIn("個別の項目として", prompt)
+
+    def test_existing_fields_still_present(self):
+        # 既存の指示(ブランド名・JANコード・有効成分濃度・製剤特徴)が
+        # 削除されずそのまま維持されていること
+        prompt = pipeline.build_stage1_prompt("テストブランド", "テスト商品")
+        self.assertIn("ブランド名・正式な製品名", prompt)
+        self.assertIn("JANコード", prompt)
+        self.assertIn("有効成分とその濃度", prompt)
+        self.assertIn("製剤特徴", prompt)
+
+
 if __name__ == "__main__":
     unittest.main()
