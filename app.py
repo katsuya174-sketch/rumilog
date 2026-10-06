@@ -3036,6 +3036,35 @@ def build_rakuten_search_keywords(product_name, brand="", category="", ingredien
         if _brand_stripped and len(_brand_stripped) >= 4:
             add(_brand_stripped)
 
+    # ブランドalias(VERIFIED_BRAND_ALIAS_GROUPS)による低優先度フォールバック。
+    # alias専用の新しい仕組みは作らず、既存のアライアスグループをそのまま
+    # 再利用する。1ブランドにつきalias候補は1件のみ生成し(大量query化を
+    # 防ぐ)、既存キーワードの内容・優先順位には影響しない(末尾に追加するのみ)。
+    if brand:
+        _brand_norm = normalize_candidate_name_for_merge(brand)
+        _brand_norm_compact = _brand_norm.replace(" ", "")
+        for _aliases in VERIFIED_BRAND_ALIAS_GROUPS:
+            _normalized_aliases = [
+                normalize_candidate_name_for_merge(a) for a in _aliases if str(a or "").strip()
+            ]
+            _normalized_aliases = [a for a in _normalized_aliases if a]
+            _alias_compacts = [a.replace(" ", "") for a in _normalized_aliases]
+            if _brand_norm in _normalized_aliases or _brand_norm_compact in _alias_compacts:
+                for _alias in _aliases:
+                    _alias_str = str(_alias or "").strip()
+                    if not _alias_str:
+                        continue
+                    if normalize_candidate_name_for_merge(_alias_str) == _brand_norm:
+                        continue
+                    if name.lower().startswith(brand.lower()):
+                        _rest = name[len(brand):].strip()
+                        _alias_kw = f"{_alias_str} {_rest}".strip() if _rest else _alias_str
+                    else:
+                        _alias_kw = f"{_alias_str} {name}".strip()
+                    add(_alias_kw)
+                    break
+                break
+
     print("[RAKUTEN KEYWORDS]", keywords, flush=True)
 
     return keywords[:6]
@@ -4499,6 +4528,7 @@ VERIFIED_BRAND_ALIAS_GROUPS = [
     ("エストラ", "aestura"),
     ("サナ", "sana", "なめらか本舗"),
     ("トゥヴェール", "toutvert", "tout vert", "touver", "tvert"),
+    ("WHITH WHITE", "whith white", "フィスホワイト", "フィス ホワイト"),
 ]
 
 
@@ -4914,8 +4944,11 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
         keywords.append(cleaned_keyword)
 
     # 「keyword is not valid」400 が返った場合は continue して次を試すため
-    # 英語のみの長いキーワードが弾かれてもフォールバックが機能するよう上限を上げる
-    MAX_RAKUTEN_KEYWORDS = 4
+    # 英語のみの長いキーワードが弾かれてもフォールバックが機能するよう上限を上げる。
+    # 4から5への引き上げは、ブランドalias(VERIFIED_BRAND_ALIAS_GROUPS)による
+    # 低優先度フォールバックキーワード(末尾に追加)が必ず試行対象に入るようにする
+    # ための最小変更。alias対象でないブランドは元々4件以下のためコストは増えない。
+    MAX_RAKUTEN_KEYWORDS = 5
 
     for keyword in keywords[:MAX_RAKUTEN_KEYWORDS]:
         keyword = clean_rakuten_keyword(keyword)

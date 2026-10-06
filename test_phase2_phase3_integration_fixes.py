@@ -434,5 +434,49 @@ class ScoreRakutenItemLongVowelMarkTokenizationTests(unittest.TestCase):
         self.assertIn("ルルルン", tokens)
 
 
+class BuildRakutenSearchKeywordsAliasFallbackTests(unittest.TestCase):
+    """build_rakuten_search_keywords(): VERIFIED_BRAND_ALIAS_GROUPSにbrandの
+    aliasが存在する場合、aliasへ置換した検索keywordを低優先度フォールバック
+    として末尾に1件だけ追加する(Step24)。既存キーワード・優先順位は不変。"""
+
+    def test_whith_white_generates_alias_keyword(self):
+        kws = app.build_rakuten_search_keywords("WHITH WHITE 薬用美白乳液", brand="WHITH WHITE")
+        self.assertIn("フィスホワイト 薬用美白乳液", kws)
+        # 元のキーワードと優先順位は維持される(先頭は従来通り)
+        self.assertEqual(kws[0], "WHITH WHITE 薬用美白乳液")
+        self.assertEqual(kws[-1], "フィスホワイト 薬用美白乳液")
+
+    def test_existing_alias_brand_still_generates_alias_keyword(self):
+        kws = app.build_rakuten_search_keywords("エストラ ACローションモイスト", brand="エストラ")
+        self.assertIn("aestura ACローションモイスト", kws)
+
+    def test_alias_keyword_is_within_max_rakuten_keywords_tryable_range(self):
+        kws = app.build_rakuten_search_keywords("WHITH WHITE 薬用美白乳液", brand="WHITH WHITE")
+        self.assertLessEqual(len(kws), 5)
+        self.assertIn("フィスホワイト 薬用美白乳液", kws[:5])
+
+    def test_non_alias_brand_keyword_list_unchanged(self):
+        kws = app.build_rakuten_search_keywords("ドクターサニー AHAクリアソープ", brand="ドクターサニー", category="洗顔")
+        self.assertEqual(kws, [
+            "ドクターサニー AHAクリアソープ",
+            "ドクターサニー ドクターサニー AHAクリアソープ",
+            "AHAクリアソープ",
+        ])
+
+    def test_no_brand_keyword_list_unchanged(self):
+        kws = app.build_rakuten_search_keywords("ヒアルロン酸配合美容液")
+        self.assertEqual(kws, ["ヒアルロン酸配合美容液"])
+
+    def test_no_duplicate_alias_keyword(self):
+        kws = app.build_rakuten_search_keywords("WHITH WHITE 薬用美白乳液", brand="WHITH WHITE")
+        self.assertEqual(kws.count("フィスホワイト 薬用美白乳液"), 1)
+
+    def test_only_one_alias_keyword_generated_per_brand(self):
+        # alias groupに複数のalias語があっても、生成されるalias keywordは1件のみ
+        kws = app.build_rakuten_search_keywords("トゥヴェール モイストバリアエッセンス", brand="トゥヴェール")
+        alias_based = [k for k in kws if "toutvert" in k.lower() or "touver" in k.lower() or "tvert" in k.lower()]
+        self.assertEqual(len(alias_based), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
