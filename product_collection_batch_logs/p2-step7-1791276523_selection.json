@@ -1,0 +1,85 @@
+{
+  "batch_id": "p2-step7-1791276523",
+  "logged_at": "2026-10-06T08:48:58.474709",
+  "count": 13,
+  "products": [
+    {
+      "brand": "第一三共ヘルスケア",
+      "name": "トランシーノ 薬用ブライトニングクリアローション",
+      "category": "化粧水",
+      "active_ingredients": []
+    },
+    {
+      "brand": "肌ラボ",
+      "name": "肌ラボ 白潤薬用美白化粧水 しっとりタイプ",
+      "category": "化粧水",
+      "active_ingredients": []
+    },
+    {
+      "brand": "ちふれ",
+      "name": "ちふれ 美白化粧水 TA",
+      "category": "化粧水",
+      "active_ingredients": []
+    },
+    {
+      "brand": "ミノン",
+      "name": "ミノン アミノモイスト モイストチャージ ローションI しっとりタイプ",
+      "category": "化粧水",
+      "active_ingredients": []
+    },
+    {
+      "brand": "菊正宗",
+      "name": "菊正宗 日本酒の化粧水 高保湿",
+      "category": "化粧水",
+      "active_ingredients": []
+    },
+    {
+      "brand": "サンソリット",
+      "name": "サンソリット ウルピールフォーム",
+      "category": "洗顔",
+      "active_ingredients": []
+    },
+    {
+      "brand": "ドクターサニー",
+      "name": "ドクターサニー AHAクリアソープ",
+      "category": "洗顔",
+      "active_ingredients": []
+    },
+    {
+      "brand": "サンソリット",
+      "name": "サンソリット スキンピールバー AHA",
+      "category": "洗顔",
+      "active_ingredients": []
+    },
+    {
+      "brand": "トゥヴェール",
+      "name": "トゥヴェール フェイスクリーム パワーアクティブ",
+      "category": "クリーム",
+      "active_ingredients": []
+    },
+    {
+      "brand": "APLB",
+      "name": "APLB コラーゲン EGF ペプチド フェイシャルクリーム",
+      "category": "クリーム",
+      "active_ingredients": []
+    },
+    {
+      "brand": "ツボクサレディ",
+      "name": "ツボクサレディ マイルドクレンジングクリーム",
+      "category": "クレンジング",
+      "active_ingredients": []
+    },
+    {
+      "brand": "セザンヌ",
+      "name": "セザンヌ うるオフ クレンジングバーム",
+      "category": "クレンジング",
+      "active_ingredients": []
+    },
+    {
+      "brand": "Sitrana",
+      "name": "Sitrana シカプロテクト クレンジングバーム",
+      "category": "クレンジング",
+      "active_ingredients": []
+    }
+  ]
+}
