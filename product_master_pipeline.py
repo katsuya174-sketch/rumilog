@@ -184,8 +184,24 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit):
             i.get("ingredient") for i in (payload.get("active_ingredients") or [])
             if isinstance(i, dict)
         ]
-        tags = set(app.compute_ingredient_tags(ingredient_names))
-        if target not in tags:
+        # Step43: 関連性判定はapp.is_candidate_relevant_to_target()(cosmetics/
+        # サプリメント/美容機器で分岐する共通adapter)へ委譲し、ここで独自の
+        # タグ一致ロジックを持たない(美容機器のmethod一致もこれで扱える)。
+        # cosmetics分岐はscore_product()を呼ぶため、brand/name/categoryを
+        # 省略すると_is_generic_candidate_name()の空文字判定でハード除外
+        # されてしまう(合意事項ではない回帰)。実際の値を渡す。
+        # score_product()のingredient_focus一致は統制タグの完全一致でしか
+        # 判定しない(_product_master_row_to_product()がactive_ingredient_
+        # tagsをactive_ingredientsへ合流させるのと同じ理由)ため、生の原料名
+        # だけでなくcompute_ingredient_tags()の結果も合流させる。
+        pseudo_product = {
+            "brand": brand, "name": name, "category": category,
+            "active_ingredients": list(dict.fromkeys(
+                ingredient_names + app.compute_ingredient_tags(ingredient_names)
+            )),
+            "category_attributes": pipeline.flatten_category_attributes(payload.get("category_attributes")),
+        }
+        if not app.is_candidate_relevant_to_target(category, target, pseudo_product):
             continue
         key = app.make_verified_product_key({"brand": brand, "name": name, "category": category})
         if key and key in excluded_keys:
@@ -197,7 +213,7 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit):
             "brand": brand, "name": name, "category": category,
             "discovery_source": "staging_reuse",
             "discovery_evidence": evidence,
-            "target_evidence": f"過去のstaging収集(stage2)でingredient_tag={target}が確認済み",
+            "target_evidence": f"過去のstaging収集(stage2)でtarget={target}との関連性が確認済み",
         })
         if key:
             excluded_keys.add(key)
@@ -208,14 +224,14 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit):
 
 def _db_reuse_candidates(category, target, excluded_keys, limit):
     """探索順序②: 既存DB(load_products()/load_verified_products_cache())
-    内で、まだproduct_masterへ反映されていない利用可能候補を探す。新しい
-    関連性判定ロジックは作らず、coverage報告と同じscore_product()/
-    _is_relevant_scored_candidate()をそのまま再利用する。"""
+    内で、まだproduct_masterへ反映されていない利用可能候補を探す。関連性
+    判定はapp.is_candidate_relevant_to_target()(Step43の共通adapter。
+    calculate_effective_candidates()と同じものを使う)へ委譲し、ここで
+    独自の判定ロジックを持たない。"""
     if limit <= 0:
         return []
     category_norm = app.normalize_candidate_category(category, fallback=category)
     pool = app.load_products() + app.load_verified_products_cache()
-    step = {"category": category, "purpose": "", "ingredient_focus": target}
 
     candidates = []
     for p in pool:
@@ -226,18 +242,13 @@ def _db_reuse_candidates(category, target, excluded_keys, limit):
         key = app.make_verified_product_key(p)
         if not key or key in excluded_keys:
             continue
-        reasons = []
-        score = app.score_product(
-            dict(p), step, app._EFFECTIVE_CANDIDATE_NEUTRAL_USER_DATA,
-            app._EFFECTIVE_CANDIDATE_BUDGET_VALUE, reasons=reasons,
-        )
-        if not app._is_relevant_scored_candidate(score, reasons, target):
+        if not app.is_candidate_relevant_to_target(category, target, p):
             continue
         candidates.append({
             "brand": p.get("brand", ""), "name": p.get("name", ""), "category": category,
             "discovery_source": "db_reuse",
             "discovery_evidence": ["internal_product_db"],
-            "target_evidence": f"既存DB内でingredient_focus={target}に関連性ありと判定済み",
+            "target_evidence": f"既存DB内でtarget={target}との関連性が確認済み",
         })
         excluded_keys.add(key)
         if len(candidates) >= limit:
@@ -345,17 +356,37 @@ def _fetch_staging_row(staging_id):
         conn.close()
 
 
-def _is_confident_enough(staging_row, brand):
+def _category_attributes_check(category, payload):
+    """stage2_payloadのcategory_attributes(active_ingredients等と同じ
+    {field: {value, confidence, source_url}}のwrapped形式)を、product_
+    master反映時と同じflatten_category_attributes()で平坦化してから
+    app.validate_category_attributes()へ渡す(Step43)。
+
+    Gemini側のresponse_schemaは必須フィールドのキー自体を常に強制する
+    ため、wrapped形式をそのまま渡すと値が全て"unknown"でもキー存在
+    チェックだけでは valid=True になってしまう。flatten_category_
+    attributes()がvalue="unknown"のフィールドをキーごと落とすため、
+    平坦化後に渡すことで「必須フィールドに実際の根拠ある値が無い」を
+    正しく"欠落"として検出できる。
+    """
+    flattened = pipeline.flatten_category_attributes(payload.get("category_attributes"))
+    return app.validate_category_attributes(category, flattened)
+
+
+def _is_confident_enough(staging_row, brand, category):
     """citation不足/variant不明(確信度不足)に対する安全側ゲート。新しい
     照合ロジックは作らず、既存のcitation数とis_official_source_confirmed()
     (sanitize_stage2_payload内で既に決定論的に算出され、stage2_payload
-    のofficial_source_confirmedに入っている値)だけを見る。"""
+    のofficial_source_confirmedに入っている値)だけを見る。
+    category_attributesの充足判定はapp.CATEGORY_ATTRIBUTE_SCHEMAS/
+    validate_category_attributes()に委譲し、別の判定基準は作らない。"""
     if staging_row.get("stage1_status") != "ok":
         return False, "stage1_not_ok"
     if len(staging_row.get("stage1_citations") or []) < 1:
         return False, "no_citations"
     payload = staging_row.get("stage2_payload") or {}
-    if not payload.get("active_ingredients") and not payload.get("category_attributes"):
+    category_check = _category_attributes_check(category, payload)
+    if not payload.get("active_ingredients") and not category_check["valid"]:
         return False, "no_extracted_fields"
     if not payload.get("official_source_confirmed"):
         return False, "official_source_not_confirmed_variant_uncertain"
@@ -450,10 +481,8 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
             })
             continue
 
-        confident, reason = _is_confident_enough(staging_row, brand)
-        category_check = app.validate_category_attributes(
-            category, (staging_row.get("stage2_payload") or {}).get("category_attributes")
-        )
+        confident, reason = _is_confident_enough(staging_row, brand, category)
+        category_check = _category_attributes_check(category, staging_row.get("stage2_payload") or {})
         can_reflect = (
             collect_result["stage2_status"] == "ok" and confident and category_check["valid"]
         )
@@ -520,10 +549,8 @@ def process_stale_item(item, mode, batch_id, budget):
         }]
 
     staging_row = _fetch_staging_row(collect_result["staging_id"])
-    confident, reason = _is_confident_enough(staging_row, brand)
-    category_check = app.validate_category_attributes(
-        category, (staging_row.get("stage2_payload") or {}).get("category_attributes")
-    )
+    confident, reason = _is_confident_enough(staging_row, brand, category)
+    category_check = _category_attributes_check(category, staging_row.get("stage2_payload") or {})
 
     if collect_result["stage2_status"] != "ok" or not confident or not category_check["valid"]:
         return [{

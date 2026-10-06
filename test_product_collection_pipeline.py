@@ -167,7 +167,7 @@ class Stage1NoSearchEvidenceRejectionTests(unittest.TestCase):
 
     def test_stage2_is_skipped_when_stage1_has_no_evidence(self):
         stage1_result = {"status": "no_search_evidence", "raw_text": "", "citations": []}
-        result = pipeline.run_stage2_structuring("Brand", "Product", stage1_result, "batch-1")
+        result = pipeline.run_stage2_structuring("Brand", "Product", "美容液", stage1_result, "batch-1")
         self.assertEqual(result["status"], "skipped")
 
 
@@ -256,7 +256,7 @@ class OfficialSourceConfirmedDeterministicTests(unittest.TestCase):
         fake_response = _fake_response(json.dumps(fake_payload))
         with patch.object(pipeline, "call_gemini_for_collection", return_value=fake_response), \
              patch.object(pipeline, "record_usage_and_check_limit", return_value={"limit_exceeded": False}):
-            result = pipeline.run_stage2_structuring("Brand", "Product", stage1_result, "batch-1")
+            result = pipeline.run_stage2_structuring("Brand", "Product", "美容液", stage1_result, "batch-1")
         self.assertFalse(result["payload"]["official_source_confirmed"])
 
 
@@ -334,7 +334,7 @@ class Stage2GuessingRejectionTests(unittest.TestCase):
         fake_response = _fake_response(json.dumps(fake_payload, ensure_ascii=False))
         with patch.object(pipeline, "call_gemini_for_collection", return_value=fake_response), \
              patch.object(pipeline, "record_usage_and_check_limit", return_value={"limit_exceeded": False}):
-            result = pipeline.run_stage2_structuring("Brand", "Product", stage1_result, "batch-1")
+            result = pipeline.run_stage2_structuring("Brand", "Product", "美容液", stage1_result, "batch-1")
 
         self.assertEqual(result["status"], "ok")
         ingredients = result["payload"]["active_ingredients"]
@@ -810,7 +810,7 @@ class DiagnosisQuotaIsolationTests(unittest.TestCase):
         fake_response = _fake_response(json.dumps(fake_payload))
         with patch.object(pipeline, "call_gemini_for_collection", return_value=fake_response), \
              patch.object(pipeline, "record_usage_and_check_limit", return_value={"limit_exceeded": False}):
-            pipeline.run_stage2_structuring("Brand", "Product", stage1_result, "batch-quota-test")
+            pipeline.run_stage2_structuring("Brand", "Product", "美容液", stage1_result, "batch-quota-test")
         after = self._current_gemini_usage_count()
         self.assertEqual(before, after)
 
@@ -1368,7 +1368,7 @@ class Stage2ComplexNameDecompositionEndToEndTests(unittest.TestCase):
         fake_response = _fake_response(json.dumps(fake_payload))
         with patch.object(pipeline, "call_gemini_for_collection", return_value=fake_response), \
              patch.object(pipeline, "record_usage_and_check_limit", return_value={"limit_exceeded": False}):
-            result = pipeline.run_stage2_structuring("KISOCARE", "キソ マトリックスセラム PE", stage1_result, "batch-1")
+            result = pipeline.run_stage2_structuring("KISOCARE", "キソ マトリックスセラム PE", "美容液", stage1_result, "batch-1")
 
         ingredients = [i["ingredient"] for i in result["payload"]["active_ingredients"]]
         self.assertEqual(len(ingredients), 5)
@@ -1396,7 +1396,7 @@ class Stage2ComplexNameDecompositionEndToEndTests(unittest.TestCase):
         fake_response = _fake_response(json.dumps(fake_payload))
         with patch.object(pipeline, "call_gemini_for_collection", return_value=fake_response), \
              patch.object(pipeline, "record_usage_and_check_limit", return_value={"limit_exceeded": False}):
-            result = pipeline.run_stage2_structuring("KISOCARE", "キソ マトリックスセラム PE", stage1_result, "batch-1")
+            result = pipeline.run_stage2_structuring("KISOCARE", "キソ マトリックスセラム PE", "美容液", stage1_result, "batch-1")
 
         ingredients = [i["ingredient"] for i in result["payload"]["active_ingredients"]]
         self.assertEqual(ingredients, ["マトリキシル3000"])
@@ -1414,7 +1414,7 @@ class Stage2ComplexNameDecompositionEndToEndTests(unittest.TestCase):
         fake_response = _fake_response(json.dumps(fake_payload))
         with patch.object(pipeline, "call_gemini_for_collection", return_value=fake_response), \
              patch.object(pipeline, "record_usage_and_check_limit", return_value={"limit_exceeded": False}):
-            result = pipeline.run_stage2_structuring("KISOCARE", "キソ マトリックスセラム PE", stage1_result, "batch-1")
+            result = pipeline.run_stage2_structuring("KISOCARE", "キソ マトリックスセラム PE", "美容液", stage1_result, "batch-1")
         self.assertEqual(result["payload"]["active_ingredients"], [])
 
     def test_vitamin_c_retinoid_complex_name_also_decomposed_generically(self):
@@ -1437,7 +1437,7 @@ class Stage2ComplexNameDecompositionEndToEndTests(unittest.TestCase):
         fake_response = _fake_response(json.dumps(fake_payload))
         with patch.object(pipeline, "call_gemini_for_collection", return_value=fake_response), \
              patch.object(pipeline, "record_usage_and_check_limit", return_value={"limit_exceeded": False}):
-            result = pipeline.run_stage2_structuring("KISOCARE", "テスト商品", stage1_result, "batch-1")
+            result = pipeline.run_stage2_structuring("KISOCARE", "テスト商品", "美容液", stage1_result, "batch-1")
 
         ingredients = [i["ingredient"] for i in result["payload"]["active_ingredients"]]
         self.assertIn("レチナール", ingredients)

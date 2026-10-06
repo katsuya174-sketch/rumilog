@@ -47,11 +47,22 @@ def build_product_collection_prompt(brand_hint, product_name):
 """
 
 
-def build_product_collection_response_schema():
+def build_product_collection_response_schema(category_attributes_spec=None):
     """
     厳格な構造化出力スキーマ。成分・formulation_featuresは配列で、
     各要素にconfidence・source_urlを持たせ、複数ソース一致/情報不足/
     矛盾を後工程で判定できるようにする。
+
+    category_attributes_spec(Step43): {field_name: types.Schema(type="STRING", ...)}
+    形式の、カテゴリ固有フィールドの定義。Noneの場合(cosmetics)は
+    category_attributes自体をschemaに含めず、既存の出力(brand/product_name/
+    jan_code/active_ingredients/formulation_features/official_source_confirmed
+    のみ)を完全維持する。このモジュール自体はcategory名を知らず、呼び出し元
+    (product_collection_pipeline.py)がカテゴリ別の定義を渡すだけの汎用
+    ビルダーのまま維持する(カテゴリ別の別パイプラインは作らない)。
+    各フィールドはactive_ingredients/formulation_featuresと同じ
+    {value, confidence, source_url}形式にし、citation検証(sanitize)を
+    同じ仕組みで行えるようにする。
     """
     ingredient_item_schema = types.Schema(
         type="OBJECT",
@@ -81,27 +92,53 @@ def build_product_collection_response_schema():
         required=["feature", "other_detail", "confidence", "source_url"],
     )
 
-    return types.Schema(
-        type="OBJECT",
-        properties={
-            "brand": types.Schema(type="STRING"),
-            "product_name": types.Schema(type="STRING"),
-            "jan_code": types.Schema(
-                type="STRING",
-                description="JANコード(数字)。不明な場合は'unknown'",
-            ),
-            "active_ingredients": types.Schema(type="ARRAY", items=ingredient_item_schema),
-            "formulation_features": types.Schema(type="ARRAY", items=formulation_item_schema),
-            "official_source_confirmed": types.Schema(
-                type="BOOLEAN",
-                description="公式メーカー/ブランドの情報で確認できたか",
-            ),
-        },
-        required=[
-            "brand", "product_name", "jan_code",
-            "active_ingredients", "formulation_features", "official_source_confirmed",
-        ],
-    )
+    properties = {
+        "brand": types.Schema(type="STRING"),
+        "product_name": types.Schema(type="STRING"),
+        "jan_code": types.Schema(
+            type="STRING",
+            description="JANコード(数字)。不明な場合は'unknown'",
+        ),
+        "active_ingredients": types.Schema(type="ARRAY", items=ingredient_item_schema),
+        "formulation_features": types.Schema(type="ARRAY", items=formulation_item_schema),
+        "official_source_confirmed": types.Schema(
+            type="BOOLEAN",
+            description="公式メーカー/ブランドの情報で確認できたか",
+        ),
+    }
+    required = [
+        "brand", "product_name", "jan_code",
+        "active_ingredients", "formulation_features", "official_source_confirmed",
+    ]
+
+    if category_attributes_spec:
+        def _attr_field_schema(value_schema):
+            # value_schema: そのフィールド固有の値制約(例: methodのenum)。
+            # 他フィールドと同じ{value, confidence, source_url}の形にし、
+            # active_ingredients/formulation_featuresと同じsanitize(citation
+            # 検証)の仕組みをそのまま使えるようにする。
+            return types.Schema(
+                type="OBJECT",
+                properties={
+                    "value": value_schema,
+                    "confidence": types.Schema(type="STRING", enum=CONFIDENCE_VALUES),
+                    "source_url": types.Schema(type="STRING"),
+                },
+                required=["value", "confidence", "source_url"],
+            )
+
+        category_attributes_schema = types.Schema(
+            type="OBJECT",
+            properties={
+                field_name: _attr_field_schema(value_schema)
+                for field_name, value_schema in category_attributes_spec.items()
+            },
+            required=list(category_attributes_spec.keys()),
+        )
+        properties["category_attributes"] = category_attributes_schema
+        required.append("category_attributes")
+
+    return types.Schema(type="OBJECT", properties=properties, required=required)
 
 
 def build_product_collection_config():

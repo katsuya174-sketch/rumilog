@@ -373,6 +373,10 @@ class CategoryValidatorFailureTests(OrchestratorTestBase):
     が欠落している場合、reflectしない(cosmetics専用にしていないことの確認)。"""
 
     def test_beauty_device_missing_required_attributes_is_not_reflected(self):
+        # Step43: 現在の推薦が実際に使うのはmethodのみ(modes/usage_frequency
+        # は根拠も使途も無いため廃止済み)。methodが根拠不十分(citationに無い
+        # URLでsanitizeにより落とされる)場合、必須フィールド欠落として
+        # reflectされないことを確認する。
         brand, name, category = f"デバイスブランド{TEST_NAME_SUFFIX}", f"デバイス商品{TEST_NAME_SUFFIX}", "美容機器"
         batch_id = self._new_batch_id("device-fail")
 
@@ -383,7 +387,15 @@ class CategoryValidatorFailureTests(OrchestratorTestBase):
                 "stage2_payload": {
                     "active_ingredients": [], "formulation_features": [],
                     "official_source_confirmed": True,
-                    "category_attributes": {"method": "RF"},  # modes/usage_frequency/contraindications欠落
+                    "category_attributes": {
+                        "method": {
+                            "value": "RF", "confidence": "high",
+                            "source_url": "https://fake-generated-url.example.com/made-up",  # citationに無いURL
+                        },
+                        "contraindications": {
+                            "value": "unknown", "confidence": "unknown", "source_url": "unknown",
+                        },
+                    },
                 },
             },
         })
@@ -400,7 +412,7 @@ class CategoryValidatorFailureTests(OrchestratorTestBase):
 
         self.assertEqual(actions[0]["action"], "not_reflected")
         self.assertFalse(actions[0]["category_validator"]["valid"])
-        self.assertIn("modes", actions[0]["category_validator"]["missing_fields"])
+        self.assertIn("method", actions[0]["category_validator"]["missing_fields"])
         self.assertIsNone(self._product_master_row(brand, name, category))
 
 
@@ -410,19 +422,28 @@ class CategoryDelegationSupplementTests(OrchestratorTestBase):
     processorがカテゴリ非依存に動くことの確認)。"""
 
     def test_supplement_with_complete_attributes_is_reflected(self):
+        # Step43: サプリメントに必須category_attributesフィールドは無い
+        # (成分名・濃度はactive_ingredientsがsource of truth)。dosage/
+        # serving_size/precautionsは補助情報として正しくproduct_masterへ
+        # 反映されることを確認する(citation根拠ありのwrapped形式)。
         brand, name, category = f"サプリブランド{TEST_NAME_SUFFIX}", f"サプリ商品{TEST_NAME_SUFFIX}", "サプリメント"
         batch_id = self._new_batch_id("supplement-ok")
+        source_url = "https://official.example.com/x"
 
         mock_gemini = make_mock_call_gemini({
             f"{brand} {name}": {
-                "stage1": {"text": "ビタミンC含有のサプリメント",
-                           "citations": [{"uri": "https://official.example.com/x", "title": brand}]},
+                "stage1": {"text": "ビタミンC含有のサプリメント。1日2粒を目安に摂取。",
+                           "citations": [{"uri": source_url, "title": brand}]},
                 "stage2_payload": {
-                    "active_ingredients": [], "formulation_features": [],
-                    "official_source_confirmed": True,
+                    "active_ingredients": [
+                        {"ingredient": "アスコルビン酸", "concentration": "unknown",
+                         "confidence": "high", "source_url": source_url},
+                    ],
+                    "formulation_features": [], "official_source_confirmed": True,
                     "category_attributes": {
-                        "ingredients": ["ビタミンC"], "dosage": {"ビタミンC": "500mg"},
-                        "serving_size": "1日2粒", "precautions": ["持病のある方は医師に相談"],
+                        "dosage": {"value": "1日500mg", "confidence": "high", "source_url": source_url},
+                        "serving_size": {"value": "1日2粒", "confidence": "high", "source_url": source_url},
+                        "precautions": {"value": "unknown", "confidence": "unknown", "source_url": "unknown"},
                     },
                 },
             },
@@ -440,7 +461,18 @@ class CategoryDelegationSupplementTests(OrchestratorTestBase):
             )
 
         self.assertEqual(actions[0]["action"], "reflected")
-        self.assertIsNotNone(self._product_master_row(brand, name, category))
+        row = self._product_master_row(brand, name, category)
+        self.assertIsNotNone(row)
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT category_attributes FROM product_master WHERE product_id = %s", (row[0],))
+            category_attributes = cur.fetchone()[0]
+        finally:
+            conn.close()
+        self.assertEqual(category_attributes.get("dosage"), "1日500mg")
+        self.assertEqual(category_attributes.get("serving_size"), "1日2粒")
+        self.assertNotIn("precautions", category_attributes)
 
     def test_unset_policy_category_never_enters_queue(self):
         # beauty_device/supplementはCOVERAGE_POLICIESに未登録のため、

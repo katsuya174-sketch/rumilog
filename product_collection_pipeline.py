@@ -428,8 +428,70 @@ def run_stage1_collection(brand, product_name, batch_id):
 
 # ===== Stage 2: 構造化 =====
 
-def build_stage2_prompt(brand, product_name, stage1_text, citations):
+# Step43: category_attributes(カテゴリ固有情報)の抽出schema定義。
+# フィールド名はapp.CATEGORY_ATTRIBUTE_SCHEMASの必須フィールドと対応する
+# (定義自体はapp.pyではなくここに置き、poc側はこの定義を受け取るだけの
+# category非依存な汎用ビルダーのまま維持する)。
+# cosmeticsはCATEGORY_ATTRIBUTE_SCHEMASに存在しないため、ここにも対応する
+# specは無い(=category_attributes自体がStage2出力に現れない。既存出力を
+# 完全維持)。
+#
+# フィールド選定(Step42監査+Step43指示に基づく):
+# - 美容機器: method(現在の推薦が実際に使うdevice_type一致判定の唯一の
+#   根拠。6種のenum+unknown)のみ。modes/usage_frequencyは現在の推薦・
+#   検証のどちらにも使われず根拠も乏しいため追加しない。contraindications
+#   (禁忌事項)は安全情報として収集するが、必須ではない(method無しでは
+#   そもそも実効候補として使えないため、methodだけが必須)。
+# - サプリメント: 成分名・濃度は共通フィールドのactive_ingredientsを
+#   source of truthとし、ここでは二重管理しない(Step38の"ingredients"
+#   フィールドは廃止)。category_attributesは製品単位の摂取情報
+#   (1日の摂取目安量・1回あたりの量・注意事項)のみを持つ。
+_CATEGORY_ATTRIBUTES_EXTRACTION_SPECS = {
+    "美容機器": {
+        "method": types.Schema(
+            type="STRING",
+            enum=["RF", "LED", "EMS", "エレクトロポレーション", "超音波洗浄", "マイクロカレント", "unknown"],
+            description="確認できた方式。該当/不明な場合は'unknown'",
+        ),
+        "contraindications": types.Schema(
+            type="STRING",
+            description="使用上の注意・禁忌事項の要約。不明な場合は'unknown'",
+        ),
+    },
+    "サプリメント": {
+        "dosage": types.Schema(
+            type="STRING",
+            description="確認できた1日の摂取目安量。不明な場合は'unknown'",
+        ),
+        "serving_size": types.Schema(
+            type="STRING",
+            description="1回あたりの摂取量(粒数・mg等)。不明な場合は'unknown'",
+        ),
+        "precautions": types.Schema(
+            type="STRING",
+            description="注意事項の要約。不明な場合は'unknown'",
+        ),
+    },
+}
+
+
+def _category_attributes_extraction_spec(category):
+    return _CATEGORY_ATTRIBUTES_EXTRACTION_SPECS.get(category)
+
+
+def build_stage2_prompt(brand, product_name, stage1_text, citations, category_attributes_spec=None):
     citation_lines = "\n".join(f"- {c['uri']} ({c.get('title', '')})" for c in citations) or "(なし)"
+    category_attributes_instructions = ""
+    if category_attributes_spec:
+        field_names = "、".join(category_attributes_spec.keys())
+        category_attributes_instructions = f"""
+
+【category_attributes(カテゴリ固有情報: {field_names})】
+上記と同じ原則で、これらのフィールドも上記の調査結果本文に明記されている
+場合のみvalueを記載し、明記されていない場合は必ずvalue="unknown"とする
+こと。推測・一般知識からの補完は絶対禁止。source_urlも、active_ingredients
+と同じく出典URL一覧に実在するものだけを使用し、根拠が無い場合は"unknown"
+とすること。"""
     return f"""以下はステージ1で実際にWeb検索を行って得られた調査結果です。
 この内容に書かれている情報のみを使って、指定のJSON形式へ構造化してください。
 
@@ -462,7 +524,7 @@ def build_stage2_prompt(brand, product_name, stage1_text, citations):
   一般原則である。
 - 各フィールドのsource_urlには、上記の出典URL一覧に実在するURLを
   そのまま使用すること。一覧に無いURLを生成することは絶対禁止。
-  どの出典にも対応しない場合は"unknown"とする。"""
+  どの出典にも対応しない場合は"unknown"とする。{category_attributes_instructions}"""
 
 
 def is_official_source_confirmed(brand, citations):
@@ -521,24 +583,59 @@ def sanitize_stage2_payload(payload, valid_citation_urls, stage1_text, brand=Non
         if isinstance(item, dict) and item.get("source_url") in valid_citation_urls
     ]
     sanitized["official_source_confirmed"] = is_official_source_confirmed(brand, citations or [])
+
+    # Step43: category_attributes(美容機器/サプリメント等のカテゴリ固有
+    # フィールド)。active_ingredients/formulation_featuresと同じ原則で、
+    # source_urlがStage1の実citation一覧に無いフィールドはvalue/source_url
+    # を"unknown"に強制する(根拠のない値を採用しない)。cosmeticsでは
+    # payloadにcategory_attributesキー自体が無いため、このブロックは
+    # 何もしない(既存出力を完全維持)。
+    if isinstance(sanitized.get("category_attributes"), dict):
+        sanitized_attrs = {}
+        for field_name, field_value in sanitized["category_attributes"].items():
+            if not isinstance(field_value, dict):
+                continue
+            source_url = field_value.get("source_url")
+            if source_url in valid_citation_urls:
+                sanitized_attrs[field_name] = {
+                    "value": field_value.get("value", "unknown"),
+                    "confidence": field_value.get("confidence", "unknown"),
+                    "source_url": source_url,
+                }
+            else:
+                sanitized_attrs[field_name] = {
+                    "value": "unknown", "confidence": "unknown", "source_url": "unknown",
+                }
+        sanitized["category_attributes"] = sanitized_attrs
+
     return sanitized
 
 
-def run_stage2_structuring(brand, product_name, stage1_result, batch_id):
+def run_stage2_structuring(brand, product_name, category, stage1_result, batch_id):
     """
     Stage 2: Google Searchを使わず、Stage 1の結果のみを入力に厳格な
     response_schemaで構造化する。Stage 1がno_search_evidence/errorの
     場合はStage 2自体を実行しない(検索の裏付けが無い情報を構造化しても
     意味が無く、費用も無駄になるため)。
+
+    category(Step43): category_attributesをcosmetics以外のカテゴリでも
+    抽出できるようにするためのcategory-aware化。
+    _category_attributes_extraction_spec(category)がNoneを返す場合
+    (cosmetics)は、プロンプト・response_schemaともcategory_attributes
+    関連の変更が一切無く、既存の挙動を完全維持する。
     """
     product_label = f"{brand} {product_name}"
     if stage1_result.get("status") != "ok":
         return {"status": "skipped", "reason": stage1_result.get("status"), "payload": None}
 
-    prompt = build_stage2_prompt(brand, product_name, stage1_result["raw_text"], stage1_result["citations"])
+    attrs_spec = _category_attributes_extraction_spec(category)
+    prompt = build_stage2_prompt(
+        brand, product_name, stage1_result["raw_text"], stage1_result["citations"],
+        category_attributes_spec=attrs_spec,
+    )
     config = types.GenerateContentConfig(
         response_mime_type="application/json",
-        response_schema=poc.build_product_collection_response_schema(),
+        response_schema=poc.build_product_collection_response_schema(category_attributes_spec=attrs_spec),
     )
 
     try:
@@ -564,6 +661,28 @@ def run_stage2_structuring(brand, product_name, stage1_result, batch_id):
         brand=brand, citations=stage1_result["citations"],
     )
     return {"status": "ok", "payload": sanitized, "usage_result": usage_result}
+
+
+def flatten_category_attributes(category_attributes_payload):
+    """sanitize済みのcategory_attributes({field: {value,confidence,
+    source_url}})を、product_master反映・relevance判定用の単純な
+    {field: value}形式へ変換する(confidence/source_urlは根拠追跡用の
+    一時情報であり、active_ingredients/formulation_featuresのconfidence/
+    source_urlがproduct_masterへ反映時に保持されないのと同じ扱いにする)。
+    value="unknown"(根拠なし)のフィールドは、確認できなかったことを示す
+    だけで中身が無いため、反映後のdictには含めない。
+    """
+    if not isinstance(category_attributes_payload, dict):
+        return {}
+    flattened = {}
+    for field_name, field_value in category_attributes_payload.items():
+        if isinstance(field_value, dict):
+            value = str(field_value.get("value", "") or "").strip()
+        else:
+            value = str(field_value or "").strip()
+        if value and value.lower() != "unknown":
+            flattened[field_name] = value
+    return flattened
 
 
 # ===== Candidate Discovery(Step41): coverage_gapに対する商品候補の自動探索 =====
@@ -878,7 +997,7 @@ def collect_one_product(brand, product_name, category, batch_id, existing_produc
     処理を完了させた上で呼び出し元(collect_batch)に伝え、バッチを停止する。"""
     stage1_result = run_stage1_collection(brand, product_name, batch_id)
 
-    stage2_result = run_stage2_structuring(brand, product_name, stage1_result, batch_id)
+    stage2_result = run_stage2_structuring(brand, product_name, category, stage1_result, batch_id)
 
     conflict_result = {"status": "skipped", "conflicts": []}
     if stage2_result.get("status") == "ok":
@@ -1040,7 +1159,7 @@ def resume_one_product(brand, product_name, category, batch_id, existing_product
             "citations": existing["stage1_citations"] or [],
             "search_queries": existing["stage1_search_queries"] or [],
         }
-        stage2_result = run_stage2_structuring(brand, product_name, stage1_result, batch_id)
+        stage2_result = run_stage2_structuring(brand, product_name, category, stage1_result, batch_id)
         conflict_result = {"status": "skipped", "conflicts": []}
         if stage2_result.get("status") == "ok":
             conflict_result = detect_conflicts(stage2_result["payload"], existing_product)
@@ -1178,6 +1297,17 @@ def reflect_staging_to_product_master(staging_id, dry_run=True):
         jan_code = str(payload.get("jan_code", "") or "").strip()
         if jan_code and jan_code.lower() != "unknown":
             product_for_master["jan_code"] = jan_code
+
+        # Step43: category_attributes(美容機器のmethod等)をproduct_masterへ
+        # 反映する。confidence/source_url等の根拠追跡用メタ情報は、
+        # active_ingredients/formulation_featuresがconcentration/feature名
+        # だけを残すのと同じ扱いで保持しない(flatten_category_attributes)。
+        # value="unknown"(根拠なし)のフィールドは反映しない(キー自体を
+        # 持たせないことで、validate_category_attributes()が「未確認」を
+        # 「欠落」として正しく検出できるようにする)。
+        category_attributes = flatten_category_attributes(payload.get("category_attributes"))
+        if category_attributes:
+            product_for_master["category_attributes"] = category_attributes
 
         identity_key = app._normalize_product_master_identity_key(brand, product_name, category)
         cur.execute("SELECT product_id FROM product_master WHERE identity_key = %s", (identity_key,))

@@ -504,16 +504,15 @@ class CategoryAttributesValidatorTests(unittest.TestCase):
         self.assertTrue(result["valid"])
 
     def test_beauty_device_missing_required_fields(self):
-        result = app.validate_category_attributes("美容機器", {"method": "RF"})
+        # Step43: 現在の推薦が実際に使うのはmethodのみ(modes/usage_frequency
+        # は根拠も使途も無いため必須から削除済み)。
+        result = app.validate_category_attributes("美容機器", {})
         self.assertFalse(result["valid"])
-        self.assertIn("modes", result["missing_fields"])
-        self.assertIn("usage_frequency", result["missing_fields"])
-        self.assertIn("contraindications", result["missing_fields"])
+        self.assertEqual(result["missing_fields"], ["method"])
 
     def test_beauty_device_complete_fields_is_valid(self):
         result = app.validate_category_attributes("美容機器", {
-            "method": "RF", "modes": ["強", "中", "弱"],
-            "usage_frequency": "週3回", "contraindications": [],
+            "method": "RF", "contraindications": "ペースメーカー使用者は不可",
         })
         self.assertTrue(result["valid"])
 
@@ -521,22 +520,20 @@ class CategoryAttributesValidatorTests(unittest.TestCase):
         # 不明な情報はunknown/null/空のままでよい(推測しない)。キー自体が
         # 存在する限り"欠落"ではない。
         result = app.validate_category_attributes("美容機器", {
-            "method": "unknown", "modes": [], "usage_frequency": "unknown",
-            "contraindications": [],
+            "method": "unknown", "contraindications": "unknown",
         })
         self.assertTrue(result["valid"])
 
     def test_supplement_missing_required_fields(self):
-        result = app.validate_category_attributes("サプリメント", {"ingredients": ["ビタミンC"]})
-        self.assertFalse(result["valid"])
-        self.assertIn("dosage", result["missing_fields"])
-        self.assertIn("serving_size", result["missing_fields"])
-        self.assertIn("precautions", result["missing_fields"])
+        # Step43: ingredientsはactive_ingredients(共通フィールド)と二重
+        # 管理しないため廃止。サプリメントに必須フィールドは無い。
+        result = app.validate_category_attributes("サプリメント", {})
+        self.assertTrue(result["valid"])
+        self.assertEqual(result["missing_fields"], [])
 
     def test_supplement_complete_fields_is_valid(self):
         result = app.validate_category_attributes("サプリメント", {
-            "ingredients": ["ビタミンC"], "dosage": {"ビタミンC": "500mg"},
-            "serving_size": "1日2粒", "precautions": ["持病のある方は医師に相談"],
+            "dosage": "1日500mg", "serving_size": "1日2粒", "precautions": "持病のある方は医師に相談",
         })
         self.assertTrue(result["valid"])
 

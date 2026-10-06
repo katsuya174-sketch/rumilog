@@ -4404,6 +4404,57 @@ _EFFECTIVE_CANDIDATE_NEUTRAL_USER_DATA = {
 }
 _EFFECTIVE_CANDIDATE_BUDGET_VALUE = 3000
 
+# Step43: サプリメントの"probiotics"(乳酸菌サプリメントのingredient_focus
+# タグ、_SUPPLEMENT_DEFAULTS参照)と、既存の化粧品向け発酵成分タグ
+# (lactobacillus/bifida、normalize_ingredient_tag()の「発酵」ブロック)は
+# 既存タグとの衝突を避けるため別タグとして扱っている。そのため、原料名が
+# 文字どおり「ビフィズス菌」と書かれている場合はbifidaに正規化され、
+# probiotics自体にはならない。「乳酸菌」はさらに手前の「乳酸」ルール
+# (lactic_acid、AHA系角質ケア成分)に部分文字列一致するため、実際には
+# lactic_acidに正規化される(normalize_ingredient_tag()の既存の順序依存の
+# 挙動で、Step43では変更しない)。これらは実質同じ対象(サプリの乳酸菌/
+# ビフィズス菌由来成分)を指すため、relevance判定でのみ同義語として扱う。
+_SUPPLEMENT_TARGET_TAG_SYNONYMS = {
+    "probiotics": {"probiotics", "lactobacillus", "bifida", "lactic_acid"},
+}
+
+
+def is_candidate_relevant_to_target(category, target, product, user_data=None, budget_value=None):
+    """category×targetに対する「関連性」判定の単一の入口(Step43)。
+    calculate_effective_candidates()とproduct_master_pipeline._db_reuse_
+    candidates()/_staging_reuse_candidates()が共通で使い、判定ロジックを
+    二重実装しない。
+
+    - サプリメント: active_ingredientsをcompute_ingredient_tags()で統制
+      タグ化し、targetと一致するかで判定する(ingredient_focus/tag一致)。
+      _SUPPLEMENT_TARGET_TAG_SYNONYMSの同義語も受理する。
+    - 美容機器: category_attributes.get("method")がtargetと一致するかで
+      判定する(device_type自体がmethodの値。成分の概念が無いため
+      score_product()のingredient_focus軸は使わない)。
+    - それ以外(cosmetics系カテゴリ): 既存のscore_product()/
+      _is_relevant_scored_candidate()をそのまま使う(挙動を一切変更しない)。
+    """
+    if not isinstance(product, dict):
+        return False
+
+    if category == "サプリメント":
+        tags = set(compute_ingredient_tags(product.get("active_ingredients") or []))
+        synonyms = _SUPPLEMENT_TARGET_TAG_SYNONYMS.get(target, {target})
+        return bool(tags & synonyms)
+
+    if category == "美容機器":
+        attrs = product.get("category_attributes")
+        if not isinstance(attrs, dict):
+            return False
+        return str(attrs.get("method", "") or "").strip() == target
+
+    user_data = user_data if user_data is not None else _EFFECTIVE_CANDIDATE_NEUTRAL_USER_DATA
+    budget_value = budget_value if budget_value is not None else _EFFECTIVE_CANDIDATE_BUDGET_VALUE
+    step = {"category": category, "purpose": "", "ingredient_focus": target}
+    reasons = []
+    score = score_product(dict(product), step, user_data, budget_value, reasons=reasons)
+    return _is_relevant_scored_candidate(score, reasons, target)
+
 
 def calculate_effective_candidates(category, tag, db_products=None, verified_products=None,
                                      user_data=None, budget_value=None, extra_candidates=None):
@@ -4412,8 +4463,10 @@ def calculate_effective_candidates(category, tag, db_products=None, verified_pro
     新規寄与分のうち関連性ありと判定される件数)を計算する共通関数。
 
     P2 Step26/27で手動のワンオフスクリプトとして個別に書いていたロジックを
-    正式な共通関数へ移植したもので、判定基準(dedup方法・score_product・
-    _is_relevant_scored_candidateの使い方)は一切変更していない。
+    正式な共通関数へ移植したもので、判定基準(dedup方法)は一切変更していない。
+    関連性判定はis_candidate_relevant_to_target()(Step43)へ委譲し、
+    cosmetics系カテゴリではそれが内部で従来通りscore_product()/
+    _is_relevant_scored_candidateを呼ぶため、cosmeticsの結果は完全に同一。
     extra_candidatesは、まだDBへreflectしていない候補を仮追加して再計算
     したい場合に使う(Step31〜35のシミュレーションと同じ用途)。
     """
@@ -4444,12 +4497,9 @@ def calculate_effective_candidates(category, tag, db_products=None, verified_pro
             survivors.append(extra)
             seen.add(k)
 
-    step = {"category": category, "purpose": "", "ingredient_focus": tag}
     relevant = 0
     for mp in survivors:
-        reasons = []
-        score = score_product(dict(mp), step, user_data, budget_value, reasons=reasons)
-        if _is_relevant_scored_candidate(score, reasons, tag):
+        if is_candidate_relevant_to_target(category, tag, mp, user_data=user_data, budget_value=budget_value):
             relevant += 1
     return relevant
 
@@ -4515,14 +4565,26 @@ def get_stale_product_master_candidates(category=None, limit=100):
 # 複数の個別カテゴリ名であり、単一の"cosmetics"という値は実際には流れて
 # こないため、英語の総称キーは使わない)。
 
+# Step43: Step42監査で判明した「実用途に合わせたschema確定」。
+# - 美容機器: 現在の推薦(enrich_beauty_devices/select_best_beauty_device_
+#   candidate)が実際に使うのはmethod(device_typeとの一致判定)のみ。
+#   modes/usage_frequencyは現在の推薦・検証のどちらにも使われず、収集の
+#   根拠も乏しいため必須にしない(=スキーマから削除。収集自体はしない)。
+#   contraindications(禁忌事項)は安全情報として収集するが必須ではない
+#   (methodが無ければそもそも実効候補として使えないため、methodだけが
+#   load-bearing)。
+# - サプリメント: 成分名・濃度は共通フィールドのactive_ingredientsを
+#   source of truthとし、ここでは二重管理しない(Step38の"ingredients"
+#   フィールドは廃止)。category_attributesは製品単位の摂取情報
+#   (1日の摂取目安量・1回あたりの量・注意事項)のみを持つ補助情報であり、
+#   relevance判定(ingredient_focus/タグ一致)には使わないため必須フィールド
+#   は無い(active_ingredientsがあれば確信度判定は通る)。
 CATEGORY_ATTRIBUTE_SCHEMAS = {
     "美容機器": {
-        # 方式・機能/モード・使用頻度・禁忌/注意事項
-        "required": ["method", "modes", "usage_frequency", "contraindications"],
+        "required": ["method"],
     },
     "サプリメント": {
-        # 成分・含有量・摂取目安・注意事項
-        "required": ["ingredients", "dosage", "serving_size", "precautions"],
+        "required": [],
     },
 }
 
@@ -5915,6 +5977,63 @@ def _device_feature_sentence(features):
     if not features:
         return ""
     return f"この商品は商品説明で{'・'.join(features[:3])}に関する記載を確認できます。"
+
+
+# ===== Step43: 美容機器・サプリメントの診断時Product Master利用 =====
+# select_best_beauty_device_candidate()/select_best_supplement_candidate()
+# は「fetch_rakuten_candidates()が返す楽天item JSON相当のスコア済み候補群」
+# を入力に取る設計(ランキング思想自体は変更しない)。そのため、product_
+# masterの候補をこれらにそのまま渡すには、保存済みの実測値(rakuten_title/
+# price_ref/item_code/last_known_image/last_known_rakuten_link)を楽天item
+# JSON相当の形へ変換するアダプタが必要になる。新しいランキング・スコアリング
+# ロジックは作らず、既存のscore_rakuten_item()をそのまま再利用する。
+
+def _product_master_row_as_rakuten_item(mp):
+    """product_masterの1行を、score_rakuten_item()/select_best_beauty_
+    device_candidate()/select_best_supplement_candidate()がそのまま読める
+    楽天item JSON相当の形へ変換する。レビュー数・レビュー平均はproduct_
+    masterに保存していないため0とする(既存のtie-breaker軸で中立に扱われ
+    るだけで、肌悩み適合/成分一致等の主軸には影響しない)。"""
+    image = str(mp.get("last_known_image") or "").strip()
+    return {
+        "itemName": str(mp.get("rakuten_title") or mp.get("name") or ""),
+        "itemCaption": "",
+        "itemPrice": safe_price(mp.get("price_ref") or 0),
+        "itemCode": str(mp.get("item_code") or ""),
+        "itemUrl": str(mp.get("last_known_rakuten_link") or ""),
+        "affiliateUrl": "",
+        "reviewCount": 0,
+        "reviewAverage": 0,
+        "shopName": str(mp.get("shop_name") or ""),
+        "mediumImageUrls": [{"imageUrl": image}] if image else [],
+        "_source": "product_master",
+    }
+
+
+def _product_master_candidates_for_live_style_ranking(category, target, product_name, brand):
+    """美容機器・サプリメントの既存ranking関数が使える形で、product_master
+    の関連候補(販売情報あり)を返す(Step43)。関連性判定はis_candidate_
+    relevant_to_target()(Candidate Discoveryのcoverage計算と同じadapter)
+    に委譲する。販売情報(item_code+last_known_rakuten_link)が無い行は
+    候補にしない(古い/不足している場合は呼び出し元が既存のRakutenフォール
+    バックへ進む)。新しいスコアリングは作らず、既存のscore_rakuten_item()
+    をそのまま使う。"""
+    if not target:
+        return []
+    candidates = []
+    for mp in query_product_master_candidates(category):
+        if not is_candidate_relevant_to_target(category, target, mp):
+            continue
+        if not str(mp.get("item_code") or "").strip():
+            continue
+        if not str(mp.get("last_known_rakuten_link") or "").strip():
+            continue
+        item = _product_master_row_as_rakuten_item(mp)
+        score = score_rakuten_item(item, product_name, brand=brand, category=category)
+        if score <= -9000:
+            continue
+        candidates.append((score, item))
+    return candidates
 
 
 def select_best_beauty_device_candidate(
@@ -8013,11 +8132,21 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
     # 挙動・戻り値・キャッシュ・スコアリングは一切変わらない。
     if category == "美容機器" and isinstance(user_data, dict):
         device_type = str(step.get("device_type", "") or "").strip()
-        scored_candidates = fetch_rakuten_candidates(
-            product_name=product_name,
-            category=category,
-            brand=brand,
+        # Step43: 「Product Master候補 → 既存ranking/scoring → 必要な場合
+        # のみ楽天ライブ候補」。関連性確認済み・販売情報ありのproduct_master
+        # 候補が1件以上あればそれだけでランキングし、楽天ライブ検索はしない。
+        # 無ければ従来通り(現状はproduct_masterに美容機器が0件のため常に
+        # こちら)fetch_rakuten_candidates()にフォールバックする。
+        # select_best_beauty_device_candidate()のランキング思想は変更しない。
+        scored_candidates = _product_master_candidates_for_live_style_ranking(
+            category, device_type, product_name, brand,
         )
+        if not scored_candidates:
+            scored_candidates = fetch_rakuten_candidates(
+                product_name=product_name,
+                category=category,
+                brand=brand,
+            )
         best_raw_item, device_selection_reason = select_best_beauty_device_candidate(
             scored_candidates, device_type, user_data, budget_value,
             category_purpose=str(step.get("purpose", "") or ""),
@@ -8035,11 +8164,19 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
     elif category == "サプリメント" and isinstance(user_data, dict):
         supplement_type = str(step.get("supplement_type", "") or "").strip()
         ingredient_focus = step.get("ingredient_focus", [])
-        scored_candidates = fetch_rakuten_candidates(
-            product_name=product_name,
-            category=category,
-            brand=brand,
+        # Step43: 美容機器と同じ「Product Master候補優先」。ingredient_focus
+        # は現状必ず1タグのみ(_SUPPLEMENT_DEFAULTS)なので先頭要素をtargetに使う。
+        _relevance_target = ingredient_focus[0] if isinstance(ingredient_focus, list) and ingredient_focus else ""
+        scored_candidates = (
+            _product_master_candidates_for_live_style_ranking(category, _relevance_target, product_name, brand)
+            if _relevance_target else []
         )
+        if not scored_candidates:
+            scored_candidates = fetch_rakuten_candidates(
+                product_name=product_name,
+                category=category,
+                brand=brand,
+            )
         best_raw_item, supplement_selection_reason = select_best_supplement_candidate(
             scored_candidates, supplement_type, ingredient_focus, user_data, budget_value
         )
@@ -10979,6 +11116,30 @@ def normalize_ingredient_tag(text):
         return "multi_care_complex"
     if "total skin solution complex" in text or "total_skin_solution_complex" in text:
         return "total_skin_solution_complex"
+
+    # =========================
+    # サプリメント専用タグ(Step43)
+    # _SUPPLEMENT_INGREDIENT_KEYWORDSの既存表記を再利用して追加する5種。
+    # 乳酸菌/ビフィズス菌は既に上の「発酵」ブロックがlactobacillus/bifida
+    # (化粧品の発酵成分タグ)として使っているため、ここでは同じ語を
+    # トリガーにしない(既存タグを壊さないため、probioticsは英語/カタカナの
+    # 総称語のみで判定する。乳酸菌サプリメントが実際に"乳酸菌"という原料名
+    # で抽出された場合はlactobacillusタグになる、という既知の対応関係は
+    # is_candidate_relevant_to_target()のシノニム処理で吸収する)。
+    # =========================
+    if "l-cysteine" in text or "lシステイン" in text or "エルシステイン" in text or "cysteine" in text or "システイン" in text:
+        return "l_cysteine"
+    if "vitamin b" in text or "vitamin_b" in text or "ビタミンb" in text:
+        return "vitamin_b"
+    if "vitamin d" in text or "vitamin_d" in text or "ビタミンd" in text:
+        return "vitamin_d"
+    if (
+        "omega-3" in text or "omega3" in text or "オメガ3" in text or "オメガ-3" in text
+        or "フィッシュオイル" in text or "fish oil" in text or "epa" in text or "dha" in text
+    ):
+        return "omega3"
+    if "probiotics" in text or "プロバイオティクス" in text:
+        return "probiotics"
 
     return None
 
