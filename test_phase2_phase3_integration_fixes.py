@@ -270,5 +270,44 @@ class BundleQuantityNewPatternsTests(unittest.TestCase):
         self.assertFalse(app._is_rakuten_set_item("テスト商品 美容液 1個入り"))
 
 
+class BuildRakutenSearchKeywordsBrandStrippedFallbackTests(unittest.TestCase):
+    """build_rakuten_search_keywords(): nameが「brand + 商品名」の2トークン
+    構成(brand単体+空白なしの複合語1つ)の場合、既存のmeaningful_parts[-2:]
+    フォールバックがbrand付きフルネームと重複し、brand抜きの商品名のみの
+    キーワードが一度も生成されないケースを補うフォールバック(Step19)。"""
+
+    def test_doctor_sunny_generates_brand_stripped_fallback(self):
+        kws = app.build_rakuten_search_keywords("ドクターサニー AHAクリアソープ", brand="ドクターサニー")
+        self.assertIn("AHAクリアソープ", kws)
+
+    def test_jumiso_generates_brand_stripped_fallback(self):
+        kws = app.build_rakuten_search_keywords("JUMISO ナイアシンアミド20セラム", brand="JUMISO")
+        self.assertIn("ナイアシンアミド20セラム", kws)
+
+    def test_tsubokusa_lady_generates_brand_stripped_fallback(self):
+        kws = app.build_rakuten_search_keywords("ツボクサレディ マイルドクレンジングクリーム", brand="ツボクサレディ")
+        self.assertIn("マイルドクレンジングクリーム", kws)
+
+    def test_multi_word_brand_whith_white_not_broken(self):
+        kws = app.build_rakuten_search_keywords("WHITH WHITE 薬用美白乳液", brand="WHITH WHITE")
+        # 既存のキーワードは維持されたまま、brand抜きのフォールバックが追加される
+        self.assertIn("WHITH WHITE 薬用美白乳液", kws)
+        self.assertIn("薬用美白乳液", kws)
+
+    def test_no_duplicate_when_fallback_already_produced_by_existing_logic(self):
+        kws = app.build_rakuten_search_keywords("クレアラシル 薬用洗顔クリーム マイルドタイプ", brand="クレアラシル")
+        self.assertEqual(kws.count("薬用洗顔クリーム マイルドタイプ"), 1)
+
+    def test_too_short_remainder_is_not_added(self):
+        kws = app.build_rakuten_search_keywords("テストブランド 美", brand="テストブランド")
+        self.assertNotIn("美", kws)
+
+    def test_existing_three_token_case_priority_unchanged(self):
+        # ブランドがnameの先頭に無い代表ケースでは新フォールバックは発火せず、
+        # 既存の優先順位(brand+name が先頭)が維持される
+        kws = app.build_rakuten_search_keywords("ヒアルロン酸配合美容液", brand="テストブランド")
+        self.assertEqual(kws[0], "テストブランド ヒアルロン酸配合美容液")
+
+
 if __name__ == "__main__":
     unittest.main()

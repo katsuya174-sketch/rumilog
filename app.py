@@ -3027,6 +3027,15 @@ def build_rakuten_search_keywords(product_name, brand="", category="", ingredien
             if _short and _short != kw and len(_short) >= 4:
                 add(_short)
 
+    # name が「brand + 商品名」の2トークン構成（brand単体+空白なしの複合語1つ）
+    # だと、上のmeaningful_parts[-2:]フォールバックがbrand付きフルネームと
+    # 同一になり重複除外され、brandを含まない商品名のみのキーワードが一度も
+    # 生成されないケースがある（最低優先度のフォールバックとして追加する）。
+    if brand and name.lower().startswith(brand.lower()):
+        _brand_stripped = name[len(brand):].strip()
+        if _brand_stripped and len(_brand_stripped) >= 4:
+            add(_brand_stripped)
+
     print("[RAKUTEN KEYWORDS]", keywords, flush=True)
 
     return keywords[:6]
