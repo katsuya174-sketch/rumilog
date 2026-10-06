@@ -230,5 +230,45 @@ class IsNonCosmeticCapsuleOverrideTests(unittest.TestCase):
         self.assertGreater(score, -9000)
 
 
+class BundleQuantityNewPatternsTests(unittest.TestCase):
+    """infer_bundle_quantity_from_title() / _is_rakuten_set_item() に追加した
+    容量×個数・×Nセット・N個/本入り(裸)・N個/本パックの新パターン(Step17)。
+    容量単体表記(200ml, 2g等)を誤検出しないことも確認する。"""
+
+    def test_cezanne_90g_x2_set_title_is_now_detected_as_set(self):
+        # product_id=64で見落とされていた実際のタイトル(回帰テスト)
+        title = "セザンヌ うるオフ クレンジングバーム(90g×2セット)【セザンヌ(CEZANNE)】"
+        self.assertGreaterEqual(app.infer_bundle_quantity_from_title(title), 2)
+        self.assertTrue(app._is_rakuten_set_item(title))
+
+    def test_capacity_x_count_without_set_suffix(self):
+        self.assertTrue(app._is_rakuten_set_item("テスト商品 化粧水 100ml×2"))
+
+    def test_bare_n_iri_patterns(self):
+        self.assertTrue(app._is_rakuten_set_item("テスト商品 洗顔 3本入り"))
+        self.assertTrue(app._is_rakuten_set_item("テスト商品 美容液 2個入り"))
+
+    def test_n_pack_patterns(self):
+        self.assertTrue(app._is_rakuten_set_item("テスト商品 マスク 2個パック"))
+        self.assertTrue(app._is_rakuten_set_item("テスト商品 乳液 3本パック"))
+
+    def test_existing_counter_word_set_patterns_still_work(self):
+        self.assertTrue(app._is_rakuten_set_item("テスト商品 美容液 2個セット"))
+        self.assertTrue(app._is_rakuten_set_item("テスト商品 化粧水 3点セット"))
+
+    def test_plain_capacity_notation_is_not_falsely_detected(self):
+        self.assertFalse(app._is_rakuten_set_item("テスト商品 化粧水 200ml"))
+        self.assertFalse(app._is_rakuten_set_item("テスト商品 クリーム 2g お試しサイズ"))
+        self.assertFalse(app._is_rakuten_set_item("テスト商品 乳液 100ml SPF30 PA+++"))
+        self.assertFalse(app._is_rakuten_set_item("テスト商品 洗顔フォーム 120g"))
+
+    def test_sheet_count_iri_is_not_falsely_detected(self):
+        # 「枚入り」はマスクのシート枚数(単品の内容量)であり、購買単位のバンドルではない
+        self.assertFalse(app._is_rakuten_set_item("テスト商品 パック 5枚入り"))
+
+    def test_single_unit_quantity_one_is_not_detected(self):
+        self.assertFalse(app._is_rakuten_set_item("テスト商品 美容液 1個入り"))
+
+
 if __name__ == "__main__":
     unittest.main()
