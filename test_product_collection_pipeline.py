@@ -1286,5 +1286,163 @@ class Stage1PromptIngredientNameDepthTests(unittest.TestCase):
         self.assertIn("製剤特徴", prompt)
 
 
+# KISOCARE/キソ マトリックスセラム PEの実際のStage1 raw_text(Step34で実際に
+# 取得したもの、固定fixture)。複合原料名(マトリキシル3000/アルジレロックス)
+# とその構成INCI成分(ペプチド4種)が両方明記されているケース。
+KISOCARE_STAGE1_RAW_TEXT = """\
+### 有効成分とその濃度
+主要な成分として、以下の複合原料およびビタミンC誘導体が配合されています。
+
+*   **マトリキシル3000**（整肌成分）
+*   **アルジレロックス**（整肌成分）
+*   **アスコルビルリン酸Na（APS）**（整肌成分・ビタミンC誘導体）
+
+#### 構成成分の詳細（INCI成分名）
+**マトリキシル3000の構成成分**
+*   パルミトイルテトラペプチド-7
+*   パルミトイルトリペプチド-1
+
+**アルジレロックスの構成成分**
+*   アセチルヘキサペプチド-8
+*   ペンタペプチド-18
+"""
+
+
+class Stage2PromptComplexNameDecompositionTests(unittest.TestCase):
+    """build_stage2_prompt(): Stage1に複合原料名/trade name/blend名と、その
+    構成要素が両方明記されている場合、構成要素を個別のactive_ingredients
+    項目として抽出するよう指示する一般ルールが追加されていること(Step35)。
+    peptide専用・化粧品専用の表現にしていないかを確認する。"""
+
+    def test_prompt_instructs_individual_constituent_extraction(self):
+        prompt = pipeline.build_stage2_prompt("Brand", "Product", "text", [])
+        self.assertIn("複合原料名", prompt)
+        self.assertIn("個別のactive_ingredients", prompt)
+
+    def test_prompt_forbids_inventing_constituents_not_in_stage1(self):
+        prompt = pipeline.build_stage2_prompt("Brand", "Product", "text", [])
+        self.assertIn("知識から推測して展開してはならない", prompt)
+
+    def test_prompt_is_not_category_or_ingredient_specific(self):
+        # ペプチド専用・化粧品専用の表現を使わず、カテゴリ共通の一般原則
+        # として明記されていること
+        prompt = pipeline.build_stage2_prompt("Brand", "Product", "text", [])
+        self.assertNotIn("ペプチド専用", prompt)
+        self.assertIn("特定の成分種別専用のルールではなく", prompt)
+        self.assertIn("美容機器", prompt)
+        self.assertIn("サプリメント", prompt)
+
+
+class Stage2ComplexNameDecompositionEndToEndTests(unittest.TestCase):
+    """Stage1に根拠付きで構成要素が明記されている場合、Stage2(モック)が
+    それを個別抽出して返せば、sanitize_stage2_payload()がそれを正しく
+    保持すること(複合原料名への縮約・取りこぼしをしない)を確認する。
+    実際のモデル挙動がStage1 raw_textに追従するかはStep35-4の実再実行で
+    別途確認する(ここではパイプライン側の取りこぼしが無いことの確認)。"""
+
+    def _make_stage1_result(self, raw_text):
+        return {
+            "status": "ok",
+            "raw_text": raw_text,
+            "citations": [{"uri": "https://kisocare.co.jp/p/x", "title": "kisocare.co.jp"}],
+        }
+
+    def test_kisocare_fixture_four_peptides_individually_extracted(self):
+        stage1_result = self._make_stage1_result(KISOCARE_STAGE1_RAW_TEXT)
+        fake_payload = {
+            "active_ingredients": [
+                {"ingredient": "パルミトイルテトラペプチド-7", "concentration": "unknown",
+                 "confidence": "high", "source_url": "https://kisocare.co.jp/p/x"},
+                {"ingredient": "パルミトイルトリペプチド-1", "concentration": "unknown",
+                 "confidence": "high", "source_url": "https://kisocare.co.jp/p/x"},
+                {"ingredient": "アセチルヘキサペプチド-8", "concentration": "unknown",
+                 "confidence": "high", "source_url": "https://kisocare.co.jp/p/x"},
+                {"ingredient": "ペンタペプチド-18", "concentration": "unknown",
+                 "confidence": "high", "source_url": "https://kisocare.co.jp/p/x"},
+                {"ingredient": "アスコルビルリン酸Na", "concentration": "unknown",
+                 "confidence": "high", "source_url": "https://kisocare.co.jp/p/x"},
+            ],
+            "formulation_features": [], "jan_code": "4580050290591",
+            "official_source_confirmed": True,
+        }
+        fake_response = _fake_response(json.dumps(fake_payload))
+        with patch.object(pipeline, "call_gemini_for_collection", return_value=fake_response), \
+             patch.object(pipeline, "record_usage_and_check_limit", return_value={"limit_exceeded": False}):
+            result = pipeline.run_stage2_structuring("KISOCARE", "キソ マトリックスセラム PE", stage1_result, "batch-1")
+
+        ingredients = [i["ingredient"] for i in result["payload"]["active_ingredients"]]
+        self.assertEqual(len(ingredients), 5)
+        for expected in ["パルミトイルテトラペプチド-7", "パルミトイルトリペプチド-1",
+                          "アセチルヘキサペプチド-8", "ペンタペプチド-18"]:
+            self.assertIn(expected, ingredients)
+
+        tags = app.compute_ingredient_tags(ingredients)
+        self.assertIn("peptide", tags)
+
+    def test_trade_name_without_constituents_is_not_expanded(self):
+        # Stage1に構成要素の記載が無い場合、パイプライン側が勝手に展開
+        # することはない(モデルがtrade nameのみ返す想定のケース)
+        stage1_result = self._make_stage1_result(
+            "マトリキシル3000という整肌成分が配合されています。構成成分の詳細は不明です。"
+        )
+        fake_payload = {
+            "active_ingredients": [
+                {"ingredient": "マトリキシル3000", "concentration": "unknown",
+                 "confidence": "medium", "source_url": "https://kisocare.co.jp/p/x"},
+            ],
+            "formulation_features": [], "jan_code": "unknown",
+            "official_source_confirmed": True,
+        }
+        fake_response = _fake_response(json.dumps(fake_payload))
+        with patch.object(pipeline, "call_gemini_for_collection", return_value=fake_response), \
+             patch.object(pipeline, "record_usage_and_check_limit", return_value={"limit_exceeded": False}):
+            result = pipeline.run_stage2_structuring("KISOCARE", "キソ マトリックスセラム PE", stage1_result, "batch-1")
+
+        ingredients = [i["ingredient"] for i in result["payload"]["active_ingredients"]]
+        self.assertEqual(ingredients, ["マトリキシル3000"])
+
+    def test_unsupported_ingredient_without_valid_citation_still_dropped(self):
+        stage1_result = self._make_stage1_result(KISOCARE_STAGE1_RAW_TEXT)
+        fake_payload = {
+            "active_ingredients": [
+                {"ingredient": "パルミトイルトリペプチド-1", "concentration": "unknown",
+                 "confidence": "high", "source_url": "https://fake-generated-url.example.com/made-up"},
+            ],
+            "formulation_features": [], "jan_code": "unknown",
+            "official_source_confirmed": True,
+        }
+        fake_response = _fake_response(json.dumps(fake_payload))
+        with patch.object(pipeline, "call_gemini_for_collection", return_value=fake_response), \
+             patch.object(pipeline, "record_usage_and_check_limit", return_value={"limit_exceeded": False}):
+            result = pipeline.run_stage2_structuring("KISOCARE", "キソ マトリックスセラム PE", stage1_result, "batch-1")
+        self.assertEqual(result["payload"]["active_ingredients"], [])
+
+    def test_vitamin_c_retinoid_complex_name_also_decomposed_generically(self):
+        # ペプチド以外(ビタミンC/レチノイド系)の複合原料名でも同じ一般
+        # ルールが機能することを、非ペプチド成分のfixtureで確認する。
+        stage1_result = self._make_stage1_result(
+            "レチノイドコンプレックスという独自配合が使われており、"
+            "構成成分はレチナール、バクチオールです。"
+        )
+        fake_payload = {
+            "active_ingredients": [
+                {"ingredient": "レチナール", "concentration": "unknown",
+                 "confidence": "high", "source_url": "https://kisocare.co.jp/p/x"},
+                {"ingredient": "バクチオール", "concentration": "unknown",
+                 "confidence": "high", "source_url": "https://kisocare.co.jp/p/x"},
+            ],
+            "formulation_features": [], "jan_code": "unknown",
+            "official_source_confirmed": True,
+        }
+        fake_response = _fake_response(json.dumps(fake_payload))
+        with patch.object(pipeline, "call_gemini_for_collection", return_value=fake_response), \
+             patch.object(pipeline, "record_usage_and_check_limit", return_value={"limit_exceeded": False}):
+            result = pipeline.run_stage2_structuring("KISOCARE", "テスト商品", stage1_result, "batch-1")
+
+        ingredients = [i["ingredient"] for i in result["payload"]["active_ingredients"]]
+        self.assertIn("レチナール", ingredients)
+        self.assertIn("バクチオール", ingredients)
+
+
 if __name__ == "__main__":
     unittest.main()
