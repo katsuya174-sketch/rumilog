@@ -10303,6 +10303,11 @@ def normalize_ingredient_tag(text):
         return "squalane"
     if "amino acid" in text or "amino_acid" in text or "アミノ酸" in text:
         return "amino_acid"
+    # P2 Step9: 個別アミノ酸名は、既存成分(アゼロイルジグリシンK/メチルセリン/
+    # アミジノプロリン等)との部分一致誤検出を避けるため、完全一致のみで判定する
+    # (部分一致は禁止。他の個別アミノ酸20種への拡張は今回は行わない)。
+    if text in ("グルタミン酸", "アルギニン", "ロイシン"):
+        return "amino_acid"
     if "urea" in text or "尿素" in text:
         return "urea"
     if "glycerin" in text or "グリセリン" in text:

@@ -63,6 +63,55 @@ class ComputeIngredientTagsTests(unittest.TestCase):
         self.assertEqual(tags.count("centella_extract"), 1)
 
 
+class AminoAcidExactMatchNormalizationTests(unittest.TestCase):
+    """P2 Step9: normalize_ingredient_tag()に追加した個別アミノ酸名
+    (グルタミン酸/アルギニン/ロイシン)の完全一致判定の回帰テスト。
+    部分一致は禁止(既存の無関係な成分名との誤検出を防ぐため)。"""
+
+    def test_glutamic_acid_matches_exactly(self):
+        self.assertEqual(app.normalize_ingredient_tag("グルタミン酸"), "amino_acid")
+
+    def test_arginine_matches_exactly(self):
+        self.assertEqual(app.normalize_ingredient_tag("アルギニン"), "amino_acid")
+
+    def test_leucine_matches_exactly(self):
+        self.assertEqual(app.normalize_ingredient_tag("ロイシン"), "amino_acid")
+
+    def test_generic_amino_acid_phrase_still_matches(self):
+        # 既存の「アミノ酸」部分一致判定は維持されていること。
+        self.assertEqual(app.normalize_ingredient_tag("アミノ酸"), "amino_acid")
+        self.assertEqual(
+            app.normalize_ingredient_tag("5種のアミノ酸(アラニン、アルギニン、グルタミン酸Na、セリン、プロリン)"),
+            "amino_acid",
+        )
+
+    def test_polyglutamic_acid_is_not_misdetected(self):
+        # 「ポリグルタミン酸」は既存の別タグ(polyglutamic_acid)のままで、
+        # 誤ってamino_acidにならないこと。
+        self.assertEqual(app.normalize_ingredient_tag("ポリグルタミン酸"), "polyglutamic_acid")
+
+    def test_partial_match_false_positives_are_not_detected(self):
+        # 部分一致ではないため、既存の無関係な成分名(グリシン/セリン/
+        # プロリンを含む別成分)は誤ってamino_acidにならないこと。
+        self.assertIsNone(app.normalize_ingredient_tag("アゼロイルジグリシンK"))
+        self.assertNotEqual(
+            app.normalize_ingredient_tag("ケラトMF複合成分（アミジノプロリン、コハク酸ジグリコールグアニジン、メチルセリン）"),
+            "amino_acid",
+        )
+
+    def test_salt_form_variants_not_in_scope_remain_unmatched(self):
+        # 今回はグルタミン酸/アルギニン/ロイシンの3成分のみが対象であり、
+        # 塩形態(グルタミン酸Na等)や他の個別アミノ酸20種への拡張は
+        # 今回は行っていないことを確認する(スコープの明示的な固定)。
+        self.assertIsNone(app.normalize_ingredient_tag("グルタミン酸Na"))
+        self.assertIsNone(app.normalize_ingredient_tag("バリン"))
+
+    def test_compute_ingredient_tags_picks_up_newly_recognized_amino_acids(self):
+        tags = app.compute_ingredient_tags(["グルタミン酸", "アルギニン", "ロイシン", "セラミド3"])
+        self.assertIn("amino_acid", tags)
+        self.assertIn("ceramide", tags)
+
+
 class ProductMasterRowToProductTagMergeTests(unittest.TestCase):
     """_product_master_row_to_product()が、DB列のactive_ingredient_tagsを
     active_ingredients(原文は保持したまま)へ合流させることを確認する
