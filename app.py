@@ -4509,13 +4509,18 @@ def get_stale_product_master_candidates(category=None, limit=100):
 # フィールドを追加しない。カテゴリ固有の構造はこのcategory_attributes用
 # スキーマ定義とvalidate_category_attributes()だけに閉じ込める。
 # まだ実際の収集パイプライン(Stage1/2)には接続しない(検証のみ)。
+#
+# キーはproduct_master.category / normalize_candidate_category()が実際に
+# 使う文字列(日本語)に合わせる(化粧水/美容液等のcosmetics系カテゴリは
+# 複数の個別カテゴリ名であり、単一の"cosmetics"という値は実際には流れて
+# こないため、英語の総称キーは使わない)。
 
 CATEGORY_ATTRIBUTE_SCHEMAS = {
-    "beauty_device": {
+    "美容機器": {
         # 方式・機能/モード・使用頻度・禁忌/注意事項
         "required": ["method", "modes", "usage_frequency", "contraindications"],
     },
-    "supplement": {
+    "サプリメント": {
         # 成分・含有量・摂取目安・注意事項
         "required": ["ingredients", "dosage", "serving_size", "precautions"],
     },
@@ -4525,16 +4530,17 @@ CATEGORY_ATTRIBUTE_SCHEMAS = {
 def validate_category_attributes(category, attributes):
     """category_attributesの構造(必須フィールドの有無)を検証する。
 
-    - cosmeticsはcategory_attributesを使わないため常にvalid(既存挙動を
+    - cosmetics系カテゴリ(化粧水/美容液/洗顔/クリーム/クレンジング等)は
+      CATEGORY_ATTRIBUTE_SCHEMASに存在しないため常にvalid(既存挙動を
       完全維持し、化粧品固有フィールドをこの共通スキーマに混在させない)。
-    - スキーマが未定義の将来カテゴリは、スキーマが用意されるまで構造を
+    - スキーマが未定義の将来カテゴリも、スキーマが用意されるまで構造を
       強制しない(無条件でvalid)。
     - 定義済みカテゴリは、必須フィールドが辞書のキーとして存在しない場合に
       のみ"欠落"とする。値が"unknown"/None/空であることは、調査した上で
       確認できなかったことの明示であり欠落とは区別する(推測で埋めることを
       禁止するのと同じ理由で、不明の表明自体は正当な結果として扱う)。
     """
-    if category == "cosmetics" or category not in CATEGORY_ATTRIBUTE_SCHEMAS:
+    if category not in CATEGORY_ATTRIBUTE_SCHEMAS:
         return {"valid": True, "missing_fields": []}
 
     schema = CATEGORY_ATTRIBUTE_SCHEMAS[category]

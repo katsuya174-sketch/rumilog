@@ -483,16 +483,19 @@ class StaleProductMasterCandidatesTests(unittest.TestCase):
 
 class CategoryAttributesValidatorTests(unittest.TestCase):
     """Step38: validate_category_attributes()のfixtureベース検証。
-    cosmeticsは常にvalid、beauty_device/supplementは必須フィールド欠落を
-    検出し、未定義の将来カテゴリは無条件でvalidとする。"""
+    CATEGORY_ATTRIBUTE_SCHEMASのキーはproduct_master.categoryが実際に使う
+    日本語の値(美容機器/サプリメント)に合わせている(Step40の統合テストで
+    発覚した英語キー("beauty_device"/"supplement")との不一致を修正済み)。
+    cosmetics系カテゴリ(化粧水等)は常にvalid、美容機器/サプリメントは
+    必須フィールド欠落を検出し、未定義の将来カテゴリは無条件でvalidとする。"""
 
-    def test_cosmetics_always_valid_regardless_of_content(self):
+    def test_cosmetics_category_always_valid_regardless_of_content(self):
         self.assertEqual(
-            app.validate_category_attributes("cosmetics", {"anything": "goes"}),
+            app.validate_category_attributes("美容液", {"anything": "goes"}),
             {"valid": True, "missing_fields": []},
         )
         self.assertEqual(
-            app.validate_category_attributes("cosmetics", None),
+            app.validate_category_attributes("化粧水", None),
             {"valid": True, "missing_fields": []},
         )
 
@@ -501,14 +504,14 @@ class CategoryAttributesValidatorTests(unittest.TestCase):
         self.assertTrue(result["valid"])
 
     def test_beauty_device_missing_required_fields(self):
-        result = app.validate_category_attributes("beauty_device", {"method": "RF"})
+        result = app.validate_category_attributes("美容機器", {"method": "RF"})
         self.assertFalse(result["valid"])
         self.assertIn("modes", result["missing_fields"])
         self.assertIn("usage_frequency", result["missing_fields"])
         self.assertIn("contraindications", result["missing_fields"])
 
     def test_beauty_device_complete_fields_is_valid(self):
-        result = app.validate_category_attributes("beauty_device", {
+        result = app.validate_category_attributes("美容機器", {
             "method": "RF", "modes": ["強", "中", "弱"],
             "usage_frequency": "週3回", "contraindications": [],
         })
@@ -517,28 +520,28 @@ class CategoryAttributesValidatorTests(unittest.TestCase):
     def test_beauty_device_unknown_values_still_valid(self):
         # 不明な情報はunknown/null/空のままでよい(推測しない)。キー自体が
         # 存在する限り"欠落"ではない。
-        result = app.validate_category_attributes("beauty_device", {
+        result = app.validate_category_attributes("美容機器", {
             "method": "unknown", "modes": [], "usage_frequency": "unknown",
             "contraindications": [],
         })
         self.assertTrue(result["valid"])
 
     def test_supplement_missing_required_fields(self):
-        result = app.validate_category_attributes("supplement", {"ingredients": ["ビタミンC"]})
+        result = app.validate_category_attributes("サプリメント", {"ingredients": ["ビタミンC"]})
         self.assertFalse(result["valid"])
         self.assertIn("dosage", result["missing_fields"])
         self.assertIn("serving_size", result["missing_fields"])
         self.assertIn("precautions", result["missing_fields"])
 
     def test_supplement_complete_fields_is_valid(self):
-        result = app.validate_category_attributes("supplement", {
+        result = app.validate_category_attributes("サプリメント", {
             "ingredients": ["ビタミンC"], "dosage": {"ビタミンC": "500mg"},
             "serving_size": "1日2粒", "precautions": ["持病のある方は医師に相談"],
         })
         self.assertTrue(result["valid"])
 
     def test_common_layer_schema_has_no_cosmetics_specific_fields(self):
-        # 共通スキーマ定義(beauty_device/supplement)に、化粧品固有の
+        # 共通スキーマ定義(美容機器/サプリメント)に、化粧品固有の
         # フィールド名(active_ingredients等)が混在していないことを確認する。
         for schema in app.CATEGORY_ATTRIBUTE_SCHEMAS.values():
             self.assertNotIn("active_ingredients", schema["required"])

@@ -1,0 +1,637 @@
+"""Product Master半自動オーケストレーター(product_master_pipeline.py)の
+E2Eテスト(Step40)。
+
+Gemini/Rakutenの実APIは一切呼ばない。call_gemini_for_collection()と
+pipeline.verify_and_resolve_item_code()だけをmockし、それ以外(Stage1/2の
+構造化・citation検証・identity/dedup・conflict判定・reflect)は実際の
+ローカルテストDB(rumilog_test)に対して本物のロジックを通す。
+"""
+
+import json
+import os
+import time
+import unittest
+from unittest.mock import MagicMock, patch
+
+os.environ.setdefault("DATABASE_URL", "postgresql://localhost/rumilog_test")
+
+import psycopg2  # noqa: E402
+
+import app  # noqa: E402
+import product_collection_pipeline as pipeline  # noqa: E402
+import product_master_pipeline as orchestrator  # noqa: E402
+
+TEST_BATCH_PREFIX = "orch-test-"
+TEST_NAME_SUFFIX = "_OrchTest"
+
+
+def _fake_response(text):
+    response = MagicMock()
+    response.text = text
+    response.usage_metadata.prompt_token_count = 100
+    response.usage_metadata.candidates_token_count = 100
+    response.usage_metadata.tool_use_prompt_token_count = None
+    response.usage_metadata.total_token_count = 200
+    response.candidates = [MagicMock(grounding_metadata=None)]
+    return response
+
+
+def _fake_stage1_response(text="検索結果に基づく回答", citations=None, queries=None):
+    citations = citations if citations is not None else [
+        {"uri": "https://official.example.com/x", "title": "official.example.com"}
+    ]
+    queries = queries if queries is not None else ["query"]
+    response = _fake_response(text)
+    chunks = []
+    for c in citations:
+        web = MagicMock()
+        web.uri = c["uri"]
+        web.title = c.get("title", "")
+        web.domain = c.get("domain", "")
+        chunks.append(MagicMock(web=web))
+    response.candidates = [MagicMock(grounding_metadata=MagicMock(
+        web_search_queries=queries, grounding_chunks=chunks,
+    ))]
+    return response
+
+
+def make_mock_call_gemini(candidate_configs):
+    """candidate_configs: {"brand name": {"stage1": {...}, "stage2_payload": {...}}}
+    promptの文字列に"brand name"が含まれるかでどの候補の呼び出しかを判定し、
+    config(response_schemaの有無)でstage1/stage2を判定する。
+    """
+    def _mock(model, contents, config=None, max_retries=2, timeout=60):
+        is_stage2 = config is not None and getattr(config, "response_schema", None) is not None
+        matched = None
+        for key, cfg in candidate_configs.items():
+            if key in contents:
+                matched = cfg
+                break
+        if matched is None:
+            return _fake_stage1_response("該当なし", citations=[], queries=[])
+        if is_stage2:
+            return _fake_response(json.dumps(matched.get("stage2_payload", {})))
+        stage1_cfg = matched.get("stage1", {})
+        return _fake_stage1_response(
+            text=stage1_cfg.get("text", "検索結果に基づく回答"),
+            citations=stage1_cfg.get("citations"),
+            queries=stage1_cfg.get("queries"),
+        )
+    return _mock
+
+
+class OrchestratorTestBase(unittest.TestCase):
+    def setUp(self):
+        pipeline.init_product_collection_tables()
+        app.init_product_master_table()
+        self._cleanup()
+
+    def tearDown(self):
+        self._cleanup()
+
+    def _cleanup(self):
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "DELETE FROM product_field_sources WHERE staging_id IN "
+                "(SELECT staging_id FROM product_collection_staging WHERE batch_id LIKE %s)",
+                (f"{TEST_BATCH_PREFIX}%",),
+            )
+            cur.execute("DELETE FROM product_collection_staging WHERE batch_id LIKE %s", (f"{TEST_BATCH_PREFIX}%",))
+            cur.execute("DELETE FROM product_collection_usage WHERE batch_id LIKE %s", (f"{TEST_BATCH_PREFIX}%",))
+            cur.execute("DELETE FROM product_master WHERE name LIKE %s", (f"%{TEST_NAME_SUFFIX}%",))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _new_batch_id(self, suffix):
+        return f"{TEST_BATCH_PREFIX}{suffix}-{int(time.time() * 1000)}"
+
+    def _count_staging(self, batch_id):
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM product_collection_staging WHERE batch_id = %s", (batch_id,))
+            return cur.fetchone()[0]
+        finally:
+            conn.close()
+
+    def _product_master_row(self, brand, name, category):
+        identity_key = app._normalize_product_master_identity_key(brand, name, category)
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT product_id, active_ingredients, jan_code FROM product_master WHERE identity_key = %s",
+                (identity_key,),
+            )
+            return cur.fetchone()
+        finally:
+            conn.close()
+
+
+class DryRunNoSideEffectsTests(OrchestratorTestBase):
+    """Step40-5: dry-runは既定で、Gemini/Rakuten実呼び出し・reflect・DB更新
+    を一切行わないこと(副作用ゼロ)を確認する。"""
+
+    def test_dry_run_default_mode(self):
+        batch_id = self._new_batch_id("dryrun-default")
+        with patch.object(app, "generate_product_master_work_queue", return_value=[
+            {"type": "coverage_gap", "category": "美容液", "target": "vitamin_c", "shortage_count": 1,
+             "priority": "high", "reason": "test"},
+        ]):
+            def candidate_source(category, target, limit):
+                return [{"brand": f"ブランド{TEST_NAME_SUFFIX}", "name": f"商品{TEST_NAME_SUFFIX}", "category": category}]
+
+            with patch.object(pipeline, "call_gemini_for_collection") as mock_gemini:
+                result = orchestrator.run_batch(
+                    mode="dry_run", candidate_source=candidate_source, batch_id=batch_id,
+                )
+        self.assertEqual(result["mode"], "dry_run")
+        self.assertEqual(len(result["actions"]), 1)
+        self.assertEqual(result["actions"][0]["action"], "would_collect")
+        mock_gemini.assert_not_called()
+        self.assertEqual(self._count_staging(batch_id), 0)
+        self.assertIsNone(self._product_master_row(f"ブランド{TEST_NAME_SUFFIX}", f"商品{TEST_NAME_SUFFIX}", "美容液"))
+
+    def test_dry_run_stale_item_no_side_effects(self):
+        batch_id = self._new_batch_id("dryrun-stale")
+        with patch.object(app, "generate_product_master_work_queue", return_value=[
+            {"type": "stale_reverification", "category": "美容液",
+             "brand": f"ブランド{TEST_NAME_SUFFIX}", "name": f"商品{TEST_NAME_SUFFIX}", "product_id": 1,
+             "priority": "low", "reason": "test"},
+        ]), patch.object(app, "get_stale_product_master_candidates", return_value=[
+            {"_product_master_id": 1, "brand": f"ブランド{TEST_NAME_SUFFIX}", "name": f"商品{TEST_NAME_SUFFIX}",
+             "category": "美容液"},
+        ]):
+            with patch.object(pipeline, "call_gemini_for_collection") as mock_gemini:
+                result = orchestrator.run_batch(mode="dry_run", batch_id=batch_id)
+        self.assertEqual(result["actions"][0]["action"], "would_reverify")
+        mock_gemini.assert_not_called()
+        self.assertEqual(self._count_staging(batch_id), 0)
+
+    def test_empty_work_queue_produces_zero_actions(self):
+        # 実際に production DB が13/13 sufficient(work_items=0)であることは
+        # 手動のdry-run実行(本Stepの報告内で記載)で別途確認済み。ここでは
+        # ローカルのテストDB状態に依存せず、「work_items=0ならactions=0」
+        # という構造を直接検証する(モックしたwork queueで決定的に確認)。
+        with patch.object(app, "generate_product_master_work_queue", return_value=[]):
+            result = orchestrator.run_batch()
+        self.assertEqual(result["mode"], "dry_run")
+        self.assertEqual(result["work_items"], 0)
+        self.assertEqual(result["actions"], [])
+
+
+class CoverageGapHappyPathTests(OrchestratorTestBase):
+    """Step40-1/6: coverage不足→候補→Stage1/2→validator→reflect→
+    coverage改善のE2Eを確認する(cosmetics)。"""
+
+    def test_coverage_gap_reflects_new_product_and_improves_coverage(self):
+        brand, name, category = f"ブランドA{TEST_NAME_SUFFIX}", f"商品A{TEST_NAME_SUFFIX}", "美容液"
+        batch_id = self._new_batch_id("happy")
+
+        before = app.calculate_effective_candidates(category, "vitamin_c")
+
+        mock_gemini = make_mock_call_gemini({
+            f"{brand} {name}": {
+                "stage1": {"text": "アスコルビン酸を配合しています。",
+                           "citations": [{"uri": "https://official.example.com/x", "title": brand}]},
+                "stage2_payload": {
+                    "brand": brand, "product_name": name, "jan_code": "unknown",
+                    "active_ingredients": [
+                        {"ingredient": "アスコルビン酸", "concentration": "unknown",
+                         "confidence": "high", "source_url": "https://official.example.com/x"},
+                    ],
+                    "formulation_features": [], "official_source_confirmed": True,
+                },
+            },
+        })
+
+        def candidate_source(cat, target, limit):
+            return [{"brand": brand, "name": name, "category": cat}]
+
+        with patch.object(app, "generate_product_master_work_queue", return_value=[
+            {"type": "coverage_gap", "category": category, "target": "vitamin_c", "shortage_count": 1,
+             "priority": "high", "reason": "test"},
+        ]), patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini), \
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+            result = orchestrator.run_batch(mode="execute", candidate_source=candidate_source, batch_id=batch_id)
+
+        reflected = [a for a in result["actions"] if a["action"] == "reflected"]
+        self.assertEqual(len(reflected), 1)
+        row = self._product_master_row(brand, name, category)
+        self.assertIsNotNone(row)
+
+        after = app.calculate_effective_candidates(category, "vitamin_c")
+        self.assertEqual(after, before + 1)
+
+
+class CitationInsufficientTests(OrchestratorTestBase):
+    """Step40-4: citation不足(stage1はokだがcitationsが0件)の場合は
+    reflectしないことを確認する。"""
+
+    def test_zero_citations_is_not_reflected(self):
+        brand, name, category = f"ブランドB{TEST_NAME_SUFFIX}", f"商品B{TEST_NAME_SUFFIX}", "美容液"
+        batch_id = self._new_batch_id("nocitation")
+
+        mock_gemini = make_mock_call_gemini({
+            f"{brand} {name}": {
+                # queriesはあるがsources(citations)が無い -> stage1_status="ok"かつcitations=0
+                "stage1": {"text": "検索したが詳細不明", "citations": [], "queries": ["q"]},
+                "stage2_payload": {"active_ingredients": [], "formulation_features": [], "official_source_confirmed": False},
+            },
+        })
+
+        def candidate_source(cat, target, limit):
+            return [{"brand": brand, "name": name, "category": cat}]
+
+        with patch.object(app, "generate_product_master_work_queue", return_value=[
+            {"type": "coverage_gap", "category": category, "target": "vitamin_c", "shortage_count": 1,
+             "priority": "high", "reason": "test"},
+        ]), patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini):
+            result = orchestrator.run_batch(mode="execute", candidate_source=candidate_source, batch_id=batch_id)
+
+        self.assertEqual(len(result["actions"]), 1)
+        self.assertEqual(result["actions"][0]["action"], "not_reflected")
+        self.assertEqual(result["actions"][0]["reason"], "no_citations")
+        self.assertIsNone(self._product_master_row(brand, name, category))
+
+
+class VariantUncertainTests(OrchestratorTestBase):
+    """Step40-4: citationはあるがofficial_source_confirmed=False(variant
+    不明相当)の場合はreflectしないことを確認する。"""
+
+    def test_official_source_not_confirmed_is_not_reflected(self):
+        brand, name, category = f"ブランドC{TEST_NAME_SUFFIX}", f"商品C{TEST_NAME_SUFFIX}", "美容液"
+        batch_id = self._new_batch_id("variant")
+
+        mock_gemini = make_mock_call_gemini({
+            f"{brand} {name}": {
+                "stage1": {"text": "第三者サイトでの言及のみ"},
+                "stage2_payload": {
+                    "active_ingredients": [
+                        {"ingredient": "アスコルビン酸", "concentration": "unknown",
+                         "confidence": "low", "source_url": "https://official.example.com/x"},
+                    ],
+                    "formulation_features": [], "official_source_confirmed": False,
+                },
+            },
+        })
+
+        def candidate_source(cat, target, limit):
+            return [{"brand": brand, "name": name, "category": cat}]
+
+        with patch.object(app, "generate_product_master_work_queue", return_value=[
+            {"type": "coverage_gap", "category": category, "target": "vitamin_c", "shortage_count": 1,
+             "priority": "high", "reason": "test"},
+        ]), patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini):
+            result = orchestrator.run_batch(mode="execute", candidate_source=candidate_source, batch_id=batch_id)
+
+        self.assertEqual(result["actions"][0]["action"], "not_reflected")
+        self.assertEqual(result["actions"][0]["reason"], "official_source_not_confirmed_variant_uncertain")
+        self.assertIsNone(self._product_master_row(brand, name, category))
+
+
+class IdentityDuplicateTests(OrchestratorTestBase):
+    """Step40-4: identity重複が既にproduct_masterに存在する候補はskipされ、
+    Geminiが呼ばれないことを確認する。"""
+
+    def test_duplicate_candidate_is_skipped_without_gemini_call(self):
+        brand, name, category = f"ブランドD{TEST_NAME_SUFFIX}", f"商品D{TEST_NAME_SUFFIX}", "美容液"
+        app.upsert_product_master({
+            "brand": brand, "name": name, "category": category,
+            "active_ingredients": ["vitamin_c"], "verified_at": time.time(),
+        }, data_source="ai_precollected")
+
+        batch_id = self._new_batch_id("dup")
+
+        def candidate_source(cat, target, limit):
+            return [{"brand": brand, "name": name, "category": cat}]
+
+        with patch.object(app, "generate_product_master_work_queue", return_value=[
+            {"type": "coverage_gap", "category": category, "target": "vitamin_c", "shortage_count": 1,
+             "priority": "high", "reason": "test"},
+        ]), patch.object(pipeline, "call_gemini_for_collection") as mock_gemini:
+            result = orchestrator.run_batch(mode="execute", candidate_source=candidate_source, batch_id=batch_id)
+
+        self.assertEqual(result["actions"][0]["action"], "skipped_duplicate")
+        mock_gemini.assert_not_called()
+        self.assertEqual(self._count_staging(batch_id), 0)
+
+
+class CategoryValidatorFailureTests(OrchestratorTestBase):
+    """Step40-3/6: beauty_deviceの候補でcategory_attributesの必須フィールド
+    が欠落している場合、reflectしない(cosmetics専用にしていないことの確認)。"""
+
+    def test_beauty_device_missing_required_attributes_is_not_reflected(self):
+        brand, name, category = f"デバイスブランド{TEST_NAME_SUFFIX}", f"デバイス商品{TEST_NAME_SUFFIX}", "美容機器"
+        batch_id = self._new_batch_id("device-fail")
+
+        mock_gemini = make_mock_call_gemini({
+            f"{brand} {name}": {
+                "stage1": {"text": "RF方式の美容機器",
+                           "citations": [{"uri": "https://official.example.com/x", "title": brand}]},
+                "stage2_payload": {
+                    "active_ingredients": [], "formulation_features": [],
+                    "official_source_confirmed": True,
+                    "category_attributes": {"method": "RF"},  # modes/usage_frequency/contraindications欠落
+                },
+            },
+        })
+
+        def candidate_source(cat, target, limit):
+            return [{"brand": brand, "name": name, "category": cat}]
+
+        item = {"category": category, "target": "method", "shortage_count": 1}
+        budget = orchestrator.BatchBudget(batch_id, 5, 20, 0.50)
+        with patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini):
+            actions = orchestrator.process_coverage_gap_item(
+                item, "execute", batch_id, budget, candidate_source, 3, set(),
+            )
+
+        self.assertEqual(actions[0]["action"], "not_reflected")
+        self.assertFalse(actions[0]["category_validator"]["valid"])
+        self.assertIn("modes", actions[0]["category_validator"]["missing_fields"])
+        self.assertIsNone(self._product_master_row(brand, name, category))
+
+
+class CategoryDelegationSupplementTests(OrchestratorTestBase):
+    """Step40-3: supplementの候補がcategory_attributesの必須フィールドを
+    すべて満たす場合はcosmetics同様に正しくreflectされること(同じ
+    processorがカテゴリ非依存に動くことの確認)。"""
+
+    def test_supplement_with_complete_attributes_is_reflected(self):
+        brand, name, category = f"サプリブランド{TEST_NAME_SUFFIX}", f"サプリ商品{TEST_NAME_SUFFIX}", "サプリメント"
+        batch_id = self._new_batch_id("supplement-ok")
+
+        mock_gemini = make_mock_call_gemini({
+            f"{brand} {name}": {
+                "stage1": {"text": "ビタミンC含有のサプリメント",
+                           "citations": [{"uri": "https://official.example.com/x", "title": brand}]},
+                "stage2_payload": {
+                    "active_ingredients": [], "formulation_features": [],
+                    "official_source_confirmed": True,
+                    "category_attributes": {
+                        "ingredients": ["ビタミンC"], "dosage": {"ビタミンC": "500mg"},
+                        "serving_size": "1日2粒", "precautions": ["持病のある方は医師に相談"],
+                    },
+                },
+            },
+        })
+
+        def candidate_source(cat, target, limit):
+            return [{"brand": brand, "name": name, "category": cat}]
+
+        item = {"category": category, "target": "vitamin_c", "shortage_count": 1}
+        budget = orchestrator.BatchBudget(batch_id, 5, 20, 0.50)
+        with patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini), \
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+            actions = orchestrator.process_coverage_gap_item(
+                item, "execute", batch_id, budget, candidate_source, 3, set(),
+            )
+
+        self.assertEqual(actions[0]["action"], "reflected")
+        self.assertIsNotNone(self._product_master_row(brand, name, category))
+
+    def test_unset_policy_category_never_enters_queue(self):
+        # beauty_device/supplementはCOVERAGE_POLICIESに未登録のため、
+        # 実際のget_coverage_report()経由ではcoverage_gap itemが
+        # 一切生成されない(架空の基準で収集しない)。
+        self.assertEqual(app.get_coverage_report("beauty_device"), [])
+        self.assertEqual(app.get_coverage_report("supplement"), [])
+
+
+class ConsecutiveFailureStopTests(OrchestratorTestBase):
+    """Step40-4: 同一coverage領域で候補が3回連続失敗したら、その領域だけ
+    STOPし、4件目以降は試行しないことを確認する。"""
+
+    def test_three_consecutive_failures_stops_area_before_fourth_candidate(self):
+        category = "美容液"
+        batch_id = self._new_batch_id("threefail")
+        candidates = [
+            {"brand": f"失敗A{TEST_NAME_SUFFIX}", "name": f"商品A{TEST_NAME_SUFFIX}", "category": category},
+            {"brand": f"失敗B{TEST_NAME_SUFFIX}", "name": f"商品B{TEST_NAME_SUFFIX}", "category": category},
+            {"brand": f"失敗C{TEST_NAME_SUFFIX}", "name": f"商品C{TEST_NAME_SUFFIX}", "category": category},
+            {"brand": f"成功D{TEST_NAME_SUFFIX}", "name": f"商品D{TEST_NAME_SUFFIX}", "category": category},
+        ]
+
+        def candidate_source(cat, target, limit):
+            return candidates
+
+        # 全候補について、Stage1自体が検索証拠なし(no_search_evidence)で
+        # 失敗する(=matched configを持たない名前にして既定のno-evidence応答)。
+        with patch.object(pipeline, "call_gemini_for_collection",
+                           side_effect=make_mock_call_gemini({})):
+            item = {"category": category, "target": "vitamin_c", "shortage_count": 4}
+            budget = orchestrator.BatchBudget(batch_id, 10, 20, 0.50)
+            actions = orchestrator.process_coverage_gap_item(
+                item, "execute", batch_id, budget, candidate_source, 3, set(),
+            )
+
+        action_types = [a["action"] for a in actions]
+        self.assertEqual(action_types.count("not_reflected"), 3)
+        self.assertIn("area_stop", action_types)
+        # 4件目(成功D)は試行されていない
+        for a in actions:
+            self.assertNotIn("成功D", a.get("brand", ""))
+
+
+class BatchBudgetStopTests(OrchestratorTestBase):
+    """Step40-4: バッチ全体の商品数上限に達したら、残りを実行せずSTOPする
+    ことを確認する。"""
+
+    def test_max_products_per_batch_stops_remaining_candidates(self):
+        category = "美容液"
+        batch_id = self._new_batch_id("budget")
+        brand1, name1 = f"予算A{TEST_NAME_SUFFIX}", f"商品A{TEST_NAME_SUFFIX}"
+        brand2, name2 = f"予算B{TEST_NAME_SUFFIX}", f"商品B{TEST_NAME_SUFFIX}"
+
+        mock_gemini = make_mock_call_gemini({
+            f"{brand1} {name1}": {
+                "stage1": {"text": "アスコルビン酸配合",
+                           "citations": [{"uri": "https://official.example.com/x", "title": brand1}]},
+                "stage2_payload": {
+                    "active_ingredients": [
+                        {"ingredient": "アスコルビン酸", "concentration": "unknown",
+                         "confidence": "high", "source_url": "https://official.example.com/x"},
+                    ],
+                    "formulation_features": [], "official_source_confirmed": True,
+                },
+            },
+            f"{brand2} {name2}": {
+                "stage1": {"text": "アスコルビン酸配合",
+                           "citations": [{"uri": "https://official.example.com/x", "title": brand2}]},
+                "stage2_payload": {
+                    "active_ingredients": [
+                        {"ingredient": "アスコルビン酸", "concentration": "unknown",
+                         "confidence": "high", "source_url": "https://official.example.com/x"},
+                    ],
+                    "formulation_features": [], "official_source_confirmed": True,
+                },
+            },
+        })
+
+        def candidate_source(cat, target, limit):
+            return [
+                {"brand": brand1, "name": name1, "category": cat},
+                {"brand": brand2, "name": name2, "category": cat},
+            ]
+
+        with patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini), \
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+            item = {"category": category, "target": "vitamin_c", "shortage_count": 2}
+            budget = orchestrator.BatchBudget(batch_id, 1, 20, 0.50)  # 商品数上限=1
+            actions = orchestrator.process_coverage_gap_item(
+                item, "execute", batch_id, budget, candidate_source, 3, set(),
+            )
+
+        action_types = [a["action"] for a in actions]
+        self.assertEqual(action_types.count("reflected"), 1)
+        self.assertIn("batch_stop", action_types)
+        self.assertIsNone(self._product_master_row(brand2, name2, category))
+
+
+class NeedsReviewReportOnlyTests(OrchestratorTestBase):
+    """Step40-2: needs_review work itemは自動解決・自動reflectせず、
+    報告対象として残るだけであることを確認する。"""
+
+    def test_needs_review_item_is_only_reported(self):
+        item = {
+            "type": "needs_review", "staging_id": 1, "batch_id": "b",
+            "brand": "テストブランド", "name": "テスト商品", "category": "美容液",
+            "identity_key": "key1", "conflict_detail": [],
+        }
+        actions = orchestrator.process_needs_review_item(item)
+        self.assertEqual(len(actions), 1)
+        self.assertEqual(actions[0]["action"], "reported_only")
+
+
+class StaleReverificationTests(OrchestratorTestBase):
+    """Step40-2: stale_reverificationが既存商品の再調査を行い、確認済み
+    タグを根拠なく削除しないことを確認する(実DB)。"""
+
+    def test_stale_item_reverifies_and_updates_verified_at(self):
+        brand, name, category = f"ステイルA{TEST_NAME_SUFFIX}", f"商品A{TEST_NAME_SUFFIX}", "美容液"
+        old_ts = time.time() - (200 * 24 * 60 * 60)
+        app.upsert_product_master({
+            "brand": brand, "name": name, "category": category,
+            "active_ingredients": ["vitamin_c"], "verified_at": old_ts,
+        }, data_source="ai_precollected")
+        row = self._product_master_row(brand, name, category)
+        product_id = row[0]
+
+        batch_id = self._new_batch_id("stale-ok")
+        mock_gemini = make_mock_call_gemini({
+            f"{brand} {name}": {
+                "stage1": {"text": "アスコルビン酸配合を再確認",
+                           "citations": [{"uri": "https://official.example.com/x", "title": brand}]},
+                "stage2_payload": {
+                    "active_ingredients": [
+                        {"ingredient": "アスコルビン酸", "concentration": "unknown",
+                         "confidence": "high", "source_url": "https://official.example.com/x"},
+                    ],
+                    "formulation_features": [], "official_source_confirmed": True,
+                },
+            },
+        })
+
+        item = {
+            "type": "stale_reverification", "category": category, "product_id": product_id,
+            "brand": brand, "name": name, "priority": "low", "reason": "test",
+        }
+        with patch.object(app, "generate_product_master_work_queue", return_value=[item]), \
+             patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini), \
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+            result = orchestrator.run_batch(mode="execute", batch_id=batch_id)
+
+        self.assertEqual(result["actions"][0]["action"], "reflected")
+
+    def test_stale_item_does_not_drop_confirmed_tags_when_new_extraction_is_narrower(self):
+        brand, name, category = f"ステイルB{TEST_NAME_SUFFIX}", f"商品B{TEST_NAME_SUFFIX}", "美容液"
+        old_ts = time.time() - (200 * 24 * 60 * 60)
+        # 既存はvitamin_c+peptideの2タグを確認済み
+        app.upsert_product_master({
+            "brand": brand, "name": name, "category": category,
+            "active_ingredients": ["アスコルビン酸", "ペプチド"], "verified_at": old_ts,
+        }, data_source="ai_precollected")
+        row = self._product_master_row(brand, name, category)
+        product_id, before_actives, _ = row
+
+        batch_id = self._new_batch_id("stale-narrow")
+        # 新しい抽出結果はvitamin_cのみ(peptideへの言及が無い=タグが減る)
+        mock_gemini = make_mock_call_gemini({
+            f"{brand} {name}": {
+                "stage1": {"text": "アスコルビン酸配合を再確認(ペプチドへの言及なし)",
+                           "citations": [{"uri": "https://official.example.com/x", "title": brand}]},
+                "stage2_payload": {
+                    "active_ingredients": [
+                        {"ingredient": "アスコルビン酸", "concentration": "unknown",
+                         "confidence": "high", "source_url": "https://official.example.com/x"},
+                    ],
+                    "formulation_features": [], "official_source_confirmed": True,
+                },
+            },
+        })
+
+        item = {
+            "type": "stale_reverification", "category": category, "product_id": product_id,
+            "brand": brand, "name": name, "priority": "low", "reason": "test",
+        }
+        with patch.object(app, "generate_product_master_work_queue", return_value=[item]), \
+             patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini):
+            result = orchestrator.run_batch(mode="execute", batch_id=batch_id)
+
+        self.assertEqual(result["actions"][0]["action"], "not_reflected")
+        self.assertEqual(result["actions"][0]["reason"], "would_lose_confirmed_ingredient_tags")
+        self.assertIn("peptide", result["actions"][0]["lost_tags"])
+
+        after_row = self._product_master_row(brand, name, category)
+        self.assertEqual(after_row[1], before_actives)  # 既存のactive_ingredientsは不変
+
+    def test_needs_review_conflict_during_stale_reverification(self):
+        brand, name, category = f"ステイルC{TEST_NAME_SUFFIX}", f"商品C{TEST_NAME_SUFFIX}", "美容液"
+        old_ts = time.time() - (200 * 24 * 60 * 60)
+        app.upsert_product_master({
+            "brand": brand, "name": name, "category": category,
+            "active_ingredients": ["アスコルビン酸"], "formulation": ["stabilized"],
+            "verified_at": old_ts,
+        }, data_source="ai_precollected")
+        row = self._product_master_row(brand, name, category)
+        product_id = row[0]
+
+        batch_id = self._new_batch_id("stale-conflict")
+        # 新しい抽出結果が既存と矛盾するformulation_feature(統制語彙同士で
+        # 重ならない)を報告 -> detect_conflicts()がneeds_reviewを返す
+        # (既存ロジックそのまま、新しい照合ロジックは作っていない)。
+        mock_gemini = make_mock_call_gemini({
+            f"{brand} {name}": {
+                "stage1": {"text": "カプセル化技術を採用したアスコルビン酸配合",
+                           "citations": [{"uri": "https://official.example.com/x", "title": brand}]},
+                "stage2_payload": {
+                    "active_ingredients": [
+                        {"ingredient": "アスコルビン酸", "concentration": "unknown",
+                         "confidence": "high", "source_url": "https://official.example.com/x"},
+                    ],
+                    "formulation_features": [
+                        {"feature": "encapsulated", "other_detail": "unknown",
+                         "confidence": "high", "source_url": "https://official.example.com/x"},
+                    ],
+                    "official_source_confirmed": True,
+                },
+            },
+        })
+
+        item = {
+            "type": "stale_reverification", "category": category, "product_id": product_id,
+            "brand": brand, "name": name, "priority": "low", "reason": "test",
+        }
+        with patch.object(app, "generate_product_master_work_queue", return_value=[item]), \
+             patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini):
+            result = orchestrator.run_batch(mode="execute", batch_id=batch_id)
+
+        self.assertEqual(result["actions"][0]["action"], "needs_review")
+
+
+if __name__ == "__main__":
+    unittest.main()
