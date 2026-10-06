@@ -1083,6 +1083,7 @@ def resolve_item_code_for_product(brand, product_name, category, jan_code=None):
             product_name=product_name,
             rakuten_title=str(item.get("itemName", "") or ""),
             brand=brand,
+            shop_name=str(item.get("shopName", "") or ""),
         )
     ]
     diag["title_matched_count"] = len(title_matched_pairs)

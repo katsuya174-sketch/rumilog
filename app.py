@@ -3175,9 +3175,12 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     title_compact = compact_text(title)
     name_compact = compact_text(name)
 
+    # 「ー」(長音記号)は区切り文字から除外する。「ドクターサニー」等の
+    # ブランド名を「ドクタ」「サニ」のような無意味な断片に分断してしまい、
+    # ブランドトークンが一致せず正当な候補がhard rejectされていたため。
     name_tokens = [
         compact_text(t)
-        for t in re.split(r"[\s　・_\-ー/／\(\)（）\[\]【】+＋\.。,:：,]", name)
+        for t in re.split(r"[\s　・_\-/／\(\)（）\[\]【】+＋\.。,:：,]", name)
         if compact_text(t)
     ]
 

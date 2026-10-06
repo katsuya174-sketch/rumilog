@@ -372,5 +372,67 @@ class IsSameVerifiedRakutenProductShopNameFallbackTests(unittest.TestCase):
         ))
 
 
+class ScoreRakutenItemLongVowelMarkTokenizationTests(unittest.TestCase):
+    """score_rakuten_item(): 商品名トークン分割で日本語の長音記号「ー」を
+    区切り文字として扱っていたため、「ドクターサニー」が「ドクタ」「サニ」
+    という無意味な断片に分断され、ブランドトークンが一致せず59の真候補が
+    スコア-9999でhard rejectされていた(Step22)。"""
+
+    PRODUCT_NAME = "ドクターサニー AHAクリアソープ"
+    BRAND = "ドクターサニー"
+    TRUE_TITLE = "フルーツ酸(AHA)5％配合AHAクリアソープ(ピーリング石鹸)"
+
+    def test_brand_name_with_long_vowel_marks_is_not_fragmented(self):
+        # 修正後は「ドクターサニー」が1トークンのまま保持される
+        tokens = [
+            t for t in __import__("re").split(
+                r"[\s　・_\-/／\(\)（）\[\]【】+＋\.。,:：,]",
+                app.clean_rakuten_keyword(self.PRODUCT_NAME).lower()
+            )
+            if t
+        ]
+        self.assertIn("ドクターサニー", tokens)
+        self.assertNotIn("ドクタ", tokens)
+        self.assertNotIn("サニ", tokens)
+
+    def test_59_true_candidate_no_longer_hard_rejected(self):
+        item = {
+            "itemName": self.TRUE_TITLE,
+            "itemPrice": 1980,
+            "shopName": "株式会社ドクターサニー",
+            "mediumImageUrls": [{"imageUrl": "x"}],
+            "reviewCount": 0,
+        }
+        score = app.score_rakuten_item(
+            item, product_name=self.PRODUCT_NAME, brand=self.BRAND, category="洗顔"
+        )
+        self.assertGreater(score, -9999)
+
+    def test_bundle_hard_reject_words_still_work(self):
+        # 「2個」「3個」等の既存hard_reject_wordsはこの修正で変化しない
+        item = {
+            "itemName": "AHAクリアソープ(ピーリング石鹸)3個セット【送料無料】",
+            "itemPrice": 4950,
+            "shopName": "株式会社ドクターサニー",
+            "mediumImageUrls": [{"imageUrl": "x"}],
+            "reviewCount": 0,
+        }
+        score = app.score_rakuten_item(
+            item, product_name=self.PRODUCT_NAME, brand=self.BRAND, category="洗顔"
+        )
+        self.assertEqual(score, -9999)
+
+    def test_other_long_vowel_mark_brand_not_fragmented(self):
+        # 他の長音記号を含む一般的なブランド名でも同様に1トークンのまま保持される
+        tokens = [
+            t for t in __import__("re").split(
+                r"[\s　・_\-/／\(\)（）\[\]【】+＋\.。,:：,]",
+                app.clean_rakuten_keyword("ルルルン フェイスマスク").lower()
+            )
+            if t
+        ]
+        self.assertIn("ルルルン", tokens)
+
+
 if __name__ == "__main__":
     unittest.main()
