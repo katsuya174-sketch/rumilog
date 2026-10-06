@@ -309,5 +309,68 @@ class BuildRakutenSearchKeywordsBrandStrippedFallbackTests(unittest.TestCase):
         self.assertEqual(kws[0], "テストブランド ヒアルロン酸配合美容液")
 
 
+class IsSameVerifiedRakutenProductShopNameFallbackTests(unittest.TestCase):
+    """is_same_verified_rakuten_product(): brandが楽天title側に存在しない
+    場合の補助経路(shop_nameが法人格除去後にbrandと正規化完全一致、かつ
+    brand部分を除いた商品名の意味トークンが全件一致する場合のみaccept)。
+    shop_nameの単純部分一致だけでのacceptは禁止(Step21)。"""
+
+    PRODUCT_NAME = "ドクターサニー AHAクリアソープ"
+    BRAND = "ドクターサニー"
+    TRUE_TITLE = "フルーツ酸(AHA)5％配合AHAクリアソープ(ピーリング石鹸)"
+
+    def test_true_candidate_with_official_shop_is_accepted(self):
+        self.assertTrue(app.is_same_verified_rakuten_product(
+            self.PRODUCT_NAME, self.TRUE_TITLE, self.BRAND, "株式会社ドクターサニー"
+        ))
+
+    def test_unrelated_shop_name_is_rejected(self):
+        self.assertFalse(app.is_same_verified_rakuten_product(
+            self.PRODUCT_NAME, self.TRUE_TITLE, self.BRAND, "ドラッグストア専門店X"
+        ))
+
+    def test_shop_name_merely_containing_brand_string_is_rejected(self):
+        # 「○○取扱店」等、brand文字列を含むだけの第三者店舗は
+        # 単純部分一致ではacceptしない(完全一致のみ許可)
+        self.assertFalse(app.is_same_verified_rakuten_product(
+            self.PRODUCT_NAME, self.TRUE_TITLE, self.BRAND, "ドクターサニー取扱店"
+        ))
+
+    def test_partial_product_token_match_only_is_rejected(self):
+        self.assertFalse(app.is_same_verified_rakuten_product(
+            "ドクターサニー AHAクリアソープ プレミアム", self.TRUE_TITLE,
+            self.BRAND, "株式会社ドクターサニー"
+        ))
+
+    def test_existing_accepted_case_unaffected_by_new_fallback(self):
+        # 28 WHITH WHITEの真候補は既存ロジック(alias不要)で既にacceptされ、
+        # shop_name補助経路の追加によって変化しない
+        title = (
+            "【4日 20時〜】30%OFFクーポン有！美白 薬用 乳液 フィス ホワイト"
+            "「 しみ くすみ を ケア 予防 」「プラセンタ + コラーゲン 配合 」"
+            "で肌のキメを整える 「美容液 や 化粧水 と セット使い でさらに "
+            "肌に透明感を与える 」150mlWHITH WHITE"
+        )
+        self.assertTrue(app.is_same_verified_rakuten_product(
+            "WHITH WHITE 薬用美白乳液", title, "WHITH WHITE", "イルミルド公式ショップ"
+        ))
+
+    def test_bundle_titles_are_not_excluded_by_this_function_itself(self):
+        # title-matchとしては同一ブランド・同一商品のbundle表記も正しくaccept
+        # する(bundle除外は_is_rakuten_set_item側の別レイヤーの責務)
+        bundle_title = "AHAクリアソープ(ピーリング石鹸)3個セット【送料無料】【あす楽対応】"
+        self.assertTrue(app.is_same_verified_rakuten_product(
+            self.PRODUCT_NAME, bundle_title, self.BRAND, "株式会社ドクターサニー"
+        ))
+        self.assertTrue(app._is_rakuten_set_item(bundle_title))
+
+    def test_no_shop_name_provided_falls_back_to_previous_behavior(self):
+        # shop_name省略時(既存の呼び出し元との後方互換)は補助経路が発火せず
+        # 従来通りreject
+        self.assertFalse(app.is_same_verified_rakuten_product(
+            self.PRODUCT_NAME, self.TRUE_TITLE, self.BRAND
+        ))
+
+
 if __name__ == "__main__":
     unittest.main()

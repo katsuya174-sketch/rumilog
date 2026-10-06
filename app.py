@@ -4549,7 +4549,16 @@ def is_same_verified_brand_by_alias(brand_identity, rakuten_identity):
 
     return False
 
-def is_same_verified_rakuten_product(product_name, rakuten_title, brand=""):
+_CORPORATE_AFFIX_RE = re.compile(r"(株式会社|有限会社|合同会社|合資会社|合名会社)")
+
+
+def _strip_corporate_affixes(text):
+    """法人格表記(株式会社/有限会社等)を除去する。shop_nameとブランド名の
+    強い一致判定で、法人格の有無による表記ゆれだけを吸収するために使う。"""
+    return _CORPORATE_AFFIX_RE.sub("", str(text or ""))
+
+
+def is_same_verified_rakuten_product(product_name, rakuten_title, brand="", shop_name=""):
     product_name = clean_display_product_name(product_name)
     rakuten_title = str(rakuten_title or "").strip()
     brand = str(brand or "").strip()
@@ -4638,6 +4647,23 @@ def is_same_verified_rakuten_product(product_name, rakuten_title, brand=""):
         required_matches = 2 if len(product_tokens) <= 2 else min(3, len(product_tokens))
 
     if len(matched_tokens) < required_matches:
+        # brandが楽天title側に存在しない場合の補助経路。以下をすべて満たす
+        # 場合のみbrandが確認できたものとして扱う(shop_nameの単純部分一致
+        # だけでのacceptは禁止。「○○取扱店」等、brand文字列を含むだけの
+        # 第三者店舗を誤って通さないよう、法人格除去後の正規化完全一致を
+        # 要求する):
+        #   - brandが通常経路(alias含む)では一致していない
+        #   - shop_nameが法人格除去・正規化後にbrandと完全一致
+        #   - 商品名からbrand部分を除いた意味トークンが楽天titleで全件一致
+        if not brand_ok and brand_identity:
+            shop_identity = normalize_candidate_name_for_merge(
+                _strip_corporate_affixes(shop_name)
+            )
+            if shop_identity == brand_identity:
+                non_brand_tokens = [t for t in product_tokens if t not in brand_identity]
+                non_brand_matched = [t for t in matched_tokens if t not in brand_identity]
+                if non_brand_tokens and len(non_brand_matched) == len(non_brand_tokens):
+                    return True
         return False
 
     return True
@@ -5044,7 +5070,8 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
                     if not is_same_verified_rakuten_product(
                         product_name=product_name,
                         rakuten_title=rakuten_title,
-                        brand=brand
+                        brand=brand,
+                        shop_name=str(item.get("shopName", "") or "")
                     ):
                         print(
                             "[RAKUTEN REJECT TITLE MISMATCH]",
