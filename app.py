@@ -4018,6 +4018,15 @@ def init_product_master_table():
             ALTER TABLE product_master
             ADD COLUMN IF NOT EXISTS active_ingredient_tags JSONB
         """)
+        # category_attributes: cosmetics以外のカテゴリ(美容機器・サプリメント・
+        # 将来追加されるカテゴリ)固有の構造化情報を保持する汎用JSONBカラム。
+        # 既存の化粧品専用カラム(active_ingredients等)はcosmetics向けのまま
+        # 変更しない(Step37設計: 共通層に化粧品固有フィールドを追加しない/
+        # cosmeticsは既存挙動を完全維持)。既存行は追加時NULLのまま変化しない。
+        cur.execute("""
+            ALTER TABLE product_master
+            ADD COLUMN IF NOT EXISTS category_attributes JSONB
+        """)
         cur.execute("""
             CREATE UNIQUE INDEX IF NOT EXISTS idx_product_master_identity
             ON product_master (identity_key)
@@ -4046,6 +4055,11 @@ def _product_master_upsert_sql(product, identity_key, jan_code, brand, name, cat
     # 一貫して再計算される(二重の正規化ロジックを作らず、常にここ一箇所で
     # compute_ingredient_tags()=normalize_ingredient_tag()の集合として算出する)。
     active_ingredient_tags = compute_ingredient_tags(product.get("active_ingredients") or [])
+    # category_attributes: cosmetics向け呼び出しでは渡されないため既定で
+    # None(DBにはNULLとして入る)。呼び出し元が明示的に渡した場合のみ
+    # JSONBとして保存する(共通層からcosmetics固有フィールドを増やさない
+    # ため、cosmetics側の呼び出しは一切変更しない)。
+    category_attributes = product.get("category_attributes")
     return ("""
         INSERT INTO product_master (
             identity_key, jan_code, brand, name, category, price_ref,
@@ -4054,10 +4068,10 @@ def _product_master_upsert_sql(product, identity_key, jan_code, brand, name, cat
             ingredient_focus, ingredient_strength, formulation, technology,
             texture, contraindications, uv_level, availability_japan,
             last_known_image, last_known_rakuten_link, rakuten_title,
-            item_code, shop_name, data_source, verified_at
+            item_code, shop_name, data_source, verified_at, category_attributes
         ) VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         ON CONFLICT (identity_key) DO UPDATE SET
             brand = EXCLUDED.brand,
@@ -4086,6 +4100,7 @@ def _product_master_upsert_sql(product, identity_key, jan_code, brand, name, cat
             item_code = EXCLUDED.item_code,
             shop_name = EXCLUDED.shop_name,
             verified_at = GREATEST(product_master.verified_at, EXCLUDED.verified_at),
+            category_attributes = COALESCE(EXCLUDED.category_attributes, product_master.category_attributes),
             updated_at = NOW()
         RETURNING product_id
     """, (
@@ -4115,6 +4130,7 @@ def _product_master_upsert_sql(product, identity_key, jan_code, brand, name, cat
         str(product.get("shop_name", "") or ""),
         data_source,
         verified_at,
+        json.dumps(category_attributes) if category_attributes is not None else None,
     ))
 
 
@@ -4302,7 +4318,7 @@ _PRODUCT_MASTER_ROW_COLUMNS = (
     "texture", "contraindications", "uv_level", "availability_japan",
     "last_known_image", "last_known_rakuten_link", "rakuten_title",
     "item_code", "shop_name", "data_source", "verified_at",
-    "active_ingredient_tags",
+    "active_ingredient_tags", "category_attributes",
 )
 
 
@@ -4381,6 +4397,150 @@ def _is_relevant_scored_candidate(base_score, base_reasons, ingredient_tag):
         return True
     rules = {r.get("rule") for r in (base_reasons or []) if isinstance(r, dict)}
     return bool(rules & {"ingredient_focus_active_match", "ingredient_focus_support_match"})
+
+
+_EFFECTIVE_CANDIDATE_NEUTRAL_USER_DATA = {
+    "skin_type": "normal", "oil": "normal", "sens": "normal", "pregnant": False, "exp": "none",
+}
+_EFFECTIVE_CANDIDATE_BUDGET_VALUE = 3000
+
+
+def calculate_effective_candidates(category, tag, db_products=None, verified_products=None,
+                                     user_data=None, budget_value=None, extra_candidates=None):
+    """product_masterの「実効候補数」(select_best_market_candidate()と同じ
+    順序・dedup条件での、db_products/verified_products_cacheと重複しない
+    新規寄与分のうち関連性ありと判定される件数)を計算する共通関数。
+
+    P2 Step26/27で手動のワンオフスクリプトとして個別に書いていたロジックを
+    正式な共通関数へ移植したもので、判定基準(dedup方法・score_product・
+    _is_relevant_scored_candidateの使い方)は一切変更していない。
+    extra_candidatesは、まだDBへreflectしていない候補を仮追加して再計算
+    したい場合に使う(Step31〜35のシミュレーションと同じ用途)。
+    """
+    db_products = db_products if db_products is not None else load_products()
+    verified_products = verified_products if verified_products is not None else load_verified_products_cache()
+    user_data = user_data if user_data is not None else _EFFECTIVE_CANDIDATE_NEUTRAL_USER_DATA
+    budget_value = budget_value if budget_value is not None else _EFFECTIVE_CANDIDATE_BUDGET_VALUE
+
+    def keys_of(items):
+        s = set()
+        for p in items:
+            if isinstance(p, dict):
+                k = make_verified_product_key(p)
+                if k:
+                    s.add(k)
+        return s
+
+    seen = keys_of(db_products) | keys_of(verified_products)
+    master = query_product_master_candidates(category, limit=50)
+    survivors = [mp for mp in master if make_verified_product_key(mp) not in seen]
+
+    for extra in (extra_candidates or []):
+        if normalize_candidate_category(extra.get("category", ""), fallback=extra.get("category", "")) != \
+           normalize_candidate_category(category, fallback=category):
+            continue
+        k = make_verified_product_key(extra)
+        if k and k not in seen:
+            survivors.append(extra)
+            seen.add(k)
+
+    step = {"category": category, "purpose": "", "ingredient_focus": tag}
+    relevant = 0
+    for mp in survivors:
+        reasons = []
+        score = score_product(dict(mp), step, user_data, budget_value, reasons=reasons)
+        if _is_relevant_scored_candidate(score, reasons, tag):
+            relevant += 1
+    return relevant
+
+
+def calculate_effective_candidates_batch(areas, db_products=None, verified_products=None,
+                                           user_data=None, budget_value=None, extra_candidates=None):
+    """calculate_effective_candidates()を(category, tag)のリストへ一括適用し、
+    {(category, tag): count}を返す。db_products/verified_productsは1回だけ
+    読み込んで全領域で再利用する(領域ごとに再読込しない)。"""
+    db_products = db_products if db_products is not None else load_products()
+    verified_products = verified_products if verified_products is not None else load_verified_products_cache()
+    return {
+        (category, tag): calculate_effective_candidates(
+            category, tag, db_products=db_products, verified_products=verified_products,
+            user_data=user_data, budget_value=budget_value, extra_candidates=extra_candidates,
+        )
+        for category, tag in areas
+    }
+
+
+def get_stale_product_master_candidates(category=None, limit=100):
+    """verified_atがPRODUCT_MASTER_REVERIFY_AFTER_SECONDSを超えて古い(＝
+    _needs_reverification=True)product_master行を検出する共通関数。
+    検出のみ行い、再収集・反映は一切行わない(Step37設計: 不足/更新必要性
+    検出と実際の収集アクションは分離する)。
+    """
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        if category:
+            category_norm = normalize_candidate_category(category, fallback=category)
+            cur.execute(
+                f"SELECT {', '.join(_PRODUCT_MASTER_ROW_COLUMNS)} FROM product_master "
+                "WHERE category = %s ORDER BY verified_at ASC LIMIT %s",
+                (category_norm, limit),
+            )
+        else:
+            cur.execute(
+                f"SELECT {', '.join(_PRODUCT_MASTER_ROW_COLUMNS)} FROM product_master "
+                "ORDER BY verified_at ASC LIMIT %s",
+                (limit,),
+            )
+        rows = cur.fetchall()
+    except Exception as e:
+        print(f"[PRODUCT MASTER STALE QUERY ERROR] {repr(e)}", flush=True)
+        return []
+    finally:
+        if conn: conn.close()
+
+    products = [_product_master_row_to_product(row) for row in rows]
+    return [p for p in products if p.get("_needs_reverification")]
+
+
+# ===== category_attributes: cosmetics以外のカテゴリ向け構造化スキーマ =====
+# Step37/38設計: 共通層(product_master本体のロジック)にはcosmetics固有の
+# フィールドを追加しない。カテゴリ固有の構造はこのcategory_attributes用
+# スキーマ定義とvalidate_category_attributes()だけに閉じ込める。
+# まだ実際の収集パイプライン(Stage1/2)には接続しない(検証のみ)。
+
+CATEGORY_ATTRIBUTE_SCHEMAS = {
+    "beauty_device": {
+        # 方式・機能/モード・使用頻度・禁忌/注意事項
+        "required": ["method", "modes", "usage_frequency", "contraindications"],
+    },
+    "supplement": {
+        # 成分・含有量・摂取目安・注意事項
+        "required": ["ingredients", "dosage", "serving_size", "precautions"],
+    },
+}
+
+
+def validate_category_attributes(category, attributes):
+    """category_attributesの構造(必須フィールドの有無)を検証する。
+
+    - cosmeticsはcategory_attributesを使わないため常にvalid(既存挙動を
+      完全維持し、化粧品固有フィールドをこの共通スキーマに混在させない)。
+    - スキーマが未定義の将来カテゴリは、スキーマが用意されるまで構造を
+      強制しない(無条件でvalid)。
+    - 定義済みカテゴリは、必須フィールドが辞書のキーとして存在しない場合に
+      のみ"欠落"とする。値が"unknown"/None/空であることは、調査した上で
+      確認できなかったことの明示であり欠落とは区別する(推測で埋めることを
+      禁止するのと同じ理由で、不明の表明自体は正当な結果として扱う)。
+    """
+    if category == "cosmetics" or category not in CATEGORY_ATTRIBUTE_SCHEMAS:
+        return {"valid": True, "missing_fields": []}
+
+    schema = CATEGORY_ATTRIBUTE_SCHEMAS[category]
+    attributes = attributes if isinstance(attributes, dict) else {}
+    missing_fields = [f for f in schema["required"] if f not in attributes]
+    return {"valid": len(missing_fields) == 0, "missing_fields": missing_fields}
 
 
 def _merge_product_master_with_live_candidate(master_product, live_product):

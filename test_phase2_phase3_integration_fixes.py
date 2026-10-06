@@ -130,6 +130,7 @@ class ProductMasterRowToProductTagMergeTests(unittest.TestCase):
             "rakuten_title": "", "item_code": "", "shop_name": "",
             "data_source": "ai_precollected", "verified_at": None,
             "active_ingredient_tags": active_ingredient_tags,
+            "category_attributes": None,
         }
         return tuple(values[col] for col in app._PRODUCT_MASTER_ROW_COLUMNS)
 
