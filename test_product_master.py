@@ -25,6 +25,7 @@ os.environ.setdefault("DATABASE_URL", "postgresql://localhost/rumilog_test")
 import psycopg2  # noqa: E402
 
 import app  # noqa: E402
+import product_collection_pipeline as pipeline  # noqa: E402
 
 
 def _test_product(suffix, **overrides):
@@ -543,6 +544,214 @@ class CategoryAttributesValidatorTests(unittest.TestCase):
             self.assertNotIn("active_ingredients", schema["required"])
             self.assertNotIn("retinol_level", schema["required"])
             self.assertNotIn("uv_level", schema["required"])
+
+
+class GetCoverageReportTests(unittest.TestCase):
+    """Step39: get_coverage_report()がcalculate_effective_candidates_batch()
+    (Step38の共通関数)の結果だけを使ってtarget_count/effective_count/
+    shortage_count/sufficientを計算すること、未登録policyはスキップされる
+    ことを確認する(判定ロジックは再実装しない)。"""
+
+    def test_unregistered_policy_returns_empty_list(self):
+        self.assertEqual(app.get_coverage_report("beauty_device"), [])
+        self.assertEqual(app.get_coverage_report("supplement"), [])
+        self.assertEqual(app.get_coverage_report("not_a_real_policy"), [])
+
+    def test_cosmetics_policy_has_13_areas(self):
+        with patch.object(app, "calculate_effective_candidates_batch", return_value={}) as mock_batch:
+            mock_batch.return_value = {
+                (item["category"], item["target"]): 5 for item in app.COSMETICS_COVERAGE_POLICY
+            }
+            report = app.get_coverage_report("cosmetics")
+        self.assertEqual(len(report), 13)
+
+    def test_shortage_computed_from_common_function_result(self):
+        with patch.object(app, "calculate_effective_candidates_batch") as mock_batch:
+            mock_batch.return_value = {
+                (item["category"], item["target"]): 2 for item in app.COSMETICS_COVERAGE_POLICY
+            }
+            report = app.get_coverage_report("cosmetics")
+        for area in report:
+            self.assertEqual(area["effective_count"], 2)
+            self.assertEqual(area["target_count"], 3)
+            self.assertEqual(area["shortage_count"], 1)
+            self.assertFalse(area["sufficient"])
+
+    def test_sufficient_when_effective_meets_target(self):
+        with patch.object(app, "calculate_effective_candidates_batch") as mock_batch:
+            mock_batch.return_value = {
+                (item["category"], item["target"]): 3 for item in app.COSMETICS_COVERAGE_POLICY
+            }
+            report = app.get_coverage_report("cosmetics")
+        for area in report:
+            self.assertEqual(area["shortage_count"], 0)
+            self.assertTrue(area["sufficient"])
+
+    def test_effective_above_target_does_not_go_negative(self):
+        with patch.object(app, "calculate_effective_candidates_batch") as mock_batch:
+            mock_batch.return_value = {
+                (item["category"], item["target"]): 10 for item in app.COSMETICS_COVERAGE_POLICY
+            }
+            report = app.get_coverage_report("cosmetics")
+        for area in report:
+            self.assertEqual(area["shortage_count"], 0)
+
+
+class NeedsReviewStagingItemsTests(unittest.TestCase):
+    """Step39: get_needs_review_staging_items()がconflict_status=
+    'needs_review'かつreflected_at IS NULLの行だけを検出すること(実DB)。"""
+
+    TEST_BATCH_PREFIX = "step39-needs-review-test"
+
+    @classmethod
+    def setUpClass(cls):
+        pipeline.init_product_collection_tables()
+
+    def setUp(self):
+        self._cleanup()
+
+    def tearDown(self):
+        self._cleanup()
+
+    def _cleanup(self):
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "DELETE FROM product_collection_staging WHERE batch_id LIKE %s",
+                (f"{self.TEST_BATCH_PREFIX}%",),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _insert_staging(self, suffix, conflict_status, reflected_at=None):
+        batch_id = f"{self.TEST_BATCH_PREFIX}-{suffix}"
+        brand, name, category = f"テストブランド{suffix}", f"テスト商品{suffix}", "美容液"
+        identity_key = app._normalize_product_master_identity_key(brand, name, category)
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute("""
+                INSERT INTO product_collection_staging
+                    (batch_id, brand, product_name, category, identity_key,
+                     stage1_status, stage2_status, conflict_status, conflict_detail, reflected_at)
+                VALUES (%s, %s, %s, %s, %s, 'ok', 'ok', %s, '[]', %s)
+            """, (batch_id, brand, name, category, identity_key, conflict_status, reflected_at))
+            conn.commit()
+        finally:
+            conn.close()
+        return brand, name
+
+    def test_needs_review_unreflected_is_detected(self):
+        brand, name = self._insert_staging("A", "needs_review")
+        items = app.get_needs_review_staging_items()
+        names = [i["name"] for i in items]
+        self.assertIn(name, names)
+
+    def test_new_status_is_not_detected(self):
+        brand, name = self._insert_staging("B", "new")
+        items = app.get_needs_review_staging_items()
+        names = [i["name"] for i in items]
+        self.assertNotIn(name, names)
+
+    def test_already_reflected_needs_review_is_not_detected(self):
+        import datetime
+        brand, name = self._insert_staging("C", "needs_review", reflected_at=datetime.datetime.utcnow())
+        items = app.get_needs_review_staging_items()
+        names = [i["name"] for i in items]
+        self.assertNotIn(name, names)
+
+
+class GenerateProductMasterWorkQueueTests(unittest.TestCase):
+    """Step39: generate_product_master_work_queue()がcoverage_gap/
+    stale_reverification/needs_reviewの3種を正しく生成し、sufficient/fresh
+    な対象を除外し、重複をまとめることを確認する(read-only、mock使用)。"""
+
+    def _coverage_area(self, category, target, effective_count, target_count=3):
+        shortage = max(0, target_count - effective_count)
+        return {
+            "category": category, "target": target, "target_count": target_count,
+            "effective_count": effective_count, "shortage_count": shortage,
+            "sufficient": shortage == 0,
+        }
+
+    def test_sufficient_area_not_queued(self):
+        with patch.object(app, "get_coverage_report", return_value=[
+            self._coverage_area("化粧水", "hyaluronic_acid", 3),
+        ]), patch.object(app, "get_stale_product_master_candidates", return_value=[]), \
+             patch.object(app, "get_needs_review_staging_items", return_value=[]):
+            queue = app.generate_product_master_work_queue()
+        self.assertEqual(queue, [])
+
+    def test_coverage_gap_item_generated_with_priority(self):
+        with patch.object(app, "get_coverage_report", return_value=[
+            self._coverage_area("美容液", "vitamin_c", 1),  # shortage=2 -> high
+            self._coverage_area("化粧水", "amino_acid", 2),  # shortage=1 -> medium
+        ]), patch.object(app, "get_stale_product_master_candidates", return_value=[]), \
+             patch.object(app, "get_needs_review_staging_items", return_value=[]):
+            queue = app.generate_product_master_work_queue()
+
+        by_target = {item["target"]: item for item in queue}
+        self.assertEqual(by_target["vitamin_c"]["type"], "coverage_gap")
+        self.assertEqual(by_target["vitamin_c"]["priority"], "high")
+        self.assertEqual(by_target["amino_acid"]["priority"], "medium")
+
+    def test_fresh_product_not_queued_as_stale(self):
+        with patch.object(app, "get_coverage_report", return_value=[]), \
+             patch.object(app, "get_stale_product_master_candidates", return_value=[]), \
+             patch.object(app, "get_needs_review_staging_items", return_value=[]):
+            queue = app.generate_product_master_work_queue()
+        self.assertEqual(queue, [])
+
+    def test_stale_product_generates_low_priority_item(self):
+        stale_product = {
+            "_product_master_id": 999, "brand": "テストブランド", "name": "テスト商品",
+            "category": "美容液",
+        }
+        with patch.object(app, "get_coverage_report", return_value=[]), \
+             patch.object(app, "get_stale_product_master_candidates", return_value=[stale_product]), \
+             patch.object(app, "get_needs_review_staging_items", return_value=[]):
+            queue = app.generate_product_master_work_queue()
+        self.assertEqual(len(queue), 1)
+        self.assertEqual(queue[0]["type"], "stale_reverification")
+        self.assertEqual(queue[0]["priority"], "low")
+
+    def test_needs_review_generates_high_priority_item(self):
+        needs_review_item = {
+            "staging_id": 1, "batch_id": "b", "brand": "テストブランド", "name": "テスト商品",
+            "category": "美容液", "identity_key": "key1", "conflict_detail": [],
+        }
+        with patch.object(app, "get_coverage_report", return_value=[]), \
+             patch.object(app, "get_stale_product_master_candidates", return_value=[]), \
+             patch.object(app, "get_needs_review_staging_items", return_value=[needs_review_item]):
+            queue = app.generate_product_master_work_queue()
+        self.assertEqual(len(queue), 1)
+        self.assertEqual(queue[0]["type"], "needs_review")
+        self.assertEqual(queue[0]["priority"], "high")
+
+    def test_duplicate_stale_products_with_same_identity_are_merged(self):
+        dup = {
+            "_product_master_id": 1, "brand": "テストブランド", "name": "テスト商品",
+            "category": "美容液",
+        }
+        dup2 = {
+            "_product_master_id": 2, "brand": "テストブランド", "name": "テスト商品",
+            "category": "美容液",
+        }
+        with patch.object(app, "get_coverage_report", return_value=[]), \
+             patch.object(app, "get_stale_product_master_candidates", return_value=[dup, dup2]), \
+             patch.object(app, "get_needs_review_staging_items", return_value=[]):
+            queue = app.generate_product_master_work_queue()
+        self.assertEqual(len(queue), 1)
+
+    def test_unset_policy_category_produces_no_coverage_gap_items(self):
+        # beauty_device/supplementはpolicy未設定のためget_coverage_report()
+        # が[]を返す -> coverage_gap itemは一切生成されない
+        with patch.object(app, "get_stale_product_master_candidates", return_value=[]), \
+             patch.object(app, "get_needs_review_staging_items", return_value=[]):
+            queue = app.generate_product_master_work_queue(coverage_policy_name="beauty_device")
+        self.assertEqual([i for i in queue if i["type"] == "coverage_gap"], [])
 
 
 if __name__ == "__main__":

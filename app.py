@@ -4543,6 +4543,171 @@ def validate_category_attributes(category, attributes):
     return {"valid": len(missing_fields) == 0, "missing_fields": missing_fields}
 
 
+# ===== Step39: coverage policy / 不足・更新必要性の自動検出(read-only) =====
+# ここから下は「次に何を収集・更新すべきか」を判定するだけで、実際の
+# Gemini/Rakuten呼び出しやproduct_masterへの反映は一切行わない。
+
+# P1 8領域+P2 5領域=13領域(これまでStep17〜38で実際に使ってきた基準)を、
+# 最初のcoverage policyとして定義する。cosmetics専用の内容だが、policyの
+# 登録先(COVERAGE_POLICIES)自体はカテゴリ名をキーにした辞書なので、他の
+# カテゴリ用policyを追加しても共通オーケストレーション層のコードは変更不要。
+COSMETICS_COVERAGE_POLICY = [
+    {"category": "化粧水", "target": "hyaluronic_acid"},
+    {"category": "美容液", "target": "vitamin_c"},
+    {"category": "化粧水", "target": "ceramide"},
+    {"category": "美容液", "target": "peptide"},
+    {"category": "美容液", "target": "retinol"},
+    {"category": "美容液", "target": "niacinamide"},
+    {"category": "化粧水", "target": "niacinamide"},
+    {"category": "洗顔", "target": "salicylic_acid"},
+    {"category": "化粧水", "target": "tranexamic_acid"},
+    {"category": "化粧水", "target": "amino_acid"},
+    {"category": "洗顔", "target": "glycolic_acid"},
+    {"category": "クリーム", "target": "peptide"},
+    {"category": "クレンジング", "target": "centella_extract"},
+]
+
+# beauty_device/supplementはまだ架空のcoverage基準を作らない(合意事項)。
+# policy名がここに存在しない場合、get_coverage_report()は空リストを返し、
+# coverage gap判定自体をスキップする。
+COVERAGE_POLICIES = {
+    "cosmetics": COSMETICS_COVERAGE_POLICY,
+}
+
+
+def get_coverage_report(policy_name="cosmetics", db_products=None, verified_products=None):
+    """coverage policy(policy_name)に登録された各(category, target)について
+    target_count/effective_count/shortage_count/sufficientを返す。
+
+    実効候補数の算出はcalculate_effective_candidates_batch()(Step38)を
+    そのまま使い、判定ロジックは再実装しない。policy_nameが未登録の場合は
+    空リストを返す(=そのカテゴリのcoverage gap判定をスキップできる)。
+    """
+    policy = COVERAGE_POLICIES.get(policy_name)
+    if not policy:
+        return []
+
+    db_products = db_products if db_products is not None else load_products()
+    verified_products = verified_products if verified_products is not None else load_verified_products_cache()
+    areas = [(item["category"], item["target"]) for item in policy]
+    effective_counts = calculate_effective_candidates_batch(
+        areas, db_products=db_products, verified_products=verified_products,
+    )
+
+    report = []
+    for item in policy:
+        category, target = item["category"], item["target"]
+        target_count = item.get("target_count", PRODUCT_MASTER_SUFFICIENT_CANDIDATE_COUNT)
+        effective_count = effective_counts[(category, target)]
+        shortage_count = max(0, target_count - effective_count)
+        report.append({
+            "category": category,
+            "target": target,
+            "target_count": target_count,
+            "effective_count": effective_count,
+            "shortage_count": shortage_count,
+            "sufficient": shortage_count == 0,
+        })
+    return report
+
+
+def get_needs_review_staging_items(limit=200):
+    """conflict_status='needs_review'でまだreflectされていないstaging行を
+    検出する(検出のみ、自動reflect・再収集・再Gemini実行は一切行わない)。"""
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT staging_id, batch_id, brand, product_name, category, identity_key, conflict_detail
+            FROM product_collection_staging
+            WHERE conflict_status = 'needs_review' AND reflected_at IS NULL
+            ORDER BY staging_id DESC LIMIT %s
+        """, (limit,))
+        rows = cur.fetchall()
+    except Exception as e:
+        print(f"[NEEDS REVIEW QUERY ERROR] {repr(e)}", flush=True)
+        return []
+    finally:
+        if conn: conn.close()
+
+    return [
+        {
+            "staging_id": r[0], "batch_id": r[1], "brand": r[2], "name": r[3],
+            "category": r[4], "identity_key": r[5], "conflict_detail": r[6],
+        }
+        for r in rows
+    ]
+
+
+def generate_product_master_work_queue(coverage_policy_name="cosmetics", stale_category=None, stale_limit=100):
+    """次に必要な作業を表すread-onlyのwork queueを生成する(実際のGemini/
+    Rakuten呼び出し・product_masterへの反映は一切行わない)。
+
+    work item種別:
+      - coverage_gap: get_coverage_report()でsufficient=Falseの(category, target)
+      - stale_reverification: get_stale_product_master_candidates()で
+        _needs_reverification=Trueのproduct_master行
+      - needs_review: get_needs_review_staging_items()でconflict_status=
+        'needs_review'かつ未reflectのstaging行
+
+    既にsufficientかつfreshな対象はqueueへ入れない。同一対象(identity_key、
+    または(category, target))の重複work itemは1件にまとめる。
+    """
+    queue = []
+    seen_keys = set()
+
+    def add_item(item, dedup_key):
+        if dedup_key in seen_keys:
+            return
+        seen_keys.add(dedup_key)
+        queue.append(item)
+
+    for area in get_coverage_report(coverage_policy_name):
+        if area["sufficient"]:
+            continue
+        shortage = area["shortage_count"]
+        add_item({
+            "type": "coverage_gap",
+            "category": area["category"],
+            "target": area["target"],
+            "shortage_count": shortage,
+            "priority": "high" if shortage >= 2 else "medium",
+            "reason": (
+                f"{area['category']}×{area['target']}の実効候補が"
+                f"{area['effective_count']}件で目標{area['target_count']}件に"
+                f"{shortage}件不足"
+            ),
+        }, dedup_key=("coverage_gap", area["category"], area["target"]))
+
+    for p in get_stale_product_master_candidates(category=stale_category, limit=stale_limit):
+        identity_key = _normalize_product_master_identity_key(
+            p.get("brand", ""), p.get("name", ""), p.get("category", "")
+        )
+        add_item({
+            "type": "stale_reverification",
+            "category": p.get("category"),
+            "product_id": p.get("_product_master_id"),
+            "brand": p.get("brand"),
+            "name": p.get("name"),
+            "priority": "low",
+            "reason": f"verified_atが{PRODUCT_MASTER_REVERIFY_AFTER_SECONDS // 86400}日超過",
+        }, dedup_key=("stale_reverification", identity_key))
+
+    for item in get_needs_review_staging_items():
+        add_item({
+            "type": "needs_review",
+            "category": item["category"],
+            "staging_id": item["staging_id"],
+            "brand": item["brand"],
+            "name": item["name"],
+            "priority": "high",
+            "reason": "既存product_masterとの矛盾が検出され自動反映されていない",
+        }, dedup_key=("needs_review", item["identity_key"]))
+
+    return queue
+
+
 def _merge_product_master_with_live_candidate(master_product, live_product):
     """
     同一商品(item_codeが一致)がproduct_masterと楽天ライブ候補の両方に
