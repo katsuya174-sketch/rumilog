@@ -1,0 +1,25 @@
+{
+  "batch_id": "p3-step32-1791293672",
+  "logged_at": "2026-10-06T13:34:42.041857",
+  "count": 3,
+  "products": [
+    {
+      "brand": "ちふれ",
+      "name": "濃厚化粧水",
+      "category": "化粧水",
+      "active_ingredients": []
+    },
+    {
+      "brand": "AMPLEN",
+      "name": "ペプチドショット(2X)美容液",
+      "category": "美容液",
+      "active_ingredients": []
+    },
+    {
+      "brand": "SKINFOOD",
+      "name": "どんぐり ポア ペプチド クリーム",
+      "category": "クリーム",
+      "active_ingredients": []
+    }
+  ]
+}

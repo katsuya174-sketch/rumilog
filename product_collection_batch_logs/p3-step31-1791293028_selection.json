@@ -1,0 +1,43 @@
+{
+  "batch_id": "p3-step31-1791293028",
+  "logged_at": "2026-10-06T13:24:04.754660",
+  "count": 6,
+  "products": [
+    {
+      "brand": "プラスキレイ",
+      "name": "プラスレチAセラム",
+      "category": "美容液",
+      "active_ingredients": []
+    },
+    {
+      "brand": "プラスキレイ",
+      "name": "プラスピュアVC28",
+      "category": "美容液",
+      "active_ingredients": []
+    },
+    {
+      "brand": "ハルメク",
+      "name": "C35プレミアム",
+      "category": "美容液",
+      "active_ingredients": []
+    },
+    {
+      "brand": "ETVOS",
+      "name": "モイスチャライジングローション",
+      "category": "化粧水",
+      "active_ingredients": []
+    },
+    {
+      "brand": "肌ラボ",
+      "name": "極潤 薬用ハリ化粧水",
+      "category": "化粧水",
+      "active_ingredients": []
+    },
+    {
+      "brand": "VT",
+      "name": "レチナール ペプチド カプセルクリーム",
+      "category": "クリーム",
+      "active_ingredients": []
+    }
+  ]
+}
