@@ -1,9 +1,12 @@
-"""Product Master半自動オーケストレーター(Step40)。
+"""Product Master半自動オーケストレーター(Step40/Step41)。
 
 Step39のwork queue(app.generate_product_master_work_queue())を入力として、
 work_type別(coverage_gap/stale_reverification/needs_review)に既存のPhase3
 関数(Stage1/2収集、identity/dedup、reflect、Rakuten resolver)を呼び出して
-構成する。ここでは新しい収集・照合・判定ロジックは一切作らない。
+構成する。coverage_gapの候補探索(candidate_source)は、人間が商品名を指定
+しなくても済むよう、Step41でstaging再利用→DB再利用→Gemini Grounding探索
+のtiered discovery(make_discovery_candidate_source)を既定実装とした。
+ここでは新しい収集・照合・判定ロジックは一切作らない。
 
 安全原則:
 - mode="dry_run"が既定。実行(mode="execute")には呼び出し元の明示指定が必要。
@@ -33,15 +36,13 @@ DEFAULT_MAX_API_CALLS = 20
 DEFAULT_MAX_COST_USD = 0.50
 DEFAULT_MAX_CONSECUTIVE_FAILURES = 3
 
-
-def _default_candidate_source(category, target, limit):
-    """候補探索の既定実装。商品名を自動で発見する機能(Web全体からの
-    ブレインストーミング等)はまだ実装していない(Step37で指摘した未実装
-    機能)。呼び出し元がcandidate_sourceを明示的に注入しない限り、常に
-    空リストを返す(=そのcoverage_gap領域は「候補が見つからない」として
-    処理され、自動で架空の商品名を作ることはない)。
-    """
-    return []
+# Step41: 1coverage領域あたり探索する候補数の絶対上限(shortage_countの値に
+# 関わらず固定)。暴走防止のためで、shortage_count=1でも予備候補を許すが
+# 無制限には増やさない。
+MAX_DISCOVERY_CANDIDATES_PER_AREA = 3
+# Step41: 「最近失敗した同一候補」を再探索・再Gemini投入しないための
+# 遡り期間。
+RECENTLY_FAILED_LOOKBACK_HOURS = 24
 
 
 class BatchBudget:
@@ -112,6 +113,205 @@ def _existing_identity_keys():
     finally:
         conn.close()
     return keys
+
+
+# ===== Step41: Candidate Discovery(商品候補自動探索) =====
+# coverage_gapが発生したとき、人間が商品名を指定しなくても、Stage1へ調査
+# させる候補を自動で見つける。探索順序は固定: ①既存staging/sourceの未反映
+# 候補の再利用 → ②既存DB(load_products()/verified_products_cache)内で
+# まだproduct_masterへ反映されていない利用可能候補 → ③必要な場合のみ
+# Gemini Groundingによる新規探索。
+#
+# ここで見つかった候補はProduct Master情報として一切信用しない。brand/
+# nameだけをStage1→Stage2→citation/validator経路(既存のcollect_one_product
+# 以降)へ渡す「調査対象の提案」に過ぎず、採用判定は既存経路だけで行う。
+
+
+def _category_has_registered_policy(category):
+    """categoryがapp.COVERAGE_POLICIESのどれかに登録されているかを調べる。
+    beauty_device/supplement等、policyが未定義のカテゴリでは勝手な基準で
+    探索を開始しない(合意事項)。"""
+    for policy in app.COVERAGE_POLICIES.values():
+        if any(entry.get("category") == category for entry in policy):
+            return True
+    return False
+
+
+def _recently_failed_identity_keys(hours=RECENTLY_FAILED_LOOKBACK_HOURS):
+    """直近hours時間以内に失敗した(stage1/stage2がokでない、またはconflict
+    needs_review)未reflectの候補のidentity_keyを集める。同一candidateを
+    繰り返し探索・Gemini投入しないための除外集合。"""
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT DISTINCT identity_key FROM product_collection_staging "
+            "WHERE reflected_at IS NULL "
+            "AND created_at >= NOW() - (%s * INTERVAL '1 hour') "
+            "AND (stage1_status != 'ok' OR stage2_status != 'ok' OR conflict_status = 'needs_review')",
+            (hours,),
+        )
+        return {row[0] for row in cur.fetchall() if row[0]}
+    finally:
+        conn.close()
+
+
+def _staging_reuse_candidates(category, target, excluded_keys, limit):
+    """探索順序①: 既存staging(product_collection_staging)の未反映候補を
+    再利用する。過去に別の目的で収集済みの候補が今回のtargetにも合致する
+    場合に、新しいGemini呼び出しを発生させずに再利用する。"""
+    if limit <= 0:
+        return []
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT brand, product_name, stage2_payload, stage1_citations "
+            "FROM product_collection_staging "
+            "WHERE category = %s AND stage2_status = 'ok' "
+            "AND conflict_status IS DISTINCT FROM 'needs_review' AND reflected_at IS NULL "
+            "ORDER BY created_at DESC LIMIT 200",
+            (category,),
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+
+    candidates = []
+    for brand, name, payload, citations in rows:
+        payload = payload or {}
+        ingredient_names = [
+            i.get("ingredient") for i in (payload.get("active_ingredients") or [])
+            if isinstance(i, dict)
+        ]
+        tags = set(app.compute_ingredient_tags(ingredient_names))
+        if target not in tags:
+            continue
+        key = app.make_verified_product_key({"brand": brand, "name": name, "category": category})
+        if key and key in excluded_keys:
+            continue
+        evidence = [c.get("uri") for c in (citations or []) if isinstance(c, dict) and c.get("uri")]
+        if not evidence:
+            continue
+        candidates.append({
+            "brand": brand, "name": name, "category": category,
+            "discovery_source": "staging_reuse",
+            "discovery_evidence": evidence,
+            "target_evidence": f"過去のstaging収集(stage2)でingredient_tag={target}が確認済み",
+        })
+        if key:
+            excluded_keys.add(key)
+        if len(candidates) >= limit:
+            break
+    return candidates
+
+
+def _db_reuse_candidates(category, target, excluded_keys, limit):
+    """探索順序②: 既存DB(load_products()/load_verified_products_cache())
+    内で、まだproduct_masterへ反映されていない利用可能候補を探す。新しい
+    関連性判定ロジックは作らず、coverage報告と同じscore_product()/
+    _is_relevant_scored_candidate()をそのまま再利用する。"""
+    if limit <= 0:
+        return []
+    category_norm = app.normalize_candidate_category(category, fallback=category)
+    pool = app.load_products() + app.load_verified_products_cache()
+    step = {"category": category, "purpose": "", "ingredient_focus": target}
+
+    candidates = []
+    for p in pool:
+        if not isinstance(p, dict):
+            continue
+        if app.normalize_candidate_category(p.get("category", ""), fallback=p.get("category", "")) != category_norm:
+            continue
+        key = app.make_verified_product_key(p)
+        if not key or key in excluded_keys:
+            continue
+        reasons = []
+        score = app.score_product(
+            dict(p), step, app._EFFECTIVE_CANDIDATE_NEUTRAL_USER_DATA,
+            app._EFFECTIVE_CANDIDATE_BUDGET_VALUE, reasons=reasons,
+        )
+        if not app._is_relevant_scored_candidate(score, reasons, target):
+            continue
+        candidates.append({
+            "brand": p.get("brand", ""), "name": p.get("name", ""), "category": category,
+            "discovery_source": "db_reuse",
+            "discovery_evidence": ["internal_product_db"],
+            "target_evidence": f"既存DB内でingredient_focus={target}に関連性ありと判定済み",
+        })
+        excluded_keys.add(key)
+        if len(candidates) >= limit:
+            break
+    return candidates
+
+
+def _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limit):
+    """探索順序③: 既存staging/DBで候補が埋まらない場合のみ、Gemini
+    Groundingによる新規探索(product_collection_pipeline.
+    discover_candidates_via_gemini、Step41)を行う。ここで見つかった情報は
+    Product Masterへの正式採用根拠にはしない。API呼び出し・費用は既存の
+    record_usage_and_check_limit()経由でbatch_idに記録され、BatchBudget
+    の集計にそのまま含まれる(別の費用計算は作らない)。"""
+    if limit <= 0:
+        return []
+    raw_candidates = pipeline.discover_candidates_via_gemini(category, target, batch_id, max_candidates=limit)
+
+    candidates = []
+    for c in raw_candidates:
+        if not isinstance(c, dict):
+            continue
+        brand = str(c.get("brand", "") or "").strip()
+        name = str(c.get("product_name", "") or "").strip()
+        source_url = str(c.get("source_url", "") or "").strip()
+        if not brand or not name or not source_url:
+            continue
+        key = app.make_verified_product_key({"brand": brand, "name": name, "category": category})
+        if key and key in excluded_keys:
+            continue
+        candidates.append({
+            "brand": brand, "name": name, "category": category,
+            "discovery_source": "gemini_grounding",
+            "discovery_evidence": [source_url],
+            "target_evidence": c.get("target_evidence", "unknown"),
+        })
+        if key:
+            excluded_keys.add(key)
+        if len(candidates) >= limit:
+            break
+    return candidates
+
+
+def make_discovery_candidate_source(batch_id, budget, mode):
+    """Step41: run_batch()の既定candidate_source。探索順序は固定で
+    ①staging再利用 → ②DB再利用 → ③(必要な場合のみ)Gemini Grounding探索。
+    beauty_device/supplement等、coverage policy(app.COVERAGE_POLICIES)が
+    未定義のカテゴリでは何も探索しない。mode="dry_run"ではGemini呼び出し
+    (③)を一切行わない(①②は既存DBの読み取りのみで安全)。
+    """
+    def candidate_source(category, target, limit):
+        limit = min(int(limit) if limit else 0, MAX_DISCOVERY_CANDIDATES_PER_AREA)
+        if limit <= 0:
+            return []
+        if not _category_has_registered_policy(category):
+            return []
+
+        excluded_keys = _existing_identity_keys() | _recently_failed_identity_keys()
+
+        candidates = []
+        candidates.extend(_staging_reuse_candidates(category, target, excluded_keys, limit - len(candidates)))
+        if len(candidates) < limit:
+            candidates.extend(_db_reuse_candidates(category, target, excluded_keys, limit - len(candidates)))
+        if len(candidates) < limit and mode == "execute" and budget.can_continue():
+            candidates.extend(
+                _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limit - len(candidates))
+            )
+
+        # discovery evidenceの無い候補は正式な提案として扱わない(採用判定は
+        # 既存のStage1→Stage2→citation/validator経路に委ねるにしても、
+        # 「何を調査すべきか」の根拠自体が無い候補はStage1にも回さない)。
+        return [c for c in candidates if c.get("discovery_evidence")][:limit]
+
+    return candidate_source
 
 
 def _product_master_lookup(brand, name, category):
@@ -201,7 +401,11 @@ def _resolve_item_code_safely(product_id, brand, name, category):
 def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
                                max_consecutive_failures, existing_keys):
     category, target, shortage = item["category"], item["target"], item["shortage_count"]
-    candidates = candidate_source(category, target, shortage)
+    # Step41: shortage_count=1だから候補も1件だけ、とはしない。候補失敗を
+    # 考慮して少数の予備候補を許可するが、1領域最大MAX_DISCOVERY_CANDIDATES_
+    # PER_AREA件という暴走防止の上限はshortage_countに関わらず固定する
+    # (実際に反映する件数はshortageで変わらず下のreflected_count判定が担う)。
+    candidates = candidate_source(category, target, MAX_DISCOVERY_CANDIDATES_PER_AREA)
 
     actions = []
     consecutive_failures = 0
@@ -377,7 +581,6 @@ def run_batch(coverage_policy_name="cosmetics", mode="dry_run", candidate_source
     if mode not in ("dry_run", "execute"):
         raise ValueError(f"invalid mode: {mode!r} (must be 'dry_run' or 'execute')")
 
-    candidate_source = candidate_source or _default_candidate_source
     batch_id = batch_id or f"orchestrator-{int(time.time())}"
 
     work_queue = app.generate_product_master_work_queue(
@@ -385,6 +588,10 @@ def run_batch(coverage_policy_name="cosmetics", mode="dry_run", candidate_source
     )
 
     budget = BatchBudget(batch_id, max_products_per_batch, max_api_calls, max_cost_usd)
+    # Step41: candidate_sourceが明示注入されない場合の既定実装は、商品名を
+    # 常に空リストで返す_default_candidate_source(Step40)ではなく、
+    # staging再利用→DB再利用→Gemini Grounding探索のtiered discoveryとする。
+    candidate_source = candidate_source or make_discovery_candidate_source(batch_id, budget, mode)
     existing_keys = set()
     if mode == "execute":
         pipeline.init_product_collection_tables()

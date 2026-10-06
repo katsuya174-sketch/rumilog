@@ -55,13 +55,33 @@ def _fake_stage1_response(text="検索結果に基づく回答", citations=None,
     return response
 
 
-def make_mock_call_gemini(candidate_configs):
+def make_mock_call_gemini(candidate_configs, discovery_configs=None):
     """candidate_configs: {"brand name": {"stage1": {...}, "stage2_payload": {...}}}
     promptの文字列に"brand name"が含まれるかでどの候補の呼び出しかを判定し、
     config(response_schemaの有無)でstage1/stage2を判定する。
+
+    discovery_configs(Step41): {(category, target): {"search": {...},
+    "candidates": [...]}}。Candidate Discovery(③Gemini Grounding探索)の
+    build_discovery_prompt/build_discovery_structuring_promptが両方
+    含む"カテゴリ: {category}"を手がかりに判定する(brand/nameを含まない
+    探索専用のプロンプト形なので、既存のcandidate_configs判定とは別に
+    先に判定する)。
     """
+    discovery_configs = discovery_configs or {}
+
     def _mock(model, contents, config=None, max_retries=2, timeout=60):
         is_stage2 = config is not None and getattr(config, "response_schema", None) is not None
+        for (category, target), cfg in discovery_configs.items():
+            if f"カテゴリ: {category}" in contents and target in contents:
+                if is_stage2:
+                    return _fake_response(json.dumps({"candidates": cfg.get("candidates", [])}))
+                search_cfg = cfg.get("search", {})
+                return _fake_stage1_response(
+                    text=search_cfg.get("text", "検索結果に基づく回答"),
+                    citations=search_cfg.get("citations"),
+                    queries=search_cfg.get("queries"),
+                )
+
         matched = None
         for key, cfg in candidate_configs.items():
             if key in contents:
@@ -127,6 +147,34 @@ class OrchestratorTestBase(unittest.TestCase):
                 (identity_key,),
             )
             return cur.fetchone()
+        finally:
+            conn.close()
+
+    def _insert_staging_row(self, batch_id, brand, name, category, stage2_payload,
+                             citations=None, stage1_status="ok", stage2_status="ok",
+                             conflict_status="none", reflected_at=None, created_at=None):
+        """Candidate Discovery(Step41)の①staging再利用/②最近失敗した候補
+        除外のテスト用に、product_collection_stagingへ直接行を挿入する
+        (test_product_master.pyの_insert_stagingと同じ既存パターン)。"""
+        identity_key = app._normalize_product_master_identity_key(brand, name, category)
+        citations = citations if citations is not None else []
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO product_collection_staging
+                    (batch_id, brand, product_name, category, identity_key,
+                     stage1_status, stage1_citations, stage2_status, stage2_payload,
+                     conflict_status, conflict_detail, reflected_at, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, '[]', %s,
+                        COALESCE(%s, CURRENT_TIMESTAMP))
+                """,
+                (batch_id, brand, name, category, identity_key, stage1_status,
+                 json.dumps(citations), stage2_status, json.dumps(stage2_payload),
+                 conflict_status, reflected_at, created_at),
+            )
+            conn.commit()
         finally:
             conn.close()
 
@@ -631,6 +679,362 @@ class StaleReverificationTests(OrchestratorTestBase):
             result = orchestrator.run_batch(mode="execute", batch_id=batch_id)
 
         self.assertEqual(result["actions"][0]["action"], "needs_review")
+
+
+class CandidateDiscoveryStagingReuseTests(OrchestratorTestBase):
+    """Step41 探索順序①: 既存staging/sourceの未反映候補を再利用し、
+    Discovery API(Gemini)を呼ばないことを確認する。"""
+
+    def test_staging_candidate_reused_without_discovery_api_call(self):
+        category, target = "美容液", "vitamin_c"
+        batch_id = self._new_batch_id("stagingreuse")
+        brand, name = f"ステ探索{TEST_NAME_SUFFIX}", f"商品ステ探索{TEST_NAME_SUFFIX}"
+        self._insert_staging_row(
+            batch_id, brand, name, category,
+            stage2_payload={
+                "active_ingredients": [{"ingredient": "アスコルビン酸", "concentration": "unknown"}],
+                "official_source_confirmed": True,
+            },
+            citations=[{"uri": "https://official.example.com/staged", "title": brand}],
+        )
+
+        with patch.object(pipeline, "call_gemini_for_collection",
+                           side_effect=AssertionError("staging再利用時はDiscovery APIを呼ばないはず")):
+            budget = orchestrator.BatchBudget(batch_id, 10, 20, 0.50)
+            candidate_source = orchestrator.make_discovery_candidate_source(batch_id, budget, "execute")
+            result = candidate_source(category, target, 3)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["brand"], brand)
+        self.assertEqual(result[0]["name"], name)
+        self.assertEqual(result[0]["discovery_source"], "staging_reuse")
+        self.assertTrue(result[0]["discovery_evidence"])
+
+    def test_staging_candidate_with_unrelated_target_is_not_reused(self):
+        category = "美容液"
+        batch_id = self._new_batch_id("stagingreuse-unrelated")
+        brand, name = f"ステ無関係{TEST_NAME_SUFFIX}", f"商品ステ無関係{TEST_NAME_SUFFIX}"
+        self._insert_staging_row(
+            batch_id, brand, name, category,
+            stage2_payload={
+                "active_ingredients": [{"ingredient": "セラミド", "concentration": "unknown"}],
+                "official_source_confirmed": True,
+            },
+            citations=[{"uri": "https://official.example.com/staged2", "title": brand}],
+        )
+
+        budget = orchestrator.BatchBudget(batch_id, 10, 20, 0.50)
+        result = orchestrator._staging_reuse_candidates(category, "vitamin_c", set(), 3)
+        names = [c["name"] for c in result]
+        self.assertNotIn(name, names)
+
+
+class CandidateDiscoveryDbReuseTests(OrchestratorTestBase):
+    """Step41 探索順序②: 既存DB(load_products/verified_products_cache)内の
+    まだproduct_masterへ反映されていない利用可能候補を再利用する。"""
+
+    def test_db_product_relevant_to_target_is_reused(self):
+        category, target = "美容液", "vitamin_c"
+        brand, name = f"DB探索{TEST_NAME_SUFFIX}", f"商品DB探索{TEST_NAME_SUFFIX}"
+        fake_db_product = {
+            "brand": brand, "name": name, "category": category,
+            # load_products()/verified_products_cacheは既に統制タグ形式
+            # (normalize_ingredient_tag()の出力そのもの)でactive_ingredients
+            # を保持する(products.jsonの実データと同じ形式)。
+            "active_ingredients": ["vitamin_c"], "price_ref": 2000,
+        }
+        with patch.object(app, "load_products", return_value=[fake_db_product]), \
+             patch.object(app, "load_verified_products_cache", return_value=[]):
+            result = orchestrator._db_reuse_candidates(category, target, set(), 3)
+
+        names = [c["name"] for c in result]
+        self.assertIn(name, names)
+        match = next(c for c in result if c["name"] == name)
+        self.assertEqual(match["discovery_source"], "db_reuse")
+        self.assertTrue(match["discovery_evidence"])
+
+    def test_db_product_already_in_excluded_keys_is_not_reused(self):
+        category, target = "美容液", "vitamin_c"
+        brand, name = f"DB重複{TEST_NAME_SUFFIX}", f"商品DB重複{TEST_NAME_SUFFIX}"
+        fake_db_product = {
+            "brand": brand, "name": name, "category": category,
+            "active_ingredients": ["vitamin_c"], "price_ref": 2000,
+        }
+        key = app.make_verified_product_key(fake_db_product)
+        with patch.object(app, "load_products", return_value=[fake_db_product]), \
+             patch.object(app, "load_verified_products_cache", return_value=[]):
+            result = orchestrator._db_reuse_candidates(category, target, {key}, 3)
+
+        self.assertEqual(result, [])
+
+
+class CandidateDiscoveryGeminiTierTests(OrchestratorTestBase):
+    """Step41 探索順序③: staging/DBで埋まらない場合のみGemini Groundingで
+    探索し、見つかった候補はcitation検証済みのdiscovery evidenceを持つ。"""
+
+    def test_gemini_discovery_returns_evidence_backed_candidates(self):
+        category, target = "美容液", "vitamin_c"
+        batch_id = self._new_batch_id("geminidisc")
+        brand, name = f"発見{TEST_NAME_SUFFIX}", f"商品発見{TEST_NAME_SUFFIX}"
+        mock_gemini = make_mock_call_gemini({}, discovery_configs={
+            (category, target): {
+                "search": {"text": f"{brand}の{name}はビタミンC配合",
+                            "citations": [{"uri": "https://official.example.com/found", "title": "found"}]},
+                "candidates": [
+                    {"brand": brand, "product_name": name, "target_evidence": "ビタミンC配合を確認",
+                     "source_url": "https://official.example.com/found"},
+                ],
+            },
+        })
+        with patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini):
+            result = orchestrator._gemini_discovery_candidates(category, target, batch_id, set(), 3)
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["brand"], brand)
+        self.assertEqual(result[0]["name"], name)
+        self.assertEqual(result[0]["discovery_source"], "gemini_grounding")
+        self.assertEqual(result[0]["discovery_evidence"], ["https://official.example.com/found"])
+
+    def test_gemini_discovery_candidate_missing_source_url_is_dropped(self):
+        category, target = "美容液", "vitamin_c"
+        batch_id = self._new_batch_id("geminidisc-nourl")
+        with patch.object(pipeline, "discover_candidates_via_gemini", return_value=[
+            {"brand": "欠落", "product_name": "欠落商品", "target_evidence": "unknown", "source_url": ""},
+        ]):
+            result = orchestrator._gemini_discovery_candidates(category, target, batch_id, set(), 3)
+        self.assertEqual(result, [])
+
+    def test_gemini_discovery_candidate_already_excluded_is_dropped(self):
+        category, target = "美容液", "vitamin_c"
+        batch_id = self._new_batch_id("geminidisc-dup")
+        brand, name = f"既存{TEST_NAME_SUFFIX}", f"商品既存{TEST_NAME_SUFFIX}"
+        key = app.make_verified_product_key({"brand": brand, "name": name, "category": category})
+        with patch.object(pipeline, "discover_candidates_via_gemini", return_value=[
+            {"brand": brand, "product_name": name, "target_evidence": "x",
+             "source_url": "https://official.example.com/x"},
+        ]):
+            result = orchestrator._gemini_discovery_candidates(category, target, batch_id, {key}, 3)
+        self.assertEqual(result, [])
+
+
+class CandidateDiscoveryExclusionTests(OrchestratorTestBase):
+    """Step41: identity重複商品・最近失敗した同一候補をStage1実行前に除外
+    することを確認する。"""
+
+    def test_identity_duplicate_excluded_from_staging_reuse(self):
+        category, target = "美容液", "vitamin_c"
+        batch_id = self._new_batch_id("dupexclude")
+        brand, name = f"重複{TEST_NAME_SUFFIX}", f"商品重複{TEST_NAME_SUFFIX}"
+        self._insert_staging_row(
+            batch_id, brand, name, category,
+            stage2_payload={"active_ingredients": [{"ingredient": "アスコルビン酸"}],
+                             "official_source_confirmed": True},
+            citations=[{"uri": "https://official.example.com/dup", "title": brand}],
+        )
+        key = app.make_verified_product_key({"brand": brand, "name": name, "category": category})
+        result = orchestrator._staging_reuse_candidates(category, target, {key}, 3)
+        self.assertEqual(result, [])
+
+    def test_recently_failed_identity_is_detected(self):
+        batch_id = self._new_batch_id("recentfail")
+        brand, name, category = f"失敗{TEST_NAME_SUFFIX}", f"商品失敗{TEST_NAME_SUFFIX}", "美容液"
+        self._insert_staging_row(
+            batch_id, brand, name, category,
+            stage2_payload={}, stage2_status="failed", conflict_status="none",
+        )
+        identity_key = app._normalize_product_master_identity_key(brand, name, category)
+        failed_keys = orchestrator._recently_failed_identity_keys(hours=24)
+        self.assertIn(identity_key, failed_keys)
+
+    def test_old_failed_identity_outside_lookback_is_not_detected(self):
+        batch_id = self._new_batch_id("oldfail")
+        brand, name, category = f"古い失敗{TEST_NAME_SUFFIX}", f"商品古い失敗{TEST_NAME_SUFFIX}", "美容液"
+        old_ts = time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(time.time() - 48 * 60 * 60))
+        self._insert_staging_row(
+            batch_id, brand, name, category,
+            stage2_payload={}, stage2_status="failed", conflict_status="none",
+            created_at=old_ts,
+        )
+        identity_key = app._normalize_product_master_identity_key(brand, name, category)
+        failed_keys = orchestrator._recently_failed_identity_keys(hours=24)
+        self.assertNotIn(identity_key, failed_keys)
+
+    def test_recently_failed_identity_excluded_from_gemini_tier(self):
+        category, target = "美容液", "vitamin_c"
+        batch_id = self._new_batch_id("recentfail-gemini")
+        brand, name = f"失敗再探索{TEST_NAME_SUFFIX}", f"商品失敗再探索{TEST_NAME_SUFFIX}"
+        self._insert_staging_row(
+            batch_id, brand, name, category,
+            stage2_payload={}, stage2_status="failed", conflict_status="none",
+        )
+
+        budget = orchestrator.BatchBudget(batch_id, 10, 20, 0.50)
+        with patch.object(orchestrator, "_staging_reuse_candidates", return_value=[]), \
+             patch.object(orchestrator, "_db_reuse_candidates", return_value=[]), \
+             patch.object(orchestrator, "_existing_identity_keys", return_value=set()), \
+             patch.object(pipeline, "discover_candidates_via_gemini", return_value=[
+                 {"brand": brand, "product_name": name, "target_evidence": "x",
+                  "source_url": "https://official.example.com/x"},
+             ]):
+            candidate_source = orchestrator.make_discovery_candidate_source(batch_id, budget, "execute")
+            result = candidate_source(category, target, 3)
+
+        self.assertEqual(result, [])
+
+
+class CandidateDiscoveryCapAndEvidenceTests(OrchestratorTestBase):
+    """Step41 暴走防止: shortage_countに関わらず1領域最大
+    MAX_DISCOVERY_CANDIDATES_PER_AREA件、discovery evidenceの無い候補は
+    破棄することを確認する。"""
+
+    def test_candidates_capped_at_max_per_area_even_if_more_available(self):
+        category, target = "美容液", "vitamin_c"
+        batch_id = self._new_batch_id("cap")
+        fake_candidates = [
+            {"brand": f"候補{i}{TEST_NAME_SUFFIX}", "name": f"商品{i}{TEST_NAME_SUFFIX}", "category": category,
+             "discovery_source": "staging_reuse", "discovery_evidence": ["https://x"], "target_evidence": "x"}
+            for i in range(5)
+        ]
+        budget = orchestrator.BatchBudget(batch_id, 10, 20, 0.50)
+        with patch.object(orchestrator, "_staging_reuse_candidates", return_value=fake_candidates), \
+             patch.object(orchestrator, "_db_reuse_candidates", side_effect=AssertionError("tier1だけで埋まるはず")), \
+             patch.object(pipeline, "discover_candidates_via_gemini",
+                           side_effect=AssertionError("tier1だけで埋まるはず")), \
+             patch.object(orchestrator, "_existing_identity_keys", return_value=set()):
+            candidate_source = orchestrator.make_discovery_candidate_source(batch_id, budget, "execute")
+            result = candidate_source(category, target, 10)
+
+        self.assertEqual(len(result), orchestrator.MAX_DISCOVERY_CANDIDATES_PER_AREA)
+
+    def test_candidate_without_discovery_evidence_is_dropped(self):
+        category, target = "美容液", "vitamin_c"
+        batch_id = self._new_batch_id("noevidence")
+        no_evidence_candidate = {
+            "brand": f"根拠無{TEST_NAME_SUFFIX}", "name": f"商品根拠無{TEST_NAME_SUFFIX}", "category": category,
+            "discovery_source": "staging_reuse", "discovery_evidence": [],
+        }
+        budget = orchestrator.BatchBudget(batch_id, 10, 20, 0.50)
+        with patch.object(orchestrator, "_staging_reuse_candidates", return_value=[no_evidence_candidate]), \
+             patch.object(orchestrator, "_db_reuse_candidates", return_value=[]), \
+             patch.object(orchestrator, "_existing_identity_keys", return_value=set()):
+            candidate_source = orchestrator.make_discovery_candidate_source(batch_id, budget, "execute")
+            result = candidate_source(category, target, 3)
+
+        self.assertEqual(result, [])
+
+
+class CandidateDiscoveryPolicyGuardTests(OrchestratorTestBase):
+    """Step41: beauty_device/supplement等、coverage policyが未定義の
+    カテゴリでは勝手な基準で探索を開始しないことを確認する。"""
+
+    def _assert_never_explores(self, category):
+        batch_id = self._new_batch_id("nopolicy")
+        budget = orchestrator.BatchBudget(batch_id, 10, 20, 0.50)
+        with patch.object(orchestrator, "_staging_reuse_candidates",
+                           side_effect=AssertionError("policy未定義カテゴリでは探索しないはず")), \
+             patch.object(orchestrator, "_db_reuse_candidates",
+                           side_effect=AssertionError("policy未定義カテゴリでは探索しないはず")), \
+             patch.object(pipeline, "call_gemini_for_collection",
+                           side_effect=AssertionError("policy未定義カテゴリでは探索しないはず")):
+            candidate_source = orchestrator.make_discovery_candidate_source(batch_id, budget, "execute")
+            result = candidate_source(category, "anything", 3)
+        self.assertEqual(result, [])
+
+    def test_beauty_device_without_policy_never_explores(self):
+        self.assertFalse(orchestrator._category_has_registered_policy("美容機器"))
+        self._assert_never_explores("美容機器")
+
+    def test_supplement_without_policy_never_explores(self):
+        self._assert_never_explores("サプリメント")
+
+    def test_category_policy_registration_lookup(self):
+        self.assertTrue(orchestrator._category_has_registered_policy("美容液"))
+        self.assertFalse(orchestrator._category_has_registered_policy("美容機器"))
+        self.assertFalse(orchestrator._category_has_registered_policy("サプリメント"))
+
+
+class CandidateDiscoveryBudgetAndModeGateTests(OrchestratorTestBase):
+    """Step41 暴走防止/安全ゲート: API・費用上限に達したらGemini探索を
+    スキップし、dry-runでは探索自体に副作用(Gemini呼び出し)が無いことを
+    確認する。"""
+
+    def test_gemini_tier_skipped_when_budget_exhausted(self):
+        category, target = "美容液", "vitamin_c"
+        batch_id = self._new_batch_id("budgetexhausted")
+        budget = orchestrator.BatchBudget(batch_id, 0, 20, 0.50)  # max_products=0 -> can_continue()は常にFalse
+        with patch.object(orchestrator, "_staging_reuse_candidates", return_value=[]), \
+             patch.object(orchestrator, "_db_reuse_candidates", return_value=[]), \
+             patch.object(orchestrator, "_existing_identity_keys", return_value=set()), \
+             patch.object(pipeline, "discover_candidates_via_gemini",
+                           side_effect=AssertionError("budget超過時はGemini探索しないはず")):
+            candidate_source = orchestrator.make_discovery_candidate_source(batch_id, budget, "execute")
+            result = candidate_source(category, target, 3)
+        self.assertEqual(result, [])
+        self.assertFalse(budget.can_continue())
+
+    def test_dry_run_mode_never_invokes_gemini_tier(self):
+        category, target = "美容液", "vitamin_c"
+        batch_id = self._new_batch_id("dryrundisc")
+        budget = orchestrator.BatchBudget(batch_id, 10, 20, 0.50)
+        with patch.object(orchestrator, "_staging_reuse_candidates", return_value=[]), \
+             patch.object(orchestrator, "_db_reuse_candidates", return_value=[]), \
+             patch.object(orchestrator, "_existing_identity_keys", return_value=set()), \
+             patch.object(pipeline, "discover_candidates_via_gemini",
+                           side_effect=AssertionError("dry_runではGemini探索しないはず")):
+            candidate_source = orchestrator.make_discovery_candidate_source(batch_id, budget, "dry_run")
+            result = candidate_source(category, target, 3)
+        self.assertEqual(result, [])
+
+
+class CandidateDiscoveryStep40WiringTests(OrchestratorTestBase):
+    """Step41とStep40の接続: coverage_gap work item -> 候補自動発見
+    (candidate_source未指定=既定のtiered discovery) -> process_coverage_gap_
+    item -> Stage1/2/validator/reflectの既存経路、というE2Eを確認する。"""
+
+    def test_coverage_gap_discovers_via_gemini_and_flows_into_reflect(self):
+        category, target = "美容液", "vitamin_c"
+        batch_id = self._new_batch_id("wiring")
+        brand, name = f"配線{TEST_NAME_SUFFIX}", f"商品配線{TEST_NAME_SUFFIX}"
+
+        mock_gemini = make_mock_call_gemini(
+            candidate_configs={
+                f"{brand} {name}": {
+                    "stage1": {"text": "アスコルビン酸配合を確認",
+                               "citations": [{"uri": "https://official.example.com/collect", "title": brand}]},
+                    "stage2_payload": {
+                        "active_ingredients": [
+                            {"ingredient": "アスコルビン酸", "concentration": "unknown",
+                             "confidence": "high", "source_url": "https://official.example.com/collect"},
+                        ],
+                        "formulation_features": [], "official_source_confirmed": True,
+                    },
+                },
+            },
+            discovery_configs={
+                (category, target): {
+                    "search": {"text": f"{brand}の{name}はビタミンC配合",
+                                "citations": [{"uri": "https://official.example.com/found", "title": "found"}]},
+                    "candidates": [
+                        {"brand": brand, "product_name": name, "target_evidence": "ビタミンC配合を確認",
+                         "source_url": "https://official.example.com/found"},
+                    ],
+                },
+            },
+        )
+
+        item = {
+            "type": "coverage_gap", "category": category, "target": target,
+            "shortage_count": 1, "priority": "high", "reason": "test",
+        }
+        with patch.object(app, "generate_product_master_work_queue", return_value=[item]), \
+             patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini), \
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+            # candidate_sourceを明示指定しない -> Step41の既定tiered discoveryを使う
+            result = orchestrator.run_batch(mode="execute", batch_id=batch_id)
+
+        action_types = [a["action"] for a in result["actions"]]
+        self.assertIn("reflected", action_types)
+        self.assertIsNotNone(self._product_master_row(brand, name, category))
 
 
 if __name__ == "__main__":

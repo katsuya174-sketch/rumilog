@@ -566,6 +566,185 @@ def run_stage2_structuring(brand, product_name, stage1_result, batch_id):
     return {"status": "ok", "payload": sanitized, "usage_result": usage_result}
 
 
+# ===== Candidate Discovery(Step41): coverage_gapに対する商品候補の自動探索 =====
+# Stage1/2と全く同じ安全パターン(Google Search Grounding→citation検証付き
+# 構造化抽出)を、"既知の1商品を検証する"用途ではなく"条件を満たす候補を
+# 複数見つける"用途に適用しただけで、新しいAPI・新しい信頼モデルは導入
+# していない。ここで見つかった候補はProduct Masterへの正式採用根拠には
+# ならず、既存のStage1→Stage2→citation/validator経路で改めて個別に検証
+# されるまでは「調査対象の提案」に過ぎない(合意事項)。
+
+def build_discovery_prompt(category, target):
+    return f"""あなたは化粧品・スキンケア・美容関連製品の情報調査アシスタントです。
+以下の条件を満たす、日本国内で実際に販売されている市販品を、最大3件まで
+Web検索で調査してください。
+
+カテゴリ: {category}
+条件: 「{target}」に該当する成分・特徴を配合していることが、メーカー公式
+サイト等の情報で確認できる商品。
+
+必ず検索を実行し、その結果に基づいて回答してください。検索せずに一般的な
+知識だけで回答することは禁止します。
+
+厳守事項:
+- 実際に検索して見つかった、実在する商品のみを挙げること。架空の商品名・
+  存在が確認できない商品名を作ってはならない。
+- 各商品について、ブランド名・正式な製品名・該当成分/条件が確認できた
+  根拠の要約を記述すること。
+- 条件を満たす商品が1件も見つからない場合は、無理に挙げず「見つかりません
+  でした」と回答すること。
+- 楽天市場等の販売実績だけでは商品の成分・条件適合の根拠にはしないこと
+  (販売の有無と、条件(成分等)の確認は別の情報源で行うこと)。"""
+
+
+def run_discovery_search(category, target, batch_id):
+    """Stage1と同じ安全パターン(Google Search Grounding、検索証拠が無い
+    場合はno_search_evidenceで失敗扱い)で、候補となる実在商品をWeb検索する。
+    """
+    prompt = build_discovery_prompt(category, target)
+    config = types.GenerateContentConfig(
+        tools=[types.Tool(google_search=types.GoogleSearch())],
+    )
+    label = f"discovery:{category}:{target}"
+
+    try:
+        response = call_gemini_for_collection(
+            STAGE1_MODEL, prompt, config=config, max_retries=1, timeout=60,
+        )
+    except Exception as e:
+        print(f"[DISCOVERY SEARCH ERROR] {label}: {repr(e)}", flush=True)
+        return {"status": "error", "error": repr(e), "raw_text": "", "citations": [], "search_queries": []}
+
+    grounding = poc.extract_grounding_summary(response)
+    usage = poc.extract_usage_summary(response)
+    usage_result = record_usage_and_check_limit(
+        batch_id, label, "discovery_search", STAGE1_MODEL, usage,
+        grounding_used=bool(grounding["sources"]),
+        search_query_count=len(grounding["web_search_queries"]),
+    )
+
+    has_evidence = bool(grounding["web_search_queries"] or grounding["sources"])
+    result = {
+        "status": "ok" if has_evidence else "no_search_evidence",
+        "raw_text": getattr(response, "text", "") or "",
+        "citations": grounding["sources"],
+        "search_queries": grounding["web_search_queries"],
+        "usage_result": usage_result,
+    }
+    if not has_evidence:
+        print(f"[DISCOVERY NO SEARCH EVIDENCE] {label}: 失敗扱い", flush=True)
+    return result
+
+
+def build_discovery_structuring_prompt(category, target, discovery_text, citations):
+    citation_lines = "\n".join(f"- {c['uri']} ({c.get('title', '')})" for c in citations) or "(なし)"
+    return f"""以下はステージ1で実際にWeb検索を行って得られた、商品候補の
+調査結果です。この内容に書かれている情報のみを使って、指定のJSON形式へ
+構造化してください。
+
+カテゴリ: {category}
+条件: {target}
+
+【調査結果(検索に基づく)】
+{discovery_text}
+
+【実際に確認された出典URL一覧(これ以外のURLは一切使用禁止)】
+{citation_lines}
+
+厳守事項:
+- 上記の調査結果に明記されていない商品・成分情報を推測・補完することは
+  絶対禁止。見つからなかった場合はcandidates=[](空配列)とする。
+- 各候補のsource_urlには、上記の出典URL一覧に実在するURLをそのまま使用
+  すること。一覧に無いURLを生成することは絶対禁止。"""
+
+
+def build_discovery_response_schema():
+    candidate_schema = types.Schema(
+        type="OBJECT",
+        properties={
+            "brand": types.Schema(type="STRING"),
+            "product_name": types.Schema(type="STRING"),
+            "target_evidence": types.Schema(
+                type="STRING",
+                description="該当成分/条件が確認できた根拠の要約(不明な場合は'unknown')",
+            ),
+            "source_url": types.Schema(type="STRING"),
+        },
+        required=["brand", "product_name", "target_evidence", "source_url"],
+    )
+    return types.Schema(
+        type="OBJECT",
+        properties={"candidates": types.Schema(type="ARRAY", items=candidate_schema)},
+        required=["candidates"],
+    )
+
+
+def run_discovery_structuring(category, target, discovery_result, batch_id):
+    """Stage2と同じ安全パターンで、discovery検索結果を候補リストへ構造化
+    する。citationに存在しないsource_urlの候補は丸ごと破棄する
+    (sanitize_stage2_payloadと同じ考え方)。"""
+    label = f"discovery:{category}:{target}"
+    if discovery_result.get("status") != "ok":
+        return {"status": "skipped", "reason": discovery_result.get("status"), "payload": None}
+
+    prompt = build_discovery_structuring_prompt(
+        category, target, discovery_result["raw_text"], discovery_result["citations"],
+    )
+    config = types.GenerateContentConfig(
+        response_mime_type="application/json",
+        response_schema=build_discovery_response_schema(),
+    )
+
+    try:
+        response = call_gemini_for_collection(
+            STAGE2_MODEL, prompt, config=config, max_retries=1, timeout=60,
+        )
+    except Exception as e:
+        print(f"[DISCOVERY STRUCTURING ERROR] {label}: {repr(e)}", flush=True)
+        return {"status": "error", "error": repr(e), "payload": None}
+
+    usage = poc.extract_usage_summary(response)
+    usage_result = record_usage_and_check_limit(
+        batch_id, label, "discovery_structuring", STAGE2_MODEL, usage, grounding_used=False,
+    )
+
+    try:
+        parsed = json.loads(response.text)
+    except Exception as e:
+        print(f"[DISCOVERY STRUCTURING PARSE ERROR] {label}: {repr(e)}", flush=True)
+        return {"status": "error", "error": repr(e), "payload": None, "usage_result": usage_result}
+
+    valid_urls = {c["uri"] for c in discovery_result["citations"]}
+    raw_candidates = parsed.get("candidates") or []
+    candidates = [
+        c for c in raw_candidates
+        if isinstance(c, dict)
+        and c.get("source_url") in valid_urls
+        and str(c.get("brand", "") or "").strip()
+        and str(c.get("product_name", "") or "").strip()
+    ]
+    return {"status": "ok", "payload": {"candidates": candidates}, "usage_result": usage_result}
+
+
+def discover_candidates_via_gemini(category, target, batch_id, max_candidates=3):
+    """Gemini Groundingによる候補探索の一括呼び出し(search→structuring)。
+    戻り値はcitation検証済みの候補リストで、各要素はdiscovery evidence
+    (source_url)とtarget_evidenceを持つ。ここで見つかった情報はProduct
+    Masterへの正式採用根拠にはしない(呼び出し元が既存のStage1→Stage2→
+    citation/validator経路へ個別に回して初めて正式採用を判断する)。
+    """
+    discovery_result = run_discovery_search(category, target, batch_id)
+    if discovery_result.get("status") != "ok":
+        return []
+
+    structuring_result = run_discovery_structuring(category, target, discovery_result, batch_id)
+    if structuring_result.get("status") != "ok":
+        return []
+
+    candidates = (structuring_result.get("payload") or {}).get("candidates") or []
+    return candidates[:max_candidates]
+
+
 # ===== identity照合・conflict検出 =====
 
 def detect_conflicts(staged_payload, existing_product):
