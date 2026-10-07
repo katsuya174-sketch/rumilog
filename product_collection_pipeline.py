@@ -24,6 +24,7 @@ import hashlib
 import json
 import re
 import time
+import unicodedata
 from datetime import datetime
 
 import psycopg2
@@ -702,24 +703,98 @@ def match_citation_url(url, valid_citation_urls):
     return None
 
 
+# Step45.3: 公式情報源判定。Stage1の実citation(Google Search Groundingの
+# grounding_chunks)だけを根拠に決定論的に判定する。固定のブランド→ドメイン
+# 対応表・類似度判定・部分文字列だけの緩いドメイン一致・Gemini自身の主張は
+# 使わない。比較時の正規化はUnicode正規化(NFKC)・大文字小文字・空白・
+# ブランド名に通常含まれる区切り記号の除去だけにとどめる。
+# Groundingのcitation URLはリダイレクトURL(最終ドメインを安全に確定できない)
+# のため使わない。titleには実データ上ソースのドメイン名が入る。
+_BRAND_SEPARATORS_RE = re.compile(r"[\s・･·\-‐‑‒–—_.'’®™]+")
+_DOMAIN_TITLE_RE = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+")
+_MIN_BRAND_MATCH_LENGTH = 2
+
+
+def _nfkc_casefold(text):
+    return unicodedata.normalize("NFKC", str(text or "")).casefold()
+
+
+def _normalize_brand_text(text):
+    return _BRAND_SEPARATORS_RE.sub("", _nfkc_casefold(text))
+
+
+def _char_class(ch):
+    if "a" <= ch <= "z" or "0" <= ch <= "9":
+        return "ascii"
+    code = ord(ch)
+    if 0x30A0 <= code <= 0x30FF:
+        return "katakana"
+    if 0x3040 <= code <= 0x309F:
+        return "hiragana"
+    if 0x4E00 <= code <= 0x9FFF or 0x3400 <= code <= 0x4DBF:
+        return "kanji"
+    return "other"
+
+
+def _contains_brand_with_boundary(brand_norm, text_norm):
+    """text_norm内にbrand_normが、前後を同じ文字種で挟まれずに現れるか。
+    「ヤーマン」が「ヤーマンド」、「dhc」が「dhcp」に一致しないようにする。"""
+    if len(brand_norm) < _MIN_BRAND_MATCH_LENGTH:
+        return False
+    first, last = _char_class(brand_norm[0]), _char_class(brand_norm[-1])
+    start = text_norm.find(brand_norm)
+    while start != -1:
+        end = start + len(brand_norm)
+        before_ok = start == 0 or first == "other" or _char_class(text_norm[start - 1]) != first
+        after_ok = end == len(text_norm) or last == "other" or _char_class(text_norm[end]) != last
+        if before_ok and after_ok:
+            return True
+        start = text_norm.find(brand_norm, start + 1)
+    return False
+
+
+def _ascii_brand_tokens(brand):
+    """ブランド名中のASCII英数字表記(区切り記号を除いて連結、2文字以上)。"""
+    folded = re.sub(r"[\-‐‑‒–—_.'’®™]", "", _nfkc_casefold(brand))
+    runs = re.findall(r"[a-z0-9]+(?:\s+[a-z0-9]+)*", folded)
+    return {re.sub(r"\s+", "", r) for r in runs if len(re.sub(r"\s+", "", r)) >= _MIN_BRAND_MATCH_LENGTH}
+
+
+def _citation_title_confirms_brand(brand, title):
+    title_folded = _nfkc_casefold(title).strip()
+    if not title_folded:
+        return False
+    if _DOMAIN_TITLE_RE.fullmatch(title_folded):
+        # ドメイン名のtitle: ASCIIブランド表記がドメインのラベル(ハイフン除去、
+        # TLDを除く)と完全一致する場合のみ。部分文字列一致はしない。
+        labels = {label.replace("-", "") for label in title_folded.split(".")[:-1]}
+        return bool(_ascii_brand_tokens(brand) & labels)
+    # 自由文のtitle: 正規化したブランド名(日本語表記を含む)が文字種境界付きで
+    # 含まれる。区切り記号を空白として残した形(語の境界を保つ)と、取り除いた
+    # 形(ブランド名自体の区切りの有無の差を吸収)の両方で確認する。
+    title_spaced = _BRAND_SEPARATORS_RE.sub(" ", title_folded)
+    title_joined = _normalize_brand_text(title_folded)
+    candidates = {_normalize_brand_text(brand)} | _ascii_brand_tokens(brand)
+    return any(
+        _contains_brand_with_boundary(c, text)
+        for c in candidates if c
+        for text in (title_spaced, title_joined)
+    )
+
+
 def is_official_source_confirmed(brand, citations):
     """
     official_source_confirmedはモデルの自己申告を信用せず、ここで
-    決定論的に判定する(合意事項)。Stage1の実citationのtitleに、
-    ブランド名のローマ字表記(英数字部分のみ)が実際に含まれている場合
-    のみTrueとする。判定不能(ブランド名が英数字を含まない、一致する
-    citationが無い等)な場合は安全側でFalseを返す。
+    決定論的に判定する(合意事項)。Stage1の実citationのtitleが、ブランド名
+    (日本語表記を含む)そのもの、またはASCIIブランド表記と完全一致する
+    ドメインラベルを含む場合のみTrue(Step45.3)。判定不能な場合は安全側でFalse。
     """
     if not brand or not citations:
         return False
-    brand_token = re.sub(r"[^a-z0-9]", "", brand.lower())
-    if not brand_token:
-        return False
-    for c in citations:
-        title_token = re.sub(r"[^a-z0-9]", "", str(c.get("title", "") or "").lower())
-        if title_token and brand_token in title_token:
-            return True
-    return False
+    return any(
+        isinstance(c, dict) and _citation_title_confirms_brand(brand, c.get("title", ""))
+        for c in citations
+    )
 
 
 def sanitize_stage2_payload(payload, valid_citation_urls, stage1_text, brand=None, citations=None):

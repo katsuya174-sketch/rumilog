@@ -91,6 +91,76 @@ class BatchBudget:
     def record_attempt(self):
         self.products_attempted += 1
 
+    def can_afford(self, kind):
+        """Step45.3: 次の処理を始める前に、現在の費用 + 次処理の保守的な推定
+        費用(conservative_cost_estimate)が上限を超えるなら開始しない。
+        can_continue()(開始時点で上限未満か)だけでは、最後の1件で上限を
+        超過していた(RF canary: $0.25上限に対して$0.2514)。
+        注意: 実際のAPI料金(特にGroundingの検索クエリ数)は呼び出し前に確定
+        できないため、推定を上回る1回の呼び出しで上限を超える可能性は残る
+        (完全なhard capではない)。推定は実績の最大値に余裕を持たせて算出する。"""
+        if not self.can_continue():
+            return False
+        estimate = conservative_cost_estimate(kind)
+        if estimate <= 0:
+            return True
+        _, cost = self.usage_snapshot()
+        if cost + estimate > self.max_cost_usd:
+            self.stopped_reason = "insufficient_budget_for_next"
+            self.last_estimate = {"kind": kind, "current_cost": cost, "estimated_next_cost": estimate,
+                                  "max_cost_usd": self.max_cost_usd}
+            return False
+        return True
+
+
+# Step45.3: 次処理の推定費用。既存usage(product_collection_usage)の実績を
+# 処理単位(stage1+stage2=1商品、discovery_search+structuring=1回の外部探索)
+# にまとめ、直近の実績の最大値にCOST_ESTIMATE_SAFETY_MARGIN倍の余裕を持たせる。
+# 実績が少ない場合は、料金定数から算出した悲観的な値(大きめのtoken数・
+# 検索クエリ数を仮定)を下限とする(固定の楽観値で上限を抜けないため)。
+COST_ESTIMATE_SAFETY_MARGIN = 1.25
+COST_ESTIMATE_MIN_SAMPLES = 5
+COST_ESTIMATE_LOOKBACK = 200
+_COST_ESTIMATE_STAGES = {
+    "product_collection": ("stage1", "stage2"),
+    "external_discovery": ("discovery_search", "discovery_structuring"),
+}
+
+
+def _pessimistic_cost_estimate(kind):
+    estimate = pipeline.estimate_call_cost_usd
+    if kind == "product_collection":
+        return (estimate({"prompt_token_count": 1000, "candidates_token_count": 4000}, search_query_count=8)
+                + estimate({"prompt_token_count": 8000, "candidates_token_count": 2000}))
+    if kind == "external_discovery":
+        return (estimate({"prompt_token_count": 1000, "candidates_token_count": 2000}, search_query_count=8)
+                + estimate({"prompt_token_count": 4000, "candidates_token_count": 2000}))
+    return 0.0
+
+
+def conservative_cost_estimate(kind):
+    """kind: "product_collection" / "external_discovery" / "staging_reuse"(API
+    呼び出し無し=0)。"""
+    stages = _COST_ESTIMATE_STAGES.get(kind)
+    if not stages:
+        return 0.0
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT SUM(estimated_cost_usd) FROM product_collection_usage "
+            "WHERE stage = ANY(%s) GROUP BY batch_id, product_label "
+            "ORDER BY MAX(called_at) DESC LIMIT %s",
+            (list(stages), COST_ESTIMATE_LOOKBACK),
+        )
+        samples = [float(r[0] or 0) for r in cur.fetchall()]
+    finally:
+        conn.close()
+    observed = max(samples) * COST_ESTIMATE_SAFETY_MARGIN if samples else 0.0
+    if len(samples) < COST_ESTIMATE_MIN_SAMPLES:
+        return max(observed, _pessimistic_cost_estimate(kind))
+    return observed
+
 
 def _product_master_identity_keys():
     """product_masterに登録済みのidentity_key集合。Candidate Discoveryと
@@ -164,7 +234,7 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT brand, product_name, stage2_payload, stage1_citations "
+            "SELECT staging_id, brand, product_name, stage2_payload, stage1_citations "
             "FROM product_collection_staging "
             "WHERE category = %s AND stage2_status = 'ok' "
             "AND conflict_status IS DISTINCT FROM 'needs_review' AND reflected_at IS NULL "
@@ -176,7 +246,7 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
         conn.close()
 
     candidates = []
-    for brand, name, payload, citations in rows:
+    for staging_id, brand, name, payload, citations in rows:
         payload = payload or {}
         ingredient_names = [
             i.get("ingredient") for i in (payload.get("active_ingredients") or [])
@@ -215,6 +285,8 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
         candidates.append({
             "brand": brand, "name": name, "category": category,
             "discovery_source": "staging_reuse",
+            # Step45.3: 保存済みStage1/2結果をそのまま再評価するための参照。
+            "staging_id": staging_id,
             "discovery_evidence": evidence,
             "target_evidence": f"過去のstaging収集(stage2)でtarget={target}との関連性が確認済み",
         })
@@ -365,7 +437,7 @@ def make_discovery_candidate_source(batch_id, budget, mode):
             # 外部探索(Gemini Grounding)はexecuteかつ予算内の場合のみ。dry-runでは
             # 要求件数だけを記録し、呼び出さない。
             report["external_discovery_requested"] = limit - len(candidates)
-            if mode == "execute" and budget.can_continue():
+            if mode == "execute" and budget.can_afford("external_discovery"):
                 report["external_discovery_executed"] = True
                 diagnostics = {}
                 report["external_discovery_diagnostics"] = diagnostics
@@ -400,7 +472,7 @@ def _fetch_staging_row(staging_id):
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT stage1_status, stage1_citations, stage2_status, stage2_payload, conflict_status "
+            "SELECT stage1_status, stage1_citations, stage2_status, stage2_payload, conflict_status, reflected_at "
             "FROM product_collection_staging WHERE staging_id = %s",
             (staging_id,),
         )
@@ -410,6 +482,7 @@ def _fetch_staging_row(staging_id):
         return {
             "stage1_status": row[0], "stage1_citations": row[1] or [],
             "stage2_status": row[2], "stage2_payload": row[3] or {}, "conflict_status": row[4],
+            "reflected_at": row[5],
         }
     finally:
         conn.close()
@@ -447,9 +520,58 @@ def _is_confident_enough(staging_row, brand, category):
     category_check = _category_attributes_check(category, payload)
     if not payload.get("active_ingredients") and not category_check["valid"]:
         return False, "no_extracted_fields"
-    if not payload.get("official_source_confirmed"):
+    # Step45.3: 保存値(収集時点の判定)ではなく、保存済みの実citationから
+    # 現行のis_official_source_confirmed()で毎回決定論的に再計算する
+    # (staging再利用時も新しい判定ルールで評価される)。
+    if not pipeline.is_official_source_confirmed(brand, staging_row.get("stage1_citations") or []):
         return False, "official_source_not_confirmed_variant_uncertain"
     return True, None
+
+
+def _staging_reuse_data_problem(staging_row):
+    """保存済みstagingをStage1/2の再実行なしで再評価できるか。不足・破損が
+    あれば理由を返す(自動で再収集・再課金はしない)。"""
+    if not staging_row:
+        return "staging_not_found"
+    if staging_row.get("reflected_at") is not None:
+        return "already_reflected"
+    if staging_row.get("stage1_status") != "ok" or staging_row.get("stage2_status") != "ok":
+        return "stage_not_ok"
+    citations = staging_row.get("stage1_citations")
+    if not isinstance(citations, list) or not citations or not all(
+            isinstance(c, dict) and c.get("uri") for c in citations):
+        return "citations_missing_or_broken"
+    payload = staging_row.get("stage2_payload")
+    if not isinstance(payload, dict) or not isinstance(payload.get("active_ingredients", []), list):
+        return "stage2_payload_missing_or_broken"
+    return None
+
+
+def evaluate_staging_for_reflect(staging_id, brand, name, category, conflict_status=None, staging_row=None):
+    """保存済みstaging(Stage1/2済み)を、official source → category validator →
+    conflictの順に評価する(DB書き込み・API呼び出しなし)。conflict_statusが
+    渡されない場合(staging再利用)は、現在のproduct_masterに対して
+    detect_conflicts()で再判定する。戻り値のreflectable=Trueのときだけ
+    reflectしてよい。"""
+    row = staging_row if staging_row is not None else _fetch_staging_row(staging_id)
+    problem = _staging_reuse_data_problem(row) if conflict_status is None else None
+    if problem:
+        return {"reflectable": False, "data_complete": False, "reason": problem, "staging_id": staging_id}
+    if conflict_status is None:
+        conflict_status = pipeline.detect_conflicts(
+            row.get("stage2_payload") or {}, _product_master_lookup(brand, name, category),
+        ).get("status")
+    if conflict_status == "needs_review":
+        return {"reflectable": False, "data_complete": True, "reason": "needs_review", "staging_id": staging_id}
+    confident, reason = _is_confident_enough(row, brand, category)
+    category_check = _category_attributes_check(category, row.get("stage2_payload") or {})
+    reflectable = row.get("stage2_status") == "ok" and confident and category_check["valid"]
+    return {
+        "reflectable": reflectable, "data_complete": True, "staging_id": staging_id,
+        "reason": None if reflectable else (reason or "category_validator_failed"),
+        "official_source_confirmed": pipeline.is_official_source_confirmed(brand, row.get("stage1_citations") or []),
+        "category_validator": category_check, "conflict_status": conflict_status,
+    }
 
 
 def _would_lose_confirmed_ingredient_tags(existing_product, staged_payload):
@@ -504,8 +626,12 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
     for cand in candidates:
         if reflected_count >= shortage:
             break
-        if mode == "execute" and not budget.can_continue():
-            actions.append({"action": "batch_stop", "reason": budget.stopped_reason})
+        reuse_staging_id = cand.get("staging_id") if cand.get("discovery_source") == "staging_reuse" else None
+        # Step45.3: staging再利用はStage1/2を再実行しない(API費用0)。それ以外は
+        # 次の1商品分の保守的な推定費用まで含めて上限内かを確認してから始める。
+        if mode == "execute" and not budget.can_afford("staging_reuse" if reuse_staging_id else "product_collection"):
+            actions.append({"action": "batch_stop", "reason": budget.stopped_reason,
+                            "budget_estimate": getattr(budget, "last_estimate", None)})
             break
         if consecutive_failures >= max_consecutive_failures:
             actions.append({
@@ -521,42 +647,56 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
             continue
 
         if mode == "dry_run":
-            actions.append({
+            would = {
                 "action": "would_collect", "brand": brand, "name": name,
                 "category": category, "target": target,
-            })
+            }
+            if reuse_staging_id:
+                # 保存済みStage1/2で再評価した場合の結果(読み取りのみ)。
+                would["staging_evaluation"] = evaluate_staging_for_reflect(reuse_staging_id, brand, name, category)
+            actions.append(would)
             continue
 
         budget.record_attempt()
-        existing_product = _product_master_lookup(brand, name, category)
-        collect_result = pipeline.collect_one_product(brand, name, category, batch_id, existing_product=existing_product)
-        staging_row = _fetch_staging_row(collect_result["staging_id"])
+        collect_result = {}
+        if reuse_staging_id:
+            staging_id = reuse_staging_id
+            evaluation = evaluate_staging_for_reflect(staging_id, brand, name, category)
+            if not evaluation["data_complete"]:
+                consecutive_failures += 1
+                actions.append({
+                    "action": "staging_needs_recollection", "brand": brand, "name": name,
+                    "reason": evaluation["reason"], "staging_id": staging_id,
+                })
+                continue
+        else:
+            existing_product = _product_master_lookup(brand, name, category)
+            collect_result = pipeline.collect_one_product(brand, name, category, batch_id, existing_product=existing_product)
+            staging_id = collect_result["staging_id"]
+            evaluation = evaluate_staging_for_reflect(
+                staging_id, brand, name, category, conflict_status=collect_result["conflict_status"],
+            )
 
-        if collect_result["conflict_status"] == "needs_review":
+        if evaluation["reason"] == "needs_review":
             consecutive_failures += 1
             actions.append({
                 "action": "not_reflected", "brand": brand, "name": name,
-                "reason": "needs_review", "staging_id": collect_result["staging_id"],
+                "reason": "needs_review", "staging_id": staging_id,
             })
             continue
 
-        confident, reason = _is_confident_enough(staging_row, brand, category)
-        category_check = _category_attributes_check(category, staging_row.get("stage2_payload") or {})
-        can_reflect = (
-            collect_result["stage2_status"] == "ok" and confident and category_check["valid"]
-        )
-
-        if not can_reflect:
+        if not evaluation["reflectable"]:
             consecutive_failures += 1
             actions.append({
                 "action": "not_reflected", "brand": brand, "name": name,
-                "reason": reason or "category_validator_failed",
-                "category_validator": category_check,
-                "staging_id": collect_result["staging_id"],
+                "reason": evaluation["reason"],
+                "category_validator": evaluation["category_validator"],
+                "staging_id": staging_id,
+                **({"reused_staging": True} if reuse_staging_id else {}),
             })
             continue
 
-        reflect_result = pipeline.reflect_staging_to_product_master(collect_result["staging_id"], dry_run=False)
+        reflect_result = pipeline.reflect_staging_to_product_master(staging_id, dry_run=False)
         if reflect_result.get("status") == "reflected":
             consecutive_failures = 0
             reflected_count += 1
@@ -565,6 +705,7 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
             actions.append({
                 "action": "reflected", "brand": brand, "name": name,
                 "product_id": reflect_result["product_id"], "item_code_result": item_code_result,
+                **({"reused_staging": True} if reuse_staging_id else {}),
             })
         else:
             consecutive_failures += 1
@@ -639,7 +780,7 @@ def process_stale_item(item, mode, batch_id, budget):
     if mode == "dry_run":
         return [{"action": "would_reverify", "brand": brand, "name": name, "product_id": product_id}]
 
-    if not budget.can_continue():
+    if not budget.can_afford("product_collection"):
         return [{"action": "batch_stop", "reason": budget.stopped_reason}]
 
     budget.record_attempt()
