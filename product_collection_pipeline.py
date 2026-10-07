@@ -1626,6 +1626,29 @@ def run_discovery_structuring(category, target, discovery_result, batch_id):
     }
 
 
+# Step48.5: Discovery段階の医薬品・医薬部外品の早期除外(negative gate専用)。
+_DISCOVERY_SENTENCE_SPLIT_RE = re.compile(r"(?<=[。!?！？])|\n")
+
+
+def _compact_text(text):
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(text or "")))
+
+
+def discovery_regulated_product_class(category, candidate, discovery_text):
+    """サプリのDiscovery候補について、その候補自身の根拠(target_evidenceと、
+    Discovery検索本文のうち候補の商品名を含む文)に医薬品/医薬部外品の区分表示が
+    あれば"drug"/"quasi_drug"を返す。それ以外・サプリ以外はNone。
+    除外方向専用で、Noneでも区分(サプリ等)を確定したことにはならない。"""
+    if category != "サプリメント" or not isinstance(candidate, dict):
+        return None
+    evidence = [str(candidate.get("target_evidence") or "")]
+    name_key = _compact_text(candidate.get("product_name"))
+    if name_key:
+        evidence.extend(s for s in _DISCOVERY_SENTENCE_SPLIT_RE.split(str(discovery_text or ""))
+                        if s and name_key in _compact_text(s))
+    return app.regulated_product_class_in_text("\n".join(evidence))
+
+
 def discover_candidates_via_gemini(category, target, batch_id, max_candidates=3, diagnostics=None):
     """Gemini Groundingによる候補探索の一括呼び出し(search→structuring)。
     戻り値はcitation検証済みの候補リストで、各要素はdiscovery evidence
@@ -1668,9 +1691,22 @@ def discover_candidates_via_gemini(category, target, batch_id, max_candidates=3,
             diag["status"] = "all_filtered"
         else:
             diag["status"] = "ok"
-        diag["returned"] = min(len(candidates), max_candidates)
-        diag["truncated"] = max(0, len(candidates) - max_candidates)
-        return candidates[:max_candidates]
+        # Step48.5: 医薬品等と判明した候補は印を付けて返し(呼び出し元が除外を記録)、
+        # 上限max_candidatesは除外対象以外の候補にだけ適用する。
+        returned, regulated, normal_count = [], 0, 0
+        for c in candidates:
+            regulated_class = discovery_regulated_product_class(category, c, raw_text)
+            if regulated_class:
+                regulated += 1
+                returned.append(dict(c, discovery_regulated_product_class=regulated_class))
+            elif normal_count < max_candidates:
+                normal_count += 1
+                returned.append(c)
+        diag["returned"] = normal_count
+        diag["truncated"] = max(0, len(candidates) - regulated - max_candidates)
+        if regulated:
+            diag["regulated_excluded"] = regulated
+        return returned
     finally:
         print(f"[DISCOVERY DIAGNOSTICS] {label} {json.dumps(diag, ensure_ascii=False)}", flush=True)
 

@@ -656,6 +656,16 @@ def _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limi
                 on_excluded(brief, None, missing)
             continue
         key = app.make_verified_product_key({"brand": brand, "name": name, "category": category})
+        # Step48.5: Discoveryの根拠で医薬品・医薬部外品と判明したサプリ候補は、
+        # Stage1(Grounding費用)前に除外する。正常なフィルタ結果であり候補失敗
+        # (連続失敗STOP)には数えない。区分の確定・保存には使わない。
+        regulated_class = c.get("discovery_regulated_product_class")
+        if regulated_class:
+            if on_excluded:
+                on_excluded(dict(brief, product_classification=regulated_class), key, "discovery_regulated_product")
+            if key:
+                excluded_keys.add(key)
+            continue
         if key and key in excluded_keys:
             if on_excluded:
                 on_excluded(brief, key, None)
