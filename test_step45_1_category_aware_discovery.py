@@ -304,7 +304,7 @@ class CategoryStage1EndToEndTests(OrchestratorTestBase):
     def test_supplement_stage1_active_ingredient_relevance_passes(self):
         brand, name = f"サプリ{TEST_NAME_SUFFIX}", f"ビタミンCサプリ{TEST_NAME_SUFFIX}"
         actions, prompts = self._run("サプリメント", "vitamin_c", brand, name,
-                                     "公式表示: ビタミンC(アスコルビン酸)1000mg。1日2粒。",
+                                     "公式表示: 栄養機能食品(ビタミンC)。ビタミンC(アスコルビン酸)1000mg。1日2粒。",
                                      {"brand": brand, "product_name": name, "jan_code": "unknown",
                                       "active_ingredients": [{"ingredient": "アスコルビン酸", "concentration": "1000mg",
                                                               "confidence": "high", "source_url": CIT}],
@@ -317,6 +317,8 @@ class CategoryStage1EndToEndTests(OrchestratorTestBase):
                                                            "source_url": "unknown"},
                                           "precautions": {"value": "unknown", "confidence": "unknown",
                                                           "source_url": "unknown"},
+                                          "product_classification": {"value": "nutrient_function_food",
+                                                                     "confidence": "high", "source_url": CIT},
                                       }})
         self.assertIn("含有成分とその含有量", prompts[0])
         self.assertEqual(actions[0]["action"], "reflected")

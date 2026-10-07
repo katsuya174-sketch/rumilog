@@ -4483,6 +4483,9 @@ def is_candidate_relevant_to_target(category, target, product, user_data=None, b
         # primary不明(未収集の旧データ等)は関連性不明=数えない(全active成分を
         # primary扱いするfallbackはしない)。
         attrs = product.get("category_attributes")
+        # Step48.1: 医薬品・医薬部外品と確認された商品はサプリの診断候補にしない。
+        if isinstance(attrs, dict) and attrs.get("product_classification") in SUPPLEMENT_EXCLUDED_PRODUCT_CLASSES:
+            return False
         primary = attrs.get("primary_ingredient_tags") if isinstance(attrs, dict) else None
         if not isinstance(primary, list):
             # Step47.2: primaryの保存値が無い既存データは、商品名+active_ingredients
@@ -6373,6 +6376,33 @@ def _supplement_name_mentions(text, target, primary_form_only=False):
     return False
 
 
+# Step48.1: サプリの商品区分。サプリProduct Masterへ入れてよい区分と、診断候補・
+# 収集から除外する区分(医薬品・医薬部外品)。unknownはどちらにも含めない
+# (reflectは不可。判定は呼び出し側で「許可区分に含まれるか」で行う)。
+SUPPLEMENT_PRODUCT_CLASSES = (
+    "supplement", "health_food", "foods_with_function_claims", "nutrient_function_food",
+    "drug", "quasi_drug", "unknown",
+)
+SUPPLEMENT_REFLECTABLE_PRODUCT_CLASSES = frozenset(
+    {"supplement", "health_food", "foods_with_function_claims", "nutrient_function_food"})
+SUPPLEMENT_EXCLUDED_PRODUCT_CLASSES = frozenset({"drug", "quasi_drug"})
+# 日本の医薬品・医薬部外品の区分表示(商品名・ブランドではなく、法定の区分名)。
+_REGULATED_PRODUCT_CLASS_PATTERNS = (
+    ("drug", re.compile(r"(?:指定)?第\s*[123一二三]\s*類医薬品|要指導医薬品|医療用医薬品|一般用医薬品")),
+    ("quasi_drug", re.compile(r"医薬部外品")),
+)
+
+
+def regulated_product_class_in_text(text):
+    """本文・商品タイトル中に医薬品(第1類・第2類・指定第2類・第3類等)/医薬部外品の
+    区分表示があれば"drug"/"quasi_drug"を、無ければNoneを返す(除外方向の判定専用)。"""
+    folded = unicodedata.normalize("NFKC", str(text or ""))
+    for product_class, pattern in _REGULATED_PRODUCT_CLASS_PATTERNS:
+        if pattern.search(folded):
+            return product_class
+    return None
+
+
 def supplement_primary_tags_from_name(product_name, active_ingredient_names):
     """Stage2のprimary_ingredientsが欠落している既存データ用の補完。
     (1)商品名にtargetの明示名称がある、(2)同じ成分がactive_ingredientsに実在、
@@ -6390,6 +6420,9 @@ def live_supplement_title_primary_target(title):
     決定論的に返す。【】等の括弧内と「|」以降(販促・SEO語)を除いた商品名部分で、
     補助的でない形で言及されるtargetがちょうど1つの場合のみ。複数・マルチ系・
     該当なしはNone(採用しない。誤推薦より候補なしを優先)。"""
+    # Step48.1: 医薬品・医薬部外品の区分表示がある出品はサプリ候補にしない。
+    if regulated_product_class_in_text(title):
+        return None
     core = re.split(r"[|｜]", unicodedata.normalize("NFKC", str(title or "")))[0]
     core = _LIVE_TITLE_BRACKETS_RE.sub(" ", core)
     if _LIVE_TITLE_MULTI_RE.search(core.lower()):

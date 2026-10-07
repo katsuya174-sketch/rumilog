@@ -243,6 +243,7 @@ _DETERMINISTIC_EVALUATION_FAILURES = {
     "official_source_not_confirmed_variant_uncertain": "official_source",
     "category_validator_failed": "category_validator",
     "no_extracted_fields": "category_validator",
+    "supplement_product_class_not_allowed": "product_classification",
 }
 _DETERMINISTIC_RAKUTEN_REASONS = {
     "title_mismatch", "device_model_mismatch", "only_non_new_sale_listings", "only_set_items",
@@ -778,8 +779,8 @@ def _fetch_staging_row(staging_id):
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT stage1_status, stage1_citations, stage2_status, stage2_payload, conflict_status, reflected_at "
-            "FROM product_collection_staging WHERE staging_id = %s",
+            "SELECT stage1_status, stage1_citations, stage2_status, stage2_payload, conflict_status, reflected_at, "
+            "stage1_raw_text FROM product_collection_staging WHERE staging_id = %s",
             (staging_id,),
         )
         row = cur.fetchone()
@@ -788,7 +789,7 @@ def _fetch_staging_row(staging_id):
         return {
             "stage1_status": row[0], "stage1_citations": row[1] or [],
             "stage2_status": row[2], "stage2_payload": row[3] or {}, "conflict_status": row[4],
-            "reflected_at": row[5],
+            "reflected_at": row[5], "stage1_raw_text": row[6],
         }
     finally:
         conn.close()
@@ -875,6 +876,20 @@ def _ensure_staging_page_verification(staging_id, brand):
     return row
 
 
+def _supplement_product_class(category, staging_row):
+    """Step48.1: サプリの商品区分(サプリ以外はNone)。保存済みStage1本文と
+    Stage2の出典照合済み値だけで決める(API・HTTPなし)。"""
+    if category != "サプリメント" or not staging_row:
+        return None
+    return pipeline.supplement_product_classification(
+        staging_row.get("stage2_payload") or {}, staging_row.get("stage1_raw_text"))
+
+
+def _supplement_product_class_blocks(category, staging_row):
+    product_class = _supplement_product_class(category, staging_row)
+    return product_class is not None and not pipeline.is_supplement_product_class_reflectable(product_class)
+
+
 def evaluate_staging_for_reflect(staging_id, brand, name, category, conflict_status=None, staging_row=None):
     """保存済みstaging(Stage1/2済み)を、official source → category validator →
     conflictの順に評価する(DB書き込み・API呼び出しなし)。conflict_statusが
@@ -891,6 +906,14 @@ def evaluate_staging_for_reflect(staging_id, brand, name, category, conflict_sta
         ).get("status")
     if conflict_status == "needs_review":
         return {"reflectable": False, "data_complete": True, "reason": "needs_review", "staging_id": staging_id}
+    # Step48.1: サプリの商品区分ゲート。official source確認・楽天確認より前に判定し、
+    # 医薬品・医薬部外品・区分不明は以降の判定(HTTP/楽天API)へ進めない。
+    product_class = _supplement_product_class(category, row)
+    if product_class is not None and not pipeline.is_supplement_product_class_reflectable(product_class):
+        return {"reflectable": False, "data_complete": True, "staging_id": staging_id,
+                "reason": "supplement_product_class_not_allowed", "product_classification": product_class,
+                "page_verification_pending": False, "official_source_confirmed": None,
+                "category_validator": None, "conflict_status": conflict_status}
     confident, reason = _is_confident_enough(row, brand, category)
     category_check = _category_attributes_check(category, row.get("stage2_payload") or {})
     reflectable = row.get("stage2_status") == "ok" and confident and category_check["valid"]
@@ -903,6 +926,7 @@ def evaluate_staging_for_reflect(staging_id, brand, name, category, conflict_sta
                                       and not pipeline.has_page_verification(citations)),
         "official_source_confirmed": pipeline.is_official_source_confirmed(brand, row.get("stage1_citations") or []),
         "category_validator": category_check, "conflict_status": conflict_status,
+        **({"product_classification": product_class} if product_class is not None else {}),
     }
 
 
@@ -1005,7 +1029,10 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
         collect_result = {}
         if reuse_staging_id:
             staging_id = reuse_staging_id
-            staging_row = _ensure_staging_page_verification(staging_id, brand)
+            staging_row = _fetch_staging_row(staging_id)
+            # Step48.1: 商品区分でreflect不可が確定している場合は公式ページ確認のHTTPをしない。
+            if not _supplement_product_class_blocks(category, staging_row):
+                staging_row = _ensure_staging_page_verification(staging_id, brand)
             evaluation = evaluate_staging_for_reflect(staging_id, brand, name, category, staging_row=staging_row)
             if not evaluation["data_complete"]:
                 consecutive_failures += 1
@@ -1036,6 +1063,8 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
                 "action": "not_reflected", "brand": brand, "name": name,
                 "reason": evaluation["reason"],
                 "category_validator": evaluation["category_validator"],
+                **({"product_classification": evaluation["product_classification"]}
+                   if "product_classification" in evaluation else {}),
                 "staging_id": staging_id,
                 **({"reused_staging": True} if reuse_staging_id else {}),
             }

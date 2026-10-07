@@ -417,8 +417,13 @@ _CATEGORY_COLLECTION_CONFIGS = {
             "その成分(上記の条件)を含むことが、メーカー/ブランド公式サイト・商品表示等の"
             "一次情報で確認できること",
             "ブランド名・正式な製品名が一次情報で確認できること",
+            # Step48.1: 自己申告は信用せず、Stage1→商品区分ゲートで再検証する。
+            "医薬品(第1類・第2類・指定第2類・第3類医薬品等)・医薬部外品は候補にしないこと"
+            "(サプリメント・健康食品・機能性表示食品・栄養機能食品として販売されている商品のみ)",
         ],
         "stage1_items": lambda: [
+            "商品区分(医薬品(第1類・第2類・指定第2類・第3類医薬品等)・医薬部外品・機能性表示食品・"
+            "栄養機能食品・健康食品・サプリメント等のうち、公式情報・商品表示に明記されている区分表示)",
             "含有成分とその含有量(1日あたり・1粒あたり等、公式の表示どおり)",
             "1日の摂取目安量",
             "1回あたりの摂取量(粒数・mg等)",
@@ -655,6 +660,18 @@ _CATEGORY_ATTRIBUTES_EXTRACTION_SPECS = {
                 "されている、または商品説明でその成分の摂取が商品の主目的と明示されているもの)。"
                 "active_ingredientsに挙げた成分名と同じ表記で、複数ある場合は「、」区切り。"
                 "成分の記載順や含有量の多さだけで決めないこと。根拠が無い場合は'unknown'"
+            ),
+        ),
+        # Step48.1: 商品区分。出典に区分表示が明記されている場合のみ。採否は
+        # supplement_product_classification()がStage1本文と照合して決める。
+        "product_classification": types.Schema(
+            type="STRING",
+            enum=list(app.SUPPLEMENT_PRODUCT_CLASSES),
+            description=(
+                "出典に明記されている商品区分。drug=医薬品(第1類・第2類・指定第2類・第3類医薬品等を含む)、"
+                "quasi_drug=医薬部外品、foods_with_function_claims=機能性表示食品、"
+                "nutrient_function_food=栄養機能食品、health_food=健康食品、supplement=サプリメント"
+                "(栄養補助食品)。区分表示が出典に無い場合・一般知識でしか判断できない場合は'unknown'"
             ),
         ),
     },
@@ -1265,6 +1282,58 @@ def supplement_primary_tags_for_payload(product_name, stage2_payload):
     return app.supplement_primary_tags_from_name(product_name, names)
 
 
+# ===== Step48.1: サプリの商品区分(医薬品・医薬部外品の除外) =====
+# 許可区分は、Stage2が出典付きで返した値の区分名がStage1本文に否定形でなく
+# 実在する場合だけ採用する(method_evidence_termsと同じ決定論的な照合)。
+_PRODUCT_CLASS_EVIDENCE_TERMS = {
+    "supplement": ("サプリメント", "栄養補助食品"),
+    "health_food": ("健康食品",),
+    "foods_with_function_claims": ("機能性表示食品",),
+    "nutrient_function_food": ("栄養機能食品",),
+}
+_PRODUCT_CLASS_NEGATION_RE = re.compile(
+    r"^\s*[」』\"”]?\s*(?:[（(][^）)]{0,20}[）)])?\s*[」』\"”]?\s*"
+    r"(?:ではな|ではありません|でなく|でもな|とは異な|には該当しな|に該当しな|には当たらな|に当たらな)")
+
+
+def _product_class_term_affirmed(text, term):
+    """termが本文中に「〜ではなく」等の否定形でない形で1回以上現れるか。"""
+    start = 0
+    while True:
+        index = text.find(term, start)
+        if index < 0:
+            return False
+        if not _PRODUCT_CLASS_NEGATION_RE.match(text[index + len(term):index + len(term) + 40]):
+            return True
+        start = index + len(term)
+
+
+def supplement_product_classification(stage2_payload, stage1_text):
+    """サプリ候補の商品区分(app.SUPPLEMENT_PRODUCT_CLASSESのいずれか)。
+
+    1. Stage1本文に医薬品/医薬部外品の区分表示があれば、それを優先する(除外方向)。
+    2. Stage2のcategory_attributes.product_classification(sanitize済み=出典照合済み)
+       を使う。許可区分は区分名がStage1本文に否定形でなく実在する場合のみ採用し、
+       それ以外・項目欠落(旧データ)・不正値はunknownとする。"""
+    text = unicodedata.normalize("NFKC", str(stage1_text or ""))
+    regulated = app.regulated_product_class_in_text(text)
+    if regulated:
+        return regulated
+    attrs = (stage2_payload or {}).get("category_attributes") or {}
+    field = attrs.get("product_classification") if isinstance(attrs, dict) else None
+    value = str((field.get("value") if isinstance(field, dict) else field) or "").strip()
+    if value in app.SUPPLEMENT_EXCLUDED_PRODUCT_CLASSES:
+        return value
+    terms = _PRODUCT_CLASS_EVIDENCE_TERMS.get(value)
+    if not terms or not any(_product_class_term_affirmed(text, unicodedata.normalize("NFKC", t)) for t in terms):
+        return "unknown"
+    return value
+
+
+def is_supplement_product_class_reflectable(product_class):
+    return product_class in app.SUPPLEMENT_REFLECTABLE_PRODUCT_CLASSES
+
+
 def flatten_category_attributes(category_attributes_payload):
     """sanitize済みのcategory_attributes({field: {value,confidence,
     source_url}})を、product_master反映・relevance判定用の単純な
@@ -1656,7 +1725,11 @@ def collect_one_product(brand, product_name, category, batch_id, existing_produc
     費用上限(PRODUCT_COLLECTION_COST_LIMIT_USD)を超えた場合は、この商品の
     処理を完了させた上で呼び出し元(collect_batch)に伝え、バッチを停止する。"""
     stage1_result = run_stage1_collection(brand, product_name, batch_id, category=category)
-    if stage1_result.get("status") == "ok":
+    # Step48.1: 本文に医薬品/医薬部外品の区分表示があるサプリ候補は、reflect不可が
+    # 確定しているため公式ページ確認のHTTPを行わない。
+    regulated_supplement = category == "サプリメント" and bool(
+        app.regulated_product_class_in_text(stage1_result.get("raw_text")))
+    if stage1_result.get("status") == "ok" and not regulated_supplement:
         # Step45.5: Stage1直後に、title判定で公式確認できない場合のみcitation先
         # ページのサイトの名乗りを確認し、結果をcitationへ付けて保存する。
         stage1_result = dict(stage1_result, citations=attach_citation_page_verification(
@@ -1912,14 +1985,15 @@ def reflect_staging_to_product_master(staging_id, dry_run=True):
         conn = psycopg2.connect(app.DATABASE_URL)
         cur = conn.cursor()
         cur.execute(
-            "SELECT brand, product_name, category, stage2_status, stage2_payload, conflict_status, reflected_at "
-            "FROM product_collection_staging WHERE staging_id = %s",
+            "SELECT brand, product_name, category, stage2_status, stage2_payload, conflict_status, reflected_at, "
+            "stage1_raw_text FROM product_collection_staging WHERE staging_id = %s",
             (staging_id,),
         )
         row = cur.fetchone()
         if not row:
             return {"status": "not_found"}
-        brand, product_name, category, stage2_status, stage2_payload, conflict_status, reflected_at = row
+        (brand, product_name, category, stage2_status, stage2_payload, conflict_status, reflected_at,
+         stage1_raw_text) = row
 
         if stage2_status != "ok":
             return {"status": "skipped", "reason": f"stage2_status={stage2_status}"}
@@ -1929,6 +2003,13 @@ def reflect_staging_to_product_master(staging_id, dry_run=True):
             return {"status": "already_reflected"}
 
         payload = stage2_payload or {}
+        product_class = None
+        if category == "サプリメント":
+            # Step48.1: 医薬品・医薬部外品・区分不明はサプリProduct Masterへ入れない。
+            product_class = supplement_product_classification(payload, stage1_raw_text)
+            if not is_supplement_product_class_reflectable(product_class):
+                return {"status": "skipped", "reason": "supplement_product_class_not_allowed",
+                        "product_classification": product_class}
         # "unknown"プレースホルダー項目は反映時にも除外する(合意事項②の
         # 後方互換: この修正より前に収集済みのstaging行にまだ残っている
         # 場合があるため、再API実行なしでも安全に除外する)。
@@ -1975,6 +2056,7 @@ def reflect_staging_to_product_master(staging_id, dry_run=True):
         if category == "サプリメント":
             # Step47.1: 主要成分タグ(coverage・診断target関連性の根拠)。
             category_attributes["primary_ingredient_tags"] = supplement_primary_tags_for_payload(product_name, payload)
+            category_attributes["product_classification"] = product_class
         if category_attributes:
             product_for_master["category_attributes"] = category_attributes
 

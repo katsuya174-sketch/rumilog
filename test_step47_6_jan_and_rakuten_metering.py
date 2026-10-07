@@ -99,8 +99,11 @@ class PrecheckPassesJanTests(OrchestratorTestBase):
                                                                         {"ingredient": "DHA", "source_url": cit}],
                                                  "formulation_features": [],
                                                  "category_attributes": {"primary_ingredients": {
-                                                     "value": "EPA、DHA", "confidence": "high", "source_url": cit}}},
-                                 citations=[{"uri": cit, "title": brand}])
+                                                     "value": "EPA、DHA", "confidence": "high", "source_url": cit},
+                                                     "product_classification": {
+                                                     "value": "supplement", "confidence": "high", "source_url": cit}}},
+                                 citations=[{"uri": cit, "title": brand}],
+                                 stage1_raw_text="EPA・DHAのサプリメント。")
         conn = psycopg2.connect(os.environ["DATABASE_URL"])
         try:
             cur = conn.cursor()

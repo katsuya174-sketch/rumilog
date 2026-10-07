@@ -39,9 +39,13 @@ class GateTestBase(OrchestratorTestBase):
                                                               "source_url": citations[0]["uri"]}}}
             else:
                 payload = {"active_ingredients": [{"ingredient": "アスコルビン酸", "source_url": citations[0]["uri"]}],
-                           "formulation_features": []}
+                           "formulation_features": [],
+                           # Step48.1: 出典付きの商品区分(本文に区分表示あり)。
+                           "category_attributes": {"product_classification": {
+                               "value": "supplement", "confidence": "high", "source_url": citations[0]["uri"]}}}
         self._insert_staging_row(self._new_batch_id(f"g-{label}"), brand, name, category,
-                                 stage2_payload=payload, citations=citations)
+                                 stage2_payload=payload, citations=citations,
+                                 stage1_raw_text="ビタミンCのサプリメント。" if category == "サプリメント" else None)
         return brand, name, self._row(brand)[0]
 
     def _row(self, brand):

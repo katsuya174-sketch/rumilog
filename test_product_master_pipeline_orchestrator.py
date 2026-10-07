@@ -152,7 +152,8 @@ class OrchestratorTestBase(unittest.TestCase):
 
     def _insert_staging_row(self, batch_id, brand, name, category, stage2_payload,
                              citations=None, stage1_status="ok", stage2_status="ok",
-                             conflict_status="none", reflected_at=None, created_at=None):
+                             conflict_status="none", reflected_at=None, created_at=None,
+                             stage1_raw_text=None):
         """Candidate Discovery(Step41)の①staging再利用/②最近失敗した候補
         除外のテスト用に、product_collection_stagingへ直接行を挿入する
         (test_product_master.pyの_insert_stagingと同じ既存パターン)。"""
@@ -166,13 +167,13 @@ class OrchestratorTestBase(unittest.TestCase):
                 INSERT INTO product_collection_staging
                     (batch_id, brand, product_name, category, identity_key,
                      stage1_status, stage1_citations, stage2_status, stage2_payload,
-                     conflict_status, conflict_detail, reflected_at, created_at)
+                     conflict_status, conflict_detail, reflected_at, created_at, stage1_raw_text)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, '[]', %s,
-                        COALESCE(%s, CURRENT_TIMESTAMP))
+                        COALESCE(%s, CURRENT_TIMESTAMP), %s)
                 """,
                 (batch_id, brand, name, category, identity_key, stage1_status,
                  json.dumps(citations), stage2_status, json.dumps(stage2_payload),
-                 conflict_status, reflected_at, created_at),
+                 conflict_status, reflected_at, created_at, stage1_raw_text),
             )
             conn.commit()
         finally:
@@ -436,7 +437,7 @@ class CategoryDelegationSupplementTests(OrchestratorTestBase):
 
         mock_gemini = make_mock_call_gemini({
             f"{brand} {name}": {
-                "stage1": {"text": "ビタミンC含有のサプリメント。1日2粒を目安に摂取。",
+                "stage1": {"text": "ビタミンC含有のサプリメント。1日2粒を目安に摂取。",  # Step48.1: 区分表示あり
                            "citations": [{"uri": source_url, "title": brand}]},
                 "stage2_payload": {
                     "active_ingredients": [
@@ -448,6 +449,8 @@ class CategoryDelegationSupplementTests(OrchestratorTestBase):
                         "dosage": {"value": "1日500mg", "confidence": "high", "source_url": source_url},
                         "serving_size": {"value": "1日2粒", "confidence": "high", "source_url": source_url},
                         "precautions": {"value": "unknown", "confidence": "unknown", "source_url": "unknown"},
+                        "product_classification": {"value": "supplement", "confidence": "high",
+                                                   "source_url": source_url},
                     },
                 },
             },
