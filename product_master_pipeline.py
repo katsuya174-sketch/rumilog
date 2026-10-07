@@ -278,16 +278,43 @@ def _active_gate_marker(stage2_payload, stage1_citations, now=None):
     return marker
 
 
-def _official_failure_is_transient(stage1_citations):
-    """公式情報源未確認のうち、citation先ページの確認がtimeout/通信エラー/
-    5xxで行えなかったものは一時的障害の可能性があるためmarkerにしない。"""
-    for c in stage1_citations or []:
-        verification = c.get("page_verification") if isinstance(c, dict) else None
-        if isinstance(verification, dict) and verification.get("fetch_status") == "unverifiable":
-            reason = str(verification.get("reason") or "")
-            if reason in _TRANSIENT_PAGE_REASONS or reason.startswith("http_5"):
-                return True
-    return False
+def classify_official_evidence(brand, stage1_citations):
+    """Step45.12: 公式情報源の根拠をcitationごとに分類し、全体の判定を返す。
+    各citation:
+      - confirmed: 公式性を証明(citation titleの照合、または保存済みpage
+        verificationを現行判定器(Step45.10)で再計算してTrue)
+      - transient_unverified: citation先ページの確認がtimeout/通信エラー/5xxで
+        評価できなかった
+      - not_confirmed: それ以外(取得・検証は完了したが証明しない。403/404・
+        安全要件での拒否・ドメイン不整合・未確認のtitle等を含む)
+    全体:
+      - confirmedが1件以上 → "confirmed"(official=True)
+      - confirmedなし・transientなし → "failed"(確定failure。markerを書く)
+      - confirmedなし・transientあり → "undetermined"(未確定。markerなし)
+    ドメインの公式らしさ・サイト種別等の推測はしない。"""
+    result = {"confirmed": [], "not_confirmed": [], "transient_unverified": []}
+    for citation in stage1_citations or []:
+        if not isinstance(citation, dict):
+            continue
+        title = citation.get("title", "")
+        if brand and (pipeline._citation_title_confirms_brand(brand, title)
+                      or pipeline._page_identity_confirms_brand(brand, citation)):
+            result["confirmed"].append(title)
+            continue
+        verification = citation.get("page_verification")
+        reason = str((verification or {}).get("reason") or "") if isinstance(verification, dict) else ""
+        if (isinstance(verification, dict) and verification.get("fetch_status") == "unverifiable"
+                and (reason in _TRANSIENT_PAGE_REASONS or reason.startswith("http_5"))):
+            result["transient_unverified"].append(title)
+        else:
+            result["not_confirmed"].append(title)
+    if result["confirmed"]:
+        result["status"] = "confirmed"
+    elif result["transient_unverified"]:
+        result["status"] = "undetermined"
+    else:
+        result["status"] = "failed"
+    return result
 
 
 def _record_gate_failure(staging_id, gate, reason):
@@ -838,7 +865,15 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
             }
             gate = _DETERMINISTIC_EVALUATION_FAILURES.get(evaluation["reason"])
             row_citations = (_fetch_staging_row(staging_id) or {}).get("stage1_citations")
-            if gate and not (gate == "official_source" and _official_failure_is_transient(row_citations)):
+            if gate == "official_source":
+                # Step45.12: 確定failure(confirmedもtransientも無い)の場合だけmarker。
+                # transientがあれば未確定としてmarkerを書かない。
+                official_evidence = classify_official_evidence(brand, row_citations)
+                not_reflected["official_evidence"] = {
+                    k: official_evidence[k] for k in ("status", "not_confirmed", "transient_unverified")}
+                if official_evidence["status"] == "failed":
+                    not_reflected["gate_failure_marker"] = _record_gate_failure(staging_id, gate, evaluation["reason"])
+            elif gate:
                 not_reflected["gate_failure_marker"] = _record_gate_failure(staging_id, gate, evaluation["reason"])
             actions.append(not_reflected)
             continue
