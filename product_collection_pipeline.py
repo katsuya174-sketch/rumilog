@@ -788,9 +788,36 @@ def _contains_brand_with_boundary(brand_norm, text_norm):
     return False
 
 
+# Step47.4: 公式情報源の照合だけで使うブランド名の候補。元の文字列に加え、
+# 末尾の括弧注記(メーカー・運営会社等)を1つだけ除いた形を候補にする
+# (例:「ネイチャーメイド（大塚製薬）」→「ネイチャーメイド」)。()と全角（）は
+# NFKCで同じ扱い。括弧内の文字列単独・中間部分の削除・単語分割・略称・翻訳・
+# 対応表・類似度は使わない。除去後が空/短すぎる場合は使わない。
+# Product Masterのbrand・identity_key・重複判定・楽天同一性判定には影響しない。
+_TRAILING_BRAND_ANNOTATION_RE = re.compile(r"^(.*?\S)\s*\([^()]*\)\s*$")
+
+
+def official_brand_forms(brand):
+    folded = unicodedata.normalize("NFKC", str(brand or "")).strip()
+    forms = [folded] if folded else []
+    match = _TRAILING_BRAND_ANNOTATION_RE.match(folded)
+    if match:
+        base = match.group(1).strip()
+        if len(_normalize_brand_text(base)) >= _MIN_BRAND_MATCH_LENGTH and base not in forms:
+            forms.append(base)
+    return forms
+
+
+def _ascii_brand_source(brand):
+    """英字トークンを取り出す元の文字列。末尾に括弧注記がある場合は除いた形
+    (括弧内の英字だけがトークンになるのを防ぐ)。"""
+    forms = official_brand_forms(brand)
+    return forms[-1] if forms else ""
+
+
 def _ascii_brand_tokens(brand):
     """ブランド名中のASCII英数字表記(区切り記号を除いて連結、2文字以上)。"""
-    folded = re.sub(r"[\-‐‑‒–—_.'’®™]", "", _nfkc_casefold(brand))
+    folded = re.sub(r"[\-‐‑‒–—_.'’®™]", "", _nfkc_casefold(_ascii_brand_source(brand)))
     runs = re.findall(r"[a-z0-9]+(?:\s+[a-z0-9]+)*", folded)
     return {re.sub(r"\s+", "", r) for r in runs if len(re.sub(r"\s+", "", r)) >= _MIN_BRAND_MATCH_LENGTH}
 
@@ -804,7 +831,7 @@ def _free_text_confirms_brand(brand, text):
         return False
     spaced = _BRAND_SEPARATORS_RE.sub(" ", folded)
     joined = _normalize_brand_text(folded)
-    candidates = {_normalize_brand_text(brand)} | _ascii_brand_tokens(brand)
+    candidates = {_normalize_brand_text(form) for form in official_brand_forms(brand)} | _ascii_brand_tokens(brand)
     return any(
         _contains_brand_with_boundary(c, t)
         for c in candidates if c
