@@ -547,6 +547,23 @@ def _staging_reuse_data_problem(staging_row):
     return None
 
 
+def _ensure_staging_page_verification(staging_id, brand):
+    """Step45.5: staging再利用(execute)時、保存済みcitationにpage_verification
+    がまだ無く、title判定でも公式確認できない場合だけ、citation先ページを
+    一度確認して結果をstage1_citationsへ保存する(Gemini費用なし)。既に
+    検証済みなら保存値をそのまま使い、HTTPは再実行しない。"""
+    row = _fetch_staging_row(staging_id)
+    citations = row.get("stage1_citations") if row else None
+    if (not row or _staging_reuse_data_problem(row) or pipeline.has_page_verification(citations)
+            or pipeline.is_official_source_confirmed(brand, citations)):
+        return row
+    verified = pipeline.attach_citation_page_verification(brand, citations)
+    if verified is not citations:
+        pipeline.update_staging_citations(staging_id, verified)
+        row = dict(row, stage1_citations=verified)
+    return row
+
+
 def evaluate_staging_for_reflect(staging_id, brand, name, category, conflict_status=None, staging_row=None):
     """保存済みstaging(Stage1/2済み)を、official source → category validator →
     conflictの順に評価する(DB書き込み・API呼び出しなし)。conflict_statusが
@@ -566,9 +583,13 @@ def evaluate_staging_for_reflect(staging_id, brand, name, category, conflict_sta
     confident, reason = _is_confident_enough(row, brand, category)
     category_check = _category_attributes_check(category, row.get("stage2_payload") or {})
     reflectable = row.get("stage2_status") == "ok" and confident and category_check["valid"]
+    citations = row.get("stage1_citations") or []
     return {
         "reflectable": reflectable, "data_complete": True, "staging_id": staging_id,
         "reason": None if reflectable else (reason or "category_validator_failed"),
+        # 公式未確認かつcitation先ページ確認がまだ(dry-runではHTTPを行わない)。
+        "page_verification_pending": (not pipeline.is_official_source_confirmed(brand, citations)
+                                      and not pipeline.has_page_verification(citations)),
         "official_source_confirmed": pipeline.is_official_source_confirmed(brand, row.get("stage1_citations") or []),
         "category_validator": category_check, "conflict_status": conflict_status,
     }
@@ -661,7 +682,8 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
         collect_result = {}
         if reuse_staging_id:
             staging_id = reuse_staging_id
-            evaluation = evaluate_staging_for_reflect(staging_id, brand, name, category)
+            staging_row = _ensure_staging_page_verification(staging_id, brand)
+            evaluation = evaluate_staging_for_reflect(staging_id, brand, name, category, staging_row=staging_row)
             if not evaluation["data_complete"]:
                 consecutive_failures += 1
                 actions.append({

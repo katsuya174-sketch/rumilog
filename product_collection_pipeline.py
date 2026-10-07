@@ -26,11 +26,13 @@ import re
 import time
 import unicodedata
 from datetime import datetime
+from urllib.parse import urljoin, urlsplit
 
 import psycopg2
 from google.genai import types
 
 import app
+import citation_verification
 import product_collection_grounding_poc as poc
 
 # ===== モデル・収集用の分離された上限 =====
@@ -760,6 +762,23 @@ def _ascii_brand_tokens(brand):
     return {re.sub(r"\s+", "", r) for r in runs if len(re.sub(r"\s+", "", r)) >= _MIN_BRAND_MATCH_LENGTH}
 
 
+def _free_text_confirms_brand(brand, text):
+    """自由文に、正規化したブランド名(日本語表記を含む)が文字種境界付きで
+    含まれるか。区切り記号を空白として残した形(語の境界を保つ)と、取り除いた
+    形(ブランド名自体の区切りの有無の差を吸収)の両方で確認する。"""
+    folded = _nfkc_casefold(text).strip()
+    if not folded:
+        return False
+    spaced = _BRAND_SEPARATORS_RE.sub(" ", folded)
+    joined = _normalize_brand_text(folded)
+    candidates = {_normalize_brand_text(brand)} | _ascii_brand_tokens(brand)
+    return any(
+        _contains_brand_with_boundary(c, t)
+        for c in candidates if c
+        for t in (spaced, joined)
+    )
+
+
 def _citation_title_confirms_brand(brand, title):
     title_folded = _nfkc_casefold(title).strip()
     if not title_folded:
@@ -769,17 +788,119 @@ def _citation_title_confirms_brand(brand, title):
         # TLDを除く)と完全一致する場合のみ。部分文字列一致はしない。
         labels = {label.replace("-", "") for label in title_folded.split(".")[:-1]}
         return bool(_ascii_brand_tokens(brand) & labels)
-    # 自由文のtitle: 正規化したブランド名(日本語表記を含む)が文字種境界付きで
-    # 含まれる。区切り記号を空白として残した形(語の境界を保つ)と、取り除いた
-    # 形(ブランド名自体の区切りの有無の差を吸収)の両方で確認する。
-    title_spaced = _BRAND_SEPARATORS_RE.sub(" ", title_folded)
-    title_joined = _normalize_brand_text(title_folded)
-    candidates = {_normalize_brand_text(brand)} | _ascii_brand_tokens(brand)
-    return any(
-        _contains_brand_with_boundary(c, text)
-        for c in candidates if c
-        for text in (title_spaced, title_joined)
-    )
+    return _free_text_confirms_brand(brand, title_folded)
+
+
+# ===== Step45.5: citation先ページ自身の「サイトの名乗り」による確認 =====
+# title判定で公式確認できない場合のみ、citationを安全に追跡し(citation_
+# verification.fetch_html)、最終ページのog:site_name/JSON-LD Organization・
+# Corporation・WebSite.name/<title>末尾のサイト名部分だけでブランドを照合する。
+# 最終ドメインとcanonicalはcitation title(=Groundingが示したソースの
+# ドメイン)と一致(またはそのサブドメイン)している必要がある。
+# 結果はstage1_citationsの各要素に"page_verification"として保存し、判定は
+# 保存値から毎回決定論的に再計算する(HTML本文は保存しない)。
+MAX_PAGE_VERIFICATION_DOMAINS = 5
+
+
+def _domain_within(host, base):
+    host = (host or "").lower().strip(".")
+    base = (base or "").lower().strip(".")
+    return bool(host and base) and (host == base or host.endswith("." + base))
+
+
+def _citation_title_domain(citation):
+    title = _nfkc_casefold(citation.get("title", "")).strip()
+    return title if _DOMAIN_TITLE_RE.fullmatch(title) else None
+
+
+def _page_identity_confirms_brand(brand, citation):
+    verification = citation.get("page_verification") if isinstance(citation, dict) else None
+    if not isinstance(verification, dict) or verification.get("fetch_status") != citation_verification.OK:
+        return False
+    title_domain = _citation_title_domain(citation)
+    if not title_domain or not _domain_within(verification.get("final_domain"), title_domain):
+        return False
+    canonical_domain = verification.get("canonical_domain")
+    if canonical_domain and not _domain_within(canonical_domain, title_domain):
+        return False
+    identity = verification.get("site_identity") or {}
+    fields = [identity.get("og_site_name"), identity.get("title_site_name"), *(identity.get("jsonld_names") or [])]
+    return any(isinstance(f, str) and _free_text_confirms_brand(brand, f) for f in fields)
+
+
+def _verify_citation_page(brand, citation):
+    fetched = citation_verification.fetch_html(citation.get("uri", ""))
+    final_url = fetched.get("final_url") or ""
+    record = {
+        "fetch_status": fetched["status"],
+        "final_domain": fetched.get("final_domain") or (urlsplit(final_url).hostname or None),
+    }
+    if fetched["status"] != citation_verification.OK:
+        record.update({"status": fetched["status"], "reason": fetched.get("reason")})
+        return record
+    identity = citation_verification.extract_site_identity(fetched.get("html", ""))
+    canonical = identity.pop("canonical", None)
+    record["canonical_domain"] = urlsplit(urljoin(final_url, canonical)).hostname if canonical else None
+    record["site_identity"] = identity
+    title_domain = _citation_title_domain(citation)
+    if not _domain_within(record["final_domain"], title_domain):
+        record.update({"status": "rejected", "reason": "final_domain_mismatch"})
+    elif record["canonical_domain"] and not _domain_within(record["canonical_domain"], title_domain):
+        record.update({"status": "rejected", "reason": "canonical_domain_mismatch"})
+    else:
+        confirmed = _page_identity_confirms_brand(brand, dict(citation, page_verification=record))
+        record.update({"status": "confirmed" if confirmed else "not_confirmed",
+                       "reason": None if confirmed else "brand_not_in_site_identity"})
+    return record
+
+
+def has_page_verification(citations):
+    return any(isinstance(c, dict) and isinstance(c.get("page_verification"), dict) for c in citations or [])
+
+
+def attach_citation_page_verification(brand, citations):
+    """title判定で公式確認できない場合のみ、citation先ページを最大
+    MAX_PAGE_VERIFICATION_DOMAINS ドメインまで(同一ドメインは1回)確認し、
+    結果を各citationの"page_verification"へ付けたリストを返す。1件で公式
+    確認できた時点で終了する。timeout/403等は「そのsourceでは確認不能」として
+    次へ進む。既に検証済みの場合・ブランド不明の場合は何もしない。"""
+    if not brand or not citations or has_page_verification(citations):
+        return citations
+    if any(isinstance(c, dict) and _citation_title_confirms_brand(brand, c.get("title", "")) for c in citations):
+        return citations
+    out = [dict(c) if isinstance(c, dict) else c for c in citations]
+    seen_domains = set()
+    for citation in out:
+        if not isinstance(citation, dict) or not citation.get("uri"):
+            continue
+        title_domain = _citation_title_domain(citation)
+        if not title_domain or title_domain in seen_domains:
+            continue
+        if len(seen_domains) >= MAX_PAGE_VERIFICATION_DOMAINS:
+            break
+        seen_domains.add(title_domain)
+        citation["page_verification"] = _verify_citation_page(brand, citation)
+        print(f"[CITATION PAGE CHECK] brand={brand} domain={title_domain} "
+              f"status={citation['page_verification'].get('status')} reason={citation['page_verification'].get('reason')}",
+              flush=True)
+        if citation["page_verification"].get("status") == "confirmed":
+            break
+    return out
+
+
+def update_staging_citations(staging_id, citations):
+    """staging再利用時に取得したpage_verificationをstage1_citations(既存JSONB)
+    へ保存する(以後の再利用でHTTPを再実行しないため)。"""
+    conn = None
+    try:
+        conn = psycopg2.connect(app.DATABASE_URL)
+        cur = conn.cursor()
+        cur.execute("UPDATE product_collection_staging SET stage1_citations = %s WHERE staging_id = %s",
+                    (json.dumps(citations, ensure_ascii=False), staging_id))
+        conn.commit()
+    finally:
+        if conn:
+            conn.close()
 
 
 def is_official_source_confirmed(brand, citations):
@@ -787,12 +908,17 @@ def is_official_source_confirmed(brand, citations):
     official_source_confirmedはモデルの自己申告を信用せず、ここで
     決定論的に判定する(合意事項)。Stage1の実citationのtitleが、ブランド名
     (日本語表記を含む)そのもの、またはASCIIブランド表記と完全一致する
-    ドメインラベルを含む場合のみTrue(Step45.3)。判定不能な場合は安全側でFalse。
+    ドメインラベルを含む場合、またはcitation先ページ自身のサイトの名乗り
+    (保存済みpage_verification、Step45.5)がブランドを含む場合のみTrue。
+    判定不能な場合は安全側でFalse。HTTPアクセスはしない(保存値から再計算)。
     """
     if not brand or not citations:
         return False
     return any(
-        isinstance(c, dict) and _citation_title_confirms_brand(brand, c.get("title", ""))
+        isinstance(c, dict) and (
+            _citation_title_confirms_brand(brand, c.get("title", ""))
+            or _page_identity_confirms_brand(brand, c)
+        )
         for c in citations
     )
 
@@ -1335,6 +1461,12 @@ def collect_one_product(brand, product_name, category, batch_id, existing_produc
     費用上限(PRODUCT_COLLECTION_COST_LIMIT_USD)を超えた場合は、この商品の
     処理を完了させた上で呼び出し元(collect_batch)に伝え、バッチを停止する。"""
     stage1_result = run_stage1_collection(brand, product_name, batch_id, category=category)
+    if stage1_result.get("status") == "ok":
+        # Step45.5: Stage1直後に、title判定で公式確認できない場合のみcitation先
+        # ページのサイトの名乗りを確認し、結果をcitationへ付けて保存する。
+        stage1_result = dict(stage1_result, citations=attach_citation_page_verification(
+            brand, stage1_result.get("citations") or [],
+        ))
 
     stage2_result = run_stage2_structuring(brand, product_name, category, stage1_result, batch_id)
 

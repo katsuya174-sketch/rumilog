@@ -333,7 +333,11 @@ class VariantUncertainTests(OrchestratorTestBase):
         with patch.object(app, "generate_product_master_work_queue", return_value=[
             {"type": "coverage_gap", "category": category, "target": "vitamin_c", "shortage_count": 1,
              "priority": "high", "reason": "test"},
-        ]), patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini):
+        ]), patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini), \
+             patch.object(pipeline.citation_verification, "fetch_html",
+                          return_value={"status": "unverifiable", "reason": "http_403", "final_url": ""}):
+            # Step45.5: title判定で確認できないためcitation先ページ確認へ進むが、
+            # 確認不能(403)なので公式未確認のまま。
             result = orchestrator.run_batch(mode="execute", candidate_source=candidate_source, batch_id=batch_id)
 
         self.assertEqual(result["actions"][0]["action"], "not_reflected")

@@ -34,3 +34,19 @@ def block_real_gemini_api_calls():
         ),
     ):
         yield
+
+
+@pytest.fixture(autouse=True)
+def block_real_citation_page_fetch():
+    """Step45.5: citation先ページ取得(citation_verification)が自動テストから
+    実DNS・実HTTPへ到達しないようにする安全装置。個別テストがfetch_html/
+    _open_url/_getaddrinfoをpatchした場合はそちらが優先される。"""
+    import citation_verification
+
+    blocked = RuntimeError(
+        "実HTTP/DNSへの到達がブロックされました。テストでは citation_verification."
+        "fetch_html / _open_url / _getaddrinfo を明示的にモックしてください(conftest.py参照)。"
+    )
+    with patch.object(citation_verification, "_getaddrinfo", side_effect=blocked), \
+            patch.object(citation_verification, "_open_url", side_effect=blocked):
+        yield

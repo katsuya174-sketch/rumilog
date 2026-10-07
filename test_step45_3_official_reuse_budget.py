@@ -86,6 +86,8 @@ class StagingReuseTests(OrchestratorTestBase):
         budget = orchestrator.BatchBudget(batch_id, 5, 20, 0.50)
         with patch.object(pipeline, "call_gemini_for_collection", side_effect=FORBIDDEN), \
              patch.object(pipeline, "collect_one_product", side_effect=FORBIDDEN), \
+             patch.object(pipeline.citation_verification, "fetch_html",
+                          return_value={"status": "unverifiable", "reason": "http_403", "final_url": ""}), \
              patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
             actions = orchestrator.process_coverage_gap_item(
                 {"category": category, "target": target, "shortage_count": 1}, "execute", batch_id, budget,
