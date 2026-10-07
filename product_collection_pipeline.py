@@ -1199,9 +1199,13 @@ def derive_primary_ingredient_tags(stage2_payload):
     """Stage2のcategory_attributes.primary_ingredients(出典照合済みの成分名)の
     うち、同じペイロードのactive_ingredientsに実在する成分名だけを
     normalize_ingredient_tag()でタグ化して返す(sorted list)。Stage2が任意の
-    タグ文字列を生成しても信用しない。根拠が無い(unknown)場合は空リスト。"""
+    タグ文字列を生成しても信用しない。根拠が無い(unknown)場合は空リスト。
+    primary_ingredients項目自体が無い(Step47.1以前の)データはNoneを返す
+    (呼び出し元が商品名からの決定論的補完を使う。Step47.2)。"""
     payload = stage2_payload or {}
     attrs = payload.get("category_attributes") or {}
+    if "primary_ingredients" not in attrs:
+        return None
     field = attrs.get("primary_ingredients")
     value = field.get("value") if isinstance(field, dict) else field
     if not value or str(value).strip().lower() == "unknown":
@@ -1221,6 +1225,17 @@ def derive_primary_ingredient_tags(stage2_payload):
         if tag and tag in active_tags:
             tags.add(tag)
     return sorted(tags)
+
+
+def supplement_primary_tags_for_payload(product_name, stage2_payload):
+    """Stage2のprimary_ingredientsを第一優先とし、その項目が欠落している既存
+    データだけapp.supplement_primary_tags_from_name()で補完する(Step47.2)。"""
+    tags = derive_primary_ingredient_tags(stage2_payload)
+    if tags is not None:
+        return tags
+    names = [i.get("ingredient") for i in ((stage2_payload or {}).get("active_ingredients") or [])
+             if isinstance(i, dict) and i.get("ingredient")]
+    return app.supplement_primary_tags_from_name(product_name, names)
 
 
 def flatten_category_attributes(category_attributes_payload):
@@ -1932,7 +1947,7 @@ def reflect_staging_to_product_master(staging_id, dry_run=True):
         category_attributes = flatten_category_attributes(payload.get("category_attributes"))
         if category == "サプリメント":
             # Step47.1: 主要成分タグ(coverage・診断target関連性の根拠)。
-            category_attributes["primary_ingredient_tags"] = derive_primary_ingredient_tags(payload)
+            category_attributes["primary_ingredient_tags"] = supplement_primary_tags_for_payload(product_name, payload)
         if category_attributes:
             product_for_master["category_attributes"] = category_attributes
 

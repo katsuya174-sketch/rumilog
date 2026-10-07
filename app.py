@@ -4485,7 +4485,9 @@ def is_candidate_relevant_to_target(category, target, product, user_data=None, b
         attrs = product.get("category_attributes")
         primary = attrs.get("primary_ingredient_tags") if isinstance(attrs, dict) else None
         if not isinstance(primary, list):
-            return False
+            # Step47.2: primaryの保存値が無い既存データは、商品名+active_ingredients
+            # から決定論的に導出する(全active成分をprimary扱いはしない)。
+            primary = supplement_primary_tags_from_name(product.get("name", ""), product.get("active_ingredients") or [])
         synonyms = _SUPPLEMENT_TARGET_TAG_SYNONYMS.get(target, {target})
         return bool(set(primary) & synonyms)
 
@@ -6313,6 +6315,63 @@ _SUPPLEMENT_INGREDIENT_KEYWORDS = {
 
 
 _SUPPLEMENT_SELECTION_REASON_FALLBACK = _DEVICE_SELECTION_REASON_FALLBACK
+
+
+# ===== Step47.2: 商品名・楽天タイトルからの決定論的なサプリ主要成分判定 =====
+# 名称の辞書は推薦定義(_SUPPLEMENT_INGREDIENT_KEYWORDS、サプリ10 target)を
+# そのまま使い、各名称がnormalize_ingredient_tag()で同じtargetになるものだけを
+# 採用する(商品ごとの対応表は持たない)。英字の名称は英字境界付きで照合する。
+_SUPPLEMENT_AUXILIARY_AFTER_RE = re.compile(r"^\s*(?:配合|入り|含有|プラス)")
+_SUPPLEMENT_AUXILIARY_BEFORE_RE = re.compile(r"(?:\+|＋|プラス|with)\s*$")
+_LIVE_TITLE_BRACKETS_RE = re.compile(r"【[^】]*】|\[[^\]]*\]|［[^］]*］|〔[^〕]*〕|《[^》]*》|<[^>]*>")
+_LIVE_TITLE_MULTI_RE = re.compile(r"マルチ|multi")
+
+
+def _supplement_target_names(target):
+    return [kw for kw in _SUPPLEMENT_INGREDIENT_KEYWORDS.get(target, ())
+            if normalize_ingredient_tag(kw) == target]
+
+
+def _supplement_name_mentions(text, target, primary_form_only=False):
+    """textにtargetの明示名称があるか。primary_form_only=Trueのときは「DHA配合」
+    「＋EPA」等の補助的な言及を除く。"""
+    folded = unicodedata.normalize("NFKC", str(text or "")).lower()
+    for kw in _supplement_target_names(target):
+        kw_folded = unicodedata.normalize("NFKC", kw).lower()
+        pattern = re.escape(kw_folded)
+        if re.fullmatch(r"[a-z0-9 \-]+", kw_folded):
+            pattern = rf"(?<![a-z]){pattern}(?![a-z])"
+        for m in re.finditer(pattern, folded):
+            if primary_form_only and (_SUPPLEMENT_AUXILIARY_AFTER_RE.match(folded[m.end():])
+                                      or _SUPPLEMENT_AUXILIARY_BEFORE_RE.search(folded[:m.start()])):
+                continue
+            return True
+    return False
+
+
+def supplement_primary_tags_from_name(product_name, active_ingredient_names):
+    """Stage2のprimary_ingredientsが欠落している既存データ用の補完。
+    (1)商品名にtargetの明示名称がある、(2)同じ成分がactive_ingredientsに実在、
+    (3)その名称がnormalize_ingredient_tag()で同じtargetになる、の3条件を全て
+    満たすtargetだけを主要成分とする。含有量・成分順序では決めない。"""
+    active_tags = set(compute_ingredient_tags([n for n in (active_ingredient_names or []) if isinstance(n, str)]))
+    return sorted(
+        target for target in _SUPPLEMENT_INGREDIENT_KEYWORDS
+        if target in active_tags and _supplement_name_mentions(product_name, target)
+    )
+
+
+def live_supplement_title_primary_target(title):
+    """楽天live候補のタイトルから、商品の主目的として扱えるtargetを1つだけ
+    決定論的に返す。【】等の括弧内と「|」以降(販促・SEO語)を除いた商品名部分で、
+    補助的でない形で言及されるtargetがちょうど1つの場合のみ。複数・マルチ系・
+    該当なしはNone(採用しない。誤推薦より候補なしを優先)。"""
+    core = re.split(r"[|｜]", unicodedata.normalize("NFKC", str(title or "")))[0]
+    core = _LIVE_TITLE_BRACKETS_RE.sub(" ", core)
+    if _LIVE_TITLE_MULTI_RE.search(core.lower()):
+        return None
+    mentioned = [t for t in _SUPPLEMENT_INGREDIENT_KEYWORDS if _supplement_name_mentions(core, t, primary_form_only=True)]
+    return mentioned[0] if len(mentioned) == 1 else None
 
 
 def _supplement_matches_keywords(item, keyword_variants):
@@ -8312,6 +8371,13 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
                 category=category,
                 brand=brand,
             )
+            # Step47.2: live候補は、タイトルからtargetが商品の主目的と判定できる
+            # ものだけを残す(キーワードがタイトルのどこかにあるだけでは採用しない)。
+            if _relevance_target:
+                scored_candidates = [
+                    (sc, it) for sc, it in scored_candidates
+                    if live_supplement_title_primary_target(str(it.get("itemName", "") or "")) == _relevance_target
+                ]
         best_raw_item, supplement_selection_reason = select_best_supplement_candidate(
             scored_candidates, supplement_type, ingredient_focus, user_data, budget_value
         )

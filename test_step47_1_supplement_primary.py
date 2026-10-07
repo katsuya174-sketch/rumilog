@@ -60,7 +60,8 @@ class DerivePrimaryTagsTests(unittest.TestCase):
 
     def test_primary_unknown_is_not_counted(self):
         self.assertEqual(pipeline.derive_primary_ingredient_tags(_payload(["ビタミンC"], "unknown")), [])
-        self.assertEqual(pipeline.derive_primary_ingredient_tags({"active_ingredients": [{"ingredient": "ビタミンC"}]}), [])
+        # Step47.2: 項目自体が無い旧データはNone(呼び出し元が商品名から決定論的に補完)。
+        self.assertIsNone(pipeline.derive_primary_ingredient_tags({"active_ingredients": [{"ingredient": "ビタミンC"}]}))
         self.assertFalse(relevant("vitamin_c", _product(["ビタミンC"], [])))
 
     def test_no_fallback_to_all_active_ingredients(self):
