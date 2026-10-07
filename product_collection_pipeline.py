@@ -646,6 +646,17 @@ _CATEGORY_ATTRIBUTES_EXTRACTION_SPECS = {
             type="STRING",
             description="注意事項の要約。不明な場合は'unknown'",
         ),
+        # Step47.1: 主要成分。タグはコード側でactive_ingredientsに実在する
+        # 成分名からだけ導出する(derive_primary_ingredient_tags)。
+        "primary_ingredients": types.Schema(
+            type="STRING",
+            description=(
+                "この商品の主要成分として出典で明示されている成分名(商品名・公式の商品種別で主要成分と"
+                "されている、または商品説明でその成分の摂取が商品の主目的と明示されているもの)。"
+                "active_ingredientsに挙げた成分名と同じ表記で、複数ある場合は「、」区切り。"
+                "成分の記載順や含有量の多さだけで決めないこと。根拠が無い場合は'unknown'"
+            ),
+        ),
     },
 }
 
@@ -1174,6 +1185,42 @@ def _enforce_device_method_evidence(category, sanitized, stage1_text):
     out = dict(sanitized)
     out["category_attributes"] = dict(attrs, method={"value": "unknown", "confidence": "unknown", "source_url": "unknown"})
     return out
+
+
+# ===== Step47.1: サプリの主要成分(primary)と副成分の分離 =====
+_PRIMARY_INGREDIENT_SEPARATORS_RE = re.compile(r"[、,，/／・\n]+")
+
+
+def _ingredient_name_key(name):
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(name or "")).lower())
+
+
+def derive_primary_ingredient_tags(stage2_payload):
+    """Stage2のcategory_attributes.primary_ingredients(出典照合済みの成分名)の
+    うち、同じペイロードのactive_ingredientsに実在する成分名だけを
+    normalize_ingredient_tag()でタグ化して返す(sorted list)。Stage2が任意の
+    タグ文字列を生成しても信用しない。根拠が無い(unknown)場合は空リスト。"""
+    payload = stage2_payload or {}
+    attrs = payload.get("category_attributes") or {}
+    field = attrs.get("primary_ingredients")
+    value = field.get("value") if isinstance(field, dict) else field
+    if not value or str(value).strip().lower() == "unknown":
+        return []
+    active_names = {
+        _ingredient_name_key(i.get("ingredient")): i.get("ingredient")
+        for i in (payload.get("active_ingredients") or [])
+        if isinstance(i, dict) and i.get("ingredient")
+    }
+    active_tags = set(app.compute_ingredient_tags(list(active_names.values())))
+    tags = set()
+    for raw in _PRIMARY_INGREDIENT_SEPARATORS_RE.split(str(value)):
+        name = active_names.get(_ingredient_name_key(raw))
+        if not name:
+            continue
+        tag = app.normalize_ingredient_tag(name)
+        if tag and tag in active_tags:
+            tags.add(tag)
+    return sorted(tags)
 
 
 def flatten_category_attributes(category_attributes_payload):
@@ -1883,6 +1930,9 @@ def reflect_staging_to_product_master(staging_id, dry_run=True):
         # 持たせないことで、validate_category_attributes()が「未確認」を
         # 「欠落」として正しく検出できるようにする)。
         category_attributes = flatten_category_attributes(payload.get("category_attributes"))
+        if category == "サプリメント":
+            # Step47.1: 主要成分タグ(coverage・診断target関連性の根拠)。
+            category_attributes["primary_ingredient_tags"] = derive_primary_ingredient_tags(payload)
         if category_attributes:
             product_for_master["category_attributes"] = category_attributes
 

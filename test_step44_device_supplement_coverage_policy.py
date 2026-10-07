@@ -161,7 +161,8 @@ class CoverageReportTests(unittest.TestCase):
     def test_supplement_relevance_for_all_ten_tags(self):
         rows = [
             _with_sales_info({"brand": f"S{i}", "name": f"{tag}サプリ{chr(65 + i)}", "category": "サプリメント",
-                              "active_ingredients": [sample]})
+                              "active_ingredients": [sample],
+                              "category_attributes": {"primary_ingredient_tags": [app.normalize_ingredient_tag(sample)]}})
             for tag, sample in SUPPLEMENT_SAMPLE_INGREDIENT.items()
             for i in range(3)
         ]

@@ -4451,13 +4451,11 @@ _EFFECTIVE_CANDIDATE_BUDGET_VALUE = 3000
 # 挙動で、Step43では変更しない)。これらは実質同じ対象(サプリの乳酸菌/
 # ビフィズス菌由来成分)を指すため、relevance判定でのみ同義語として扱う。
 # ただしlactic_acidタグ自体は「乳酸カルシウム」「乳酸Na」等の乳酸塩でも
-# 付くため同義語にはせず、「乳酸菌」は生の原料名で判定する
-# (_SUPPLEMENT_TARGET_RAW_NAME_KEYWORDS)。
+# 付くため同義語にはしない。Step46で「乳酸菌」「ビフィズス菌」自体は
+# probioticsへ正規化されるようになり、Step47.1で関連性は主要成分タグ
+# (primary_ingredient_tags)で判定するため、生の原料名による判定は廃止。
 _SUPPLEMENT_TARGET_TAG_SYNONYMS = {
     "probiotics": {"probiotics", "lactobacillus", "bifida"},
-}
-_SUPPLEMENT_TARGET_RAW_NAME_KEYWORDS = {
-    "probiotics": ("乳酸菌", "ビフィズス菌"),
 }
 
 
@@ -4480,13 +4478,16 @@ def is_candidate_relevant_to_target(category, target, product, user_data=None, b
         return False
 
     if category == "サプリメント":
-        raw_names = [str(n) for n in (product.get("active_ingredients") or []) if n is not None]
-        tags = set(compute_ingredient_tags(raw_names))
+        # Step47.1: targetが商品の主要成分(category_attributes.primary_ingredient_
+        # tags)であることを必須にする。副成分として含むだけでは関連商品にしない。
+        # primary不明(未収集の旧データ等)は関連性不明=数えない(全active成分を
+        # primary扱いするfallbackはしない)。
+        attrs = product.get("category_attributes")
+        primary = attrs.get("primary_ingredient_tags") if isinstance(attrs, dict) else None
+        if not isinstance(primary, list):
+            return False
         synonyms = _SUPPLEMENT_TARGET_TAG_SYNONYMS.get(target, {target})
-        if tags & synonyms:
-            return True
-        raw_keywords = _SUPPLEMENT_TARGET_RAW_NAME_KEYWORDS.get(target, ())
-        return any(kw in name for name in raw_names for kw in raw_keywords)
+        return bool(set(primary) & synonyms)
 
     if category == "美容機器":
         attrs = product.get("category_attributes")

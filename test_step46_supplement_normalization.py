@@ -48,10 +48,14 @@ class ProbioticsTests(unittest.TestCase):
         self.assertEqual(app.normalize_ingredient_tag("probiotic_ferment"), "probiotic_ferment")
 
     def test_supplement_relevance_uses_new_tags(self):
-        self.assertTrue(app.is_candidate_relevant_to_target("サプリメント", "omega3", {"active_ingredients": ["オメガ3脂肪酸"]}))
-        self.assertTrue(app.is_candidate_relevant_to_target("サプリメント", "probiotics", {"active_ingredients": ["有胞子性乳酸菌"]}))
-        self.assertFalse(app.is_candidate_relevant_to_target("サプリメント", "probiotics", {"active_ingredients": ["乳酸カルシウム"]}))
-        self.assertFalse(app.is_candidate_relevant_to_target("サプリメント", "omega3", {"active_ingredients": ["脂肪酸"]}))
+        # Step47.1以降、関連性は主要成分タグで判定する(タグはnormalize_ingredient_tag由来)。
+        def product(name):
+            return {"active_ingredients": [name],
+                    "category_attributes": {"primary_ingredient_tags": [app.normalize_ingredient_tag(name)]}}
+        self.assertTrue(app.is_candidate_relevant_to_target("サプリメント", "omega3", product("オメガ3脂肪酸")))
+        self.assertTrue(app.is_candidate_relevant_to_target("サプリメント", "probiotics", product("有胞子性乳酸菌")))
+        self.assertFalse(app.is_candidate_relevant_to_target("サプリメント", "probiotics", product("乳酸カルシウム")))
+        self.assertFalse(app.is_candidate_relevant_to_target("サプリメント", "omega3", product("脂肪酸")))
 
 
 class CosmeticsRegressionTests(unittest.TestCase):

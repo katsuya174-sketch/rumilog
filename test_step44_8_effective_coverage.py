@@ -41,7 +41,8 @@ def _device(i, method="RF", sale=True, name=None):
 
 def _supp(i, ingredient="亜鉛", sale=True):
     row = {"brand": f"サプリ{i}", "name": f"サプリ{chr(65 + i)}", "category": "サプリメント",
-           "active_ingredients": [ingredient]}
+           "active_ingredients": [ingredient],
+           "category_attributes": {"primary_ingredient_tags": [app.normalize_ingredient_tag(ingredient)]}}
     return _sale(row) if sale else row
 
 

@@ -70,6 +70,9 @@ class StagingReuseTests(OrchestratorTestBase):
             "active_ingredients": [{"ingredient": "アスコルビン酸",
                                     "source_url": (citations[0].get("uri", "") if citations else "")}],
             "formulation_features": [], "official_source_confirmed": False,
+            "category_attributes": {"primary_ingredients": {
+                "value": "アスコルビン酸", "confidence": "high",
+                "source_url": (citations[0].get("uri", "") if citations else "")}},
         }
         self._insert_staging_row(self._new_batch_id(f"reuse-{label}"), brand, name, category,
                                  stage2_payload=payload, citations=citations, stage2_status=stage2_status)

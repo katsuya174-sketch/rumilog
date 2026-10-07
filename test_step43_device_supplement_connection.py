@@ -263,7 +263,7 @@ class RelevanceAdapterTests(unittest.TestCase):
         self.assertFalse(app.is_candidate_relevant_to_target("美容機器", "RF", {}))
 
     def test_supplement_tag_match_is_relevant(self):
-        product = {"active_ingredients": ["vitamin_c"]}
+        product = {"active_ingredients": ["vitamin_c"], "category_attributes": {"primary_ingredient_tags": ["vitamin_c"]}}
         self.assertTrue(app.is_candidate_relevant_to_target("サプリメント", "vitamin_c", product))
 
     def test_supplement_tag_mismatch_is_not_relevant(self):
@@ -271,11 +271,9 @@ class RelevanceAdapterTests(unittest.TestCase):
         self.assertFalse(app.is_candidate_relevant_to_target("サプリメント", "vitamin_c", product))
 
     def test_supplement_probiotics_target_accepts_raw_lactic_acid_bacteria_name(self):
-        # 乳酸菌サプリメントの原料名が文字どおり"乳酸菌"と抽出された場合、
-        # normalize_ingredient_tag()は(既存の順序依存の挙動により)
-        # lactic_acidへ正規化されるが、probioticsターゲットは生の原料名で
-        # これを受理する。
-        product = {"active_ingredients": ["乳酸菌"]}
+        # Step46で「乳酸菌」はprobioticsへ正規化され、Step47.1で関連性は主要成分
+        # タグで判定する。
+        product = {"active_ingredients": ["乳酸菌"], "category_attributes": {"primary_ingredient_tags": ["probiotics"]}}
         self.assertTrue(app.is_candidate_relevant_to_target("サプリメント", "probiotics", product))
 
     def test_supplement_probiotics_target_rejects_lactate_salts(self):
@@ -286,7 +284,7 @@ class RelevanceAdapterTests(unittest.TestCase):
                 self.assertFalse(app.is_candidate_relevant_to_target("サプリメント", "probiotics", product))
 
     def test_supplement_probiotics_target_accepts_bifida_synonym(self):
-        product = {"active_ingredients": ["ビフィズス菌"]}
+        product = {"active_ingredients": ["ビフィズス菌発酵エキス"], "category_attributes": {"primary_ingredient_tags": ["bifida"]}}
         self.assertTrue(app.is_candidate_relevant_to_target("サプリメント", "probiotics", product))
 
     def test_cosmetics_delegates_to_existing_score_product_logic(self):
@@ -364,6 +362,7 @@ class ProductMasterFixtureEffectiveCandidateTests(unittest.TestCase):
         app.upsert_product_master(dict({
             "brand": brand, "name": name, "category": category,
             "active_ingredients": ["アスコルビン酸"],
+            "category_attributes": {"primary_ingredient_tags": ["vitamin_c"]},
         }, **_sales_info("supp-a", f"{brand} {name} ビタミンC")), data_source="ai_precollected")
 
         count = app.calculate_effective_candidates(category, "vitamin_c", db_products=[], verified_products=[])
@@ -468,6 +467,7 @@ class DiagnosisTimeProductMasterUsageTests(unittest.TestCase):
         master_row = {
             "brand": f"ブランドE{TEST_NAME_SUFFIX}", "name": f"ビタミンCサプリ{TEST_NAME_SUFFIX}",
             "category": "サプリメント", "active_ingredients": ["vitamin_c"],
+            "category_attributes": {"primary_ingredient_tags": ["vitamin_c"]},
             "item_code": "rk-supp-001", "price_ref": 2000,
             "last_known_rakuten_link": "https://item.rakuten.co.jp/shop/rk-supp-001/",
             "last_known_image": "https://image.example.com/supp.jpg",
@@ -508,6 +508,7 @@ class DiagnosisTimeProductMasterUsageTests(unittest.TestCase):
         return {
             "brand": f"ブランドF{TEST_NAME_SUFFIX}", "name": f"ビタミンCサプリ{TEST_NAME_SUFFIX}",
             "category": "サプリメント", "active_ingredients": ["vitamin_c"],
+            "category_attributes": {"primary_ingredient_tags": ["vitamin_c"]},
             "item_code": "rk-supp-002", "price_ref": 2000,
             "last_known_rakuten_link": "https://item.rakuten.co.jp/shop/rk-supp-002/",
             "last_known_image": "https://image.example.com/supp-old.jpg",

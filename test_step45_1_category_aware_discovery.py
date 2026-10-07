@@ -310,6 +310,8 @@ class CategoryStage1EndToEndTests(OrchestratorTestBase):
                                                               "confidence": "high", "source_url": CIT}],
                                       "formulation_features": [], "official_source_confirmed": True,
                                       "category_attributes": {
+                                          "primary_ingredients": {"value": "アスコルビン酸", "confidence": "high",
+                                                                  "source_url": CIT},
                                           "dosage": {"value": "1日2粒", "confidence": "high", "source_url": CIT},
                                           "serving_size": {"value": "unknown", "confidence": "unknown",
                                                            "source_url": "unknown"},
@@ -318,10 +320,12 @@ class CategoryStage1EndToEndTests(OrchestratorTestBase):
                                       }})
         self.assertIn("含有成分とその含有量", prompts[0])
         self.assertEqual(actions[0]["action"], "reflected")
-        _, actives, tags = self._master(brand, name, "サプリメント")
+        attrs, actives, tags = self._master(brand, name, "サプリメント")
         self.assertIn("vitamin_c", tags)
+        self.assertEqual(attrs["primary_ingredient_tags"], ["vitamin_c"])
         self.assertTrue(app.is_candidate_relevant_to_target("サプリメント", "vitamin_c",
-                                                            {"active_ingredients": list(actives) + list(tags)}))
+                                                            {"active_ingredients": list(actives) + list(tags),
+                                                             "category_attributes": attrs}))
 
 
 if __name__ == "__main__":

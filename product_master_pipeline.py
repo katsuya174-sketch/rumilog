@@ -493,7 +493,11 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
             "active_ingredients": list(dict.fromkeys(
                 ingredient_names + app.compute_ingredient_tags(ingredient_names)
             )),
-            "category_attributes": pipeline.flatten_category_attributes(payload.get("category_attributes")),
+            "category_attributes": dict(
+                pipeline.flatten_category_attributes(payload.get("category_attributes")),
+                **({"primary_ingredient_tags": pipeline.derive_primary_ingredient_tags(payload)}
+                   if category == "サプリメント" else {}),
+            ),
         }
         if not app.is_candidate_relevant_to_target(category, target, pseudo_product):
             continue

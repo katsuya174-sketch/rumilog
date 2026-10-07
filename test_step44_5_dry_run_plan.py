@@ -97,7 +97,7 @@ class DryRunPlanCandidateTests(DryRunPlanTestBase):
     def test_db_candidate_becomes_would_collect(self):
         product = {
             "brand": f"計画DB{TEST_NAME_SUFFIX}", "name": f"商品計画DB{TEST_NAME_SUFFIX}",
-            "category": "サプリメント", "active_ingredients": ["亜鉛"],
+            "category": "サプリメント", "active_ingredients": ["亜鉛"], "category_attributes": {"primary_ingredient_tags": ["zinc"]},
         }
         result = self._run([_gap("サプリメント", "zinc")], db_products=[product])
 
@@ -117,7 +117,7 @@ class DryRunPlanCandidateTests(DryRunPlanTestBase):
     def test_enough_existing_candidates_need_no_external_discovery(self):
         products = [
             {"brand": f"計画充足{i}{TEST_NAME_SUFFIX}", "name": f"商品計画充足{i}{TEST_NAME_SUFFIX}",
-             "category": "サプリメント", "active_ingredients": ["亜鉛"]}
+             "category": "サプリメント", "active_ingredients": ["亜鉛"], "category_attributes": {"primary_ingredient_tags": ["zinc"]}}
             for i in range(3)
         ]
         result = self._run([_gap("サプリメント", "zinc")], db_products=products)
