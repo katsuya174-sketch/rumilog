@@ -26,6 +26,13 @@ import product_master_pipeline as orchestrator  # noqa: E402
 TEST_NAME_SUFFIX = "_Step43Test"
 
 
+def _sales_info(item_code, title):
+    return {
+        "item_code": item_code, "rakuten_link": f"https://item.rakuten.co.jp/shop/{item_code}/",
+        "rakuten_title": title, "image": f"https://image.example.com/{item_code}.jpg", "price_ref": 3000,
+    }
+
+
 class SupplementIngredientTagTests(unittest.TestCase):
     """Step43-3: normalize_ingredient_tag()がサプリメント10タグすべてを
     正規化できること、既存タグ(lactobacillus/bifida/cysteamine等)への
@@ -327,13 +334,25 @@ class ProductMasterFixtureEffectiveCandidateTests(unittest.TestCase):
 
     def test_beauty_device_method_match_counts_as_effective_candidate(self):
         brand, name, category = f"デバイスA{TEST_NAME_SUFFIX}", f"商品A{TEST_NAME_SUFFIX}", "美容機器"
+        # Step44.8: coverageは診断で使える候補だけを数えるため販売情報が必要。
+        # 実DBの行(query_product_master_candidates()の変換後の形)で確認する。
+        app.upsert_product_master(dict({
+            "brand": brand, "name": name, "category": category,
+            "category_attributes": {"method": "RF"},
+        }, **_sales_info("dev-a", f"{brand} {name} RF美顔器")), data_source="ai_precollected")
+
+        count = app.calculate_effective_candidates(category, "RF", db_products=[], verified_products=[])
+        self.assertEqual(count, 1)
+
+    def test_beauty_device_without_sales_info_is_not_counted(self):
+        brand, name, category = f"デバイスN{TEST_NAME_SUFFIX}", f"商品N{TEST_NAME_SUFFIX}", "美容機器"
         app.upsert_product_master({
             "brand": brand, "name": name, "category": category,
             "category_attributes": {"method": "RF"},
         }, data_source="ai_precollected")
 
         count = app.calculate_effective_candidates(category, "RF", db_products=[], verified_products=[])
-        self.assertEqual(count, 1)
+        self.assertEqual(count, 0)
 
     def test_beauty_device_method_mismatch_is_excluded(self):
         brand, name, category = f"デバイスB{TEST_NAME_SUFFIX}", f"商品B{TEST_NAME_SUFFIX}", "美容機器"
@@ -347,10 +366,10 @@ class ProductMasterFixtureEffectiveCandidateTests(unittest.TestCase):
 
     def test_supplement_ingredient_tag_match_counts_as_effective_candidate(self):
         brand, name, category = f"サプリA{TEST_NAME_SUFFIX}", f"商品A{TEST_NAME_SUFFIX}", "サプリメント"
-        app.upsert_product_master({
+        app.upsert_product_master(dict({
             "brand": brand, "name": name, "category": category,
             "active_ingredients": ["アスコルビン酸"],
-        }, data_source="ai_precollected")
+        }, **_sales_info("supp-a", f"{brand} {name} ビタミンC")), data_source="ai_precollected")
 
         count = app.calculate_effective_candidates(category, "vitamin_c", db_products=[], verified_products=[])
         self.assertEqual(count, 1)

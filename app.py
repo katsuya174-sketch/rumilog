@@ -3737,6 +3737,18 @@ def _is_rakuten_set_item(title: str) -> bool:
     return False
 
 
+def _prefer_single_items(scored_items):
+    """(score, 楽天item相当)のリストから、単品が1件でもあればセット販売を
+    除いた単品だけを、無ければ元のリストを返す。select_best_beauty_device_
+    candidate()/select_best_supplement_candidate()の単品優先と、coverageの
+    実効候補数(Step44.8)で共有する。"""
+    single_items = [
+        (sc, it) for sc, it in scored_items
+        if not _is_rakuten_set_item(str(it.get("itemName", "") or ""))
+    ]
+    return single_items if single_items else scored_items
+
+
 def normalize_rakuten_item_price(item):
     if not isinstance(item, dict):
         return item
@@ -4468,55 +4480,109 @@ def is_candidate_relevant_to_target(category, target, product, user_data=None, b
 
 def calculate_effective_candidates(category, tag, db_products=None, verified_products=None,
                                      user_data=None, budget_value=None, extra_candidates=None):
-    """product_masterの「実効候補数」(product_master内でcategory×tagに関連性
-    ありと判定される商品の件数)を計算する共通関数。
+    """category×tagの「実効候補数」= 現在の診断候補生成経路を通したときに、
+    そのtargetの推薦候補として実際に使える独立商品の数(Step44.8)。
 
-    Step44.6: coverageはProduct Masterの実効候補だけで数える。products.json/
-    verified_products_cacheに存在するだけの商品はcoverage達成扱いにしない
-    一方、product_masterへreflect済みの商品は、それらにも存在するかどうかに
-    関わらず数える(以前はdb_products/verified_products_cacheと重複しない
-    「新規寄与分」だけを数えていたため、DB reuseで既存商品を検証・reflect
-    してもcoverageが増えなかった)。db_products/verified_productsは後方互換
-    のため受け取るが、計算には使わない。
-    関連性判定はis_candidate_relevant_to_target()(Step43)へ委譲する。
-    extra_candidatesは、まだDBへreflectしていない候補を仮追加して再計算
-    したい場合に使う(Step31〜35のシミュレーションと同じ用途)。product_master
-    に同じidentityが既にある候補は二重に数えない。
+    coverage専用の判定は作らず、診断時の関数をそのまま使う。
+    - 美容機器/サプリメント: attach_affiliate_links_to_step()と同じ
+      _product_master_candidates_for_live_style_ranking()(relevance・販売
+      情報(item_code/楽天リンク)・score_rakuten_itemのハード除外)と、
+      select_best_*_candidate()と同じ_prefer_single_items()(単品優先)。
+      販売情報が無い行(item_code解決失敗等)は数えない。
+    - 化粧品: select_best_market_candidate()と同じ_build_diagnosis_base_pool()
+      (products.json → verified cache → product_masterの先勝ちdedup)で
+      実際に使われる商品データを取り、同じ_passes_step_candidate_filters()・
+      enrich_product_metadata_from_ingredients()・score_product()で関連性を
+      判定する。product_masterに登録済みのidentityだけを数え、products.json/
+      verified cacheにしか無い商品は数えない(Step44.6のDB reuse→検証→reflect
+      →coverage増加の流れを維持)。
+    いずれもbuild_candidate_identity_keys()と商品名キー(preserve_ranked_top_
+    candidates()の推薦用重複除去と同じ基準)で同一商品・variantを1件にまとめる。
+
+    extra_candidatesは、まだreflectしていない候補をproduct_master行として
+    仮追加して再計算したい場合に使う(Step31〜35のシミュレーションと同じ用途)。
+    db_products/verified_productsがNoneなら診断時と同じく読み込む。
     """
     user_data = user_data if user_data is not None else _EFFECTIVE_CANDIDATE_NEUTRAL_USER_DATA
     budget_value = budget_value if budget_value is not None else _EFFECTIVE_CANDIDATE_BUDGET_VALUE
+    category_norm = normalize_candidate_category(category, fallback=category)
 
-    survivors = []
-    seen = set()
-    for mp in query_product_master_candidates(category, limit=50):
-        k = make_verified_product_key(mp)
-        if k and k in seen:
-            continue
-        if k:
-            seen.add(k)
-        survivors.append(mp)
-
+    master_rows = list(query_product_master_candidates(category))
     for extra in (extra_candidates or []):
-        if normalize_candidate_category(extra.get("category", ""), fallback=extra.get("category", "")) != \
-           normalize_candidate_category(category, fallback=category):
-            continue
-        k = make_verified_product_key(extra)
-        if k and k not in seen:
-            survivors.append(extra)
-            seen.add(k)
+        if normalize_candidate_category(extra.get("category", ""), fallback=extra.get("category", "")) == category_norm:
+            master_rows.append(extra)
 
-    relevant = 0
-    for mp in survivors:
-        if is_candidate_relevant_to_target(category, tag, mp, user_data=user_data, budget_value=budget_value):
-            relevant += 1
-    return relevant
+    seen_identity_keys = set()
+    seen_name_keys = set()
+
+    def is_new_independent_candidate(brand, name):
+        identity_keys = build_candidate_identity_keys({"brand": brand, "name": name})
+        name_key = normalize_product_name(name)
+        if not identity_keys or seen_identity_keys & identity_keys:
+            return False
+        if name_key and name_key in seen_name_keys:
+            return False
+        seen_identity_keys.update(identity_keys)
+        if name_key:
+            seen_name_keys.add(name_key)
+        return True
+
+    if category in ("美容機器", "サプリメント"):
+        product_name = _coverage_step_product_name(category, tag)
+        scored = _product_master_candidates_for_live_style_ranking(
+            category, tag, product_name, "", master_rows=master_rows,
+        )
+        count = 0
+        for _, item in _prefer_single_items(scored):
+            if is_new_independent_candidate(item.get("_pm_brand", ""), item.get("_pm_name", "")):
+                count += 1
+        return count
+
+    if db_products is None:
+        db_products = load_products()
+    if verified_products is None:
+        verified_products = load_verified_products_cache()
+    master_keys = {make_verified_product_key(m) for m in master_rows if isinstance(m, dict)}
+    combined, _, _, _ = _build_diagnosis_base_pool(
+        category, db_products, verified_products, master_products=master_rows,
+    )
+    step = {"category": category, "purpose": "", "ingredient_focus": tag}
+    count = 0
+    for p in combined:
+        if not isinstance(p, dict) or make_verified_product_key(p) not in master_keys:
+            continue
+        if not _passes_step_candidate_filters(category, p):
+            continue
+        product = copy.deepcopy(p)
+        enrich_product_metadata_from_ingredients(product)
+        reasons = []
+        score = score_product(product, step, user_data, budget_value, reasons=reasons)
+        if not _is_relevant_scored_candidate(score, reasons, tag):
+            continue
+        if is_new_independent_candidate(product.get("brand", ""), product.get("name", "")):
+            count += 1
+    return count
+
+
+def _coverage_step_product_name(category, target):
+    """美容機器/サプリメントのcoverage計算で、診断時のstep["product"]と同じ
+    検索用商品名(enrich_beauty_devices()/enrich_supplements()が推薦定義から
+    設定する値)を返す。"""
+    if category == "美容機器":
+        return str((_DEVICE_DEFAULTS.get(target) or {}).get("product", "") or "")
+    for defaults in _SUPPLEMENT_DEFAULTS.values():
+        if target in (defaults.get("ingredient_focus") or []):
+            return str(defaults.get("product", "") or "")
+    return ""
 
 
 def calculate_effective_candidates_batch(areas, db_products=None, verified_products=None,
                                            user_data=None, budget_value=None, extra_candidates=None):
     """calculate_effective_candidates()を(category, tag)のリストへ一括適用し、
-    {(category, tag): count}を返す。db_products/verified_productsは後方互換
-    のため受け取るだけ(Step44.6以降、coverage計算には使わない)。"""
+    {(category, tag): count}を返す。db_products/verified_productsは1回だけ
+    読み込んで全領域で再利用する(領域ごとに再読込しない)。"""
+    db_products = db_products if db_products is not None else load_products()
+    verified_products = verified_products if verified_products is not None else load_verified_products_cache()
     return {
         (category, tag): calculate_effective_candidates(
             category, tag, db_products=db_products, verified_products=verified_products,
@@ -4664,8 +4730,8 @@ def get_coverage_report(policy_name="cosmetics", db_products=None, verified_prod
     if not policy:
         return []
 
-    # db_products/verified_productsは後方互換のため受け取るだけ(Step44.6以降、
-    # coverageはproduct_masterの実効候補だけで数える)。
+    db_products = db_products if db_products is not None else load_products()
+    verified_products = verified_products if verified_products is not None else load_verified_products_cache()
     areas = [(item["category"], item["target"]) for item in policy]
     effective_counts = calculate_effective_candidates_batch(
         areas, db_products=db_products, verified_products=verified_products,
@@ -5997,45 +6063,64 @@ def _device_feature_sentence(features):
 # JSON相当の形へ変換するアダプタが必要になる。新しいランキング・スコアリング
 # ロジックは作らず、既存のscore_rakuten_item()をそのまま再利用する。
 
+def _product_master_row_rakuten_link(mp):
+    """product_master行の楽天リンク。query_product_master_candidates()の行は
+    _product_master_row_to_product()でlast_known_rakuten_link→rakuten_link
+    に変換済みのため、両方の形を受け付ける(Step44.8で判明: 以前は変換前の
+    列名だけを見ており、実際の行は常に「販売情報なし」扱いになっていた)。"""
+    return str(mp.get("rakuten_link") or mp.get("last_known_rakuten_link") or "").strip()
+
+
+def _product_master_row_image(mp):
+    """_product_master_row_rakuten_link()と同じ理由で、image/last_known_image
+    の両方を受け付ける。"""
+    return str(mp.get("image") or mp.get("last_known_image") or "").strip()
+
+
 def _product_master_row_as_rakuten_item(mp):
     """product_masterの1行を、score_rakuten_item()/select_best_beauty_
     device_candidate()/select_best_supplement_candidate()がそのまま読める
     楽天item JSON相当の形へ変換する。レビュー数・レビュー平均はproduct_
     masterに保存していないため0とする(既存のtie-breaker軸で中立に扱われ
     るだけで、肌悩み適合/成分一致等の主軸には影響しない)。"""
-    image = str(mp.get("last_known_image") or "").strip()
+    image = _product_master_row_image(mp)
     return {
         "itemName": str(mp.get("rakuten_title") or mp.get("name") or ""),
         "itemCaption": "",
         "itemPrice": safe_price(mp.get("price_ref") or 0),
         "itemCode": str(mp.get("item_code") or ""),
-        "itemUrl": str(mp.get("last_known_rakuten_link") or ""),
+        "itemUrl": _product_master_row_rakuten_link(mp),
         "affiliateUrl": "",
         "reviewCount": 0,
         "reviewAverage": 0,
         "shopName": str(mp.get("shop_name") or ""),
         "mediumImageUrls": [{"imageUrl": image}] if image else [],
         "_source": "product_master",
+        # coverageの独立候補判定(Step44.8)用。ランキング・表示には使わない。
+        "_pm_brand": str(mp.get("brand") or ""),
+        "_pm_name": str(mp.get("name") or ""),
     }
 
 
-def _product_master_candidates_for_live_style_ranking(category, target, product_name, brand):
+def _product_master_candidates_for_live_style_ranking(category, target, product_name, brand, master_rows=None):
     """美容機器・サプリメントの既存ranking関数が使える形で、product_master
     の関連候補(販売情報あり)を返す(Step43)。関連性判定はis_candidate_
     relevant_to_target()(Candidate Discoveryのcoverage計算と同じadapter)
-    に委譲する。販売情報(item_code+last_known_rakuten_link)が無い行は
+    に委譲する。販売情報(item_code+楽天リンク)が無い行は
     候補にしない(古い/不足している場合は呼び出し元が既存のRakutenフォール
     バックへ進む)。新しいスコアリングは作らず、既存のscore_rakuten_item()
     をそのまま使う。"""
     if not target:
         return []
     candidates = []
-    for mp in query_product_master_candidates(category):
+    if master_rows is None:
+        master_rows = query_product_master_candidates(category)
+    for mp in master_rows:
         if not is_candidate_relevant_to_target(category, target, mp):
             continue
         if not str(mp.get("item_code") or "").strip():
             continue
-        if not str(mp.get("last_known_rakuten_link") or "").strip():
+        if not _product_master_row_rakuten_link(mp):
             continue
         item = _product_master_row_as_rakuten_item(mp)
         score = score_rakuten_item(item, product_name, brand=brand, category=category)
@@ -6097,11 +6182,7 @@ def select_best_beauty_device_candidate(
         return None, ""
 
     # 単品優先(fetch_rakuten_itemの既存選定と同じ考え方)。
-    single_items = [
-        (sc, it) for sc, it in scored_items
-        if not _is_rakuten_set_item(str(it.get("itemName", "") or ""))
-    ]
-    pool = single_items if single_items else scored_items
+    pool = _prefer_single_items(scored_items)
 
     sensitivity = str(
         user_data.get("sens", "") or user_data.get("sensitivity", "") or ""
@@ -6304,11 +6385,7 @@ def select_best_supplement_candidate(scored_items, supplement_type, ingredient_f
     if not scored_items:
         return None, ""
 
-    single_items = [
-        (sc, it) for sc, it in scored_items
-        if not _is_rakuten_set_item(str(it.get("itemName", "") or ""))
-    ]
-    pool = single_items if single_items else scored_items
+    pool = _prefer_single_items(scored_items)
 
     _raw_scores = [sc for sc, _ in pool]
     _score_min, _score_max = min(_raw_scores), max(_raw_scores)
@@ -14888,43 +14965,19 @@ def score_routine_balance(step, product, routine_context=None, reasons=None):
 
     return score
 
-def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None, routine_context=None, verified_products=None, premium_improvement_priority=None):
-    if exclude_names is None:
-        exclude_names = set()
+def _build_diagnosis_base_pool(category, db_products, verified_products, master_products=None):
+    """select_best_market_candidate()の候補プールのうち、楽天ライブ検索より
+    前の部分(db_products → verified_products → product_master の順に、
+    make_verified_product_key()で先勝ちdedup)を組み立てる。coverageの実効
+    候補数(Step44.8)も同じ関数で「診断時に実際に使われる商品データ」を得る。
 
-    category = step.get("category", "")
-    candidates = normalize_ai_candidates(step)
-
-    all_candidates = []
-
-    if verified_products is None:
-        verified_products = load_verified_products_cache()
-
-    if not isinstance(db_products, list):
-        db_products = []
-
-    if not isinstance(verified_products, list):
-        verified_products = []
-
+    戻り値: (combined_products, seen_product_keys, n_before_master, n_product_master)
+    master_products: Noneならquery_product_master_candidates(category)(診断時と
+    同じlimit)を使う。"""
     combined_products = []
     seen_product_keys = set()
 
-    for source_product in db_products:
-        if not isinstance(source_product, dict):
-            continue
-
-        product_key = make_verified_product_key(source_product)
-
-        if not product_key:
-            continue
-
-        if product_key in seen_product_keys:
-            continue
-
-        seen_product_keys.add(product_key)
-        combined_products.append(source_product)
-
-    for source_product in verified_products:
+    for source_product in list(db_products or []) + list(verified_products or []):
         if not isinstance(source_product, dict):
             continue
 
@@ -14943,13 +14996,61 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
     # make_verified_product_key()と同じ正規化ロジックのため、db_products/
     # verified_productsと重複する場合はここで自然に除外される(先勝ち)。
     n_before_master = len(combined_products)
-    master_products = query_product_master_candidates(category)
+    if master_products is None:
+        master_products = query_product_master_candidates(category)
     for mp in master_products:
         mp_key = make_verified_product_key(mp)
         if mp_key and mp_key not in seen_product_keys:
             seen_product_keys.add(mp_key)
             combined_products.append(mp)
     n_product_master = len(combined_products) - n_before_master
+    return combined_products, seen_product_keys, n_before_master, n_product_master
+
+
+def _passes_step_candidate_filters(category, product, exclude_names=None):
+    """select_best_market_candidate()が採点前に候補を落とす条件(カテゴリ
+    不一致・除外名・is_candidate_wrong_for_category)。coverageの実効候補数
+    (Step44.8)と共有する。"""
+    product_category = normalize_candidate_category(
+        product.get("category", ""),
+        fallback=product.get("category", "")
+    )
+    step_category = normalize_candidate_category(category, fallback=category)
+    if product_category != step_category:
+        return False
+    if exclude_names and product.get("name") in exclude_names:
+        return False
+    # preserve_ranked_top_candidates()の表示用フィルタと同じ基準
+    # (is_candidate_wrong_for_category)を1位選定より前に適用する。
+    # 以前はここでチェックしておらず、表示用top_candidatesだけが
+    # 事後的に除外されるため、1位(step["product"])には
+    # カテゴリ不適合な商品(例:通常の洗顔料がピーリング1位になる)が
+    # そのまま残ってしまっていた。
+    if is_candidate_wrong_for_category(category, product.get("name", "")):
+        return False
+    return True
+
+
+def select_best_market_candidate(step, db_products, user_data, budget_value, improvement_plan=None, exclude_names=None, routine_context=None, verified_products=None, premium_improvement_priority=None):
+    if exclude_names is None:
+        exclude_names = set()
+
+    category = step.get("category", "")
+    candidates = normalize_ai_candidates(step)
+
+    all_candidates = []
+
+    if verified_products is None:
+        verified_products = load_verified_products_cache()
+
+    if not isinstance(db_products, list):
+        db_products = []
+
+    if not isinstance(verified_products, list):
+        verified_products = []
+
+    combined_products, seen_product_keys, n_before_master, n_product_master = \
+        _build_diagnosis_base_pool(category, db_products, verified_products)
 
     # 「十分」判定: PRODUCT_MASTER_SKIP_RAKUTEN_ENABLEDが有効な場合のみ、
     # product_master由来候補を先にscore_product()で採点し、ハード除外
@@ -15031,29 +15132,7 @@ def select_best_market_candidate(step, db_products, user_data, budget_value, imp
         if not isinstance(p, dict):
             continue
 
-        product_category = normalize_candidate_category(
-            p.get("category", ""),
-            fallback=p.get("category", "")
-        )
-
-        step_category = normalize_candidate_category(
-            category,
-            fallback=category
-        )
-
-        if product_category != step_category:
-            continue
-
-        if p.get("name") in exclude_names:
-            continue
-
-        # preserve_ranked_top_candidates()の表示用フィルタと同じ基準
-        # (is_candidate_wrong_for_category)を1位選定より前に適用する。
-        # 以前はここでチェックしておらず、表示用top_candidatesだけが
-        # 事後的に除外されるため、1位(step["product"])には
-        # カテゴリ不適合な商品(例:通常の洗顔料がピーリング1位になる)が
-        # そのまま残ってしまっていた。
-        if is_candidate_wrong_for_category(category, p.get("name", "")):
+        if not _passes_step_candidate_filters(category, p, exclude_names):
             continue
 
         product = dict(p)
@@ -16077,6 +16156,22 @@ def clean_brand_and_product_name(brand, name):
             cleaned_name = candidate_cleaned
 
     return brand_text, cleaned_name.strip()
+
+def build_candidate_identity_keys(candidate):
+    """推薦候補の重複判定キー(brand+name/name単独)。preserve_ranked_top_
+    candidates()の推薦用重複除去と、coverageの実効候補数(Step44.8)で共有する
+    (以前はpreserve_ranked_top_candidatesの入れ子関数だった)。"""
+    brand = candidate.get("brand", "")
+    name = candidate.get("name", "")
+
+    identity = normalize_product_identity(brand, name)
+
+    brand_text, name_text = clean_brand_and_product_name(brand, name)
+    name_only_identity = normalize_candidate_name_for_merge(name_text)
+
+    keys = {identity, name_only_identity}
+    return {k for k in keys if k}
+
 
 def normalize_product_identity(brand="", name=""):
     def to_text(value):
@@ -19944,18 +20039,6 @@ def finalize_step_data(step, user_data, premium_improvement_priority=None):
                 + list(c.get("_routine_reasons") or [])
             ),
         }
-
-    def build_candidate_identity_keys(candidate):
-        brand = candidate.get("brand", "")
-        name = candidate.get("name", "")
-
-        identity = normalize_product_identity(brand, name)
-
-        brand_text, name_text = clean_brand_and_product_name(brand, name)
-        name_only_identity = normalize_candidate_name_for_merge(name_text)
-
-        keys = {identity, name_only_identity}
-        return {k for k in keys if k}
 
     def preserve_ranked_top_candidates(step):
         """

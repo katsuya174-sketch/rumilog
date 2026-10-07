@@ -51,6 +51,14 @@ SUPPLEMENT_SAMPLE_INGREDIENT = {
 }
 
 
+def _with_sales_info(row):
+    # Step44.8: coverageは診断で使える候補(販売情報あり)だけを数える。
+    # query_product_master_candidates()の変換後の形(rakuten_link/image)。
+    code = f"ic-{abs(hash(row['name'])) % 10**8}"
+    return dict(row, item_code=code, rakuten_link=f"https://item.rakuten.co.jp/shop/{code}/",
+                rakuten_title=f"{row['brand']} {row['name']}", price_ref=3000)
+
+
 def _master_rows_by_category(rows_by_category):
     def fake_query(category, limit=30):
         return [dict(r) for r in rows_by_category.get(category, [])]
@@ -136,11 +144,12 @@ class CoverageReportTests(unittest.TestCase):
 
     def test_beauty_device_relevance_counts_only_matching_method(self):
         rows = [
-            {"brand": "B", "name": f"RF機{i}", "category": "美容機器",
-             "category_attributes": {"method": "RF"}}
+            _with_sales_info({"brand": f"B{i}", "name": f"RF機{chr(65 + i)}", "category": "美容機器",
+                              "category_attributes": {"method": "RF"}})
             for i in range(3)
         ] + [
-            {"brand": "B", "name": "method無し", "category": "美容機器", "category_attributes": {}},
+            _with_sales_info({"brand": "B", "name": "method無し", "category": "美容機器",
+                              "category_attributes": {}}),
         ]
         report = {a["target"]: a for a in self._report("beauty_device", {"美容機器": rows})}
         self.assertEqual(report["RF"]["effective_count"], 3)
@@ -151,8 +160,8 @@ class CoverageReportTests(unittest.TestCase):
 
     def test_supplement_relevance_for_all_ten_tags(self):
         rows = [
-            {"brand": "S", "name": f"{tag}サプリ{i}", "category": "サプリメント",
-             "active_ingredients": [sample]}
+            _with_sales_info({"brand": f"S{i}", "name": f"{tag}サプリ{chr(65 + i)}", "category": "サプリメント",
+                              "active_ingredients": [sample]})
             for tag, sample in SUPPLEMENT_SAMPLE_INGREDIENT.items()
             for i in range(3)
         ]
