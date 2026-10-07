@@ -169,15 +169,15 @@ class GateOrderTests(OrchestratorTestBase):
         brand, name, sid = self._insert("Drug", "本製品はサプリメントではなく、第3類医薬品となります。", "supplement")
         actions = self._execute(brand, name, sid)
         self.assertEqual(actions[0]["action"], "not_reflected")
-        self.assertEqual(actions[0]["reason"], "supplement_product_class_not_allowed")
+        self.assertEqual(actions[0]["reason"], "supplement_not_eligible")
         self.assertEqual(actions[0]["product_classification"], "drug")
-        self.assertEqual(actions[0]["gate_failure_marker"]["gate"], "product_classification")
+        self.assertEqual(actions[0]["gate_failure_marker"]["gate"], "supplement_eligibility")
 
     def test_unknown_class_is_not_reflected(self):
         brand, name, sid = self._insert("Unknown", "L-システイン配合。1日2錠。", None)
         actions = self._execute(brand, name, sid)
         self.assertEqual((actions[0]["reason"], actions[0]["product_classification"]),
-                         ("supplement_product_class_not_allowed", "unknown"))
+                         ("supplement_not_eligible", "unknown"))
 
     def test_allowed_class_proceeds_to_rakuten_precheck(self):
         brand, name, sid = self._insert("Allowed", "機能性表示食品。L-システイン配合。", "foods_with_function_claims")
@@ -195,7 +195,7 @@ class GateOrderTests(OrchestratorTestBase):
     def test_reflect_itself_refuses_drug(self):
         brand, name, sid = self._insert("Direct", "【第2類医薬品】", "supplement")
         result = pipeline.reflect_staging_to_product_master(sid, dry_run=False)
-        self.assertEqual((result["status"], result["reason"]), ("skipped", "supplement_product_class_not_allowed"))
+        self.assertEqual((result["status"], result["reason"]), ("skipped", "supplement_not_eligible"))
         self.assertIsNone(self._product_master_row(brand, name, "サプリメント"))
 
     def test_reflected_supplement_keeps_classification(self):
@@ -206,7 +206,7 @@ class GateOrderTests(OrchestratorTestBase):
     def test_device_is_not_gated_by_classification(self):
         brand, name, sid = self._insert("Dev", "第3類医薬品", None, category="美容機器")
         evaluation = orchestrator.evaluate_staging_for_reflect(sid, brand, name, "美容機器")
-        self.assertNotEqual(evaluation["reason"], "supplement_product_class_not_allowed")
+        self.assertNotEqual(evaluation["reason"], "supplement_not_eligible")
         self.assertNotIn("product_classification", evaluation)
 
     def test_collect_skips_page_verification_for_regulated_text(self):

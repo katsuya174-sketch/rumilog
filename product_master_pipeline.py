@@ -243,7 +243,7 @@ _DETERMINISTIC_EVALUATION_FAILURES = {
     "official_source_not_confirmed_variant_uncertain": "official_source",
     "category_validator_failed": "category_validator",
     "no_extracted_fields": "category_validator",
-    "supplement_product_class_not_allowed": "product_classification",
+    "supplement_not_eligible": "supplement_eligibility",
 }
 _DETERMINISTIC_RAKUTEN_REASONS = {
     "title_mismatch", "device_model_mismatch", "only_non_new_sale_listings", "only_set_items",
@@ -876,18 +876,18 @@ def _ensure_staging_page_verification(staging_id, brand):
     return row
 
 
-def _supplement_product_class(category, staging_row):
-    """Step48.1: サプリの商品区分(サプリ以外はNone)。保存済みStage1本文と
+def _supplement_eligibility(category, staging_row):
+    """Step48.1/48.2: サプリとしての適格性(サプリ以外はNone)。保存済みStage1本文と
     Stage2の出典照合済み値だけで決める(API・HTTPなし)。"""
     if category != "サプリメント" or not staging_row:
         return None
-    return pipeline.supplement_product_classification(
+    return pipeline.supplement_eligibility(
         staging_row.get("stage2_payload") or {}, staging_row.get("stage1_raw_text"))
 
 
-def _supplement_product_class_blocks(category, staging_row):
-    product_class = _supplement_product_class(category, staging_row)
-    return product_class is not None and not pipeline.is_supplement_product_class_reflectable(product_class)
+def _supplement_eligibility_blocks(category, staging_row):
+    eligibility = _supplement_eligibility(category, staging_row)
+    return eligibility is not None and not eligibility["eligible"]
 
 
 def evaluate_staging_for_reflect(staging_id, brand, name, category, conflict_status=None, staging_row=None):
@@ -906,12 +906,14 @@ def evaluate_staging_for_reflect(staging_id, brand, name, category, conflict_sta
         ).get("status")
     if conflict_status == "needs_review":
         return {"reflectable": False, "data_complete": True, "reason": "needs_review", "staging_id": staging_id}
-    # Step48.1: サプリの商品区分ゲート。official source確認・楽天確認より前に判定し、
-    # 医薬品・医薬部外品・区分不明は以降の判定(HTTP/楽天API)へ進めない。
-    product_class = _supplement_product_class(category, row)
-    if product_class is not None and not pipeline.is_supplement_product_class_reflectable(product_class):
+    # Step48.1/48.2: サプリの適格性ゲート。official source確認・楽天確認より前に判定し、
+    # 医薬品・医薬部外品・根拠の無い区分不明は以降の判定(HTTP/楽天API)へ進めない。
+    eligibility = _supplement_eligibility(category, row)
+    product_class = eligibility["product_classification"] if eligibility else None
+    if eligibility is not None and not eligibility["eligible"]:
         return {"reflectable": False, "data_complete": True, "staging_id": staging_id,
-                "reason": "supplement_product_class_not_allowed", "product_classification": product_class,
+                "reason": "supplement_not_eligible", "product_classification": product_class,
+                "eligibility_reason": eligibility["reason"],
                 "page_verification_pending": False, "official_source_confirmed": None,
                 "category_validator": None, "conflict_status": conflict_status}
     confident, reason = _is_confident_enough(row, brand, category)
@@ -1031,7 +1033,7 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
             staging_id = reuse_staging_id
             staging_row = _fetch_staging_row(staging_id)
             # Step48.1: 商品区分でreflect不可が確定している場合は公式ページ確認のHTTPをしない。
-            if not _supplement_product_class_blocks(category, staging_row):
+            if not _supplement_eligibility_blocks(category, staging_row):
                 staging_row = _ensure_staging_page_verification(staging_id, brand)
             evaluation = evaluate_staging_for_reflect(staging_id, brand, name, category, staging_row=staging_row)
             if not evaluation["data_complete"]:
@@ -1063,8 +1065,7 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
                 "action": "not_reflected", "brand": brand, "name": name,
                 "reason": evaluation["reason"],
                 "category_validator": evaluation["category_validator"],
-                **({"product_classification": evaluation["product_classification"]}
-                   if "product_classification" in evaluation else {}),
+                **{k: evaluation[k] for k in ("product_classification", "eligibility_reason") if k in evaluation},
                 "staging_id": staging_id,
                 **({"reused_staging": True} if reuse_staging_id else {}),
             }

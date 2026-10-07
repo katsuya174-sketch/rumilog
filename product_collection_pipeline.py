@@ -1292,20 +1292,24 @@ _PRODUCT_CLASS_EVIDENCE_TERMS = {
     "nutrient_function_food": ("栄養機能食品",),
 }
 _PRODUCT_CLASS_NEGATION_RE = re.compile(
-    r"^\s*[」』\"”]?\s*(?:[（(][^）)]{0,20}[）)])?\s*[」』\"”]?\s*"
+    r"^\s*[」』\"”）)]{0,2}\s*(?:[（(][^）)]{0,20}[）)])?\s*[」』\"”）)]{0,2}\s*"
     r"(?:ではな|ではありません|でなく|でもな|とは異な|には該当しな|に該当しな|には当たらな|に当たらな)")
 
 
-def _product_class_term_affirmed(text, term):
-    """termが本文中に「〜ではなく」等の否定形でない形で1回以上現れるか。"""
+def _iter_affirmed_term_positions(text, term):
+    """termが本文中に「〜ではなく」等の否定形でない形で現れる位置。"""
     start = 0
     while True:
         index = text.find(term, start)
         if index < 0:
-            return False
+            return
         if not _PRODUCT_CLASS_NEGATION_RE.match(text[index + len(term):index + len(term) + 40]):
-            return True
+            yield index
         start = index + len(term)
+
+
+def _product_class_term_affirmed(text, term):
+    return next(_iter_affirmed_term_positions(text, term), None) is not None
 
 
 def supplement_product_classification(stage2_payload, stage1_text):
@@ -1332,6 +1336,84 @@ def supplement_product_classification(stage2_payload, stage1_text):
 
 def is_supplement_product_class_reflectable(product_class):
     return product_class in app.SUPPLEMENT_REFLECTABLE_PRODUCT_CLASSES
+
+
+# ===== Step48.2: サプリとして扱える根拠(eligibility)。classificationとは分離 =====
+# classification=unknownの場合だけ、Stage1本文に明示された摂取情報・食品表示から
+# 判定する。商品形状(「粒」「カプセル」)単独・商品名・ブランドだけでは根拠にしない。
+_INTAKE_UNIT = r"(?:粒|カプセル|錠|包|袋|本|スティック|杯|g|ｇ)"
+_INTAKE_NUMBER = r"(?:\d+(?:\.\d+)?|[一二三四五六七八九十])(?:\s*[〜~～\-]\s*\d+)?"
+_SUPPLEMENT_EVIDENCE_PATTERNS = (
+    # 「1日の摂取目安量: 2粒」「1日の摂取目安量\n * 1日1粒」(見出し+値の書式も含む)
+    ("daily_intake_guideline", re.compile(
+        r"1日(?:の|当たりの|あたりの)?摂取目安量?[\s*:：・\-–—|]{0,20}(?:1日\s*)?"
+        + _INTAKE_NUMBER + r"\s*" + _INTAKE_UNIT)),
+    # 「1日2粒を目安に」「目安として1日2粒」
+    ("daily_intake_guideline", re.compile(r"1日\s*" + _INTAKE_NUMBER + r"\s*" + _INTAKE_UNIT + r"\s*(?:を|程度を)?\s*目安")),
+    ("daily_intake_guideline", re.compile(r"目安として\s*1日\s*" + _INTAKE_NUMBER + r"\s*" + _INTAKE_UNIT)),
+    # 「お召し上がり方: 1日2粒を水などで」
+    ("serving_directions", re.compile(
+        r"(?:お召し上がり方|召し上がり方|摂取方法)[\s*:：・\-–—|]{0,20}[^\n]{0,40}?" + _INTAKE_NUMBER + r"\s*" + _INTAKE_UNIT)),
+)
+# 食品としての栄養成分表示(エネルギー+三大栄養素/食塩相当量)。摂取目安の記載と
+# 組み合わさった場合だけ根拠にする。
+_NUTRITION_LABEL_RE = re.compile(r"エネルギー[\s*:：]{0,5}\d+(?:\.\d+)?\s*kcal")
+_NUTRITION_COMPONENT_RES = tuple(re.compile(t) for t in (r"たんぱく質|タンパク質|蛋白質", r"脂質", r"炭水化物", r"食塩相当量"))
+_INTAKE_MENTION_RE = re.compile(r"摂取目安量|摂取目安")
+_SUPPLEMENT_TERM_EVIDENCE = ("サプリメント", "栄養補助食品", "健康食品")
+# 医薬品の用法表示に特有の語。区分表示が無くても、これらがある本文の摂取情報は
+# サプリの根拠にしない(fail-closed。食品4区分が明示されている場合は対象外)。
+_DRUG_CONTEXT_RE = re.compile(r"用法[・･]?用量|添付文書|効能[・･]?効果|副作用|登録販売者|服用後")
+
+
+def _excerpt(text, match_start, match_end, width=20):
+    return text[max(0, match_start - width):match_end + width].replace("\n", " ").strip()
+
+
+def supplement_intake_evidence(stage1_text):
+    """Stage1本文から、サプリとして扱える積極的な根拠を[{kind, excerpt}]で返す。"""
+    text = unicodedata.normalize("NFKC", str(stage1_text or ""))
+    evidence = []
+    for kind, pattern in _SUPPLEMENT_EVIDENCE_PATTERNS:
+        m = pattern.search(text)
+        if m and not any(e["kind"] == kind for e in evidence):
+            evidence.append({"kind": kind, "excerpt": _excerpt(text, m.start(), m.end())})
+    for term in _SUPPLEMENT_TERM_EVIDENCE:
+        term = unicodedata.normalize("NFKC", term)
+        index = next(_iter_affirmed_term_positions(text, term), None)
+        if index is not None:
+            evidence.append({"kind": "explicit_supplement_term", "excerpt": _excerpt(text, index, index + len(term))})
+            break
+    label = _NUTRITION_LABEL_RE.search(text)
+    if (label and sum(bool(r.search(text)) for r in _NUTRITION_COMPONENT_RES) >= 2
+            and _INTAKE_MENTION_RE.search(text)):
+        evidence.append({"kind": "nutrition_label_with_intake", "excerpt": _excerpt(text, label.start(), label.end())})
+    return evidence
+
+
+def supplement_eligibility(stage2_payload, stage1_text):
+    """サプリProduct Masterへreflectしてよいか(Step48.2)。
+    1. 医薬品/医薬部外品(本文の区分表示 or 出典照合済みStage2値)は常に不適格。
+    2. 食品4区分のclassificationは適格。
+    3. unknownは、医薬品の用法表示に特有の語が無く、Stage1本文に積極的な
+       サプリ根拠(supplement_intake_evidence)がある場合だけ適格。"""
+    product_class = supplement_product_classification(stage2_payload, stage1_text)
+    result = {"product_classification": product_class, "eligible": False, "basis": None,
+              "reason": None, "evidence": []}
+    if product_class in app.SUPPLEMENT_EXCLUDED_PRODUCT_CLASSES:
+        return dict(result, reason=product_class)
+    if is_supplement_product_class_reflectable(product_class):
+        return dict(result, eligible=True, basis="classification")
+    text = unicodedata.normalize("NFKC", str(stage1_text or ""))
+    drug_context = _DRUG_CONTEXT_RE.search(text)
+    if drug_context:
+        return dict(result, reason="drug_usage_context",
+                    evidence=[{"kind": "drug_usage_context",
+                               "excerpt": _excerpt(text, drug_context.start(), drug_context.end())}])
+    evidence = supplement_intake_evidence(text)
+    if not evidence:
+        return dict(result, reason="no_supplement_evidence")
+    return dict(result, eligible=True, basis="stage1_evidence", evidence=evidence)
 
 
 def flatten_category_attributes(category_attributes_payload):
@@ -2003,13 +2085,14 @@ def reflect_staging_to_product_master(staging_id, dry_run=True):
             return {"status": "already_reflected"}
 
         payload = stage2_payload or {}
-        product_class = None
+        product_class = eligibility = None
         if category == "サプリメント":
             # Step48.1: 医薬品・医薬部外品・区分不明はサプリProduct Masterへ入れない。
-            product_class = supplement_product_classification(payload, stage1_raw_text)
-            if not is_supplement_product_class_reflectable(product_class):
-                return {"status": "skipped", "reason": "supplement_product_class_not_allowed",
-                        "product_classification": product_class}
+            eligibility = supplement_eligibility(payload, stage1_raw_text)
+            product_class = eligibility["product_classification"]
+            if not eligibility["eligible"]:
+                return {"status": "skipped", "reason": "supplement_not_eligible",
+                        "product_classification": product_class, "eligibility_reason": eligibility["reason"]}
         # "unknown"プレースホルダー項目は反映時にも除外する(合意事項②の
         # 後方互換: この修正より前に収集済みのstaging行にまだ残っている
         # 場合があるため、再API実行なしでも安全に除外する)。
@@ -2057,6 +2140,8 @@ def reflect_staging_to_product_master(staging_id, dry_run=True):
             # Step47.1: 主要成分タグ(coverage・診断target関連性の根拠)。
             category_attributes["primary_ingredient_tags"] = supplement_primary_tags_for_payload(product_name, payload)
             category_attributes["product_classification"] = product_class
+            # Step48.2: 適格と判定した根拠(classification / stage1_evidence)。
+            category_attributes["supplement_eligibility_basis"] = eligibility["basis"]
         if category_attributes:
             product_for_master["category_attributes"] = category_attributes
 
