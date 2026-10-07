@@ -284,14 +284,18 @@ def classify_official_evidence(brand, stage1_citations):
         verificationを現行判定器(Step45.10)で再計算してTrue)
       - transient_unverified: citation先ページの確認がtimeout/通信エラー/5xxで
         評価できなかった
-      - not_confirmed: それ以外(取得・検証は完了したが証明しない。403/404・
-        安全要件での拒否・ドメイン不整合・未確認のtitle等を含む)
+      - not_confirmed: page verificationを実施・完了したが証明しない(403/404・
+        安全要件での拒否・ドメイン不整合等を含む)
+      - unverified(Step45.15): page verification自体をまだ実施していない
+        (最大5ドメインの確認上限・同一ドメインの重複で未取得のもの等)。
+        未取得をnot_confirmedとは扱わない。
     全体:
       - confirmedが1件以上 → "confirmed"(official=True)
-      - confirmedなし・transientなし → "failed"(確定failure。markerを書く)
-      - confirmedなし・transientあり → "undetermined"(未確定。markerなし)
+      - confirmedなし・transientなし・unverifiedなし → "failed"(確定failure。markerを書く)
+      - confirmedなし・transientまたはunverifiedあり → "undetermined"(未確定。markerなし)
     ドメインの公式らしさ・サイト種別等の推測はしない。"""
-    result = {"confirmed": [], "not_confirmed": [], "transient_unverified": [], "transient_exhausted": []}
+    result = {"confirmed": [], "not_confirmed": [], "transient_unverified": [], "transient_exhausted": [],
+              "unverified": []}
     for citation in stage1_citations or []:
         if not isinstance(citation, dict):
             continue
@@ -301,7 +305,9 @@ def classify_official_evidence(brand, stage1_citations):
             result["confirmed"].append(title)
             continue
         verification = citation.get("page_verification")
-        if pipeline.is_transient_page_verification(verification):
+        if not isinstance(verification, dict):
+            result["unverified"].append(title)
+        elif pipeline.is_transient_page_verification(verification):
             # Step45.13: 再確認の上限に達したもの(transient_exhausted)も未評価の
             # まま保留(非公式とはしない)。
             result["transient_unverified"].append(title)
@@ -311,7 +317,7 @@ def classify_official_evidence(brand, stage1_citations):
             result["not_confirmed"].append(title)
     if result["confirmed"]:
         result["status"] = "confirmed"
-    elif result["transient_unverified"]:
+    elif result["transient_unverified"] or result["unverified"]:
         result["status"] = "undetermined"
     else:
         result["status"] = "failed"
@@ -506,8 +512,15 @@ def _db_reuse_candidates(category, target, excluded_keys, limit, on_excluded=Non
     return candidates
 
 
+# Step45.15: Gemini Grounding Discoveryは、APIが実際のsearch evidenceを返さな
+# かった(no_search_evidence)場合に限り、BatchBudgetのpreflightを通過すれば
+# 1回だけ再試行する(最大2 attempts)。正常に検索したが候補0件・構造化/
+# フィルタ結果0件・APIエラー・予算不足等では再試行しない。
+DISCOVERY_MAX_ATTEMPTS = 2
+
+
 def _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limit,
-                                 on_excluded=None, diagnostics=None):
+                                 on_excluded=None, diagnostics=None, budget=None):
     """探索順序③: 既存staging/DBで候補が埋まらない場合のみ、Gemini
     Groundingによる新規探索(product_collection_pipeline.
     discover_candidates_via_gemini、Step41)を行う。ここで見つかった情報は
@@ -518,9 +531,25 @@ def _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limi
     (pipeline.discover_candidates_via_gemini()のdiagnostics)を呼び出し元へ返す。"""
     if limit <= 0:
         return []
-    raw_candidates = pipeline.discover_candidates_via_gemini(
-        category, target, batch_id, max_candidates=limit, diagnostics=diagnostics,
-    )
+    diagnostics = diagnostics if diagnostics is not None else {}
+    attempts = []
+    raw_candidates = []
+    for attempt in range(1, DISCOVERY_MAX_ATTEMPTS + 1):
+        if attempt > 1:
+            # 再試行の前にも予算preflightを必ず通す(通らなければ再試行しない)。
+            if budget is None or not budget.can_afford("external_discovery"):
+                attempts.append({"attempt": attempt, "status": "skipped_budget"})
+                break
+        attempt_diag = {}
+        raw_candidates = pipeline.discover_candidates_via_gemini(
+            category, target, batch_id, max_candidates=limit, diagnostics=attempt_diag,
+        )
+        attempts.append({"attempt": attempt, "status": attempt_diag.get("status")})
+        diagnostics.clear()
+        diagnostics.update(attempt_diag)
+        if attempt_diag.get("status") != "no_search_evidence":
+            break
+    diagnostics["attempts"] = attempts
 
     candidates = []
     for c in raw_candidates:
@@ -615,7 +644,7 @@ def make_discovery_candidate_source(batch_id, budget, mode):
                 report["external_discovery_diagnostics"] = diagnostics
                 candidates.extend(_gemini_discovery_candidates(
                     category, target, batch_id, excluded_keys, limit - len(candidates),
-                    on_excluded=on_excluded, diagnostics=diagnostics,
+                    on_excluded=on_excluded, diagnostics=diagnostics, budget=budget,
                 ))
         candidate_source.last_report = report
 
@@ -902,7 +931,7 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
                 # transientがあれば未確定としてmarkerを書かない。
                 official_evidence = classify_official_evidence(brand, row_citations)
                 not_reflected["official_evidence"] = {
-                    k: official_evidence[k] for k in ("status", "not_confirmed", "transient_unverified")}
+                    k: official_evidence[k] for k in ("status", "not_confirmed", "transient_unverified", "unverified")}
                 if official_evidence["status"] == "failed":
                     not_reflected["gate_failure_marker"] = _record_gate_failure(staging_id, gate, evaluation["reason"])
             elif gate:

@@ -455,6 +455,16 @@ def discovery_condition_label(category, target):
     return concept if concept else target
 
 
+# Step45.15: 外部Discovery(検索)のプロンプトに共通で入れる、検索出典を必須と
+# する指示(カテゴリ非依存)。検索したふりをさせる表現は使わない。成功判定は
+# 従来どおり、APIが実際のsearch evidence(grounding metadata)を返した場合だけ。
+DISCOVERY_SEARCH_REQUIREMENT = (
+    "- 候補は、今回の検索で得た検索結果(出典)で確認できたものだけを挙げること。\n"
+    "  検索を実行できなかった場合や、検索結果の出典で確認できない場合は、\n"
+    "  候補を挙げずにその旨を回答すること。"
+)
+
+
 def _build_category_discovery_prompt(category, target, config):
     concept = discovery_search_concept(category, target)
     checks = "\n".join(f"- {c}" for c in config["discovery_checks"])
@@ -479,7 +489,8 @@ Web検索で調査してください。
 - 条件を満たす商品が1件も見つからない場合は、無理に挙げず「見つかりません
   でした」と回答すること。
 - 楽天市場等の販売実績だけでは条件適合の根拠にはしないこと
-  (販売の有無と、条件の確認は別の情報源で行うこと)。"""
+  (販売の有無と、条件の確認は別の情報源で行うこと)。
+{DISCOVERY_SEARCH_REQUIREMENT}"""
 
 
 def _build_category_stage1_prompt(brand, product_name, config):
@@ -1222,7 +1233,8 @@ Web検索で調査してください。
 - 条件を満たす商品が1件も見つからない場合は、無理に挙げず「見つかりません
   でした」と回答すること。
 - 楽天市場等の販売実績だけでは商品の成分・条件適合の根拠にはしないこと
-  (販売の有無と、条件(成分等)の確認は別の情報源で行うこと)。"""
+  (販売の有無と、条件(成分等)の確認は別の情報源で行うこと)。
+{DISCOVERY_SEARCH_REQUIREMENT}"""
 
 
 def run_discovery_search(category, target, batch_id):
