@@ -179,6 +179,8 @@ def fetch_html(url):
 # 使うのはサイト自身を表す値だけ: og:site_name、トップレベル(または@graph直下)の
 # JSON-LD Organization/Corporation/WebSite.name、<title>の最後の区切り以降。
 # Product.brand/Brand・商品名・本文・title前半の商品部分は抽出しない。
+# Step45.10: title_site_nameは診断用に抽出・保存するだけで、公式判定の
+# 肯定材料には使わない(product_collection_pipeline._page_identity_confirms_brand)。
 _SITE_IDENTITY_TYPES = {"Organization", "Corporation", "WebSite"}
 _TITLE_SEPARATOR_RE = re.compile(r"\s*(?:\||｜| - | – | — )\s*")
 _MAX_FIELD_LENGTH = 200

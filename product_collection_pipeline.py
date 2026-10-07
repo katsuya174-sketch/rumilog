@@ -804,8 +804,9 @@ def _citation_title_confirms_brand(brand, title):
 
 # ===== Step45.5: citation先ページ自身の「サイトの名乗り」による確認 =====
 # title判定で公式確認できない場合のみ、citationを安全に追跡し(citation_
-# verification.fetch_html)、最終ページのog:site_name/JSON-LD Organization・
-# Corporation・WebSite.name/<title>末尾のサイト名部分だけでブランドを照合する。
+# verification.fetch_html)、最終ページのog:site_name/トップレベルJSON-LD
+# Organization・Corporation・WebSite.nameだけでブランドを照合する(Step45.10で
+# <title>末尾のサイト名部分は肯定材料から除外。抽出・保存は診断用に残す)。
 # 最終ドメインとcanonicalはcitation title(=Groundingが示したソースの
 # ドメイン)と一致(またはそのサブドメイン)している必要がある。
 # 結果はstage1_citationsの各要素に"page_verification"として保存し、判定は
@@ -835,7 +836,12 @@ def _page_identity_confirms_brand(brand, citation):
     if canonical_domain and not _domain_within(canonical_domain, title_domain):
         return False
     identity = verification.get("site_identity") or {}
-    fields = [identity.get("og_site_name"), identity.get("title_site_name"), *(identity.get("jsonld_names") or [])]
+    # Step45.10: 公式identityの肯定材料はog:site_nameとトップレベルJSON-LD
+    # Organization/Corporation/WebSite.nameのみ。<title>(title_site_name)は
+    # 比較・小売サイトでは商品名(ブランド名を含む)がサイト名の位置に来る
+    # ことがあるため(例: 価格.com「価格.com - パナソニック …」)、使わない。
+    # 証明できなければnot_confirmed(fail closed)。
+    fields = [identity.get("og_site_name"), *(identity.get("jsonld_names") or [])]
     return any(isinstance(f, str) and _free_text_confirms_brand(brand, f) for f in fields)
 
 
