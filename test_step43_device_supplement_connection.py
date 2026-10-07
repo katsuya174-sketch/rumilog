@@ -72,18 +72,13 @@ class SupplementIngredientTagTests(unittest.TestCase):
         self.assertEqual(app.normalize_ingredient_tag("probiotics"), "probiotics")
 
     def test_existing_fermentation_tags_unaffected_by_probiotics_addition(self):
-        # ビフィズス菌/英語のlactobacillusは既存のbifida/lactobacillus
-        # (化粧品の発酵成分タグ)のまま。probioticsの追加で壊れていないこと
-        # を確認する。
-        # 注記(Step43で発見した既存の挙動、今回のスコープ外): "乳酸菌"は
-        # さらに手前の"乳酸"ルール(lactic_acid、AHA系角質ケア成分)に部分
-        # 文字列一致して先に拾われるため、実際には"lactobacillus"ではなく
-        # "lactic_acid"に正規化される(normalize_ingredient_tag()の既存の
-        # 順序依存の挙動で、Step43で変更していない)。
-        # lactic_acidタグは乳酸塩(乳酸カルシウム等)にも付くため、is_candidate_
-        # relevant_to_target()のprobiotics判定は"乳酸菌"を生の原料名で見る。
-        self.assertEqual(app.normalize_ingredient_tag("乳酸菌"), "lactic_acid")
-        self.assertEqual(app.normalize_ingredient_tag("ビフィズス菌"), "bifida")
+        # 化粧品の発酵成分タグ(bifida/lactobacillus)は発酵由来の表現では
+        # そのまま。Step46で、菌そのもの(「乳酸菌」「ビフィズス菌」)は前段で
+        # probioticsへ正規化するよう変更した(以前は「乳酸菌」が手前の「乳酸」
+        # ルールでlactic_acidになる既知の問題があった)。
+        self.assertEqual(app.normalize_ingredient_tag("乳酸菌"), "probiotics")
+        self.assertEqual(app.normalize_ingredient_tag("ビフィズス菌"), "probiotics")
+        self.assertEqual(app.normalize_ingredient_tag("ビフィズス菌発酵エキス"), "bifida")
         self.assertEqual(app.normalize_ingredient_tag("lactobacillus"), "lactobacillus")
 
     def test_cysteamine_unaffected_by_l_cysteine_addition(self):

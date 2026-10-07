@@ -10892,11 +10892,38 @@ def purpose_to_concern_tags(purpose_text):
     return list(dict.fromkeys(tags))
 
 
+# Step46: カテゴリに関係なく意味が明確なサプリ成分表現の前段判定。
+# 既存ルールの順序依存で「オメガ3脂肪酸」が脂肪酸(fatty_acid)、「乳酸菌」が
+# 乳酸(lactic_acid、AHA系)へ先に正規化されていた問題を、ルール順を入れ替えず
+# に解消する(化粧品の既存タグを壊さないため)。
+# - omega3: オメガ3/オメガ-3/オメガ 3/omega-3/omega 3/omega3、または英字境界付きの
+#   EPA/DHA(Step43のheparinoid等の誤判定対策を維持)。一般的な「脂肪酸」は対象外。
+# - probiotics: 「乳酸菌」「ビフィズス菌」(菌そのもの)。発酵・培養・溶解・抽出・
+#   エキス等の発酵由来成分(化粧品の「ビフィズス菌発酵エキス」等)は既存タグの
+#   まま。「乳酸」「lactic acid」「乳酸Na」等の乳酸塩は「菌」を含まないため対象外。
+_EXPLICIT_OMEGA3_RE = re.compile(r"オメガ[\s\-]?3(?!\d)|omega[\s\-_]?3(?!\d)|(?<![a-z])(?:epa|dha)(?![a-z])")
+_EXPLICIT_PROBIOTIC_RE = re.compile(r"乳酸菌|ビフィズス菌")
+_FERMENT_DERIVATIVE_RE = re.compile(r"発酵|培養|溶解|抽出|エキス|ferment|lysate|filtrate|extract")
+
+
+def _explicit_supplement_ingredient_tag(text):
+    folded = unicodedata.normalize("NFKC", str(text or "")).lower()
+    if _EXPLICIT_OMEGA3_RE.search(folded):
+        return "omega3"
+    if _EXPLICIT_PROBIOTIC_RE.search(folded) and not _FERMENT_DERIVATIVE_RE.search(folded):
+        return "probiotics"
+    return None
+
+
 def normalize_ingredient_tag(text):
     text = normalize_text(text)
 
     if not text:
         return None
+
+    explicit = _explicit_supplement_ingredient_tag(text)
+    if explicit:
+        return explicit
 
     # =========================
     # 攻め・美白・透明感
