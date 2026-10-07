@@ -268,16 +268,21 @@ def _db_reuse_candidates(category, target, excluded_keys, limit, on_excluded=Non
     return candidates
 
 
-def _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limit):
+def _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limit,
+                                 on_excluded=None, diagnostics=None):
     """探索順序③: 既存staging/DBで候補が埋まらない場合のみ、Gemini
     Groundingによる新規探索(product_collection_pipeline.
     discover_candidates_via_gemini、Step41)を行う。ここで見つかった情報は
     Product Masterへの正式採用根拠にはしない。API呼び出し・費用は既存の
     record_usage_and_check_limit()経由でbatch_idに記録され、BatchBudget
-    の集計にそのまま含まれる(別の費用計算は作らない)。"""
+    の集計にそのまま含まれる(別の費用計算は作らない)。
+    on_excluded/diagnostics(Step45.1): 除外理由と、外部Discovery自体の0件理由
+    (pipeline.discover_candidates_via_gemini()のdiagnostics)を呼び出し元へ返す。"""
     if limit <= 0:
         return []
-    raw_candidates = pipeline.discover_candidates_via_gemini(category, target, batch_id, max_candidates=limit)
+    raw_candidates = pipeline.discover_candidates_via_gemini(
+        category, target, batch_id, max_candidates=limit, diagnostics=diagnostics,
+    )
 
     candidates = []
     for c in raw_candidates:
@@ -286,10 +291,17 @@ def _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limi
         brand = str(c.get("brand", "") or "").strip()
         name = str(c.get("product_name", "") or "").strip()
         source_url = str(c.get("source_url", "") or "").strip()
-        if not brand or not name or not source_url:
+        brief = {"brand": brand, "name": name, "discovery_source": "gemini_grounding"}
+        missing = ("missing_brand" if not brand else "missing_product_name" if not name
+                   else "missing_source_url" if not source_url else None)
+        if missing:
+            if on_excluded:
+                on_excluded(brief, None, missing)
             continue
         key = app.make_verified_product_key({"brand": brand, "name": name, "category": category})
         if key and key in excluded_keys:
+            if on_excluded:
+                on_excluded(brief, key, None)
             continue
         candidates.append({
             "brand": brand, "name": name, "category": category,
@@ -355,9 +367,12 @@ def make_discovery_candidate_source(batch_id, budget, mode):
             report["external_discovery_requested"] = limit - len(candidates)
             if mode == "execute" and budget.can_continue():
                 report["external_discovery_executed"] = True
-                candidates.extend(
-                    _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limit - len(candidates))
-                )
+                diagnostics = {}
+                report["external_discovery_diagnostics"] = diagnostics
+                candidates.extend(_gemini_discovery_candidates(
+                    category, target, batch_id, excluded_keys, limit - len(candidates),
+                    on_excluded=on_excluded, diagnostics=diagnostics,
+                ))
         candidate_source.last_report = report
 
         # discovery evidenceの無い候補は正式な提案として扱わない(採用判定は
@@ -559,10 +574,26 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
             actions.append({"action": "batch_stop", "reason": "cost_limit_exceeded"})
             break
 
+    report = getattr(candidate_source, "last_report", None)
     if mode == "dry_run":
-        actions.extend(_dry_run_plan_actions(item, candidates, getattr(candidate_source, "last_report", None)))
+        actions.extend(_dry_run_plan_actions(item, candidates, report))
+    elif report and report.get("external_discovery_diagnostics"):
+        # Step45.1: 外部Discoveryを実行した場合、候補0件でも原因を区別できる
+        # よう要約を残す(DBには保存せず、run_batchの結果とログのみ)。
+        actions.insert(0, {
+            "action": "external_discovery_result", "category": category, "target": target,
+            "diagnostics": report["external_discovery_diagnostics"],
+            "excluded_by_reason": _count_by_reason(report.get("excluded") or []),
+        })
 
     return actions
+
+
+def _count_by_reason(excluded):
+    by_reason = {}
+    for e in excluded:
+        by_reason[e["reason"]] = by_reason.get(e["reason"], 0) + 1
+    return by_reason
 
 
 DRY_RUN_EXCLUDED_EXAMPLES = 5
@@ -578,9 +609,7 @@ def _dry_run_plan_actions(item, candidates, report):
     actions = []
     excluded = report.get("excluded") or []
     if excluded:
-        by_reason = {}
-        for e in excluded:
-            by_reason[e["reason"]] = by_reason.get(e["reason"], 0) + 1
+        by_reason = _count_by_reason(excluded)
         actions.append({
             "action": "excluded_candidates", "category": category, "target": target,
             "count": len(excluded), "by_reason": by_reason,

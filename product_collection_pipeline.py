@@ -20,6 +20,7 @@ gemini_usageテーブル)とは完全に分離した専用の使用量・費用�
 """
 
 import concurrent.futures
+import hashlib
 import json
 import re
 import time
@@ -349,9 +350,152 @@ def record_usage_and_check_limit(batch_id, product_label, stage, model, usage, g
     return {"estimated_cost": estimated_cost, "batch_total_cost": total_cost, "limit_exceeded": limit_exceeded}
 
 
+# ===== Step45.1: カテゴリ別の収集config(category adapter) =====
+# 共通のDiscovery/Stage1/Stage2パイプラインのまま、カテゴリ固有の
+#   - search concept(外部Discoveryで何を探すか。内部targetを人が検索する
+#     意味へ変換。推薦定義app._DEVICE_DEFAULTS/_SUPPLEMENT_DEFAULTSが
+#     source of truth)
+#   - Discoveryで一次情報から確認させる項目
+#   - Stage1の要求項目
+#   - Stage2 schema(_CATEGORY_ATTRIBUTES_EXTRACTION_SPECS)
+#   - validator(app.validate_category_attributes / CATEGORY_ATTRIBUTE_SCHEMAS)
+# だけを切り替える。configが無いカテゴリ(化粧品)は既存の文面・挙動のまま。
+# カテゴリを追加する場合はここへconfigを1件追加するだけで同じ経路を使える。
+
+def _device_search_concept(target):
+    defaults = app._DEVICE_DEFAULTS.get(target)
+    if not defaults:
+        return None
+    function = defaults.get("device_function") or target
+    purpose = app._DEVICE_PURPOSE_LABELS.get(target, "")
+    return f"{function}方式の顔用美容機器" + (f"（用途: {purpose}）" if purpose else "")
+
+
+def _supplement_display_name(target):
+    for display_name, defaults in app._SUPPLEMENT_DEFAULTS.items():
+        if target in (defaults.get("ingredient_focus") or []):
+            return display_name
+    return None
+
+
+def _supplement_search_concept(target):
+    name = _supplement_display_name(target)
+    return f"{name}を含むサプリメント" if name else None
+
+
+def _device_method_list():
+    return "・".join(v.get("device_function", k) for k, v in app._DEVICE_DEFAULTS.items())
+
+
+_CATEGORY_COLLECTION_CONFIGS = {
+    "美容機器": {
+        "role": "美容機器",
+        "search_concept": _device_search_concept,
+        "discovery_checks": [
+            "その方式(上記の条件)を採用していることが、メーカー/ブランド公式サイト・"
+            "取扱説明書等の一次情報で確認できること",
+            "ブランド名・正式な製品名(型番があれば型番)が一次情報で確認できること",
+        ],
+        "stage1_items": lambda: [
+            f"方式(次のうち公式情報に明記されているもの: {_device_method_list()})と、"
+            "メーカーが使用している方式・技術の名称",
+            "主な機能・モード",
+            "使用上の注意・禁忌事項(使用できない人・部位等)",
+        ],
+    },
+    "サプリメント": {
+        "role": "サプリメント",
+        "search_concept": _supplement_search_concept,
+        "discovery_checks": [
+            "その成分(上記の条件)を含むことが、メーカー/ブランド公式サイト・商品表示等の"
+            "一次情報で確認できること",
+            "ブランド名・正式な製品名が一次情報で確認できること",
+        ],
+        "stage1_items": lambda: [
+            "含有成分とその含有量(1日あたり・1粒あたり等、公式の表示どおり)",
+            "1日の摂取目安量",
+            "1回あたりの摂取量(粒数・mg等)",
+            "摂取上の注意事項",
+        ],
+    },
+}
+
+
+def category_collection_config(category):
+    """categoryの収集config。化粧品等、専用configの無いカテゴリはNone
+    (既存の文面・挙動を使う)。"""
+    return _CATEGORY_COLLECTION_CONFIGS.get(category)
+
+
+def discovery_search_concept(category, target):
+    """外部Discoveryで使う検索概念。configの無いカテゴリはNone。"""
+    config = category_collection_config(category)
+    if config is None:
+        return None
+    return config["search_concept"](target)
+
+
+def discovery_condition_label(category, target):
+    """Discovery構造化プロンプトの「条件」欄。化粧品は従来どおりtarget。"""
+    concept = discovery_search_concept(category, target)
+    return concept if concept else target
+
+
+def _build_category_discovery_prompt(category, target, config):
+    concept = discovery_search_concept(category, target)
+    checks = "\n".join(f"- {c}" for c in config["discovery_checks"])
+    return f"""あなたは{config["role"]}製品の情報調査アシスタントです。
+以下の条件を満たす、日本国内で実際に販売されている市販品を、最大3件まで
+Web検索で調査してください。
+
+カテゴリ: {category}
+条件: {concept}
+
+確認すること:
+{checks}
+
+必ず検索を実行し、その結果に基づいて回答してください。検索せずに一般的な
+知識だけで回答することは禁止します。
+
+厳守事項:
+- 実際に検索して見つかった、実在する商品のみを挙げること。架空の商品名・
+  存在が確認できない商品名を作ってはならない。
+- 各商品について、ブランド名・正式な製品名・条件を満たすことが確認できた
+  根拠の要約を記述すること。
+- 条件を満たす商品が1件も見つからない場合は、無理に挙げず「見つかりません
+  でした」と回答すること。
+- 楽天市場等の販売実績だけでは条件適合の根拠にはしないこと
+  (販売の有無と、条件の確認は別の情報源で行うこと)。"""
+
+
+def _build_category_stage1_prompt(brand, product_name, config):
+    items = "\n".join(f"- {i}" for i in config["stage1_items"]())
+    return f"""あなたは{config["role"]}製品の情報調査アシスタントです。
+以下の製品についてWeb検索を実際に行い、分かったことを日本語で記述してください。
+
+製品: {brand} {product_name}
+
+必ず検索を実行し、その結果に基づいて回答してください。検索せずに
+一般的な知識だけで回答することは禁止します。
+以下の情報を、分かった範囲で記述してください(不明な項目は「不明」と
+明記すること。推測で埋めることは禁止):
+- ブランド名・正式な製品名
+- JANコード
+{items}
+
+各情報について、どの出典で確認したかが分かるように記述してください。
+公式メーカー/ブランドの情報を最優先してください。"""
+
+
 # ===== Stage 1: Grounding収集 =====
 
-def build_stage1_prompt(brand, product_name):
+def build_stage1_prompt(brand, product_name, category=None):
+    """本収集Stage1のプロンプト。category_collection_config(category)が
+    Noneのカテゴリ(化粧品)は従来の文面のまま。美容機器/サプリメントは
+    同じ共通構造に、configの調査項目(方式・成分等)を差し込む(Step45.1)。"""
+    config = category_collection_config(category)
+    if config is not None:
+        return _build_category_stage1_prompt(brand, product_name, config)
     return f"""あなたは化粧品・スキンケア製品の情報調査アシスタントです。
 以下の製品についてWeb検索を実際に行い、分かったことを日本語で記述してください。
 
@@ -384,14 +528,14 @@ def build_stage1_prompt(brand, product_name):
 公式メーカー/ブランドの情報を最優先してください。"""
 
 
-def run_stage1_collection(brand, product_name, batch_id):
+def run_stage1_collection(brand, product_name, batch_id, category=None):
     """
     Stage 1: Google Search Grounding(response_schemaなし)で実際に検索を
     行う。grounding_metadata(web_search_queries/grounding_chunks)に
     実検索の証拠が無い場合はstatus="no_search_evidence"として失敗扱いに
     する(本文中のURLは一切信用しない)。
     """
-    prompt = build_stage1_prompt(brand, product_name)
+    prompt = build_stage1_prompt(brand, product_name, category=category)
     config = types.GenerateContentConfig(
         tools=[types.Tool(google_search=types.GoogleSearch())],
     )
@@ -448,10 +592,16 @@ def run_stage1_collection(brand, product_name, batch_id):
 #   (1日の摂取目安量・1回あたりの量・注意事項)のみを持つ。
 _CATEGORY_ATTRIBUTES_EXTRACTION_SPECS = {
     "美容機器": {
+        # Step45.1: enumと公式表記との対応は推薦定義(app._DEVICE_DEFAULTSの
+        # キー/device_function)から生成し、方式を手書きで二重管理しない。
         "method": types.Schema(
             type="STRING",
-            enum=["RF", "LED", "EMS", "エレクトロポレーション", "超音波洗浄", "マイクロカレント", "unknown"],
-            description="確認できた方式。該当/不明な場合は'unknown'",
+            enum=list(app._DEVICE_DEFAULTS.keys()) + ["unknown"],
+            description=(
+                "調査結果本文で確認できた方式。値と方式の対応: "
+                + "、".join(f"{k}={v.get('device_function', k)}" for k, v in app._DEVICE_DEFAULTS.items())
+                + "。該当/不明な場合は'unknown'"
+            ),
         ),
         "contraindications": types.Schema(
             type="STRING",
@@ -527,6 +677,31 @@ def build_stage2_prompt(brand, product_name, stage1_text, citations, category_at
   どの出典にも対応しない場合は"unknown"とする。{category_attributes_instructions}"""
 
 
+# Step45.1: source_urlとStage1/Discoveryの実citationとの照合。Google Search
+# Groundingのcitationは長いリダイレクトURL(vertexaisearch.cloud.google.com/
+# grounding-api-redirect/...)で、モデルはこれを一覧から書き写す。完全一致を
+# 原則とし、書き写し時に付きがちな前後の空白・括弧/引用符・末尾の句読点
+# だけを取り除いた結果が実citationと完全一致する場合に限り同一sourceとみなす
+# (ドメイン一致等の緩い判定はしない)。採用時はcitation側の正規URLに置き換える。
+_CITATION_URL_WRAPPERS = "<>\"'`「」『』()（）[]［］"
+_CITATION_URL_TRAILING = ".,、。;；:："
+
+
+def match_citation_url(url, valid_citation_urls):
+    """urlが実citationのいずれかと同一sourceならそのcitation URLを、そうで
+    なければNoneを返す。"""
+    if not isinstance(url, str) or not url:
+        return None
+    if url in valid_citation_urls:
+        return url
+    candidate = url.strip()
+    for _ in range(3):
+        candidate = candidate.strip().strip(_CITATION_URL_WRAPPERS).rstrip(_CITATION_URL_TRAILING)
+        if candidate in valid_citation_urls:
+            return candidate
+    return None
+
+
 def is_official_source_confirmed(brand, citations):
     """
     official_source_confirmedはモデルの自己申告を信用せず、ここで
@@ -572,16 +747,24 @@ def sanitize_stage2_payload(payload, valid_citation_urls, stage1_text, brand=Non
     if jan_code and jan_code != "unknown" and jan_code not in (stage1_text or ""):
         sanitized["jan_code"] = "unknown"
 
-    sanitized["active_ingredients"] = [
-        item for item in (sanitized.get("active_ingredients") or [])
-        if isinstance(item, dict)
-        and item.get("source_url") in valid_citation_urls
-        and str(item.get("ingredient", "") or "").strip().lower() != "unknown"
-    ]
-    sanitized["formulation_features"] = [
-        item for item in (sanitized.get("formulation_features") or [])
-        if isinstance(item, dict) and item.get("source_url") in valid_citation_urls
-    ]
+    def _with_canonical_source(items, keep):
+        out = []
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            canonical = match_citation_url(item.get("source_url"), valid_citation_urls)
+            if canonical is None or not keep(item):
+                continue
+            out.append(item if canonical == item.get("source_url") else dict(item, source_url=canonical))
+        return out
+
+    sanitized["active_ingredients"] = _with_canonical_source(
+        sanitized.get("active_ingredients"),
+        lambda item: str(item.get("ingredient", "") or "").strip().lower() != "unknown",
+    )
+    sanitized["formulation_features"] = _with_canonical_source(
+        sanitized.get("formulation_features"), lambda item: True,
+    )
     sanitized["official_source_confirmed"] = is_official_source_confirmed(brand, citations or [])
 
     # Step43: category_attributes(美容機器/サプリメント等のカテゴリ固有
@@ -595,8 +778,8 @@ def sanitize_stage2_payload(payload, valid_citation_urls, stage1_text, brand=Non
         for field_name, field_value in sanitized["category_attributes"].items():
             if not isinstance(field_value, dict):
                 continue
-            source_url = field_value.get("source_url")
-            if source_url in valid_citation_urls:
+            source_url = match_citation_url(field_value.get("source_url"), valid_citation_urls)
+            if source_url is not None:
                 sanitized_attrs[field_name] = {
                     "value": field_value.get("value", "unknown"),
                     "confidence": field_value.get("confidence", "unknown"),
@@ -694,6 +877,13 @@ def flatten_category_attributes(category_attributes_payload):
 # されるまでは「調査対象の提案」に過ぎない(合意事項)。
 
 def build_discovery_prompt(category, target):
+    """外部Discovery(検索)のプロンプト。category_collection_config(category)
+    がNoneのカテゴリ(化粧品)は従来の文面のまま。美容機器/サプリメントは、
+    内部target(RF/vitamin_c等)をそのまま入れず、推薦定義から作った検索概念
+    (discovery_search_concept)と確認項目を同じ共通構造に差し込む(Step45.1)。"""
+    config = category_collection_config(category)
+    if config is not None:
+        return _build_category_discovery_prompt(category, target, config)
     return f"""あなたは化粧品・スキンケア・美容関連製品の情報調査アシスタントです。
 以下の条件を満たす、日本国内で実際に販売されている市販品を、最大3件まで
 Web検索で調査してください。
@@ -720,6 +910,10 @@ def run_discovery_search(category, target, batch_id):
     """Stage1と同じ安全パターン(Google Search Grounding、検索証拠が無い
     場合はno_search_evidenceで失敗扱い)で、候補となる実在商品をWeb検索する。
     """
+    if category_collection_config(category) is not None and discovery_search_concept(category, target) is None:
+        # 推薦定義に無いtargetは検索概念を作れないため、内部IDのまま検索しない。
+        print(f"[DISCOVERY UNKNOWN TARGET] {category}:{target}", flush=True)
+        return {"status": "unknown_target_concept", "raw_text": "", "citations": [], "search_queries": []}
     prompt = build_discovery_prompt(category, target)
     config = types.GenerateContentConfig(
         tools=[types.Tool(google_search=types.GoogleSearch())],
@@ -762,7 +956,7 @@ def build_discovery_structuring_prompt(category, target, discovery_text, citatio
 構造化してください。
 
 カテゴリ: {category}
-条件: {target}
+条件: {discovery_condition_label(category, target)}
 
 【調査結果(検索に基づく)】
 {discovery_text}
@@ -835,33 +1029,79 @@ def run_discovery_structuring(category, target, discovery_result, batch_id):
 
     valid_urls = {c["uri"] for c in discovery_result["citations"]}
     raw_candidates = parsed.get("candidates") or []
-    candidates = [
-        c for c in raw_candidates
-        if isinstance(c, dict)
-        and c.get("source_url") in valid_urls
-        and str(c.get("brand", "") or "").strip()
-        and str(c.get("product_name", "") or "").strip()
-    ]
-    return {"status": "ok", "payload": {"candidates": candidates}, "usage_result": usage_result}
+    candidates = []
+    filtered = {}
+    for c in raw_candidates:
+        reason = None
+        if not isinstance(c, dict):
+            reason = "not_object"
+        elif not str(c.get("brand", "") or "").strip():
+            reason = "missing_brand"
+        elif not str(c.get("product_name", "") or "").strip():
+            reason = "missing_product_name"
+        elif not str(c.get("source_url", "") or "").strip() or str(c.get("source_url")).strip().lower() == "unknown":
+            reason = "missing_source_url"
+        else:
+            canonical = match_citation_url(c.get("source_url"), valid_urls)
+            if canonical is None:
+                reason = "source_url_mismatch"
+            else:
+                candidates.append(c if canonical == c.get("source_url") else dict(c, source_url=canonical))
+        if reason:
+            filtered[reason] = filtered.get(reason, 0) + 1
+    return {
+        "status": "ok", "payload": {"candidates": candidates}, "usage_result": usage_result,
+        "structured_count": len(raw_candidates), "filtered": filtered,
+    }
 
 
-def discover_candidates_via_gemini(category, target, batch_id, max_candidates=3):
+def discover_candidates_via_gemini(category, target, batch_id, max_candidates=3, diagnostics=None):
     """Gemini Groundingによる候補探索の一括呼び出し(search→structuring)。
     戻り値はcitation検証済みの候補リストで、各要素はdiscovery evidence
     (source_url)とtarget_evidenceを持つ。ここで見つかった情報はProduct
     Masterへの正式採用根拠にはしない(呼び出し元が既存のStage1→Stage2→
     citation/validator経路へ個別に回して初めて正式採用を判断する)。
+
+    diagnostics(Step45.1): 渡されたdictへ、候補0件の原因を区別できる要約
+    (status/検索クエリ数/citation数/本文長と短いハッシュ/構造化件数/除外理由
+    ごとの件数)を書き込み、ログにも出す。検索本文・生レスポンスは保存しない。
     """
-    discovery_result = run_discovery_search(category, target, batch_id)
-    if discovery_result.get("status") != "ok":
-        return []
+    diag = diagnostics if diagnostics is not None else {}
+    diag.update({"status": None, "search_query_count": 0, "citation_count": 0, "text_length": 0,
+                 "text_sha256": "", "structured_count": 0, "filtered": {}, "returned": 0, "truncated": 0})
+    label = f"discovery:{category}:{target}"
+    try:
+        discovery_result = run_discovery_search(category, target, batch_id)
+        raw_text = discovery_result.get("raw_text") or ""
+        diag.update({
+            "search_query_count": len(discovery_result.get("search_queries") or []),
+            "citation_count": len(discovery_result.get("citations") or []),
+            "text_length": len(raw_text),
+            "text_sha256": hashlib.sha256(raw_text.encode("utf-8")).hexdigest()[:12] if raw_text else "",
+        })
+        if discovery_result.get("status") != "ok":
+            diag["status"] = discovery_result.get("status") or "search_failed"
+            return []
 
-    structuring_result = run_discovery_structuring(category, target, discovery_result, batch_id)
-    if structuring_result.get("status") != "ok":
-        return []
+        structuring_result = run_discovery_structuring(category, target, discovery_result, batch_id)
+        if structuring_result.get("status") != "ok":
+            diag["status"] = f"structuring_{structuring_result.get('status') or 'failed'}"
+            return []
 
-    candidates = (structuring_result.get("payload") or {}).get("candidates") or []
-    return candidates[:max_candidates]
+        candidates = (structuring_result.get("payload") or {}).get("candidates") or []
+        diag["structured_count"] = structuring_result.get("structured_count", len(candidates))
+        diag["filtered"] = dict(structuring_result.get("filtered") or {})
+        if diag["structured_count"] == 0:
+            diag["status"] = "structured_empty"
+        elif not candidates:
+            diag["status"] = "all_filtered"
+        else:
+            diag["status"] = "ok"
+        diag["returned"] = min(len(candidates), max_candidates)
+        diag["truncated"] = max(0, len(candidates) - max_candidates)
+        return candidates[:max_candidates]
+    finally:
+        print(f"[DISCOVERY DIAGNOSTICS] {label} {json.dumps(diag, ensure_ascii=False)}", flush=True)
 
 
 # ===== identity照合・conflict検出 =====
@@ -995,7 +1235,7 @@ def collect_one_product(brand, product_name, category, batch_id, existing_produc
     """1商品分のStage1→Stage2→conflict検出→staging保存を一貫して行う。
     費用上限(PRODUCT_COLLECTION_COST_LIMIT_USD)を超えた場合は、この商品の
     処理を完了させた上で呼び出し元(collect_batch)に伝え、バッチを停止する。"""
-    stage1_result = run_stage1_collection(brand, product_name, batch_id)
+    stage1_result = run_stage1_collection(brand, product_name, batch_id, category=category)
 
     stage2_result = run_stage2_structuring(brand, product_name, category, stage1_result, batch_id)
 
