@@ -277,6 +277,20 @@ def _active_gate_marker(stage2_payload, stage1_citations, now=None):
     return marker
 
 
+def _verification_shareable(verification, title_domain):
+    """同一titleドメインの他citationのpage verificationを流用してよいか。
+    取得に成功した結果は、最終ドメイン・canonicalがこのtitleドメイン(または
+    サブドメイン)と整合する場合だけ流用する(整合しない結果は肯定・否定とも
+    流用しない)。取得自体ができなかった結果(transient・403・安全要件での拒否)
+    はドメイン単位の結果として共有する。"""
+    if verification.get("fetch_status") != "ok":
+        return True
+    if not pipeline._domain_within(verification.get("final_domain"), title_domain):
+        return False
+    canonical = verification.get("canonical_domain")
+    return not canonical or pipeline._domain_within(canonical, title_domain)
+
+
 def classify_official_evidence(brand, stage1_citations):
     """Step45.12: 公式情報源の根拠をcitationごとに分類し、全体の判定を返す。
     各citation:
@@ -296,25 +310,41 @@ def classify_official_evidence(brand, stage1_citations):
     ドメインの公式らしさ・サイト種別等の推測はしない。"""
     result = {"confirmed": [], "not_confirmed": [], "transient_unverified": [], "transient_exhausted": [],
               "unverified": []}
-    for citation in stage1_citations or []:
-        if not isinstance(citation, dict):
-            continue
+    citations = [c for c in (stage1_citations or []) if isinstance(c, dict)]
+    # Step45.18: page verificationはドメイン単位でサイト自身のidentityを確認して
+    # いるため、同じcitation titleドメインの確認結果を他のcitationでも使う。
+    # 結果はコピーせず、citationごとに現在の判定器で再評価する(肯定は各
+    # citationのtitleドメインに対する最終ドメイン・canonical整合が必須)。
+    verifications_by_domain = {}
+    for citation in citations:
+        domain = pipeline._citation_title_domain(citation)
+        if domain and isinstance(citation.get("page_verification"), dict):
+            verifications_by_domain.setdefault(domain, []).append(citation["page_verification"])
+    for citation in citations:
         title = citation.get("title", "")
-        if brand and (pipeline._citation_title_confirms_brand(brand, title)
-                      or pipeline._page_identity_confirms_brand(brand, citation)):
+        if brand and pipeline._citation_title_confirms_brand(brand, title):
             result["confirmed"].append(title)
             continue
-        verification = citation.get("page_verification")
-        if not isinstance(verification, dict):
-            result["unverified"].append(title)
-        elif pipeline.is_transient_page_verification(verification):
+        own = citation.get("page_verification")
+        domain = pipeline._citation_title_domain(citation)
+        verifications = ([own] if isinstance(own, dict) else []) + [
+            v for v in verifications_by_domain.get(domain, [])
+            if v is not own and _verification_shareable(v, domain)]
+        if brand and any(pipeline._page_identity_confirms_brand(brand, dict(citation, page_verification=v))
+                         for v in verifications):
+            result["confirmed"].append(title)
+        elif any(not pipeline.is_transient_page_verification(v) for v in verifications):
+            # 取得・検証が完了した結果(否定)がある。否定結果の共有で公式性が
+            # 生じることは無い。
+            result["not_confirmed"].append(title)
+        elif verifications:
             # Step45.13: 再確認の上限に達したもの(transient_exhausted)も未評価の
             # まま保留(非公式とはしない)。
             result["transient_unverified"].append(title)
-            if verification.get("transient_exhausted"):
+            if any(v.get("transient_exhausted") for v in verifications):
                 result["transient_exhausted"].append(title)
         else:
-            result["not_confirmed"].append(title)
+            result["unverified"].append(title)
     if result["confirmed"]:
         result["status"] = "confirmed"
     elif result["transient_unverified"] or result["unverified"]:
