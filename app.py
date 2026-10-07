@@ -3231,7 +3231,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         required_matches = 1 if len(important_tokens) <= 2 else 2
 
         if len(matched_tokens) < required_matches:
-            # 美容機器: Geminiが「イオン導入器」等のカテゴリ説明名を出すため名称一致免除
+            # 美容機器: Geminiが「RF美顔器」等のカテゴリ説明名を出すため名称一致免除
             if category == "美容機器":
                 name_match_score = 10
             # サプリメント: 成分名は通常タイトルに含まれるが品番・ブランド接頭辞で
@@ -5553,7 +5553,7 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
                         continue
 
                 # --- title match チェック ---
-                # 美容機器: 製品名がカテゴリ説明語（「イオン導入器」等）のためブランド一致のみ
+                # 美容機器: 製品名がカテゴリ説明語（「RF美顔器」等）のためブランド一致のみ
                 # 成分名+カテゴリ名パターン（「セラミド 乳液」「ナイアシンアミド 美容液」等）:
                 #   楽天タイトルに成分名が含まれないため is_same_verified_rakuten_product が
                 #   全件 False になる → score_rakuten_item のカテゴリ固有チェックに委ねる
@@ -17415,8 +17415,14 @@ _DEVICE_DEFAULTS = {
         "frequency": "週2〜3回・スキンケア後",
     },
     "エレクトロポレーション": {
-        "product": "イオン導入器",
-        "device_function": "イオン導入(エレクトロポレーション)",
+        # Step45.2: エレクトロポレーション方式のみを指す。イオン導入(イオン
+        # トフォレシス)は別の技術であり、同一方式として扱わない。
+        "product": "エレクトロポレーション美顔器",
+        "device_function": "エレクトロポレーション",
+        # 収集時、Stage2がmethod=この方式と判定しても、Stage1の調査本文に
+        # 以下のいずれかの語が無ければ根拠なし(unknown)として採用しない
+        # (product_collection_pipeline._enforce_device_method_evidence)。
+        "method_evidence_terms": ("エレクトロポレーション", "electroporation"),
         "priority": 2,
         "frequency": "週2〜3回・美容液の前後",
     },
@@ -23527,10 +23533,10 @@ moisture_level/need_emulsion/need_cream/need_double_moisture/reason
 ・1つのスコア課題に対して複数の機器を重複提案（1課題=1機器が原則）
 ・根拠のない漠然とした提案
 - category: "美容機器" (固定)
-- product: 楽天で検索可能な機器タイプ名 (例: "LEDマスク", "超音波美顔器", "EMSフェイスケア", "RF美顔器", "イオン導入器", "ローラー美顔器")
+- product: 楽天で検索可能な機器タイプ名 (例: "LEDマスク", "超音波美顔器", "EMSフェイスケア", "RF美顔器", "エレクトロポレーション美顔器", "ローラー美顔器")
 - brand: ブランド名 (不明なら "")
 - purpose: 期待される肌効果 (30字以内)
-- device_function: 機能説明 (例: "赤色LED照射", "超音波振動", "EMS微電流", "RF高周波", "イオン導入")
+- device_function: 機能説明 (例: "赤色LED照射", "超音波振動", "EMS微電流", "RF高周波", "エレクトロポレーション")
 - reason: 使用中スキンケアとの相性・増強効果の根拠を具体的に (50字以内)
 - frequency: 推奨頻度 (例: "週3〜4回・スキンケア後", "毎日・朝スキンケア後")
 - priority: 1=最優先 2=次点以降

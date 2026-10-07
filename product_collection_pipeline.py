@@ -843,7 +843,31 @@ def run_stage2_structuring(brand, product_name, category, stage1_result, batch_i
         parsed, valid_urls, stage1_result["raw_text"],
         brand=brand, citations=stage1_result["citations"],
     )
+    sanitized = _enforce_device_method_evidence(category, sanitized, stage1_result["raw_text"])
     return {"status": "ok", "payload": sanitized, "usage_result": usage_result}
+
+
+def _enforce_device_method_evidence(category, sanitized, stage1_text):
+    """Step45.2: 推薦定義(app._DEVICE_DEFAULTS)でmethod_evidence_termsを持つ
+    方式は、Stage1の調査本文にその語が実在する場合のみmethodとして採用する
+    (jan_codeの本文実在チェックと同じ決定論的な検証)。例えば本文に
+    「イオン導入」しか無い商品を、エレクトロポレーション方式として採用しない。
+    method_evidence_termsを持たない方式・美容機器以外のカテゴリは変更しない。"""
+    if category != "美容機器" or not isinstance(sanitized, dict):
+        return sanitized
+    attrs = sanitized.get("category_attributes")
+    method = attrs.get("method") if isinstance(attrs, dict) else None
+    if not isinstance(method, dict):
+        return sanitized
+    terms = (app._DEVICE_DEFAULTS.get(str(method.get("value", "") or "")) or {}).get("method_evidence_terms")
+    if not terms:
+        return sanitized
+    text = (stage1_text or "").lower()
+    if any(str(t).lower() in text for t in terms):
+        return sanitized
+    out = dict(sanitized)
+    out["category_attributes"] = dict(attrs, method={"value": "unknown", "confidence": "unknown", "source_url": "unknown"})
+    return out
 
 
 def flatten_category_attributes(category_attributes_payload):
