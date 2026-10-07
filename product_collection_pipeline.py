@@ -1842,6 +1842,83 @@ def reflect_batch_to_product_master(batch_id, dry_run=True):
 # 到達しない)。
 
 
+# ===== Step45.7: item_code保存時の美容機器identity照合 =====
+# 美容機器は診断時の商品名一致がブランド一致のみで通るため、product_masterへ
+# item_codeを永続保存する用途に限り、商品名の型番(最優先)またはシリーズ/
+# モデル名の識別部分が楽天タイトルにあることを必須にする。類似度判定はせず、
+# 判定できない場合は一致としない(=保存しない)。
+# 正規化はNFKC・小文字化・ハイフン類の除去(EH-SR85=EHSR85)と、記号の空白化のみ。
+_MODEL_HYPHENS_RE = re.compile(r"[\-‐‑‒–—―_]")
+_MODEL_SEPARATORS_RE = re.compile(r"[^0-9a-z\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uff66-\uff9fー]+")
+# 型番は「英字+数字」の本体で比較する。末尾2文字までの英字(EH-SR85-Kの
+# -K等の色記号)は同一モデルの表記として本体に含めない。
+_MODEL_NUMBER_RE = re.compile(r"(?<![a-z0-9])([a-z]{1,6}\d{2,6})[a-z]{0,2}(?![a-z0-9])")
+# 型番の後ろに続いてもよい語(商品の識別を変えない一般語)。これ以外の語が
+# 続く場合(例: 「フォトプラス EX」の後に「スムース」)は別モデルの可能性が
+# あるため一致としない。
+_DEVICE_TRAILING_GENERIC_SEGMENTS = {
+    "美顔器", "美容器", "美容機器", "家庭用", "rf", "led", "ems", "ラジオ波", "正規品", "国内正規品",
+    "公式", "送料無料", "日本製", "最新", "新品", "新製品", "フェイスケア",
+}
+
+
+def _model_text(text):
+    folded = unicodedata.normalize("NFKC", str(text or "")).lower()
+    return _MODEL_SEPARATORS_RE.sub(" ", _MODEL_HYPHENS_RE.sub("", folded)).strip()
+
+
+def _script_segments(text):
+    """空白区切りの各語を、さらに文字種の変わり目で分割する。"""
+    segments = []
+    for token in text.split():
+        current = token[0]
+        for ch in token[1:]:
+            if _char_class(ch) == _char_class(current[-1]) or ch == "ー":
+                current += ch
+            else:
+                segments.append(current)
+                current = ch
+        segments.append(current)
+    return segments
+
+
+def _model_numbers(text):
+    return set(_MODEL_NUMBER_RE.findall(_model_text(text)))
+
+
+def device_identity_matches(product_name, rakuten_title, brand=""):
+    """美容機器のproduct_master商品名と楽天タイトルが同一モデルかを決定論的に判定する。
+    戻り値: (matched: bool, reason)。"""
+    product_models = _model_numbers(product_name)
+    title_models = _model_numbers(rakuten_title)
+    if product_models:
+        if not product_models <= title_models:
+            return False, "model_number_mismatch"
+        prefixes = {re.match(r"[a-z]+", m).group(0) for m in product_models}
+        conflicting = {m for m in title_models - product_models if re.match(r"[a-z]+", m).group(0) in prefixes}
+        if conflicting:
+            return False, "conflicting_model_number"
+        return True, "model_number_match"
+
+    brand_segments = set(_script_segments(_model_text(brand))) if brand else set()
+    identity = [seg for seg in _script_segments(_model_text(product_name)) if seg not in brand_segments]
+    while identity and identity[-1] in _DEVICE_TRAILING_GENERIC_SEGMENTS:
+        identity.pop()
+    while identity and identity[0] in _DEVICE_TRAILING_GENERIC_SEGMENTS:
+        identity.pop(0)
+    if not identity:
+        return False, "identity_undeterminable"
+    title_segments = _script_segments(_model_text(rakuten_title))
+    n = len(identity)
+    for i in range(len(title_segments) - n + 1):
+        if title_segments[i:i + n] != identity:
+            continue
+        following = title_segments[i + n] if i + n < len(title_segments) else None
+        if following is None or following in _DEVICE_TRAILING_GENERIC_SEGMENTS or following in brand_segments:
+            return True, "model_name_match"
+    return False, "model_name_mismatch"
+
+
 def resolve_item_code_for_product(brand, product_name, category, jan_code=None):
     """brand+product_nameで楽天候補を検索し、確信を持って1件に絞れる場合のみ
     その候補を返す。
@@ -1894,8 +1971,30 @@ def resolve_item_code_for_product(brand, product_name, category, jan_code=None):
     if not title_matched_pairs:
         return {"status": "not_found", "reason": "title_mismatch", **diag}
 
-    single_pairs = [
+    # Step45.7: 処理順は identity一致 → 販売形態 → set/bundle → JAN → merchant
+    # tie-break。ショップ評価より先に、同一モデルであること・新品の通常販売で
+    # あることを必ず確定させる。
+    if category == "美容機器":
+        title_matched_pairs = [
+            (score, item) for score, item in title_matched_pairs
+            if device_identity_matches(product_name, str(item.get("itemName", "") or ""), brand)[0]
+        ]
+        diag["device_identity_matched_count"] = len(title_matched_pairs)
+        if not title_matched_pairs:
+            return {"status": "not_found", "reason": "device_model_mismatch", **diag}
+
+    # 販売形態はタイトルだけで判定する(商品説明には「中古品ではありません」
+    # 等の否定表現が入り得るため)。
+    new_sale_pairs = [
         (score, item) for score, item in title_matched_pairs
+        if app.classify_rakuten_sale_condition(str(item.get("itemName", "") or "")) == "new"
+    ]
+    diag["new_sale_count"] = len(new_sale_pairs)
+    if not new_sale_pairs:
+        return {"status": "not_found", "reason": "only_non_new_sale_listings", **diag}
+
+    single_pairs = [
+        (score, item) for score, item in new_sale_pairs
         if not app._is_rakuten_set_item(str(item.get("itemName", "") or ""))
     ]
     diag["single_item_count"] = len(single_pairs)

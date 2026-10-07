@@ -22,6 +22,7 @@ import urllib.parse
 import requests
 import re
 import copy
+import unicodedata
 import time
 import threading
 from psycopg2.pool import ThreadedConnectionPool
@@ -3747,6 +3748,29 @@ def _prefer_single_items(scored_items):
         if not _is_rakuten_set_item(str(it.get("itemName", "") or ""))
     ]
     return single_items if single_items else scored_items
+
+
+# Step45.7: 楽天出品の販売形態(sale condition)。セット/複数個判定
+# (_is_rakuten_set_item)とは別軸で、新品の通常販売でない出品(レンタル・
+# 中古・展示品等)を決定論的に判定する。カテゴリに依存しない共通判定。
+# 「お試し」「アウトレット」「訳あり」は新品の通常商品の訴求にも使われる
+# ため、単独では非販売扱いにしない(レンタル・中古等の明確な表現と組み
+# 合わさっていれば、その明確な表現の側で判定される)。
+_NON_NEW_SALE_PATTERNS = (
+    ("rental", re.compile(r"レンタル|貸出|貸し出し")),
+    ("used", re.compile(r"中古|リユース|(?<![a-z])used(?![a-z])")),
+    ("display", re.compile(r"展示品|展示処分|デモ機")),
+)
+
+
+def classify_rakuten_sale_condition(title, caption=""):
+    """出品タイトル(とcaption)から販売形態を返す。
+    戻り値: "new"(通常販売、または判定材料なし) / "rental" / "used" / "display"。"""
+    text = unicodedata.normalize("NFKC", f"{title or ''} {caption or ''}").lower()
+    for condition, pattern in _NON_NEW_SALE_PATTERNS:
+        if pattern.search(text):
+            return condition
+    return "new"
 
 
 def normalize_rakuten_item_price(item):
