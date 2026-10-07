@@ -92,27 +92,23 @@ class BatchBudget:
         self.products_attempted += 1
 
 
-def _existing_identity_keys():
-    """db_products + verified_products_cache + product_master全体の
-    identity_keyを集めたdedup用集合。新しい照合ロジックは作らず、既存の
-    make_verified_product_key()をそのまま使う。"""
-    db_products = app.load_products()
-    verified_products = app.load_verified_products_cache()
-    keys = set()
-    for p in db_products + verified_products:
-        if isinstance(p, dict):
-            k = app.make_verified_product_key(p)
-            if k:
-                keys.add(k)
+def _product_master_identity_keys():
+    """product_masterに登録済みのidentity_key集合。Candidate Discoveryと
+    executeのduplicate判定で「再収集しない」対象はこれだけにする(Step44.6)。
 
+    以前の_existing_identity_keys()はproducts.json/verified_products_cache
+    のidentityもまとめてduplicate扱いしていたため、それらにしか存在しない
+    (= product_master未登録の)商品をDB reuseで見つけられなかった。
+    products.json/verified_products_cacheにしか無い商品はduplicateではなく
+    DB reuseの探索対象で、coverageにも数えない(app.calculate_effective_
+    candidates())。identity_keyはmake_verified_product_key()と同じ形式。"""
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
         cur = conn.cursor()
         cur.execute("SELECT identity_key FROM product_master")
-        keys.update(row[0] for row in cur.fetchall())
+        return {row[0] for row in cur.fetchall() if row[0]}
     finally:
         conn.close()
-    return keys
 
 
 # ===== Step41: Candidate Discovery(商品候補自動探索) =====
@@ -257,6 +253,9 @@ def _db_reuse_candidates(category, target, excluded_keys, limit, on_excluded=Non
                 on_excluded({"brand": p.get("brand", ""), "name": p.get("name", ""),
                              "discovery_source": "db_reuse"}, key, None)
             continue
+        # Step44.6: 既存DBの商品情報(成分等)はproduct_masterへコピーしない。
+        # identity(brand/name/category)だけを候補として返し、採用判定は
+        # 他tierと同じStage1→Stage2→citation→validator→conflict→reflectで行う。
         candidates.append({
             "brand": p.get("brand", ""), "name": p.get("name", ""), "category": category,
             "discovery_source": "db_reuse",
@@ -320,8 +319,12 @@ def make_discovery_candidate_source(batch_id, budget, mode):
         if not _category_has_registered_policy(category):
             return []
 
+        # Step44.6: 除外はproduct_master登録済み(duplicate)と最近の失敗
+        # (recent_failure)のみ。products.json/verified_products_cache/未reflect
+        # stagingにしか無い商品は再利用候補として探索する。
+        master_keys = _product_master_identity_keys()
         failed_keys = _recently_failed_identity_keys()
-        excluded_keys = _existing_identity_keys() | failed_keys
+        excluded_keys = master_keys | failed_keys
 
         # Step44.5: dry-run計画用の記録。探索・除外の判定はexecuteと同一で、
         # ここでは結果を記録するだけ(dry-run専用の探索ロジックは持たない)。
@@ -329,7 +332,13 @@ def make_discovery_candidate_source(batch_id, budget, mode):
 
         def on_excluded(brief, key, reason):
             if reason is None:
-                reason = "recent_failure" if key in failed_keys else "duplicate"
+                if key in failed_keys:
+                    reason = "recent_failure"
+                elif key in master_keys:
+                    reason = "duplicate"
+                else:
+                    # この領域の探索で別tier/別行として既に選んだ同一identity
+                    reason = "already_selected"
             report["excluded"].append(dict(brief, reason=reason))
 
         candidates = []
@@ -692,7 +701,7 @@ def run_batch(coverage_policy_name="cosmetics", mode="dry_run", candidate_source
     if mode == "execute":
         pipeline.init_product_collection_tables()
         pipeline.PRODUCT_COLLECTION_COST_LIMIT_USD = max_cost_usd
-        existing_keys = _existing_identity_keys()
+        existing_keys = _product_master_identity_keys()
 
     results = {
         "batch_id": batch_id, "mode": mode, "coverage_policy_name": coverage_policy_name,

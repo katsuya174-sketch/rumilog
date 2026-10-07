@@ -728,8 +728,13 @@ class CandidateDiscoveryStagingReuseTests(OrchestratorTestBase):
             citations=[{"uri": "https://official.example.com/staged", "title": brand}],
         )
 
+        # Step44.6以降、products.json等のproduct_master未登録商品もDB reuse
+        # 候補になるため、staging tierだけを確認できるよう既存DBは空にする。
         with patch.object(pipeline, "call_gemini_for_collection",
-                           side_effect=AssertionError("staging再利用時はDiscovery APIを呼ばないはず")):
+                           side_effect=AssertionError("staging再利用時はDiscovery APIを呼ばないはず")), \
+             patch.object(orchestrator, "_gemini_discovery_candidates", return_value=[]), \
+             patch.object(app, "load_products", return_value=[]), \
+             patch.object(app, "load_verified_products_cache", return_value=[]):
             budget = orchestrator.BatchBudget(batch_id, 10, 20, 0.50)
             candidate_source = orchestrator.make_discovery_candidate_source(batch_id, budget, "execute")
             result = candidate_source(category, target, 3)
@@ -901,7 +906,7 @@ class CandidateDiscoveryExclusionTests(OrchestratorTestBase):
         budget = orchestrator.BatchBudget(batch_id, 10, 20, 0.50)
         with patch.object(orchestrator, "_staging_reuse_candidates", return_value=[]), \
              patch.object(orchestrator, "_db_reuse_candidates", return_value=[]), \
-             patch.object(orchestrator, "_existing_identity_keys", return_value=set()), \
+             patch.object(orchestrator, "_product_master_identity_keys", return_value=set()), \
              patch.object(pipeline, "discover_candidates_via_gemini", return_value=[
                  {"brand": brand, "product_name": name, "target_evidence": "x",
                   "source_url": "https://official.example.com/x"},
@@ -930,7 +935,7 @@ class CandidateDiscoveryCapAndEvidenceTests(OrchestratorTestBase):
              patch.object(orchestrator, "_db_reuse_candidates", side_effect=AssertionError("tier1だけで埋まるはず")), \
              patch.object(pipeline, "discover_candidates_via_gemini",
                            side_effect=AssertionError("tier1だけで埋まるはず")), \
-             patch.object(orchestrator, "_existing_identity_keys", return_value=set()):
+             patch.object(orchestrator, "_product_master_identity_keys", return_value=set()):
             candidate_source = orchestrator.make_discovery_candidate_source(batch_id, budget, "execute")
             result = candidate_source(category, target, 10)
 
@@ -946,7 +951,7 @@ class CandidateDiscoveryCapAndEvidenceTests(OrchestratorTestBase):
         budget = orchestrator.BatchBudget(batch_id, 10, 20, 0.50)
         with patch.object(orchestrator, "_staging_reuse_candidates", return_value=[no_evidence_candidate]), \
              patch.object(orchestrator, "_db_reuse_candidates", return_value=[]), \
-             patch.object(orchestrator, "_existing_identity_keys", return_value=set()):
+             patch.object(orchestrator, "_product_master_identity_keys", return_value=set()):
             candidate_source = orchestrator.make_discovery_candidate_source(batch_id, budget, "execute")
             result = candidate_source(category, target, 3)
 
@@ -997,7 +1002,7 @@ class CandidateDiscoveryBudgetAndModeGateTests(OrchestratorTestBase):
         budget = orchestrator.BatchBudget(batch_id, 0, 20, 0.50)  # max_products=0 -> can_continue()は常にFalse
         with patch.object(orchestrator, "_staging_reuse_candidates", return_value=[]), \
              patch.object(orchestrator, "_db_reuse_candidates", return_value=[]), \
-             patch.object(orchestrator, "_existing_identity_keys", return_value=set()), \
+             patch.object(orchestrator, "_product_master_identity_keys", return_value=set()), \
              patch.object(pipeline, "discover_candidates_via_gemini",
                            side_effect=AssertionError("budget超過時はGemini探索しないはず")):
             candidate_source = orchestrator.make_discovery_candidate_source(batch_id, budget, "execute")
@@ -1011,7 +1016,7 @@ class CandidateDiscoveryBudgetAndModeGateTests(OrchestratorTestBase):
         budget = orchestrator.BatchBudget(batch_id, 10, 20, 0.50)
         with patch.object(orchestrator, "_staging_reuse_candidates", return_value=[]), \
              patch.object(orchestrator, "_db_reuse_candidates", return_value=[]), \
-             patch.object(orchestrator, "_existing_identity_keys", return_value=set()), \
+             patch.object(orchestrator, "_product_master_identity_keys", return_value=set()), \
              patch.object(pipeline, "discover_candidates_via_gemini",
                            side_effect=AssertionError("dry_runではGemini探索しないはず")):
             candidate_source = orchestrator.make_discovery_candidate_source(batch_id, budget, "dry_run")

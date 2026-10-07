@@ -4468,35 +4468,33 @@ def is_candidate_relevant_to_target(category, target, product, user_data=None, b
 
 def calculate_effective_candidates(category, tag, db_products=None, verified_products=None,
                                      user_data=None, budget_value=None, extra_candidates=None):
-    """product_masterの「実効候補数」(select_best_market_candidate()と同じ
-    順序・dedup条件での、db_products/verified_products_cacheと重複しない
-    新規寄与分のうち関連性ありと判定される件数)を計算する共通関数。
+    """product_masterの「実効候補数」(product_master内でcategory×tagに関連性
+    ありと判定される商品の件数)を計算する共通関数。
 
-    P2 Step26/27で手動のワンオフスクリプトとして個別に書いていたロジックを
-    正式な共通関数へ移植したもので、判定基準(dedup方法)は一切変更していない。
-    関連性判定はis_candidate_relevant_to_target()(Step43)へ委譲し、
-    cosmetics系カテゴリではそれが内部で従来通りscore_product()/
-    _is_relevant_scored_candidateを呼ぶため、cosmeticsの結果は完全に同一。
+    Step44.6: coverageはProduct Masterの実効候補だけで数える。products.json/
+    verified_products_cacheに存在するだけの商品はcoverage達成扱いにしない
+    一方、product_masterへreflect済みの商品は、それらにも存在するかどうかに
+    関わらず数える(以前はdb_products/verified_products_cacheと重複しない
+    「新規寄与分」だけを数えていたため、DB reuseで既存商品を検証・reflect
+    してもcoverageが増えなかった)。db_products/verified_productsは後方互換
+    のため受け取るが、計算には使わない。
+    関連性判定はis_candidate_relevant_to_target()(Step43)へ委譲する。
     extra_candidatesは、まだDBへreflectしていない候補を仮追加して再計算
-    したい場合に使う(Step31〜35のシミュレーションと同じ用途)。
+    したい場合に使う(Step31〜35のシミュレーションと同じ用途)。product_master
+    に同じidentityが既にある候補は二重に数えない。
     """
-    db_products = db_products if db_products is not None else load_products()
-    verified_products = verified_products if verified_products is not None else load_verified_products_cache()
     user_data = user_data if user_data is not None else _EFFECTIVE_CANDIDATE_NEUTRAL_USER_DATA
     budget_value = budget_value if budget_value is not None else _EFFECTIVE_CANDIDATE_BUDGET_VALUE
 
-    def keys_of(items):
-        s = set()
-        for p in items:
-            if isinstance(p, dict):
-                k = make_verified_product_key(p)
-                if k:
-                    s.add(k)
-        return s
-
-    seen = keys_of(db_products) | keys_of(verified_products)
-    master = query_product_master_candidates(category, limit=50)
-    survivors = [mp for mp in master if make_verified_product_key(mp) not in seen]
+    survivors = []
+    seen = set()
+    for mp in query_product_master_candidates(category, limit=50):
+        k = make_verified_product_key(mp)
+        if k and k in seen:
+            continue
+        if k:
+            seen.add(k)
+        survivors.append(mp)
 
     for extra in (extra_candidates or []):
         if normalize_candidate_category(extra.get("category", ""), fallback=extra.get("category", "")) != \
@@ -4517,10 +4515,8 @@ def calculate_effective_candidates(category, tag, db_products=None, verified_pro
 def calculate_effective_candidates_batch(areas, db_products=None, verified_products=None,
                                            user_data=None, budget_value=None, extra_candidates=None):
     """calculate_effective_candidates()を(category, tag)のリストへ一括適用し、
-    {(category, tag): count}を返す。db_products/verified_productsは1回だけ
-    読み込んで全領域で再利用する(領域ごとに再読込しない)。"""
-    db_products = db_products if db_products is not None else load_products()
-    verified_products = verified_products if verified_products is not None else load_verified_products_cache()
+    {(category, tag): count}を返す。db_products/verified_productsは後方互換
+    のため受け取るだけ(Step44.6以降、coverage計算には使わない)。"""
     return {
         (category, tag): calculate_effective_candidates(
             category, tag, db_products=db_products, verified_products=verified_products,
@@ -4668,8 +4664,8 @@ def get_coverage_report(policy_name="cosmetics", db_products=None, verified_prod
     if not policy:
         return []
 
-    db_products = db_products if db_products is not None else load_products()
-    verified_products = verified_products if verified_products is not None else load_verified_products_cache()
+    # db_products/verified_productsは後方互換のため受け取るだけ(Step44.6以降、
+    # coverageはproduct_masterの実効候補だけで数える)。
     areas = [(item["category"], item["target"]) for item in policy]
     effective_counts = calculate_effective_candidates_batch(
         areas, db_products=db_products, verified_products=verified_products,

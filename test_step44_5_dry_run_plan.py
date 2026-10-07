@@ -41,7 +41,7 @@ class DryRunPlanTestBase(OrchestratorTestBase):
             patch.object(app, "get_coverage_report", return_value=gaps),
             patch.object(app, "get_stale_product_master_candidates", return_value=[]),
             patch.object(app, "get_needs_review_staging_items", return_value=[]),
-            patch.object(orchestrator, "_existing_identity_keys", return_value=set(existing_keys)),
+            patch.object(orchestrator, "_product_master_identity_keys", return_value=set(existing_keys)),
             patch.object(orchestrator, "_recently_failed_identity_keys", return_value=set(failed_keys)),
             patch.object(app, "load_products", return_value=list(db_products or [])),
             patch.object(app, "load_verified_products_cache", return_value=[]),
@@ -205,7 +205,7 @@ class ExecuteRegressionTests(DryRunPlanTestBase):
     def test_candidate_source_report_marks_external_execution_only_in_execute(self):
         for mode, executed in (("dry_run", False), ("execute", True)):
             budget = orchestrator.BatchBudget(self._new_batch_id(f"report-{mode}"), 10, 20, 0.50)
-            with patch.object(orchestrator, "_existing_identity_keys", return_value=set()), \
+            with patch.object(orchestrator, "_product_master_identity_keys", return_value=set()), \
                  patch.object(orchestrator, "_recently_failed_identity_keys", return_value=set()), \
                  patch.object(app, "load_products", return_value=[]), \
                  patch.object(app, "load_verified_products_cache", return_value=[]), \
