@@ -4414,8 +4414,14 @@ _EFFECTIVE_CANDIDATE_BUDGET_VALUE = 3000
 # lactic_acidに正規化される(normalize_ingredient_tag()の既存の順序依存の
 # 挙動で、Step43では変更しない)。これらは実質同じ対象(サプリの乳酸菌/
 # ビフィズス菌由来成分)を指すため、relevance判定でのみ同義語として扱う。
+# ただしlactic_acidタグ自体は「乳酸カルシウム」「乳酸Na」等の乳酸塩でも
+# 付くため同義語にはせず、「乳酸菌」は生の原料名で判定する
+# (_SUPPLEMENT_TARGET_RAW_NAME_KEYWORDS)。
 _SUPPLEMENT_TARGET_TAG_SYNONYMS = {
-    "probiotics": {"probiotics", "lactobacillus", "bifida", "lactic_acid"},
+    "probiotics": {"probiotics", "lactobacillus", "bifida"},
+}
+_SUPPLEMENT_TARGET_RAW_NAME_KEYWORDS = {
+    "probiotics": ("乳酸菌", "ビフィズス菌"),
 }
 
 
@@ -4438,9 +4444,13 @@ def is_candidate_relevant_to_target(category, target, product, user_data=None, b
         return False
 
     if category == "サプリメント":
-        tags = set(compute_ingredient_tags(product.get("active_ingredients") or []))
+        raw_names = [str(n) for n in (product.get("active_ingredients") or []) if n is not None]
+        tags = set(compute_ingredient_tags(raw_names))
         synonyms = _SUPPLEMENT_TARGET_TAG_SYNONYMS.get(target, {target})
-        return bool(tags & synonyms)
+        if tags & synonyms:
+            return True
+        raw_keywords = _SUPPLEMENT_TARGET_RAW_NAME_KEYWORDS.get(target, ())
+        return any(kw in name for name in raw_names for kw in raw_keywords)
 
     if category == "美容機器":
         attrs = product.get("category_attributes")
@@ -6034,6 +6044,29 @@ def _product_master_candidates_for_live_style_ranking(category, target, product_
             continue
         candidates.append((score, item))
     return candidates
+
+
+def _refresh_product_master_live_style_item(item):
+    """最終選定された候補がproduct_master由来の場合のみ、化粧品経路(apply_
+    db_product_to_step)と同じrefresh_selected_candidate_price()で保存済み
+    item_codeから価格・URL・画像をライブ値へ更新する。失敗時はlast known値
+    のまま。楽天ライブ候補はそのまま返す。"""
+    if not isinstance(item, dict) or item.get("_source") != "product_master":
+        return item
+    images = item.get("mediumImageUrls") or []
+    product = {
+        "item_code": item.get("itemCode", ""),
+        "price": item.get("itemPrice", 0),
+        "rakuten_link": item.get("itemUrl", ""),
+        "image": images[0].get("imageUrl", "") if images and isinstance(images[0], dict) else "",
+    }
+    refresh_selected_candidate_price(product)
+    refreshed = dict(item)
+    refreshed["itemPrice"] = product["price"]
+    refreshed["itemUrl"] = product["rakuten_link"]
+    if product["image"]:
+        refreshed["mediumImageUrls"] = [{"imageUrl": product["image"]}]
+    return refreshed
 
 
 def select_best_beauty_device_candidate(
@@ -8154,6 +8187,7 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
         )
         rakuten_item = None
         if best_raw_item:
+            best_raw_item = _refresh_product_master_live_style_item(best_raw_item)
             _cleaned_name = clean_ai_product_name(clean_display_product_name(product_name))
             rakuten_item = _build_rakuten_result(best_raw_item, _cleaned_name)
             step["device_selection_reason"] = device_selection_reason
@@ -8182,6 +8216,7 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
         )
         rakuten_item = None
         if best_raw_item:
+            best_raw_item = _refresh_product_master_live_style_item(best_raw_item)
             _cleaned_name = clean_ai_product_name(clean_display_product_name(product_name))
             rakuten_item = _build_rakuten_result(best_raw_item, _cleaned_name)
             step["device_selection_reason"] = supplement_selection_reason
@@ -11129,13 +11164,17 @@ def normalize_ingredient_tag(text):
     # =========================
     if "l-cysteine" in text or "lシステイン" in text or "エルシステイン" in text or "cysteine" in text or "システイン" in text:
         return "l_cysteine"
-    if "vitamin b" in text or "vitamin_b" in text or "ビタミンb" in text:
+    # vitamin b/d・epa/dhaは単純な部分一致だと"vitamin derivative"→vitamin_d、
+    # "heparinoid"/"adhatoda"→omega3のような誤判定になるため、直後(epa/dhaは
+    # 直前も)に英字が続かない場合のみ一致とする。
+    if re.search(r"(vitamin[ _]?|ビタミン)b(?![a-z])", text):
         return "vitamin_b"
-    if "vitamin d" in text or "vitamin_d" in text or "ビタミンd" in text:
+    if re.search(r"(vitamin[ _]?|ビタミン)d(?![a-z])", text):
         return "vitamin_d"
     if (
         "omega-3" in text or "omega3" in text or "オメガ3" in text or "オメガ-3" in text
-        or "フィッシュオイル" in text or "fish oil" in text or "epa" in text or "dha" in text
+        or "フィッシュオイル" in text or "fish oil" in text
+        or re.search(r"(?<![a-z])(epa|dha)(?![a-z])", text)
     ):
         return "omega3"
     if "probiotics" in text or "プロバイオティクス" in text:

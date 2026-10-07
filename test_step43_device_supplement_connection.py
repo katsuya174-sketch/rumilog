@@ -73,8 +73,8 @@ class SupplementIngredientTagTests(unittest.TestCase):
         # 文字列一致して先に拾われるため、実際には"lactobacillus"ではなく
         # "lactic_acid"に正規化される(normalize_ingredient_tag()の既存の
         # 順序依存の挙動で、Step43で変更していない)。
-        # is_candidate_relevant_to_target()のprobioticsシノニムはこの
-        # 実際の挙動(lactic_acid)に合わせて定義している。
+        # lactic_acidタグは乳酸塩(乳酸カルシウム等)にも付くため、is_candidate_
+        # relevant_to_target()のprobiotics判定は"乳酸菌"を生の原料名で見る。
         self.assertEqual(app.normalize_ingredient_tag("乳酸菌"), "lactic_acid")
         self.assertEqual(app.normalize_ingredient_tag("ビフィズス菌"), "bifida")
         self.assertEqual(app.normalize_ingredient_tag("lactobacillus"), "lactobacillus")
@@ -88,6 +88,23 @@ class SupplementIngredientTagTests(unittest.TestCase):
     def test_existing_vitamin_c_vitamin_e_tags_unaffected(self):
         self.assertEqual(app.normalize_ingredient_tag("ビタミンC"), "vitamin_c")
         self.assertEqual(app.normalize_ingredient_tag("ビタミンE"), "vitamin_e")
+
+    def test_epa_dha_vitamin_b_d_do_not_match_inside_other_words(self):
+        # "epa"/"dha"/"vitamin d"の単純な部分一致による誤判定(ヘパリノイド・
+        # アダトダ・vitamin derivative等)が起きないこと。
+        for text in ("heparinoid", "Heparin", "Adhatoda Vasica Leaf Extract", "vitamin derivative"):
+            with self.subTest(text=text):
+                self.assertNotIn(
+                    app.normalize_ingredient_tag(text), {"omega3", "vitamin_b", "vitamin_d"},
+                )
+
+    def test_epa_dha_vitamin_b_d_still_match_as_standalone_terms(self):
+        self.assertEqual(app.normalize_ingredient_tag("EPA・DHA"), "omega3")
+        self.assertEqual(app.normalize_ingredient_tag("DHA含有精製魚油"), "omega3")
+        self.assertEqual(app.normalize_ingredient_tag("ビタミンB12"), "vitamin_b")
+        self.assertEqual(app.normalize_ingredient_tag("vitamin_b"), "vitamin_b")
+        self.assertEqual(app.normalize_ingredient_tag("Vitamin D3"), "vitamin_d")
+        self.assertEqual(app.normalize_ingredient_tag("vitamin_d"), "vitamin_d")
 
 
 class CategoryAttributesSchemaFinalizationTests(unittest.TestCase):
@@ -251,13 +268,20 @@ class RelevanceAdapterTests(unittest.TestCase):
         product = {"active_ingredients": ["zinc"]}
         self.assertFalse(app.is_candidate_relevant_to_target("サプリメント", "vitamin_c", product))
 
-    def test_supplement_probiotics_target_accepts_lactic_acid_synonym(self):
+    def test_supplement_probiotics_target_accepts_raw_lactic_acid_bacteria_name(self):
         # 乳酸菌サプリメントの原料名が文字どおり"乳酸菌"と抽出された場合、
         # normalize_ingredient_tag()は(既存の順序依存の挙動により)
-        # lactic_acidへ正規化されるが、probioticsターゲットはこれも同義語
-        # として受理する。
+        # lactic_acidへ正規化されるが、probioticsターゲットは生の原料名で
+        # これを受理する。
         product = {"active_ingredients": ["乳酸菌"]}
         self.assertTrue(app.is_candidate_relevant_to_target("サプリメント", "probiotics", product))
+
+    def test_supplement_probiotics_target_rejects_lactate_salts(self):
+        # 乳酸カルシウム/乳酸Naもlactic_acidタグになるが、乳酸菌ではない。
+        for name in ("乳酸カルシウム", "乳酸Na"):
+            with self.subTest(name=name):
+                product = {"active_ingredients": [name]}
+                self.assertFalse(app.is_candidate_relevant_to_target("サプリメント", "probiotics", product))
 
     def test_supplement_probiotics_target_accepts_bifida_synonym(self):
         product = {"active_ingredients": ["ビフィズス菌"]}
@@ -394,6 +418,8 @@ class DiagnosisTimeProductMasterUsageTests(unittest.TestCase):
         with patch.object(app, "query_product_master_candidates", return_value=[master_row]), \
              patch.object(app, "infer_brand_from_image", return_value=""), \
              patch.object(app, "accumulate_verified_product", return_value=None), \
+             patch.object(app, "fetch_rakuten_item_by_item_code",
+                          return_value={"ok": False, "http_status": None, "rakuten_error": "test"}), \
              patch.object(app, "fetch_rakuten_candidates",
                            side_effect=AssertionError("product_master候補がある場合は楽天ライブ検索しないはず")):
             result = app.attach_affiliate_links_to_step(step, [], user_data={"sens": "normal"}, budget_value=20000)
@@ -438,6 +464,8 @@ class DiagnosisTimeProductMasterUsageTests(unittest.TestCase):
         with patch.object(app, "query_product_master_candidates", return_value=[master_row]), \
              patch.object(app, "infer_brand_from_image", return_value=""), \
              patch.object(app, "accumulate_verified_product", return_value=None), \
+             patch.object(app, "fetch_rakuten_item_by_item_code",
+                          return_value={"ok": False, "http_status": None, "rakuten_error": "test"}), \
              patch.object(app, "fetch_rakuten_candidates",
                            side_effect=AssertionError("product_master候補がある場合は楽天ライブ検索しないはず")):
             result = app.attach_affiliate_links_to_step(step, [], user_data={"sens": "normal"}, budget_value=20000)
@@ -460,6 +488,74 @@ class DiagnosisTimeProductMasterUsageTests(unittest.TestCase):
             result = app.attach_affiliate_links_to_step(step, [], user_data={"sens": "normal"}, budget_value=20000)
 
         mock_fetch.assert_called_once()
+        self.assertEqual(result["rakuten_link"], fake_item["itemUrl"])
+
+    def _supplement_master_row(self):
+        return {
+            "brand": f"ブランドF{TEST_NAME_SUFFIX}", "name": f"ビタミンCサプリ{TEST_NAME_SUFFIX}",
+            "category": "サプリメント", "active_ingredients": ["vitamin_c"],
+            "item_code": "rk-supp-002", "price_ref": 2000,
+            "last_known_rakuten_link": "https://item.rakuten.co.jp/shop/rk-supp-002/",
+            "last_known_image": "https://image.example.com/supp-old.jpg",
+            "rakuten_title": f"ブランドF{TEST_NAME_SUFFIX} ビタミンCサプリ 60粒",
+            "shop_name": "テストショップ",
+        }
+
+    def test_selected_product_master_candidate_is_refreshed_by_item_code(self):
+        # 化粧品経路(apply_db_product_to_step)と同じく、選定されたproduct_
+        # master候補はitem_codeでライブの価格・URL・画像へ更新される。
+        master_row = self._supplement_master_row()
+        live = {
+            "ok": True,
+            "item": {
+                "itemPrice": 2480, "itemUrl": "https://item.rakuten.co.jp/shop/rk-supp-002/?live",
+                "mediumImageUrls": [{"imageUrl": "https://image.example.com/supp-live.jpg"}],
+            },
+        }
+        step = self._supplement_step()
+        with patch.object(app, "query_product_master_candidates", return_value=[master_row]), \
+             patch.object(app, "infer_brand_from_image", return_value=""), \
+             patch.object(app, "accumulate_verified_product", return_value=None), \
+             patch.object(app, "fetch_rakuten_item_by_item_code", return_value=live) as mock_by_code, \
+             patch.object(app, "fetch_rakuten_candidates",
+                           side_effect=AssertionError("product_master候補がある場合は楽天ライブ検索しないはず")):
+            result = app.attach_affiliate_links_to_step(step, [], user_data={"sens": "normal"}, budget_value=20000)
+
+        mock_by_code.assert_called_once_with("rk-supp-002")
+        self.assertEqual(result["rakuten_link"], live["item"]["itemUrl"])
+        self.assertEqual(result["image"], "https://image.example.com/supp-live.jpg")
+
+    def test_selected_product_master_candidate_keeps_last_known_when_refresh_fails(self):
+        master_row = self._supplement_master_row()
+        step = self._supplement_step()
+        with patch.object(app, "query_product_master_candidates", return_value=[master_row]), \
+             patch.object(app, "infer_brand_from_image", return_value=""), \
+             patch.object(app, "accumulate_verified_product", return_value=None), \
+             patch.object(app, "fetch_rakuten_item_by_item_code",
+                          return_value={"ok": False, "http_status": 500, "rakuten_error": "test"}), \
+             patch.object(app, "fetch_rakuten_candidates",
+                           side_effect=AssertionError("product_master候補がある場合は楽天ライブ検索しないはず")):
+            result = app.attach_affiliate_links_to_step(step, [], user_data={"sens": "normal"}, budget_value=20000)
+
+        self.assertEqual(result["rakuten_link"], master_row["last_known_rakuten_link"])
+        self.assertEqual(result["image"], master_row["last_known_image"])
+
+    def test_live_rakuten_winner_is_not_refreshed_by_item_code(self):
+        step = self._beauty_device_step()
+        fake_item = {
+            "itemName": "テストブランド RF美顔器", "itemCaption": "", "itemPrice": 12000,
+            "itemCode": "rk-live-003", "itemUrl": "https://item.rakuten.co.jp/shop/rk-live-003/",
+            "shopName": "ライブショップ", "reviewCount": 10, "reviewAverage": 4.5,
+            "mediumImageUrls": [{"imageUrl": "https://image.example.com/live3.jpg"}],
+        }
+        with patch.object(app, "query_product_master_candidates", return_value=[]), \
+             patch.object(app, "infer_brand_from_image", return_value=""), \
+             patch.object(app, "accumulate_verified_product", return_value=None), \
+             patch.object(app, "fetch_rakuten_item_by_item_code",
+                          side_effect=AssertionError("ライブ楽天候補はitem_code再取得しないはず")), \
+             patch.object(app, "fetch_rakuten_candidates", return_value=[(100, fake_item)]):
+            result = app.attach_affiliate_links_to_step(step, [], user_data={"sens": "normal"}, budget_value=20000)
+
         self.assertEqual(result["rakuten_link"], fake_item["itemUrl"])
 
     def test_cosmetics_step_unaffected_by_product_master_adapter(self):
