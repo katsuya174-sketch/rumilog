@@ -263,7 +263,7 @@ class CoverageGapHappyPathTests(OrchestratorTestBase):
             {"type": "coverage_gap", "category": category, "target": "vitamin_c", "shortage_count": 1,
              "priority": "high", "reason": "test"},
         ]), patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini), \
-             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}), patch.object(pipeline, "resolve_item_code_for_product", return_value={"status": "confirmed", "initial_candidate_count": 1, "item": {"itemCode": "test:1", "itemName": "test", "shopName": "test"}}):
             result = orchestrator.run_batch(mode="execute", candidate_source=candidate_source, batch_id=batch_id)
 
         reflected = [a for a in result["actions"] if a["action"] == "reflected"]
@@ -459,7 +459,7 @@ class CategoryDelegationSupplementTests(OrchestratorTestBase):
         item = {"category": category, "target": "vitamin_c", "shortage_count": 1}
         budget = orchestrator.BatchBudget(batch_id, 5, 20, 0.50)
         with patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini), \
-             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}), patch.object(pipeline, "resolve_item_code_for_product", return_value={"status": "confirmed", "initial_candidate_count": 1, "item": {"itemCode": "test:1", "itemName": "test", "shopName": "test"}}):
             actions = orchestrator.process_coverage_gap_item(
                 item, "execute", batch_id, budget, candidate_source, 3, set(),
             )
@@ -561,7 +561,7 @@ class BatchBudgetStopTests(OrchestratorTestBase):
             ]
 
         with patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini), \
-             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}), patch.object(pipeline, "resolve_item_code_for_product", return_value={"status": "confirmed", "initial_candidate_count": 1, "item": {"itemCode": "test:1", "itemName": "test", "shopName": "test"}}):
             item = {"category": category, "target": "vitamin_c", "shortage_count": 2}
             budget = orchestrator.BatchBudget(batch_id, 1, 20, 0.50)  # 商品数上限=1
             actions = orchestrator.process_coverage_gap_item(
@@ -624,7 +624,7 @@ class StaleReverificationTests(OrchestratorTestBase):
         }
         with patch.object(app, "generate_product_master_work_queue", return_value=[item]), \
              patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini), \
-             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}), patch.object(pipeline, "resolve_item_code_for_product", return_value={"status": "confirmed", "initial_candidate_count": 1, "item": {"itemCode": "test:1", "itemName": "test", "shopName": "test"}}):
             result = orchestrator.run_batch(mode="execute", batch_id=batch_id)
 
         self.assertEqual(result["actions"][0]["action"], "reflected")
@@ -1070,7 +1070,7 @@ class CandidateDiscoveryStep40WiringTests(OrchestratorTestBase):
         }
         with patch.object(app, "generate_product_master_work_queue", return_value=[item]), \
              patch.object(pipeline, "call_gemini_for_collection", side_effect=mock_gemini), \
-             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}), patch.object(pipeline, "resolve_item_code_for_product", return_value={"status": "confirmed", "initial_candidate_count": 1, "item": {"itemCode": "test:1", "itemName": "test", "shopName": "test"}}):
             # candidate_sourceを明示指定しない -> Step41の既定tiered discoveryを使う
             result = orchestrator.run_batch(mode="execute", batch_id=batch_id)
 

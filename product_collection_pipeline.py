@@ -393,6 +393,9 @@ def _device_method_list():
 _CATEGORY_COLLECTION_CONFIGS = {
     "美容機器": {
         "role": "美容機器",
+        # Step45.9a: coverage/診断で販売情報(item_code+楽天リンク)が必須のため、
+        # reflect前に楽天の新品通常販売listingを確認する。
+        "requires_sale_listing_before_reflect": True,
         "search_concept": _device_search_concept,
         "discovery_checks": [
             "その方式(上記の条件)を採用していることが、メーカー/ブランド公式サイト・"
@@ -408,6 +411,7 @@ _CATEGORY_COLLECTION_CONFIGS = {
     },
     "サプリメント": {
         "role": "サプリメント",
+        "requires_sale_listing_before_reflect": True,
         "search_concept": _supplement_search_concept,
         "discovery_checks": [
             "その成分(上記の条件)を含むことが、メーカー/ブランド公式サイト・商品表示等の"
@@ -428,6 +432,13 @@ def category_collection_config(category):
     """categoryの収集config。化粧品等、専用configの無いカテゴリはNone
     (既存の文面・挙動を使う)。"""
     return _CATEGORY_COLLECTION_CONFIGS.get(category)
+
+
+def requires_sale_listing_before_reflect(category):
+    """reflect前に楽天の新品通常販売listingの確認が必要なカテゴリか
+    (configの無い化粧品はFalse=従来どおりreflect後にitem_code解決)。"""
+    config = category_collection_config(category)
+    return bool(config and config.get("requires_sale_listing_before_reflect"))
 
 
 def discovery_search_concept(category, target):
@@ -2038,7 +2049,7 @@ def resolve_item_code_for_product(brand, product_name, category, jan_code=None):
     }
 
 
-def verify_and_resolve_item_code(product_id, brand, product_name, category, jan_code=None):
+def verify_and_resolve_item_code(product_id, brand, product_name, category, jan_code=None, resolution=None):
     """resolve_item_code_for_product()で1件に確定した候補のみ、
     app.fetch_rakuten_item_by_item_code()で実在・価格・URLを再確認し、
     検証成功した場合だけproduct_masterのitem_code/価格/URL/画像を更新する
@@ -2046,8 +2057,13 @@ def verify_and_resolve_item_code(product_id, brand, product_name, category, jan_
     最終status: resolved(更新成功) / ambiguous / not_found / verification_failed。
     resolved以外はいずれも書き込まず、呼び出し元がneeds_review/未取得の
     ままproduct_masterを変更しないことを保証する。
+
+    resolution(Step45.9a): reflect前に同じresolve_item_code_for_product()で
+    確認済みの結果。渡された場合は楽天検索を再実行せず、その候補をitem_code
+    による存在確認(fetch_rakuten_item_by_item_code)だけで検証して保存する。
     """
-    resolution = resolve_item_code_for_product(brand, product_name, category, jan_code=jan_code)
+    if resolution is None:
+        resolution = resolve_item_code_for_product(brand, product_name, category, jan_code=jan_code)
     if resolution["status"] != "confirmed":
         return resolution
 

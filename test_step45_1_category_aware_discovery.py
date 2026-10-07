@@ -250,7 +250,7 @@ class CategoryStage1EndToEndTests(OrchestratorTestBase):
 
         budget = orchestrator.BatchBudget(batch_id, 5, 20, 0.50)
         with patch.object(pipeline, "call_gemini_for_collection", side_effect=spy), \
-             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}), patch.object(pipeline, "resolve_item_code_for_product", return_value={"status": "confirmed", "initial_candidate_count": 1, "item": {"itemCode": "test:1", "itemName": "test", "shopName": "test"}}):
             actions = orchestrator.process_coverage_gap_item(
                 {"category": category, "target": target, "shortage_count": 1}, "execute", batch_id, budget,
                 lambda c, t, n: [{"brand": brand, "name": name, "category": c}], 3, set(),

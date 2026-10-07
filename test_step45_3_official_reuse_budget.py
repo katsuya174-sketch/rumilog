@@ -88,7 +88,7 @@ class StagingReuseTests(OrchestratorTestBase):
              patch.object(pipeline, "collect_one_product", side_effect=FORBIDDEN), \
              patch.object(pipeline.citation_verification, "fetch_html",
                           return_value={"status": "unverifiable", "reason": "http_403", "final_url": ""}), \
-             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}), patch.object(pipeline, "resolve_item_code_for_product", return_value={"status": "confirmed", "initial_candidate_count": 1, "item": {"itemCode": "test:1", "itemName": "test", "shopName": "test"}}):
             actions = orchestrator.process_coverage_gap_item(
                 {"category": category, "target": target, "shortage_count": 1}, "execute", batch_id, budget,
                 lambda c, t, n: [cand], 3, set(),

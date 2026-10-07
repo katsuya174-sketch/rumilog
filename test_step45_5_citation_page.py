@@ -311,7 +311,7 @@ class StagingAndCollectionTests(OrchestratorTestBase):
         budget = orchestrator.BatchBudget(self._new_batch_id("s455-exec"), 5, 20, 0.50)
         with patch.object(cv, "fetch_html", side_effect=fetch), \
              patch.object(pipeline, "call_gemini_for_collection", side_effect=AssertionError("Gemini不要")), \
-             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}), patch.object(pipeline, "resolve_item_code_for_product", return_value={"status": "confirmed", "initial_candidate_count": 1, "item": {"itemCode": "test:1", "itemName": "test", "shopName": "test"}}):
             return orchestrator.process_coverage_gap_item(
                 {"category": "美容機器", "target": "RF", "shortage_count": 1}, "execute", budget.batch_id, budget,
                 lambda c, t, n: [{"brand": brand, "name": name, "category": c,
@@ -364,7 +364,7 @@ class StagingAndCollectionTests(OrchestratorTestBase):
         with patch.object(pipeline, "call_gemini_for_collection", side_effect=mock), \
              patch.object(cv, "fetch_html", return_value=_ok(
                  "www.ya-man.co.jp", _html(og=f"ヤーマンCol{TEST_NAME_SUFFIX}株式会社"))), \
-             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}), patch.object(pipeline, "resolve_item_code_for_product", return_value={"status": "confirmed", "initial_candidate_count": 1, "item": {"itemCode": "test:1", "itemName": "test", "shopName": "test"}}):
             actions = orchestrator.process_coverage_gap_item(
                 {"category": "美容機器", "target": "RF", "shortage_count": 1}, "execute", budget.batch_id, budget,
                 lambda c, t, n: [{"brand": brand, "name": name, "category": c}], 3, set(),

@@ -123,7 +123,7 @@ class EndToEndTests(OrchestratorTestBase):
         batch_id = self._new_batch_id("s452")
         budget = orchestrator.BatchBudget(batch_id, 5, 20, 0.50)
         with patch.object(pipeline, "call_gemini_for_collection", side_effect=mock), \
-             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}):
+             patch.object(pipeline, "verify_and_resolve_item_code", return_value={"status": "not_found"}), patch.object(pipeline, "resolve_item_code_for_product", return_value={"status": "confirmed", "initial_candidate_count": 1, "item": {"itemCode": "test:1", "itemName": "test", "shopName": "test"}}):
             return orchestrator.process_coverage_gap_item(
                 {"category": "美容機器", "target": TARGET, "shortage_count": 1}, "execute", batch_id, budget,
                 lambda c, t, n: [{"brand": brand, "name": name, "category": c}], 3, set(),

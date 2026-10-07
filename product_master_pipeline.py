@@ -23,8 +23,11 @@ work_type別(coverage_gap/stale_reverification/needs_review)に既存のPhase3
   policyが未定義のカテゴリは勝手な基準で収集しない(work queue自体に
   そのカテゴリのcoverage_gapが現れない)。
 """
+import hashlib
+import json
 import os
 import time
+from datetime import datetime, timedelta, timezone
 
 import psycopg2
 
@@ -222,6 +225,115 @@ def _recently_failed_identity_keys(hours=RECENTLY_FAILED_LOOKBACK_HOURS):
         conn.close()
 
 
+# ===== Step45.9a: 決定論的gate failureの記録と一定期間の再利用抑制 =====
+# 再評価しても同じ結果になる商品自体のgate failure(公式情報源未確認・
+# category validator失敗・楽天の新品通常販売listingなし)を、未reflectの
+# staging行のstage2_payload内の予約キーへ記録する(DB schema変更なし)。
+# 有効なmarkerがある間は、staging再利用と外部Discoveryの両方で同一identity
+# を除外する(理由をexcluded/actionsへ出力)。
+# markerが無効になる条件(決定論的):
+#   - evaluated_atからGATE_FAILURE_TTLが経過した
+#   - 記録時のデータ指紋(stage2_payload(予約キー除く)+stage1_citations)と
+#     現在の行のデータが異なる(Stage2再実行・page verification追加等で更新)
+#   - 同一identityに、markerより新しいstaging行(markerの無い新しい収集結果)がある
+# timeout・通信エラー等の一時的障害はmarkerを書かない。
+GATE_FAILURE_MARKER_KEY = "_pipeline_gate_failure"
+GATE_FAILURE_TTL = timedelta(hours=24)
+_DETERMINISTIC_EVALUATION_FAILURES = {
+    "official_source_not_confirmed_variant_uncertain": "official_source",
+    "category_validator_failed": "category_validator",
+    "no_extracted_fields": "category_validator",
+}
+_DETERMINISTIC_RAKUTEN_REASONS = {
+    "title_mismatch", "device_model_mismatch", "only_non_new_sale_listings", "only_set_items",
+}
+_TRANSIENT_PAGE_REASONS = {"timeout", "connection_error"}
+
+
+def _now():
+    return datetime.now(timezone.utc)
+
+
+def _staging_data_fingerprint(stage2_payload, stage1_citations):
+    payload = {k: v for k, v in (stage2_payload or {}).items() if k != GATE_FAILURE_MARKER_KEY}
+    blob = json.dumps({"payload": payload, "citations": stage1_citations or []},
+                      ensure_ascii=False, sort_keys=True, default=str)
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:16]
+
+
+def _active_gate_marker(stage2_payload, stage1_citations, now=None):
+    marker = (stage2_payload or {}).get(GATE_FAILURE_MARKER_KEY)
+    if not isinstance(marker, dict):
+        return None
+    try:
+        evaluated_at = datetime.fromisoformat(str(marker.get("evaluated_at")))
+    except ValueError:
+        return None
+    if evaluated_at.tzinfo is None:
+        evaluated_at = evaluated_at.replace(tzinfo=timezone.utc)
+    if (now or _now()) - evaluated_at >= GATE_FAILURE_TTL:
+        return None
+    if marker.get("data_fingerprint") != _staging_data_fingerprint(stage2_payload, stage1_citations):
+        return None
+    return marker
+
+
+def _official_failure_is_transient(stage1_citations):
+    """公式情報源未確認のうち、citation先ページの確認がtimeout/通信エラー/
+    5xxで行えなかったものは一時的障害の可能性があるためmarkerにしない。"""
+    for c in stage1_citations or []:
+        verification = c.get("page_verification") if isinstance(c, dict) else None
+        if isinstance(verification, dict) and verification.get("fetch_status") == "unverifiable":
+            reason = str(verification.get("reason") or "")
+            if reason in _TRANSIENT_PAGE_REASONS or reason.startswith("http_5"):
+                return True
+    return False
+
+
+def _record_gate_failure(staging_id, gate, reason):
+    """未reflectのstaging行へgate failure markerを書く(execute時のみ呼ばれる)。"""
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT stage2_payload, stage1_citations FROM product_collection_staging "
+                    "WHERE staging_id = %s AND reflected_at IS NULL", (staging_id,))
+        row = cur.fetchone()
+        if not row:
+            return None
+        payload = dict(row[0] or {})
+        marker = {"gate": gate, "reason": reason, "evaluated_at": _now().isoformat(),
+                  "data_fingerprint": _staging_data_fingerprint(payload, row[1])}
+        payload[GATE_FAILURE_MARKER_KEY] = marker
+        cur.execute("UPDATE product_collection_staging SET stage2_payload = %s WHERE staging_id = %s",
+                    (json.dumps(payload, ensure_ascii=False), staging_id))
+        conn.commit()
+        return marker
+    finally:
+        conn.close()
+
+
+def _gate_failed_identities(now=None):
+    """有効なgate failure markerを持つidentity → marker。同一identityの最新の
+    未reflect staging行だけを見る(より新しい収集結果があれば古いmarkerは無効)。"""
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT DISTINCT ON (identity_key) identity_key, stage2_payload, stage1_citations "
+            "FROM product_collection_staging WHERE reflected_at IS NULL AND identity_key IS NOT NULL "
+            "ORDER BY identity_key, staging_id DESC"
+        )
+        rows = cur.fetchall()
+    finally:
+        conn.close()
+    failed = {}
+    for identity_key, payload, citations in rows:
+        marker = _active_gate_marker(payload, citations, now=now)
+        if marker:
+            failed[identity_key] = marker
+    return failed
+
+
 def _staging_reuse_candidates(category, target, excluded_keys, limit, on_excluded=None):
     """探索順序①: 既存staging(product_collection_staging)の未反映候補を
     再利用する。過去に別の目的で収集済みの候補が今回のtargetにも合致する
@@ -408,7 +520,8 @@ def make_discovery_candidate_source(batch_id, budget, mode):
         # stagingにしか無い商品は再利用候補として探索する。
         master_keys = _product_master_identity_keys()
         failed_keys = _recently_failed_identity_keys()
-        excluded_keys = master_keys | failed_keys
+        gate_failures = _gate_failed_identities()
+        excluded_keys = master_keys | failed_keys | set(gate_failures)
 
         # Step44.5: dry-run計画用の記録。探索・除外の判定はexecuteと同一で、
         # ここでは結果を記録するだけ(dry-run専用の探索ロジックは持たない)。
@@ -416,7 +529,12 @@ def make_discovery_candidate_source(batch_id, budget, mode):
 
         def on_excluded(brief, key, reason):
             if reason is None:
-                if key in failed_keys:
+                if key in gate_failures:
+                    marker = gate_failures[key]
+                    reason = "gate_failure_recent"
+                    brief = dict(brief, gate=marker.get("gate"), gate_reason=marker.get("reason"),
+                                 evaluated_at=marker.get("evaluated_at"))
+                elif key in failed_keys:
                     reason = "recent_failure"
                 elif key in master_keys:
                     reason = "duplicate"
@@ -614,7 +732,7 @@ def _would_lose_confirmed_ingredient_tags(existing_product, staged_payload):
     return bool(lost), lost
 
 
-def _resolve_item_code_safely(product_id, brand, name, category):
+def _resolve_item_code_safely(product_id, brand, name, category, resolution=None):
     """既存のitem_code解決経路(verify_and_resolve_item_code)をそのまま
     呼ぶだけ。新しい照合ロジックは作らない。確定できない場合はitem_code
     はNULLのまま(無理な紐付けをしない、既存の安全設計をそのまま継承)。"""
@@ -627,7 +745,9 @@ def _resolve_item_code_safely(product_id, brand, name, category):
     finally:
         conn.close()
 
-    update_result = pipeline.verify_and_resolve_item_code(product_id, brand, name, category, jan_code=jan_code)
+    update_result = pipeline.verify_and_resolve_item_code(
+        product_id, brand, name, category, jan_code=jan_code, resolution=resolution,
+    )
     return {"status": update_result.get("status"), "item_code": update_result.get("item_code")}
 
 
@@ -709,21 +829,54 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
 
         if not evaluation["reflectable"]:
             consecutive_failures += 1
-            actions.append({
+            not_reflected = {
                 "action": "not_reflected", "brand": brand, "name": name,
                 "reason": evaluation["reason"],
                 "category_validator": evaluation["category_validator"],
                 "staging_id": staging_id,
                 **({"reused_staging": True} if reuse_staging_id else {}),
-            })
+            }
+            gate = _DETERMINISTIC_EVALUATION_FAILURES.get(evaluation["reason"])
+            row_citations = (_fetch_staging_row(staging_id) or {}).get("stage1_citations")
+            if gate and not (gate == "official_source" and _official_failure_is_transient(row_citations)):
+                not_reflected["gate_failure_marker"] = _record_gate_failure(staging_id, gate, evaluation["reason"])
+            actions.append(not_reflected)
             continue
+
+        # Step45.9a: 販売情報が必須のカテゴリ(美容機器/サプリ)は、reflect前に
+        # 楽天の新品通常販売listingを安全化済みresolverでread-only確認する
+        # (楽天検索は1商品1回。confirmedの候補をreflect後の保存に再利用)。
+        sale_resolution = None
+        if pipeline.requires_sale_listing_before_reflect(category):
+            staged_jan = str(((_fetch_staging_row(staging_id) or {}).get("stage2_payload") or {}).get("jan_code") or "")
+            sale_resolution = pipeline.resolve_item_code_for_product(
+                brand, name, category, jan_code=None if staged_jan.lower() in ("", "unknown") else staged_jan,
+            )
+            if sale_resolution.get("status") != "confirmed":
+                consecutive_failures += 1
+                rakuten_reason = sale_resolution.get("reason") or sale_resolution.get("status")
+                deterministic = (sale_resolution.get("initial_candidate_count", 0) > 0
+                                 and rakuten_reason in _DETERMINISTIC_RAKUTEN_REASONS)
+                not_reflected = {
+                    "action": "not_reflected", "brand": brand, "name": name,
+                    "reason": "rakuten_new_listing_not_found" if deterministic else "rakuten_check_unavailable",
+                    "rakuten_reason": rakuten_reason, "staging_id": staging_id,
+                    **({"reused_staging": True} if reuse_staging_id else {}),
+                }
+                if deterministic:
+                    not_reflected["gate_failure_marker"] = _record_gate_failure(
+                        staging_id, "rakuten_sale_listing", rakuten_reason)
+                actions.append(not_reflected)
+                continue
 
         reflect_result = pipeline.reflect_staging_to_product_master(staging_id, dry_run=False)
         if reflect_result.get("status") == "reflected":
             consecutive_failures = 0
             reflected_count += 1
             existing_keys.add(key)
-            item_code_result = _resolve_item_code_safely(reflect_result["product_id"], brand, name, category)
+            item_code_result = _resolve_item_code_safely(
+                reflect_result["product_id"], brand, name, category, resolution=sale_resolution,
+            )
             actions.append({
                 "action": "reflected", "brand": brand, "name": name,
                 "product_id": reflect_result["product_id"], "item_code_result": item_code_result,

@@ -37,6 +37,30 @@ def block_real_gemini_api_calls():
 
 
 @pytest.fixture(autouse=True)
+def block_real_rakuten_api_calls():
+    """Step45.9a: 自動テストから実楽天APIへ到達しないようにする安全装置。
+    (Step45.9a実装中、reflect前の楽天確認を追加した際にモック漏れのテストが
+    実楽天検索APIへ到達したことの再発防止策。)app.pyはrequests.get()で楽天へ
+    アクセスするため、requestsの全リクエストが通るSession.requestで楽天の
+    ドメイン宛てだけを例外にする。個別テストがapp.fetch_rakuten_candidates等や
+    requests.getをpatchした場合はそちらが優先される。"""
+    import requests
+
+    original = requests.sessions.Session.request
+
+    def guarded(self, method, url, *args, **kwargs):
+        if "rakuten" in str(url).lower():
+            raise RuntimeError(
+                "実楽天APIへの到達がブロックされました。テストでは app.fetch_rakuten_candidates / "
+                "pipeline.resolve_item_code_for_product 等を明示的にモックしてください(conftest.py参照)。"
+            )
+        return original(self, method, url, *args, **kwargs)
+
+    with patch.object(requests.sessions.Session, "request", guarded):
+        yield
+
+
+@pytest.fixture(autouse=True)
 def block_real_citation_page_fetch():
     """Step45.5: citation先ページ取得(citation_verification)が自動テストから
     実DNS・実HTTPへ到達しないようにする安全装置。個別テストがfetch_html/
