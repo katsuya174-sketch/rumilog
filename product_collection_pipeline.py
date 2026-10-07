@@ -2025,6 +2025,56 @@ def device_identity_matches(product_name, rakuten_title, brand=""):
     return False, "model_name_mismatch"
 
 
+# ===== Step45.17: 美容機器の型番ベース同一性(重複防止) =====
+# ブランド表記だけが異なる同一美容機器(例: 「Panasonic」と「パナソニック」の
+# 「ソニック RF リフト EH-SR75」)は既存identity_key(ブランド+商品名)では別扱い
+# になり、二重収集・二重reflectされる。ブランドの翻訳・別名対応表は使わず、
+# 商品名の型番(Step45.7の_model_numbers()と同じ正規化)で同一性を判定する。
+# 型番の完全一致だけでは同一とせず、device_identity_matches()(双方向)と、
+# 型番・ブランド・一般語を除いたシリーズ名の識別語に矛盾が無いことも必須。
+# 型番が無い商品名は判定しない(従来のidentity_keyへfallback)。
+
+
+def device_model_key(name):
+    """商品名の正規化型番集合(空なら型番なし)。"""
+    return frozenset(_model_numbers(name))
+
+
+def _device_series_segments(name, brand):
+    brand_segments = set(_script_segments(_model_text(brand))) if brand else set()
+    return {
+        seg for seg in _script_segments(_model_text(name))
+        if seg not in brand_segments and seg not in _DEVICE_TRAILING_GENERIC_SEGMENTS
+        and not _MODEL_NUMBER_RE.fullmatch(seg)
+    }
+
+
+def same_device_by_model(brand_a, name_a, brand_b, name_b):
+    """2つの美容機器の商品名が型番ベースで同一商品か。戻り値: (same, reason)。"""
+    models_a, models_b = device_model_key(name_a), device_model_key(name_b)
+    if not models_a or not models_b:
+        return False, "no_model_number"
+    if models_a != models_b:
+        return False, "model_number_differs"
+    if not (device_identity_matches(name_a, name_b, brand_a)[0] and device_identity_matches(name_b, name_a, brand_b)[0]):
+        return False, "model_identity_conflict"
+    series_a, series_b = _device_series_segments(name_a, brand_a), _device_series_segments(name_b, brand_b)
+    if series_a and series_b and not (series_a <= series_b or series_b <= series_a):
+        return False, "series_conflict"
+    return True, "same_model_number"
+
+
+def find_device_duplicate(category, brand, name, entries):
+    """category=美容機器のとき、entries([{"brand","name",...}])の中から型番ベースで
+    同一と判定されるものを返す(無ければNone)。他カテゴリは常にNone。"""
+    if category != "美容機器" or not device_model_key(name):
+        return None
+    for entry in entries or []:
+        if same_device_by_model(brand, name, entry.get("brand", ""), entry.get("name", ""))[0]:
+            return entry
+    return None
+
+
 def resolve_item_code_for_product(brand, product_name, category, jan_code=None):
     """brand+product_nameで楽天候補を検索し、確信を持って1件に絞れる場合のみ
     その候補を返す。

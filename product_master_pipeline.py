@@ -382,8 +382,42 @@ def _staging_reuse_state(brand, citations):
     return "transient" if classify_official_evidence(brand, citations)["status"] == "undetermined" else "normal"
 
 
+# ===== Step45.17: 美容機器の型番ベース重複防止 =====
+def _registered_device_entries():
+    """product_masterに登録済みの美容機器(型番ベース重複判定用)。"""
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT product_id, brand, name FROM product_master WHERE category = %s", ("美容機器",))
+        return [{"product_id": r[0], "brand": r[1] or "", "name": r[2] or ""} for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+class DeviceDuplicateGuard:
+    """Candidate Discoveryの各tierで共通に使う型番ベースの重複判定。
+    product_master登録済み(duplicate_model)と、この実行で既に選んだ候補
+    (already_selected_model)の両方と比較する。美容機器以外は何もしない。"""
+
+    def __init__(self, category, registered_entries=None):
+        self.category = category
+        self.registered = list(registered_entries or [])
+        self.selected = []
+
+    def reason(self, brand, name):
+        if pipeline.find_device_duplicate(self.category, brand, name, self.registered):
+            return "duplicate_model"
+        if pipeline.find_device_duplicate(self.category, brand, name, self.selected):
+            return "already_selected_model"
+        return None
+
+    def add(self, brand, name):
+        if self.category == "美容機器":
+            self.selected.append({"brand": brand, "name": name})
+
+
 def _staging_reuse_candidates(category, target, excluded_keys, limit, on_excluded=None,
-                              max_transient=MAX_TRANSIENT_STAGING_CANDIDATES_PER_RUN):
+                              max_transient=MAX_TRANSIENT_STAGING_CANDIDATES_PER_RUN, duplicate_guard=None):
     """探索順序①: 既存staging(product_collection_staging)の未反映候補を
     再利用する。過去に別の目的で収集済みの候補が今回のtargetにも合致する
     場合に、新しいGemini呼び出しを発生させずに再利用する。
@@ -444,6 +478,13 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
             if on_excluded:
                 on_excluded(brief, key, "no_discovery_evidence")
             continue
+        duplicate_reason = duplicate_guard.reason(brand, name) if duplicate_guard else None
+        if duplicate_reason:
+            if on_excluded:
+                on_excluded(brief, key, duplicate_reason)
+            if key:
+                excluded_keys.add(key)
+            continue
         reuse_state = _staging_reuse_state(brand, citations)
         if reuse_state == "transient" and transient_count >= max_transient:
             if on_excluded:
@@ -462,6 +503,8 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
         })
         if reuse_state == "transient":
             transient_count += 1
+        if duplicate_guard:
+            duplicate_guard.add(brand, name)
         if key:
             excluded_keys.add(key)
         if len(candidates) >= limit:
@@ -469,7 +512,7 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
     return candidates
 
 
-def _db_reuse_candidates(category, target, excluded_keys, limit, on_excluded=None):
+def _db_reuse_candidates(category, target, excluded_keys, limit, on_excluded=None, duplicate_guard=None):
     """探索順序②: 既存DB(load_products()/load_verified_products_cache())
     内で、まだproduct_masterへ反映されていない利用可能候補を探す。関連性
     判定はapp.is_candidate_relevant_to_target()(Step43の共通adapter。
@@ -497,6 +540,15 @@ def _db_reuse_candidates(category, target, excluded_keys, limit, on_excluded=Non
                 on_excluded({"brand": p.get("brand", ""), "name": p.get("name", ""),
                              "discovery_source": "db_reuse"}, key, None)
             continue
+        duplicate_reason = duplicate_guard.reason(p.get("brand", ""), p.get("name", "")) if duplicate_guard else None
+        if duplicate_reason:
+            if on_excluded:
+                on_excluded({"brand": p.get("brand", ""), "name": p.get("name", ""),
+                             "discovery_source": "db_reuse"}, key, duplicate_reason)
+            excluded_keys.add(key)
+            continue
+        if duplicate_guard:
+            duplicate_guard.add(p.get("brand", ""), p.get("name", ""))
         # Step44.6: 既存DBの商品情報(成分等)はproduct_masterへコピーしない。
         # identity(brand/name/category)だけを候補として返し、採用判定は
         # 他tierと同じStage1→Stage2→citation→validator→conflict→reflectで行う。
@@ -520,7 +572,7 @@ DISCOVERY_MAX_ATTEMPTS = 2
 
 
 def _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limit,
-                                 on_excluded=None, diagnostics=None, budget=None):
+                                 on_excluded=None, diagnostics=None, budget=None, duplicate_guard=None):
     """探索順序③: 既存staging/DBで候補が埋まらない場合のみ、Gemini
     Groundingによる新規探索(product_collection_pipeline.
     discover_candidates_via_gemini、Step41)を行う。ここで見つかった情報は
@@ -570,6 +622,17 @@ def _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limi
             if on_excluded:
                 on_excluded(brief, key, None)
             continue
+        # Step45.17: Discovery結果の商品名から型番が分かった時点で、Stage1/2の
+        # 課金前に既存商品・選択済み候補との型番ベース重複を除外する。
+        duplicate_reason = duplicate_guard.reason(brand, name) if duplicate_guard else None
+        if duplicate_reason:
+            if on_excluded:
+                on_excluded(brief, key, duplicate_reason)
+            if key:
+                excluded_keys.add(key)
+            continue
+        if duplicate_guard:
+            duplicate_guard.add(brand, name)
         candidates.append({
             "brand": brand, "name": name, "category": category,
             "discovery_source": "gemini_grounding",
@@ -626,13 +689,17 @@ def make_discovery_candidate_source(batch_id, budget, mode):
                     reason = "already_selected"
             report["excluded"].append(dict(brief, reason=reason))
 
+        duplicate_guard = DeviceDuplicateGuard(
+            category, _registered_device_entries() if category == "美容機器" else [])
         candidates = []
         candidates.extend(_staging_reuse_candidates(
             category, target, excluded_keys, limit - len(candidates), on_excluded=on_excluded,
+            duplicate_guard=duplicate_guard,
         ))
         if len(candidates) < limit:
             candidates.extend(_db_reuse_candidates(
                 category, target, excluded_keys, limit - len(candidates), on_excluded=on_excluded,
+                duplicate_guard=duplicate_guard,
             ))
         if len(candidates) < limit:
             # 外部探索(Gemini Grounding)はexecuteかつ予算内の場合のみ。dry-runでは
@@ -645,6 +712,7 @@ def make_discovery_candidate_source(batch_id, budget, mode):
                 candidates.extend(_gemini_discovery_candidates(
                     category, target, batch_id, excluded_keys, limit - len(candidates),
                     on_excluded=on_excluded, diagnostics=diagnostics, budget=budget,
+                    duplicate_guard=duplicate_guard,
                 ))
         candidate_source.last_report = report
 
@@ -886,6 +954,16 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
             actions.append(would)
             continue
 
+        # Step45.17: 型番が分かっている美容機器は、Stage1/2・reflect前に登録済み
+        # 商品との型番ベース重複を確認する(注入されたcandidate_source経由も含む)。
+        registered_duplicate = pipeline.find_device_duplicate(
+            category, brand, name, _registered_device_entries() if category == "美容機器" else [])
+        if registered_duplicate:
+            actions.append({"action": "skipped_duplicate_model", "brand": brand, "name": name, "category": category,
+                            "duplicate_of_product_id": registered_duplicate.get("product_id"),
+                            **({"staging_id": reuse_staging_id} if reuse_staging_id else {})})
+            continue
+
         budget.record_attempt()
         collect_result = {}
         if reuse_staging_id:
@@ -937,6 +1015,18 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
             elif gate:
                 not_reflected["gate_failure_marker"] = _record_gate_failure(staging_id, gate, evaluation["reason"])
             actions.append(not_reflected)
+            continue
+
+        # Step45.17: reflect直前の型番ベース重複ゲート(収集中に他経路で登録された
+        # 場合にも同一商品を別行としてreflectしない)。
+        registered_duplicate = pipeline.find_device_duplicate(
+            category, brand, name, _registered_device_entries() if category == "美容機器" else [])
+        if registered_duplicate:
+            consecutive_failures += 1
+            actions.append({"action": "not_reflected", "brand": brand, "name": name,
+                            "reason": "duplicate_model_in_product_master",
+                            "duplicate_of_product_id": registered_duplicate.get("product_id"),
+                            "staging_id": staging_id})
             continue
 
         # Step45.9a: 販売情報が必須のカテゴリ(美容機器/サプリ)は、reflect前に
