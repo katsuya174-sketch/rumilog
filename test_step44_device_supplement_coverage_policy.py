@@ -162,7 +162,9 @@ class CoverageReportTests(unittest.TestCase):
         rows = [
             _with_sales_info({"brand": f"S{i}", "name": f"{tag}サプリ{chr(65 + i)}", "category": "サプリメント",
                               "active_ingredients": [sample],
-                              "category_attributes": {"primary_ingredient_tags": [app.normalize_ingredient_tag(sample)]}})
+                              "category_attributes": {"primary_ingredient_tags": [app.normalize_ingredient_tag(sample)],
+                                                      "product_classification": "supplement",
+                                                      "supplement_eligibility_basis": "classification"}})
             for tag, sample in SUPPLEMENT_SAMPLE_INGREDIENT.items()
             for i in range(3)
         ]

@@ -362,7 +362,7 @@ class ProductMasterFixtureEffectiveCandidateTests(unittest.TestCase):
         app.upsert_product_master(dict({
             "brand": brand, "name": name, "category": category,
             "active_ingredients": ["アスコルビン酸"],
-            "category_attributes": {"primary_ingredient_tags": ["vitamin_c"]},
+            "category_attributes": {"primary_ingredient_tags": ["vitamin_c"], "product_classification": "supplement", "supplement_eligibility_basis": "classification"},
         }, **_sales_info("supp-a", f"{brand} {name} ビタミンC")), data_source="ai_precollected")
 
         count = app.calculate_effective_candidates(category, "vitamin_c", db_products=[], verified_products=[])
@@ -467,7 +467,7 @@ class DiagnosisTimeProductMasterUsageTests(unittest.TestCase):
         master_row = {
             "brand": f"ブランドE{TEST_NAME_SUFFIX}", "name": f"ビタミンCサプリ{TEST_NAME_SUFFIX}",
             "category": "サプリメント", "active_ingredients": ["vitamin_c"],
-            "category_attributes": {"primary_ingredient_tags": ["vitamin_c"]},
+            "category_attributes": {"primary_ingredient_tags": ["vitamin_c"], "product_classification": "supplement", "supplement_eligibility_basis": "classification"},
             "item_code": "rk-supp-001", "price_ref": 2000,
             "last_known_rakuten_link": "https://item.rakuten.co.jp/shop/rk-supp-001/",
             "last_known_image": "https://image.example.com/supp.jpg",
@@ -508,7 +508,7 @@ class DiagnosisTimeProductMasterUsageTests(unittest.TestCase):
         return {
             "brand": f"ブランドF{TEST_NAME_SUFFIX}", "name": f"ビタミンCサプリ{TEST_NAME_SUFFIX}",
             "category": "サプリメント", "active_ingredients": ["vitamin_c"],
-            "category_attributes": {"primary_ingredient_tags": ["vitamin_c"]},
+            "category_attributes": {"primary_ingredient_tags": ["vitamin_c"], "product_classification": "supplement", "supplement_eligibility_basis": "classification"},
             "item_code": "rk-supp-002", "price_ref": 2000,
             "last_known_rakuten_link": "https://item.rakuten.co.jp/shop/rk-supp-002/",
             "last_known_image": "https://image.example.com/supp-old.jpg",

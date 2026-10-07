@@ -106,7 +106,8 @@ class CoverageTests(unittest.TestCase):
     def test_coverage_counts_only_primary_products(self):
         def row(i, actives, primary):
             return {"brand": f"S{i}", "name": f"サプリ{i}", "category": "サプリメント", "active_ingredients": actives,
-                    "category_attributes": {} if primary is None else {"primary_ingredient_tags": primary},
+                    "category_attributes": dict({"supplement_eligibility_basis": "stage1_evidence"},
+                                                **({} if primary is None else {"primary_ingredient_tags": primary})),
                     "item_code": f"s:{i}", "rakuten_link": f"https://item.rakuten.co.jp/s/{i}/",
                     "rakuten_title": f"S{i} サプリ{i}", "price_ref": 2000}
         rows = [row(1, ["ビタミンC", "ビタミンB2"], ["vitamin_c"]),

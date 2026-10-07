@@ -6172,6 +6172,9 @@ def _product_master_candidates_for_live_style_ranking(category, target, product_
     for mp in master_rows:
         if not is_candidate_relevant_to_target(category, target, mp):
             continue
+        # Step48.3: サプリは保存済みの適格性根拠がある行だけを診断・coverageの候補にする。
+        if category == "サプリメント" and not is_supplement_product_master_eligible(mp):
+            continue
         if not str(mp.get("item_code") or "").strip():
             continue
         if not _product_master_row_rakuten_link(mp):
@@ -6391,6 +6394,28 @@ _REGULATED_PRODUCT_CLASS_PATTERNS = (
     ("drug", re.compile(r"(?:指定)?第\s*[123一二三]\s*類医薬品|要指導医薬品|医療用医薬品|一般用医薬品")),
     ("quasi_drug", re.compile(r"医薬部外品")),
 )
+
+
+# Step48.3: Product Masterのサプリ行が「サプリとして扱える」根拠
+# (reflect時/backfill時にsupplement_eligibility()で判定して保存した値)。
+SUPPLEMENT_ELIGIBILITY_BASES = frozenset({"classification", "stage1_evidence"})
+
+
+def is_supplement_product_master_eligible(product):
+    """保存済みproduct_classification+supplement_eligibility_basisだけで判定する
+    (診断時にstagingは参照しない)。drug/quasi_drug・basis無し・不正なbasisは不適格。"""
+    attrs = product.get("category_attributes") if isinstance(product, dict) else None
+    if not isinstance(attrs, dict):
+        return False
+    product_class = attrs.get("product_classification")
+    if product_class in SUPPLEMENT_EXCLUDED_PRODUCT_CLASSES:
+        return False
+    basis = attrs.get("supplement_eligibility_basis")
+    if basis == "classification":
+        return product_class in SUPPLEMENT_REFLECTABLE_PRODUCT_CLASSES
+    if basis == "stage1_evidence":
+        return product_class in SUPPLEMENT_REFLECTABLE_PRODUCT_CLASSES or product_class in (None, "unknown")
+    return False
 
 
 def regulated_product_class_in_text(text):
