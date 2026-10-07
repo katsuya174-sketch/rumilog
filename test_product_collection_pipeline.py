@@ -1051,7 +1051,8 @@ class ResolveItemCodeForProductTests(unittest.TestCase):
                 "TestBrand", "テスト美容液", "美容液", jan_code="4912345678901",
             )
         self.assertEqual(result["status"], "confirmed")
-        self.assertEqual(result["disambiguated_by"], "merchant_tiebreak")
+        # Step47.6: JAN一致候補の中でのmerchant tie-break
+        self.assertEqual(result["disambiguated_by"], "jan_code+merchant_tiebreak")
 
     def test_missing_jan_does_not_drop_candidates(self):
         # JAN記載なしの候補を、JAN不明であることを理由に落とさない。

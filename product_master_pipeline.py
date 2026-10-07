@@ -246,6 +246,9 @@ _DETERMINISTIC_EVALUATION_FAILURES = {
 }
 _DETERMINISTIC_RAKUTEN_REASONS = {
     "title_mismatch", "device_model_mismatch", "only_non_new_sale_listings", "only_set_items",
+    # Step47.6: 検索結果はあるが、検証済みJANと一致する候補が無い(同一商品・
+    # 同一variantの新品listingが確認できない)。
+    "jan_mismatch",
 }
 
 
@@ -1067,6 +1070,7 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
         # 楽天の新品通常販売listingを安全化済みresolverでread-only確認する
         # (楽天検索は1商品1回。confirmedの候補をreflect後の保存に再利用)。
         sale_resolution = None
+        rakuten_calls_before = app.rakuten_api_call_snapshot()
         if pipeline.requires_sale_listing_before_reflect(category):
             staged_jan = str(((_fetch_staging_row(staging_id) or {}).get("stage2_payload") or {}).get("jan_code") or "")
             sale_resolution = pipeline.resolve_item_code_for_product(
@@ -1081,6 +1085,7 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
                     "action": "not_reflected", "brand": brand, "name": name,
                     "reason": "rakuten_new_listing_not_found" if deterministic else "rakuten_check_unavailable",
                     "rakuten_reason": rakuten_reason, "staging_id": staging_id,
+                    "rakuten_api_calls": app.rakuten_api_call_delta(rakuten_calls_before),
                     **({"reused_staging": True} if reuse_staging_id else {}),
                 }
                 if deterministic:
@@ -1100,6 +1105,8 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
             actions.append({
                 "action": "reflected", "brand": brand, "name": name,
                 "product_id": reflect_result["product_id"], "item_code_result": item_code_result,
+                # Step47.6: この候補のreflect前確認〜itemCode照会で発生した実楽天API回数。
+                "rakuten_api_calls": app.rakuten_api_call_delta(rakuten_calls_before),
                 **({"reused_staging": True} if reuse_staging_id else {}),
             })
         else:

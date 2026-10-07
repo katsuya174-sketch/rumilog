@@ -2167,6 +2167,19 @@ def find_device_duplicate(category, brand, name, entries):
     return None
 
 
+def normalize_jan_code(jan_code):
+    """検証済みJAN(8桁/13桁の数字)を正規化して返す。それ以外(unknown・空・
+    桁数違い)は空文字。"""
+    value = re.sub(r"[\s\-]", "", unicodedata.normalize("NFKC", str(jan_code or "")))
+    return value if re.fullmatch(r"\d{8}|\d{13}", value) else ""
+
+
+def rakuten_item_mentions_jan(item, jan):
+    """楽天候補のタイトル/商品説明にJANが(前後を数字に挟まれずに)記載されているか。"""
+    text = unicodedata.normalize("NFKC", f"{item.get('itemName', '') or ''} {item.get('itemCaption', '') or ''}")
+    return bool(jan) and re.search(rf"(?<!\d){re.escape(jan)}(?!\d)", text) is not None
+
+
 def resolve_item_code_for_product(brand, product_name, category, jan_code=None):
     """brand+product_nameで楽天候補を検索し、確信を持って1件に絞れる場合のみ
     その候補を返す。
@@ -2249,25 +2262,26 @@ def resolve_item_code_for_product(brand, product_name, category, jan_code=None):
     if not single_pairs:
         return {"status": "not_found", "reason": "only_set_items", **diag}
 
-    if len(single_pairs) == 1:
+    # Step47.6: 検証済みJANがある商品は、JANが楽天候補(タイトル/商品説明)に
+    # 記載された候補だけを同一商品・同一variantとして扱う。JAN一致が1件も
+    # 無ければ(候補が1件だけでも)安全側でnot_found。JAN一致候補同士では
+    # 既存の新品・単品・merchant tie-breakを使う。JANが無い商品は従来どおり。
+    jan_str = normalize_jan_code(jan_code)
+    tiebreak_label = "merchant_tiebreak"
+    if jan_str:
+        single_pairs = [(score, item) for score, item in single_pairs if rakuten_item_mentions_jan(item, jan_str)]
+        diag["jan_match_count"] = len(single_pairs)
+        if not single_pairs:
+            return {"status": "not_found", "reason": "jan_mismatch", **diag}
+        if len(single_pairs) == 1:
+            return {"status": "confirmed", "item": single_pairs[0][1], "disambiguated_by": "jan_code", **diag}
+        tiebreak_label = "jan_code+merchant_tiebreak"
+    elif len(single_pairs) == 1:
         return {"status": "confirmed", "item": single_pairs[0][1], **diag}
 
-    single_items = [item for _, item in single_pairs]
-
-    jan_str = str(jan_code or "").strip()
-    jan_matches = []
-    if jan_str:
-        for item in single_items:
-            text = str(item.get("itemName", "") or "") + " " + str(item.get("itemCaption", "") or "")
-            if jan_str in text:
-                jan_matches.append(item)
-
-    if len(jan_matches) == 1:
-        return {"status": "confirmed", "item": jan_matches[0], "disambiguated_by": "jan_code", **diag}
-
-    # JANで一意に決まらない場合のみ、同一商品・複数店舗の代表1件を既存の
-    # タイブレーク基準で選ぶ(別商品の可能性がある候補はここには残っていない
-    # 前提=is_same_verified_rakuten_product+セット除外を通過済みのため)。
+    # 同一商品・複数店舗の代表1件を既存のタイブレーク基準で選ぶ(別商品の
+    # 可能性がある候補はここには残っていない前提=商品名一致・identity・販売
+    # 形態・セット除外(JANがあればJAN一致)を通過済みのため)。
     best_item = app._select_single_or_set_best(single_pairs)
     tiebreak_pool = [
         {
@@ -2280,7 +2294,7 @@ def resolve_item_code_for_product(brand, product_name, category, jan_code=None):
         for score, item in single_pairs
     ]
     return {
-        "status": "confirmed", "item": best_item, "disambiguated_by": "merchant_tiebreak",
+        "status": "confirmed", "item": best_item, "disambiguated_by": tiebreak_label,
         "candidate_count": len(single_pairs), "tiebreak_pool": tiebreak_pool,
         **diag,
     }
@@ -2301,6 +2315,11 @@ def verify_and_resolve_item_code(product_id, brand, product_name, category, jan_
     """
     if resolution is None:
         resolution = resolve_item_code_for_product(brand, product_name, category, jan_code=jan_code)
+    elif resolution.get("status") == "confirmed" and normalize_jan_code(jan_code) \
+            and not rakuten_item_mentions_jan(resolution.get("item") or {}, normalize_jan_code(jan_code)):
+        # Step47.6: 事前確認の結果を再利用する場合も、検証済みJANと一致しない
+        # 候補は保存しない(JANを渡さずに得た結果の取り込みを防ぐ)。
+        return {"status": "not_found", "reason": "jan_mismatch", "item_code": (resolution.get("item") or {}).get("itemCode")}
     if resolution["status"] != "confirmed":
         return resolution
 

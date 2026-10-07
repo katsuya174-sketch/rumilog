@@ -5344,6 +5344,30 @@ def extract_rakuten_image_url(item):
 
     return ""
 
+# Step47.6: 実楽天APIへのHTTPリクエストを共通の1か所で計測する。実際に
+# requests.get()を発行する直前にだけ数える(キャッシュヒットや、送信前に
+# 打ち切った場合は数えない)。Product Master pipeline・診断の両方の楽天呼び出し
+# (商品検索・itemCode照会・criteria検索)がここを通る。usageテーブル・DB schema
+# は変更しない(プロセス内の計数のみ)。
+RAKUTEN_API_CALLS = {}
+
+
+def _rakuten_api_get(kind, endpoint, **kwargs):
+    RAKUTEN_API_CALLS[kind] = RAKUTEN_API_CALLS.get(kind, 0) + 1
+    return requests.get(endpoint, **kwargs)
+
+
+def rakuten_api_call_snapshot():
+    """現在までの実楽天APIリクエスト数(kind別)のコピー。差分で区間の回数を測る。"""
+    return dict(RAKUTEN_API_CALLS)
+
+
+def rakuten_api_call_delta(before):
+    after = rakuten_api_call_snapshot()
+    delta = {k: after.get(k, 0) - before.get(k, 0) for k in set(after) | set(before)}
+    return {k: v for k, v in delta.items() if v}
+
+
 def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_focus="", purpose=""):
     """
     楽天API検索→実在検証(score_rakuten_item)までを行う共通ヘルパー。
@@ -5478,7 +5502,7 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
             if RAKUTEN_AFFILIATE_ID:
                 params["affiliateId"] = RAKUTEN_AFFILIATE_ID
 
-            res = requests.get(
+            res = _rakuten_api_get("item_search",
                 endpoint,
                 params=params,
                 headers=headers,
@@ -5512,7 +5536,7 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
 
                     try:
                         wait_for_rakuten_rate_limit()
-                        res = requests.get(
+                        res = _rakuten_api_get("item_search",
                             endpoint, params=params, headers=headers, timeout=(2, 4)
                         )
                         print(f"[RAKUTEN RETRY STATUS] {res.status_code}", flush=True)
@@ -5555,7 +5579,7 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
                 print(f"[RAKUTEN] 0 items with genreId={params['genreId']}, retrying without", flush=True)
                 _params_ng = {k: v for k, v in params.items() if k != "genreId"}
                 wait_for_rakuten_rate_limit()
-                _res2 = requests.get(endpoint, params=_params_ng, headers=headers, timeout=(2, 4))
+                _res2 = _rakuten_api_get("item_search", endpoint, params=_params_ng, headers=headers, timeout=(2, 4))
                 if _res2.status_code == 200:
                     _pl2 = _res2.json()
                     items = _pl2.get("items") or _pl2.get("Items") or []
@@ -5812,7 +5836,7 @@ def fetch_rakuten_item_by_item_code(item_code):
 
     try:
         wait_for_rakuten_rate_limit()
-        res = requests.get(endpoint, params=params, headers=headers, timeout=(2, 4))
+        res = _rakuten_api_get("item_code_lookup", endpoint, params=params, headers=headers, timeout=(2, 4))
     except Exception as e:
         print(f"[ITEM CODE VERIFY] request exception for item_code={item_code}: {repr(e)}", flush=True)
         return {"http_status": 0, "ok": False, "rakuten_error": repr(e), "item": None}
@@ -7108,7 +7132,7 @@ def _rakuten_criteria_search_single(keyword, category):
             params["affiliateId"] = RAKUTEN_AFFILIATE_ID
 
         _t_http = time.time()
-        res = requests.get(endpoint, params=params, headers=headers, timeout=(2, 4))
+        res = _rakuten_api_get("criteria_search", endpoint, params=params, headers=headers, timeout=(2, 4))
         _http_elapsed = time.time() - _t_http
         print(
             f"[RAKUTEN TIMING] keyword={keyword!r} wait={_wait_elapsed:.2f}s http={_http_elapsed:.2f}s "
@@ -7133,7 +7157,7 @@ def _rakuten_criteria_search_single(keyword, category):
             time.sleep(retry_seconds)
             try:
                 wait_for_rakuten_rate_limit()
-                res = requests.get(endpoint, params=params, headers=headers, timeout=(2, 4))
+                res = _rakuten_api_get("criteria_search", endpoint, params=params, headers=headers, timeout=(2, 4))
                 print(f"[RAKUTEN CRITERIA RETRY STATUS] {res.status_code}", flush=True)
             except Exception as _re:
                 # 一時的なAPIエラー(429/例外)は「該当商品なし」ではないため、
@@ -7163,7 +7187,7 @@ def _rakuten_criteria_search_single(keyword, category):
             params_no_genre = {k: v for k, v in params.items() if k != "genreId"}
             wait_for_rakuten_rate_limit()
             _t_retry = time.time()
-            res2 = requests.get(endpoint, params=params_no_genre, headers=headers, timeout=(2, 4))
+            res2 = _rakuten_api_get("criteria_search", endpoint, params=params_no_genre, headers=headers, timeout=(2, 4))
             print(
                 f"[RAKUTEN TIMING] genreId-retry keyword={keyword!r} http={time.time()-_t_retry:.2f}s status={res2.status_code}",
                 flush=True
