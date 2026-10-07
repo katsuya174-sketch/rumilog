@@ -553,8 +553,7 @@ class GetCoverageReportTests(unittest.TestCase):
     ことを確認する(判定ロジックは再実装しない)。"""
 
     def test_unregistered_policy_returns_empty_list(self):
-        self.assertEqual(app.get_coverage_report("beauty_device"), [])
-        self.assertEqual(app.get_coverage_report("supplement"), [])
+        # beauty_device/supplementはStep44で登録済み。未登録policyのみ空。
         self.assertEqual(app.get_coverage_report("not_a_real_policy"), [])
 
     def test_cosmetics_policy_has_13_areas(self):
@@ -746,11 +745,11 @@ class GenerateProductMasterWorkQueueTests(unittest.TestCase):
         self.assertEqual(len(queue), 1)
 
     def test_unset_policy_category_produces_no_coverage_gap_items(self):
-        # beauty_device/supplementはpolicy未設定のためget_coverage_report()
-        # が[]を返す -> coverage_gap itemは一切生成されない
+        # 未登録policyはget_coverage_report()が[]を返す
+        # -> coverage_gap itemは一切生成されない
         with patch.object(app, "get_stale_product_master_candidates", return_value=[]), \
              patch.object(app, "get_needs_review_staging_items", return_value=[]):
-            queue = app.generate_product_master_work_queue(coverage_policy_name="beauty_device")
+            queue = app.generate_product_master_work_queue(coverage_policy_name="not_a_real_policy")
         self.assertEqual([i for i in queue if i["type"] == "coverage_gap"], [])
 
 

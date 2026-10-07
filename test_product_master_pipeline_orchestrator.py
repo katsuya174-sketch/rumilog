@@ -475,11 +475,9 @@ class CategoryDelegationSupplementTests(OrchestratorTestBase):
         self.assertNotIn("precautions", category_attributes)
 
     def test_unset_policy_category_never_enters_queue(self):
-        # beauty_device/supplementはCOVERAGE_POLICIESに未登録のため、
-        # 実際のget_coverage_report()経由ではcoverage_gap itemが
-        # 一切生成されない(架空の基準で収集しない)。
-        self.assertEqual(app.get_coverage_report("beauty_device"), [])
-        self.assertEqual(app.get_coverage_report("supplement"), [])
+        # COVERAGE_POLICIESに未登録のpolicyは、実際のget_coverage_report()
+        # 経由ではcoverage_gap itemが一切生成されない(架空の基準で収集しない)。
+        self.assertEqual(app.get_coverage_report("not_a_real_policy"), [])
 
 
 class ConsecutiveFailureStopTests(OrchestratorTestBase):
@@ -956,8 +954,9 @@ class CandidateDiscoveryCapAndEvidenceTests(OrchestratorTestBase):
 
 
 class CandidateDiscoveryPolicyGuardTests(OrchestratorTestBase):
-    """Step41: beauty_device/supplement等、coverage policyが未定義の
-    カテゴリでは勝手な基準で探索を開始しないことを確認する。"""
+    """Step41: coverage policyが未定義のカテゴリでは勝手な基準で探索を
+    開始しないことを確認する(美容機器/サプリメントはStep44で登録済みの
+    ため、未登録カテゴリで確認する)。"""
 
     def _assert_never_explores(self, category):
         batch_id = self._new_batch_id("nopolicy")
@@ -972,17 +971,19 @@ class CandidateDiscoveryPolicyGuardTests(OrchestratorTestBase):
             result = candidate_source(category, "anything", 3)
         self.assertEqual(result, [])
 
-    def test_beauty_device_without_policy_never_explores(self):
-        self.assertFalse(orchestrator._category_has_registered_policy("美容機器"))
-        self._assert_never_explores("美容機器")
+    def test_unknown_category_without_policy_never_explores(self):
+        self.assertFalse(orchestrator._category_has_registered_policy("ヘアオイル"))
+        self._assert_never_explores("ヘアオイル")
 
-    def test_supplement_without_policy_never_explores(self):
-        self._assert_never_explores("サプリメント")
+    def test_unknown_cosmetics_like_category_without_policy_never_explores(self):
+        # cosmetics policyに無いカテゴリ(乳液)も同様に探索しない。
+        self._assert_never_explores("乳液")
 
     def test_category_policy_registration_lookup(self):
         self.assertTrue(orchestrator._category_has_registered_policy("美容液"))
-        self.assertFalse(orchestrator._category_has_registered_policy("美容機器"))
-        self.assertFalse(orchestrator._category_has_registered_policy("サプリメント"))
+        self.assertTrue(orchestrator._category_has_registered_policy("美容機器"))
+        self.assertTrue(orchestrator._category_has_registered_policy("サプリメント"))
+        self.assertFalse(orchestrator._category_has_registered_policy("ヘアオイル"))
 
 
 class CandidateDiscoveryBudgetAndModeGateTests(OrchestratorTestBase):

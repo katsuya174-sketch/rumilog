@@ -4645,9 +4645,12 @@ COSMETICS_COVERAGE_POLICY = [
     {"category": "クレンジング", "target": "centella_extract"},
 ]
 
-# beauty_device/supplementはまだ架空のcoverage基準を作らない(合意事項)。
 # policy名がここに存在しない場合、get_coverage_report()は空リストを返し、
 # coverage gap判定自体をスキップする。
+# beauty_device/supplement(Step44)は、推薦定義の_DEVICE_DEFAULTS/
+# _SUPPLEMENT_DEFAULTSをsource of truthとして生成するため、それらの定義
+# 直後(enrich_supplements()の手前)で登録する(方式・タグを手書きで二重管理
+# しない)。
 COVERAGE_POLICIES = {
     "cosmetics": COSMETICS_COVERAGE_POLICY,
 }
@@ -17527,6 +17530,34 @@ _SUPPLEMENT_DEFAULTS = {
         "priority": 2,
     },
 }
+
+
+# ===== Step44: 美容機器・サプリメントのCoverage Policy =====
+# 推薦定義(_DEVICE_DEFAULTSのdevice_type/_SUPPLEMENT_DEFAULTSの
+# ingredient_focus)から生成し、推薦できる方式・タグとcoverage管理対象が
+# ずれない構造にする。targetは診断時のProduct Master relevance判定
+# (is_candidate_relevant_to_target)が実際に照合する値と同じ。
+def build_beauty_device_coverage_policy():
+    return [
+        {"category": "美容機器", "target": device_type,
+         "target_count": PRODUCT_MASTER_SUFFICIENT_CANDIDATE_COUNT}
+        for device_type in _DEVICE_DEFAULTS
+    ]
+
+
+def build_supplement_coverage_policy():
+    tags = []
+    for defaults in _SUPPLEMENT_DEFAULTS.values():
+        tags.extend(defaults.get("ingredient_focus") or [])
+    return [
+        {"category": "サプリメント", "target": tag,
+         "target_count": PRODUCT_MASTER_SUFFICIENT_CANDIDATE_COUNT}
+        for tag in dict.fromkeys(tags)
+    ]
+
+
+COVERAGE_POLICIES["beauty_device"] = build_beauty_device_coverage_policy()
+COVERAGE_POLICIES["supplement"] = build_supplement_coverage_policy()
 
 
 def enrich_supplements(data, user_data):
