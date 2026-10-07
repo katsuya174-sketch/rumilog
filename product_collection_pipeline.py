@@ -25,7 +25,7 @@ import json
 import re
 import time
 import unicodedata
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.parse import urljoin, urlsplit
 
 import psycopg2
@@ -845,12 +845,17 @@ def _page_identity_confirms_brand(brand, citation):
     return any(isinstance(f, str) and _free_text_confirms_brand(brand, f) for f in fields)
 
 
+def _utcnow():
+    return datetime.now(timezone.utc)
+
+
 def _verify_citation_page(brand, citation):
     fetched = citation_verification.fetch_html(citation.get("uri", ""))
     final_url = fetched.get("final_url") or ""
     record = {
         "fetch_status": fetched["status"],
         "final_domain": fetched.get("final_domain") or (urlsplit(final_url).hostname or None),
+        "checked_at": _utcnow().isoformat(),
     }
     if fetched["status"] != citation_verification.OK:
         record.update({"status": fetched["status"], "reason": fetched.get("reason")})
@@ -869,6 +874,78 @@ def _verify_citation_page(brand, citation):
         record.update({"status": "confirmed" if confirmed else "not_confirmed",
                        "reason": None if confirmed else "brand_not_in_site_identity"})
     return record
+
+
+# ===== Step45.13: transient citationの再確認 =====
+# page確認がtimeout/通信エラー/5xxで評価できなかったcitation(transient)だけを、
+# 前回の試行から PAGE_RETRY_INTERVAL 以上経過していれば、最大
+# PAGE_RETRY_MAX_ATTEMPTS 回まで再確認する。正常に評価済みのcitationは
+# 再取得しない。retry状態はpage_verification内に保存する(schema変更なし):
+#   checked_at(初回確認)、retry_count、last_attempt_at、transient_exhausted
+# 最大回数後もtransientならtransient_exhausted=True(保留)。これは非公式の
+# 判定ではなく、gate failure markerとも別(スケジューリング状態)。
+PAGE_RETRY_INTERVAL = timedelta(hours=24)
+PAGE_RETRY_MAX_ATTEMPTS = 2
+TRANSIENT_PAGE_REASONS = {"timeout", "connection_error"}
+
+
+def is_transient_page_verification(verification):
+    if not isinstance(verification, dict) or verification.get("fetch_status") != citation_verification.UNVERIFIABLE:
+        return False
+    reason = str(verification.get("reason") or "")
+    return reason in TRANSIENT_PAGE_REASONS or reason.startswith("http_5")
+
+
+def _parse_time(value):
+    try:
+        parsed = datetime.fromisoformat(str(value))
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def retry_transient_page_verifications(brand, citations, now=None):
+    """transient citationのうち再確認期限が来たものだけを再取得する。
+    戻り値: (citations, changed)。公式確認できた時点で残りは再確認しない。
+    時刻情報の無い既存のtransient記録は、取得せずに現在時刻を最終試行として
+    記録するだけにする(前回確認から24時間以上の条件を守るため)。"""
+    now = now or _utcnow()
+    if not brand or not citations:
+        return citations, False
+    out = [dict(c) if isinstance(c, dict) else c for c in citations]
+    changed = False
+    for citation in out:
+        verification = citation.get("page_verification") if isinstance(citation, dict) else None
+        if not is_transient_page_verification(verification):
+            continue
+        retry_count = int(verification.get("retry_count") or 0)
+        if retry_count >= PAGE_RETRY_MAX_ATTEMPTS:
+            if not verification.get("transient_exhausted"):
+                citation["page_verification"] = dict(verification, transient_exhausted=True)
+                changed = True
+            continue
+        last = _parse_time(verification.get("last_attempt_at") or verification.get("checked_at"))
+        if last is None:
+            citation["page_verification"] = dict(verification, last_attempt_at=now.isoformat())
+            changed = True
+            continue
+        if now - last < PAGE_RETRY_INTERVAL:
+            continue
+        record = _verify_citation_page(brand, citation)
+        record.update({
+            "first_checked_at": verification.get("first_checked_at") or verification.get("checked_at"),
+            "retry_count": retry_count + 1,
+            "last_attempt_at": now.isoformat(),
+        })
+        if is_transient_page_verification(record) and record["retry_count"] >= PAGE_RETRY_MAX_ATTEMPTS:
+            record["transient_exhausted"] = True
+        citation["page_verification"] = record
+        changed = True
+        print(f"[CITATION PAGE RETRY] brand={brand} domain={citation.get('title')} "
+              f"retry={record['retry_count']} status={record.get('status')} reason={record.get('reason')}", flush=True)
+        if record.get("status") == "confirmed":
+            break
+    return out, changed
 
 
 def has_page_verification(citations):

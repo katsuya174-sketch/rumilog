@@ -247,7 +247,6 @@ _DETERMINISTIC_EVALUATION_FAILURES = {
 _DETERMINISTIC_RAKUTEN_REASONS = {
     "title_mismatch", "device_model_mismatch", "only_non_new_sale_listings", "only_set_items",
 }
-_TRANSIENT_PAGE_REASONS = {"timeout", "connection_error"}
 
 
 def _now():
@@ -292,7 +291,7 @@ def classify_official_evidence(brand, stage1_citations):
       - confirmedなし・transientなし → "failed"(確定failure。markerを書く)
       - confirmedなし・transientあり → "undetermined"(未確定。markerなし)
     ドメインの公式らしさ・サイト種別等の推測はしない。"""
-    result = {"confirmed": [], "not_confirmed": [], "transient_unverified": []}
+    result = {"confirmed": [], "not_confirmed": [], "transient_unverified": [], "transient_exhausted": []}
     for citation in stage1_citations or []:
         if not isinstance(citation, dict):
             continue
@@ -302,10 +301,12 @@ def classify_official_evidence(brand, stage1_citations):
             result["confirmed"].append(title)
             continue
         verification = citation.get("page_verification")
-        reason = str((verification or {}).get("reason") or "") if isinstance(verification, dict) else ""
-        if (isinstance(verification, dict) and verification.get("fetch_status") == "unverifiable"
-                and (reason in _TRANSIENT_PAGE_REASONS or reason.startswith("http_5"))):
+        if pipeline.is_transient_page_verification(verification):
+            # Step45.13: 再確認の上限に達したもの(transient_exhausted)も未評価の
+            # まま保留(非公式とはしない)。
             result["transient_unverified"].append(title)
+            if verification.get("transient_exhausted"):
+                result["transient_exhausted"].append(title)
         else:
             result["not_confirmed"].append(title)
     if result["confirmed"]:
@@ -361,7 +362,22 @@ def _gate_failed_identities(now=None):
     return failed
 
 
-def _staging_reuse_candidates(category, target, excluded_keys, limit, on_excluded=None):
+# Step45.13: 公式判定が未確定(transient/保留)のstaging再利用候補は1実行あたり
+# この件数まで。残りの枠は通常のstaging・DB reuse・外部Discoveryへ回す
+# (transient候補は削除・failure扱い・永久除外せず、その実行だけ見送る)。
+MAX_TRANSIENT_STAGING_CANDIDATES_PER_RUN = 1
+
+
+def _staging_reuse_state(brand, citations):
+    """staging再利用候補の公式判定状態。page確認が一度も行われていない
+    (pending)ものは通常候補として最初の評価機会を与える。"""
+    if not pipeline.has_page_verification(citations):
+        return "normal"
+    return "transient" if classify_official_evidence(brand, citations)["status"] == "undetermined" else "normal"
+
+
+def _staging_reuse_candidates(category, target, excluded_keys, limit, on_excluded=None,
+                              max_transient=MAX_TRANSIENT_STAGING_CANDIDATES_PER_RUN):
     """探索順序①: 既存staging(product_collection_staging)の未反映候補を
     再利用する。過去に別の目的で収集済みの候補が今回のtargetにも合致する
     場合に、新しいGemini呼び出しを発生させずに再利用する。
@@ -385,6 +401,7 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
         conn.close()
 
     candidates = []
+    transient_count = 0
     for staging_id, brand, name, payload, citations in rows:
         payload = payload or {}
         ingredient_names = [
@@ -421,14 +438,24 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
             if on_excluded:
                 on_excluded(brief, key, "no_discovery_evidence")
             continue
+        reuse_state = _staging_reuse_state(brand, citations)
+        if reuse_state == "transient" and transient_count >= max_transient:
+            if on_excluded:
+                on_excluded(brief, key, "transient_slot_deferred")
+            if key:
+                excluded_keys.add(key)  # 同一identityを他tierで再収集しない
+            continue
         candidates.append({
             "brand": brand, "name": name, "category": category,
             "discovery_source": "staging_reuse",
             # Step45.3: 保存済みStage1/2結果をそのまま再評価するための参照。
             "staging_id": staging_id,
+            "reuse_state": reuse_state,
             "discovery_evidence": evidence,
             "target_evidence": f"過去のstaging収集(stage2)でtarget={target}との関連性が確認済み",
         })
+        if reuse_state == "transient":
+            transient_count += 1
         if key:
             excluded_keys.add(key)
         if len(candidates) >= limit:
@@ -699,11 +726,16 @@ def _ensure_staging_page_verification(staging_id, brand):
     検証済みなら保存値をそのまま使い、HTTPは再実行しない。"""
     row = _fetch_staging_row(staging_id)
     citations = row.get("stage1_citations") if row else None
-    if (not row or _staging_reuse_data_problem(row) or pipeline.has_page_verification(citations)
-            or pipeline.is_official_source_confirmed(brand, citations)):
+    if not row or _staging_reuse_data_problem(row) or pipeline.is_official_source_confirmed(brand, citations):
         return row
-    verified = pipeline.attach_citation_page_verification(brand, citations)
-    if verified is not citations:
+    if pipeline.has_page_verification(citations):
+        # Step45.13: 評価済みのcitationは再取得せず、transientだけを期限・回数の
+        # 範囲内で再確認する。
+        verified, changed = pipeline.retry_transient_page_verifications(brand, citations)
+    else:
+        verified = pipeline.attach_citation_page_verification(brand, citations)
+        changed = verified is not citations
+    if changed:
         pipeline.update_staging_citations(staging_id, verified)
         row = dict(row, stage1_citations=verified)
     return row
