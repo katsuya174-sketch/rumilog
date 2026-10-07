@@ -218,7 +218,10 @@ class WorkQueueAndDryRunTests(unittest.TestCase):
             self.assertEqual(result["work_items"], len(app.COVERAGE_POLICIES[name]))
             self.assertNotIn("coverage_after", result)
             for action in result["actions"]:
-                self.assertIn(action["action"], {"would_collect", "skipped_duplicate"})
+                self.assertIn(action["action"], {
+                    "would_collect", "skipped_duplicate",
+                    "external_discovery_required", "excluded_candidates",
+                })
         self.assertEqual(self._table_counts(), before)
 
     def test_unknown_category_still_not_explored(self):

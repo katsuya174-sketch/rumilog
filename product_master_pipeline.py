@@ -156,10 +156,12 @@ def _recently_failed_identity_keys(hours=RECENTLY_FAILED_LOOKBACK_HOURS):
         conn.close()
 
 
-def _staging_reuse_candidates(category, target, excluded_keys, limit):
+def _staging_reuse_candidates(category, target, excluded_keys, limit, on_excluded=None):
     """探索順序①: 既存staging(product_collection_staging)の未反映候補を
     再利用する。過去に別の目的で収集済みの候補が今回のtargetにも合致する
-    場合に、新しいGemini呼び出しを発生させずに再利用する。"""
+    場合に、新しいGemini呼び出しを発生させずに再利用する。
+    on_excluded(Step44.5): 関連性はあるが除外した候補を(brief, key, reason)
+    で通知する任意のcallback(dry-run計画の除外理由表示用。判定自体は変えない)。"""
     if limit <= 0:
         return []
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
@@ -204,10 +206,15 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit):
         if not app.is_candidate_relevant_to_target(category, target, pseudo_product):
             continue
         key = app.make_verified_product_key({"brand": brand, "name": name, "category": category})
+        brief = {"brand": brand, "name": name, "discovery_source": "staging_reuse"}
         if key and key in excluded_keys:
+            if on_excluded:
+                on_excluded(brief, key, None)
             continue
         evidence = [c.get("uri") for c in (citations or []) if isinstance(c, dict) and c.get("uri")]
         if not evidence:
+            if on_excluded:
+                on_excluded(brief, key, "no_discovery_evidence")
             continue
         candidates.append({
             "brand": brand, "name": name, "category": category,
@@ -222,12 +229,13 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit):
     return candidates
 
 
-def _db_reuse_candidates(category, target, excluded_keys, limit):
+def _db_reuse_candidates(category, target, excluded_keys, limit, on_excluded=None):
     """探索順序②: 既存DB(load_products()/load_verified_products_cache())
     内で、まだproduct_masterへ反映されていない利用可能候補を探す。関連性
     判定はapp.is_candidate_relevant_to_target()(Step43の共通adapter。
     calculate_effective_candidates()と同じものを使う)へ委譲し、ここで
-    独自の判定ロジックを持たない。"""
+    独自の判定ロジックを持たない。
+    on_excluded: _staging_reuse_candidates()と同じ(関連性ありの除外候補のみ通知)。"""
     if limit <= 0:
         return []
     category_norm = app.normalize_candidate_category(category, fallback=category)
@@ -240,9 +248,14 @@ def _db_reuse_candidates(category, target, excluded_keys, limit):
         if app.normalize_candidate_category(p.get("category", ""), fallback=p.get("category", "")) != category_norm:
             continue
         key = app.make_verified_product_key(p)
-        if not key or key in excluded_keys:
+        if not key:
             continue
         if not app.is_candidate_relevant_to_target(category, target, p):
+            continue
+        if key in excluded_keys:
+            if on_excluded:
+                on_excluded({"brand": p.get("brand", ""), "name": p.get("name", ""),
+                             "discovery_source": "db_reuse"}, key, None)
             continue
         candidates.append({
             "brand": p.get("brand", ""), "name": p.get("name", ""), "category": category,
@@ -300,28 +313,50 @@ def make_discovery_candidate_source(batch_id, budget, mode):
     (③)を一切行わない(①②は既存DBの読み取りのみで安全)。
     """
     def candidate_source(category, target, limit):
+        candidate_source.last_report = None
         limit = min(int(limit) if limit else 0, MAX_DISCOVERY_CANDIDATES_PER_AREA)
         if limit <= 0:
             return []
         if not _category_has_registered_policy(category):
             return []
 
-        excluded_keys = _existing_identity_keys() | _recently_failed_identity_keys()
+        failed_keys = _recently_failed_identity_keys()
+        excluded_keys = _existing_identity_keys() | failed_keys
+
+        # Step44.5: dry-run計画用の記録。探索・除外の判定はexecuteと同一で、
+        # ここでは結果を記録するだけ(dry-run専用の探索ロジックは持たない)。
+        report = {"excluded": [], "external_discovery_requested": 0, "external_discovery_executed": False}
+
+        def on_excluded(brief, key, reason):
+            if reason is None:
+                reason = "recent_failure" if key in failed_keys else "duplicate"
+            report["excluded"].append(dict(brief, reason=reason))
 
         candidates = []
-        candidates.extend(_staging_reuse_candidates(category, target, excluded_keys, limit - len(candidates)))
+        candidates.extend(_staging_reuse_candidates(
+            category, target, excluded_keys, limit - len(candidates), on_excluded=on_excluded,
+        ))
         if len(candidates) < limit:
-            candidates.extend(_db_reuse_candidates(category, target, excluded_keys, limit - len(candidates)))
-        if len(candidates) < limit and mode == "execute" and budget.can_continue():
-            candidates.extend(
-                _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limit - len(candidates))
-            )
+            candidates.extend(_db_reuse_candidates(
+                category, target, excluded_keys, limit - len(candidates), on_excluded=on_excluded,
+            ))
+        if len(candidates) < limit:
+            # 外部探索(Gemini Grounding)はexecuteかつ予算内の場合のみ。dry-runでは
+            # 要求件数だけを記録し、呼び出さない。
+            report["external_discovery_requested"] = limit - len(candidates)
+            if mode == "execute" and budget.can_continue():
+                report["external_discovery_executed"] = True
+                candidates.extend(
+                    _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limit - len(candidates))
+                )
+        candidate_source.last_report = report
 
         # discovery evidenceの無い候補は正式な提案として扱わない(採用判定は
         # 既存のStage1→Stage2→citation/validator経路に委ねるにしても、
         # 「何を調査すべきか」の根拠自体が無い候補はStage1にも回さない)。
         return [c for c in candidates if c.get("discovery_evidence")][:limit]
 
+    candidate_source.last_report = None
     return candidate_source
 
 
@@ -515,6 +550,40 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
             actions.append({"action": "batch_stop", "reason": "cost_limit_exceeded"})
             break
 
+    if mode == "dry_run":
+        actions.extend(_dry_run_plan_actions(item, candidates, getattr(candidate_source, "last_report", None)))
+
+    return actions
+
+
+DRY_RUN_EXCLUDED_EXAMPLES = 5
+
+
+def _dry_run_plan_actions(item, candidates, report):
+    """Step44.5: dry-run計画のうち、would_collect以外(外部探索の要否・除外
+    理由)をcandidate_sourceの記録から組み立てる。記録を持たない注入
+    candidate_sourceでは何も追加しない。"""
+    if not report:
+        return []
+    category, target = item["category"], item["target"]
+    actions = []
+    excluded = report.get("excluded") or []
+    if excluded:
+        by_reason = {}
+        for e in excluded:
+            by_reason[e["reason"]] = by_reason.get(e["reason"], 0) + 1
+        actions.append({
+            "action": "excluded_candidates", "category": category, "target": target,
+            "count": len(excluded), "by_reason": by_reason,
+            "examples": excluded[:DRY_RUN_EXCLUDED_EXAMPLES],
+        })
+    requested = report.get("external_discovery_requested", 0)
+    if requested > 0:
+        actions.append({
+            "action": "external_discovery_required", "category": category, "target": target,
+            "requested_candidates": requested,
+            "shortage_after_existing": max(0, item["shortage_count"] - len(candidates)),
+        })
     return actions
 
 
