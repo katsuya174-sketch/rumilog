@@ -141,9 +141,16 @@ def _pessimistic_cost_estimate(kind):
     return 0.0
 
 
+# Step48.7: 外部Discoveryは、その後に最低1商品分のStage1/2を実行できる予算が
+# 無ければ費用だけ発生して候補を処理できないため、両方の合計で事前判定する。
+DISCOVERY_WITH_ONE_PRODUCT = "external_discovery_with_product"
+
+
 def conservative_cost_estimate(kind):
     """kind: "product_collection" / "external_discovery" / "staging_reuse"(API
-    呼び出し無し=0)。"""
+    呼び出し無し=0) / DISCOVERY_WITH_ONE_PRODUCT(外部Discovery+1商品分)。"""
+    if kind == DISCOVERY_WITH_ONE_PRODUCT:
+        return conservative_cost_estimate("external_discovery") + conservative_cost_estimate("product_collection")
     stages = _COST_ESTIMATE_STAGES.get(kind)
     if not stages:
         return 0.0
@@ -627,7 +634,7 @@ def _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limi
     for attempt in range(1, DISCOVERY_MAX_ATTEMPTS + 1):
         if attempt > 1:
             # 再試行の前にも予算preflightを必ず通す(通らなければ再試行しない)。
-            if budget is None or not budget.can_afford("external_discovery"):
+            if budget is None or not budget.can_afford(DISCOVERY_WITH_ONE_PRODUCT):
                 attempts.append({"attempt": attempt, "status": "skipped_budget"})
                 break
         attempt_diag = {}
@@ -753,7 +760,7 @@ def make_discovery_candidate_source(batch_id, budget, mode):
             # 外部探索(Gemini Grounding)はexecuteかつ予算内の場合のみ。dry-runでは
             # 要求件数だけを記録し、呼び出さない。
             report["external_discovery_requested"] = limit - len(candidates)
-            if mode == "execute" and budget.can_afford("external_discovery"):
+            if mode == "execute" and budget.can_afford(DISCOVERY_WITH_ONE_PRODUCT):
                 report["external_discovery_executed"] = True
                 diagnostics = {}
                 report["external_discovery_diagnostics"] = diagnostics

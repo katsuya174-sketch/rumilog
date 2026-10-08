@@ -3809,6 +3809,20 @@ def normalize_rakuten_item_price(item):
 
     return item
 
+# Step48.7: 楽天商品検索APIは各キーワード(空白区切りの語)に半角2文字以上を要求し、
+# 「L-Cysteine」→「L Cysteine」のような半角1文字の単独語があると400
+# (keyword is not valid)になる。検索リクエスト用キーワードからだけ半角1文字の
+# 単独語を除く(名称照合等で使うclean_rakuten_keyword()の結果は変えない)。
+_RAKUTEN_SINGLE_HALFWIDTH_TOKEN_RE = re.compile(r"^[A-Za-z0-9]$")
+
+
+def rakuten_request_keyword(keyword):
+    parts = str(keyword or "").split()
+    kept = [p for p in parts if not _RAKUTEN_SINGLE_HALFWIDTH_TOKEN_RE.match(p)]
+    # 除くと何も残らない場合は元のまま(従来どおり400ならスキップされる)。
+    return " ".join(kept) if kept else " ".join(parts)
+
+
 def clean_rakuten_keyword(keyword):
     if isinstance(keyword, list):
         keyword = " ".join(str(x) for x in keyword if str(x).strip())
@@ -5452,7 +5466,7 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
     seen_keywords = set()
 
     for keyword in raw_keywords:
-        cleaned_keyword = clean_rakuten_keyword(keyword)
+        cleaned_keyword = rakuten_request_keyword(clean_rakuten_keyword(keyword))
 
         if not cleaned_keyword:
             continue
@@ -5473,7 +5487,7 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
     MAX_RAKUTEN_KEYWORDS = 5
 
     for keyword in keywords[:MAX_RAKUTEN_KEYWORDS]:
-        keyword = clean_rakuten_keyword(keyword)
+        keyword = rakuten_request_keyword(clean_rakuten_keyword(keyword))
 
         if not keyword:
             print("[RAKUTEN SKIP INVALID KEYWORD]", product_name, flush=True)
