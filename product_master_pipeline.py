@@ -185,8 +185,42 @@ def _product_master_identity_keys():
     conn = psycopg2.connect(os.environ["DATABASE_URL"])
     try:
         cur = conn.cursor()
-        cur.execute("SELECT identity_key FROM product_master")
-        return {row[0] for row in cur.fetchall() if row[0]}
+        cur.execute("SELECT identity_key, brand, name, category FROM product_master")
+        keys = set()
+        for identity_key, brand, name, category in cur.fetchall():
+            if identity_key:
+                keys.add(identity_key)
+            # Step49.1: 商品名先頭のブランド重複を除いた形でも同一商品として扱う。
+            keys |= identity_keys_for(brand or "", name or "", category or "")
+        return keys
+    finally:
+        conn.close()
+
+
+def identity_keys_for(brand, name, category):
+    """Step49.1: 重複判定用のidentity_key集合。通常のキーに加え、商品名の先頭に
+    ブランド名が重複して付いている場合はそれを除いた商品名のキーも含める。"""
+    keys = {app.make_verified_product_key({"brand": brand, "name": name, "category": category})}
+    stripped = pipeline.brand_stripped_product_name(brand, name)
+    if stripped:
+        keys.add(app.make_verified_product_key({"brand": brand, "name": stripped, "category": category}))
+    return {k for k in keys if k}
+
+
+def _identity_hit(key, keys, keyset):
+    """keys(identity_keys_for)のうちkeysetにあるもの(通常キーを優先)。無ければNone。"""
+    if key and key in keyset:
+        return key
+    return next((k for k in sorted(keys) if k in keyset), None)
+
+
+def _product_master_jans():
+    """Step49.1: 既存Product MasterのJAN→product_id(JANは全体で一意)。"""
+    conn = psycopg2.connect(os.environ["DATABASE_URL"])
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT jan_code, product_id FROM product_master WHERE jan_code IS NOT NULL AND jan_code <> ''")
+        return {pipeline.normalize_jan_code(jan): pid for jan, pid in cur.fetchall() if pipeline.normalize_jan_code(jan)}
     finally:
         conn.close()
 
@@ -458,7 +492,8 @@ class DeviceDuplicateGuard:
 
 
 def _staging_reuse_candidates(category, target, excluded_keys, limit, on_excluded=None,
-                              max_transient=MAX_TRANSIENT_STAGING_CANDIDATES_PER_RUN, duplicate_guard=None):
+                              max_transient=MAX_TRANSIENT_STAGING_CANDIDATES_PER_RUN, duplicate_guard=None,
+                              skip_staging_ids=None):
     """探索順序①: 既存staging(product_collection_staging)の未反映候補を
     再利用する。過去に別の目的で収集済みの候補が今回のtargetにも合致する
     場合に、新しいGemini呼び出しを発生させずに再利用する。
@@ -513,10 +548,18 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
         if not app.is_candidate_relevant_to_target(category, target, pseudo_product):
             continue
         key = app.make_verified_product_key({"brand": brand, "name": name, "category": category})
+        keys = identity_keys_for(brand, name, category)
         brief = {"brand": brand, "name": name, "discovery_source": "staging_reuse"}
-        if key and key in excluded_keys:
+        # Step49.1: 公式確認が未確定(transient)のstagingは、同じバッチで一度候補に
+        # 出したら他の領域では再度候補枠を使わない。
+        if skip_staging_ids and staging_id in skip_staging_ids:
             if on_excluded:
-                on_excluded(brief, key, None)
+                on_excluded(dict(brief, staging_id=staging_id), key, "transient_already_offered_this_batch")
+            continue
+        hit = _identity_hit(key, keys, excluded_keys)
+        if hit:
+            if on_excluded:
+                on_excluded(brief, hit, None)
             continue
         evidence = [c.get("uri") for c in (citations or []) if isinstance(c, dict) and c.get("uri")]
         if not evidence:
@@ -528,14 +571,14 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
             if on_excluded:
                 on_excluded(brief, key, duplicate_reason)
             if key:
-                excluded_keys.add(key)
+                excluded_keys.update(keys)
             continue
         reuse_state = _staging_reuse_state(brand, citations)
         if reuse_state == "transient" and transient_count >= max_transient:
             if on_excluded:
                 on_excluded(brief, key, "transient_slot_deferred")
             if key:
-                excluded_keys.add(key)  # 同一identityを他tierで再収集しない
+                excluded_keys.update(keys)  # 同一identityを他tierで再収集しない
             continue
         candidates.append({
             "brand": brand, "name": name, "category": category,
@@ -551,7 +594,7 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
         if duplicate_guard:
             duplicate_guard.add(brand, name)
         if key:
-            excluded_keys.add(key)
+            excluded_keys.update(keys)
         if len(candidates) >= limit:
             break
     return candidates
@@ -580,17 +623,19 @@ def _db_reuse_candidates(category, target, excluded_keys, limit, on_excluded=Non
             continue
         if not app.is_candidate_relevant_to_target(category, target, p):
             continue
-        if key in excluded_keys:
+        keys = identity_keys_for(p.get("brand", ""), p.get("name", ""), p.get("category", ""))
+        hit = _identity_hit(key, keys, excluded_keys)
+        if hit:
             if on_excluded:
                 on_excluded({"brand": p.get("brand", ""), "name": p.get("name", ""),
-                             "discovery_source": "db_reuse"}, key, None)
+                             "discovery_source": "db_reuse"}, hit, None)
             continue
         duplicate_reason = duplicate_guard.reason(p.get("brand", ""), p.get("name", "")) if duplicate_guard else None
         if duplicate_reason:
             if on_excluded:
                 on_excluded({"brand": p.get("brand", ""), "name": p.get("name", ""),
                              "discovery_source": "db_reuse"}, key, duplicate_reason)
-            excluded_keys.add(key)
+            excluded_keys.update(keys)
             continue
         if duplicate_guard:
             duplicate_guard.add(p.get("brand", ""), p.get("name", ""))
@@ -603,7 +648,7 @@ def _db_reuse_candidates(category, target, excluded_keys, limit, on_excluded=Non
             "discovery_evidence": ["internal_product_db"],
             "target_evidence": f"既存DB内でtarget={target}との関連性が確認済み",
         })
-        excluded_keys.add(key)
+        excluded_keys.update(keys)
         if len(candidates) >= limit:
             break
     return candidates
@@ -653,7 +698,9 @@ def _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limi
         if not isinstance(c, dict):
             continue
         brand = str(c.get("brand", "") or "").strip()
-        name = str(c.get("product_name", "") or "").strip()
+        # Step49.1: 「（型番：… 等）」等の説明注記を商品名から分離する(型番はヒントとして保持)。
+        name, model_hints = pipeline.split_discovery_product_name(str(c.get("product_name", "") or "").strip())
+        guard_name = " ".join([name, *model_hints])
         source_url = str(c.get("source_url", "") or "").strip()
         brief = {"brand": brand, "name": name, "discovery_source": "gemini_grounding"}
         missing = ("missing_brand" if not brand else "missing_product_name" if not name
@@ -663,6 +710,7 @@ def _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limi
                 on_excluded(brief, None, missing)
             continue
         key = app.make_verified_product_key({"brand": brand, "name": name, "category": category})
+        keys = identity_keys_for(brand, name, category)
         # Step48.5: Discoveryの根拠で医薬品・医薬部外品と判明したサプリ候補は、
         # Stage1(Grounding費用)前に除外する。正常なフィルタ結果であり候補失敗
         # (連続失敗STOP)には数えない。区分の確定・保存には使わない。
@@ -671,31 +719,33 @@ def _gemini_discovery_candidates(category, target, batch_id, excluded_keys, limi
             if on_excluded:
                 on_excluded(dict(brief, product_classification=regulated_class), key, "discovery_regulated_product")
             if key:
-                excluded_keys.add(key)
+                excluded_keys.update(keys)
             continue
-        if key and key in excluded_keys:
+        hit = _identity_hit(key, keys, excluded_keys)
+        if hit:
             if on_excluded:
-                on_excluded(brief, key, None)
+                on_excluded(brief, hit, None)
             continue
         # Step45.17: Discovery結果の商品名から型番が分かった時点で、Stage1/2の
         # 課金前に既存商品・選択済み候補との型番ベース重複を除外する。
-        duplicate_reason = duplicate_guard.reason(brand, name) if duplicate_guard else None
+        duplicate_reason = duplicate_guard.reason(brand, guard_name) if duplicate_guard else None
         if duplicate_reason:
             if on_excluded:
                 on_excluded(brief, key, duplicate_reason)
             if key:
-                excluded_keys.add(key)
+                excluded_keys.update(keys)
             continue
         if duplicate_guard:
-            duplicate_guard.add(brand, name)
+            duplicate_guard.add(brand, guard_name)
         candidates.append({
             "brand": brand, "name": name, "category": category,
             "discovery_source": "gemini_grounding",
             "discovery_evidence": [source_url],
             "target_evidence": c.get("target_evidence", "unknown"),
+            **({"model_number_hints": model_hints} if model_hints else {}),
         })
         if key:
-            excluded_keys.add(key)
+            excluded_keys.update(keys)
         if len(candidates) >= limit:
             break
     return candidates
@@ -708,6 +758,9 @@ def make_discovery_candidate_source(batch_id, budget, mode):
     未定義のカテゴリでは何も探索しない。mode="dry_run"ではGemini呼び出し
     (③)を一切行わない(①②は既存DBの読み取りのみで安全)。
     """
+    # Step49.1: このバッチで既に候補に出した公式未確定(transient)のstaging_id。
+    offered_transient_staging_ids = set()
+
     def candidate_source(category, target, limit):
         candidate_source.last_report = None
         limit = min(int(limit) if limit else 0, MAX_DISCOVERY_CANDIDATES_PER_AREA)
@@ -749,8 +802,10 @@ def make_discovery_candidate_source(batch_id, budget, mode):
         candidates = []
         candidates.extend(_staging_reuse_candidates(
             category, target, excluded_keys, limit - len(candidates), on_excluded=on_excluded,
-            duplicate_guard=duplicate_guard,
+            duplicate_guard=duplicate_guard, skip_staging_ids=offered_transient_staging_ids,
         ))
+        offered_transient_staging_ids.update(
+            c["staging_id"] for c in candidates if c.get("reuse_state") == "transient" and c.get("staging_id"))
         if len(candidates) < limit:
             candidates.extend(_db_reuse_candidates(
                 category, target, excluded_keys, limit - len(candidates), on_excluded=on_excluded,
@@ -1019,7 +1074,8 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
 
         brand, name = cand.get("brand", ""), cand.get("name", "")
         key = app.make_verified_product_key({"brand": brand, "name": name, "category": category})
-        if key and key in existing_keys:
+        keys = identity_keys_for(brand, name, category)
+        if _identity_hit(key, keys, existing_keys):
             actions.append({"action": "skipped_duplicate", "brand": brand, "name": name, "category": category})
             continue
 
@@ -1046,9 +1102,20 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
 
         budget.record_attempt()
         collect_result = {}
+        # Step49.1: 美容機器/サプリは、既存Product MasterのJANと一致する候補を
+        # Stage2・公式ページ確認・楽天確認の前に重複として除外する(JANは全体で一意)。
+        existing_jans = _product_master_jans() if pipeline.requires_sale_listing_before_reflect(category) else {}
         if reuse_staging_id:
             staging_id = reuse_staging_id
             staging_row = _fetch_staging_row(staging_id)
+            staged_jan = pipeline.normalize_jan_code((staging_row.get("stage2_payload") or {}).get("jan_code"))
+            if staged_jan and staged_jan in existing_jans:
+                actions.append({"action": "skipped_duplicate_jan", "brand": brand, "name": name, "jan": staged_jan,
+                                "duplicate_of_product_id": existing_jans[staged_jan], "staging_id": staging_id,
+                                "reused_staging": True,
+                                "gate_failure_marker": _record_gate_failure(staging_id, "duplicate_jan",
+                                                                            "jan_in_product_master")})
+                continue
             # Step48.1: 商品区分でreflect不可が確定している場合は公式ページ確認のHTTPをしない。
             if not _supplement_eligibility_blocks(category, staging_row):
                 staging_row = _ensure_staging_page_verification(staging_id, brand)
@@ -1062,8 +1129,20 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
                 continue
         else:
             existing_product = _product_master_lookup(brand, name, category)
-            collect_result = pipeline.collect_one_product(brand, name, category, batch_id, existing_product=existing_product)
+            collect_result = pipeline.collect_one_product(brand, name, category, batch_id, existing_product=existing_product,
+                                                          existing_jans=existing_jans)
             staging_id = collect_result["staging_id"]
+            if collect_result.get("duplicate_jan"):
+                # 重複除外は正常なフィルタ結果のため連続失敗には数えない。
+                actions.append({"action": "skipped_duplicate_jan", "brand": brand, "name": name,
+                                "jan": collect_result["duplicate_jan"]["jan"],
+                                "duplicate_of_product_id": collect_result["duplicate_jan"]["product_id"],
+                                "staging_id": staging_id})
+                existing_keys.update(keys)
+                if collect_result.get("limit_exceeded"):
+                    actions.append({"action": "batch_stop", "reason": "cost_limit_exceeded"})
+                    break
+                continue
             evaluation = evaluate_staging_for_reflect(
                 staging_id, brand, name, category, conflict_status=collect_result["conflict_status"],
             )
@@ -1145,7 +1224,7 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
         if reflect_result.get("status") == "reflected":
             consecutive_failures = 0
             reflected_count += 1
-            existing_keys.add(key)
+            existing_keys.update(keys)
             item_code_result = _resolve_item_code_safely(
                 reflect_result["product_id"], brand, name, category, resolution=sale_resolution,
             )

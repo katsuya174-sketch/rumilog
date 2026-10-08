@@ -11136,6 +11136,10 @@ def normalize_ingredient_tag(text):
         return "retinoid"
     if "bakuchiol" in text or "バクチオール" in text:
         return "bakuchiol"
+    # Step49.1: コラーゲンペプチド(コラーゲンを加水分解したもの)はコラーゲン。
+    # 一般のペプチド判定より先に、「コラーゲン(トリ)ペプチド」と連続する表記だけを扱う。
+    if re.search(r"コラーゲン(?:トリ)?ペプチド|collagen\s*(?:tri)?peptide", text):
+        return "collagen"
     if "peptide" in text or "ペプチド" in text or "acetyl hexapeptide" in text or "hexapeptide" in text or "palmitoyl peptide" in text or "sh-oligopeptide" in text:
         return "peptide"
     if text == "egf" or "上皮成長因子" in text:

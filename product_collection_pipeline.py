@@ -908,7 +908,18 @@ def _page_identity_confirms_brand(brand, citation):
     # ことがあるため(例: 価格.com「価格.com - パナソニック …」)、使わない。
     # 証明できなければnot_confirmed(fail closed)。
     fields = [identity.get("og_site_name"), *(identity.get("jsonld_names") or [])]
-    return any(isinstance(f, str) and _free_text_confirms_brand(brand, f) for f in fields)
+    return any(isinstance(f, str) and _free_text_confirms_brand(brand, _corporate_designators_as_spaces(f))
+               for f in fields)
+
+
+# Step49.1: サイトの名乗りに含まれる法人格表記(「小林製薬株式会社」等)は、ブランド名との
+# 境界として扱う(「小林製薬」+「株式会社」のように漢字が連続して境界判定に失敗するため)。
+# 名乗り側の法人格表記を空白に置き換えるだけで、照合規則・対象フィールドは変えない。
+_CORPORATE_DESIGNATOR_RE = re.compile(r"株式会社|有限会社|合同会社|\(株\)|（株）|㈱")
+
+
+def _corporate_designators_as_spaces(text):
+    return _CORPORATE_DESIGNATOR_RE.sub(" ", unicodedata.normalize("NFKC", str(text or "")))
 
 
 def _utcnow():
@@ -1018,6 +1029,23 @@ def has_page_verification(citations):
     return any(isinstance(c, dict) and isinstance(c.get("page_verification"), dict) for c in citations or [])
 
 
+def _page_verification_order(citations):
+    """Step49.1: ページ確認の順序。Stage1で多く引用されたドメイン(公式の商品
+    ページは複数回引用されやすい)から、同数なら元の出現順で確認する。各ドメインの
+    最初のcitationだけを返す。対応表・ドメイン名の推測は使わない。"""
+    first, counts = {}, {}
+    for index, citation in enumerate(citations):
+        if not isinstance(citation, dict) or not citation.get("uri"):
+            continue
+        domain = _citation_title_domain(citation)
+        if not domain:
+            continue
+        counts[domain] = counts.get(domain, 0) + 1
+        first.setdefault(domain, (index, citation))
+    ordered = sorted(first, key=lambda d: (-counts[d], first[d][0]))
+    return [first[d][1] for d in ordered]
+
+
 def attach_citation_page_verification(brand, citations):
     """title判定で公式確認できない場合のみ、citation先ページを最大
     MAX_PAGE_VERIFICATION_DOMAINS ドメインまで(同一ドメインは1回)確認し、
@@ -1030,11 +1058,9 @@ def attach_citation_page_verification(brand, citations):
         return citations
     out = [dict(c) if isinstance(c, dict) else c for c in citations]
     seen_domains = set()
-    for citation in out:
-        if not isinstance(citation, dict) or not citation.get("uri"):
-            continue
+    for citation in _page_verification_order(out):
         title_domain = _citation_title_domain(citation)
-        if not title_domain or title_domain in seen_domains:
+        if title_domain in seen_domains:
             continue
         if len(seen_domains) >= MAX_PAGE_VERIFICATION_DOMAINS:
             break
@@ -1838,11 +1864,25 @@ def write_staging_record(batch_id, brand, product_name, category, stage1_result,
 
 # ===== 商品単位・バッチ単位の収集処理(Stage1+Stage2+conflict+staging) =====
 
-def collect_one_product(brand, product_name, category, batch_id, existing_product=None):
+def collect_one_product(brand, product_name, category, batch_id, existing_product=None, existing_jans=None):
     """1商品分のStage1→Stage2→conflict検出→staging保存を一貫して行う。
     費用上限(PRODUCT_COLLECTION_COST_LIMIT_USD)を超えた場合は、この商品の
-    処理を完了させた上で呼び出し元(collect_batch)に伝え、バッチを停止する。"""
+    処理を完了させた上で呼び出し元(collect_batch)に伝え、バッチを停止する。
+    existing_jans(Step49.1): {JAN: product_id}。Stage1本文に既存Product Masterの
+    JANがあれば、公式ページ確認・Stage2を行わずduplicate_janとして返す。"""
     stage1_result = run_stage1_collection(brand, product_name, batch_id, category=category)
+    duplicate = None
+    if existing_jans and stage1_result.get("status") == "ok":
+        matched = sorted(extract_jan_codes(stage1_result.get("raw_text")) & set(existing_jans))
+        if matched:
+            duplicate = {"jan": matched[0], "product_id": existing_jans[matched[0]]}
+    if duplicate:
+        stage2_result = {"status": "skipped", "reason": "duplicate_jan_in_product_master", "payload": None}
+        staging_id = write_staging_record(batch_id, brand, product_name, category, stage1_result, stage2_result,
+                                          {"status": "skipped", "conflicts": []})
+        return {"staging_id": staging_id, "stage1_status": stage1_result.get("status"), "stage2_status": "skipped",
+                "conflict_status": "skipped", "duplicate_jan": duplicate,
+                "limit_exceeded": bool((stage1_result.get("usage_result") or {}).get("limit_exceeded"))}
     # Step48.1: 本文に医薬品/医薬部外品の区分表示があるサプリ候補は、reflect不可が
     # 確定しているため公式ページ確認のHTTPを行わない。
     regulated_supplement = category == "サプリメント" and bool(
@@ -2375,6 +2415,55 @@ def normalize_jan_code(jan_code):
     桁数違い)は空文字。"""
     value = re.sub(r"[\s\-]", "", unicodedata.normalize("NFKC", str(jan_code or "")))
     return value if re.fullmatch(r"\d{8}|\d{13}", value) else ""
+
+
+def _valid_jan_check_digit(code):
+    digits = [int(c) for c in code]
+    body, check = digits[:-1], digits[-1]
+    weights = [3 if (len(body) - i) % 2 == 1 else 1 for i in range(len(body))]
+    return (10 - sum(d * w for d, w in zip(body, weights)) % 10) % 10 == check
+
+
+def extract_jan_codes(text):
+    """Step49.1: 本文中のJAN(13桁/8桁、前後が数字でない、チェックデジット正当)の集合。"""
+    folded = unicodedata.normalize("NFKC", str(text or ""))
+    return {m for m in re.findall(r"(?<!\d)(\d{13}|\d{8})(?!\d)", folded) if _valid_jan_check_digit(m)}
+
+
+def brand_stripped_product_name(brand, name):
+    """Step49.1: 商品名の先頭にブランド名(official_brand_forms()の表記)が重複して
+    付いている場合だけ、それを除いた商品名を返す(該当しなければNone)。
+    「ネイチャーメイド スーパーフィッシュオイル」と「スーパーフィッシュオイル」を
+    同じ商品名として扱うための重複判定専用。除去後が短すぎる場合はNone。"""
+    folded = unicodedata.normalize("NFKC", str(name or "")).strip()
+    for form in sorted(official_brand_forms(brand), key=len, reverse=True):
+        match = re.match(rf"^{re.escape(form)}[\s・･:：/|｜\-]*", folded, flags=re.IGNORECASE)
+        if match and match.end() < len(folded):
+            rest = folded[match.end():].strip()
+            if len(_normalize_brand_text(rest)) >= _MIN_BRAND_MATCH_LENGTH:
+                return rest
+    return None
+
+
+# Step49.1: Discoveryの商品名に付く「（型番：RR-AT-02A 等）」のような説明注記。
+_MODEL_ANNOTATION_RE = re.compile(r"\s*[（(]\s*型番\s*[:：]?\s*([^（）()]*)[）)]")
+_MODEL_UNCERTAIN_RE = re.compile(r"等|など|ほか|他")
+
+
+def split_discovery_product_name(name):
+    """Discoveryの商品名から型番の説明注記を分離する。戻り値(商品名, 型番ヒント)。
+    型番が1つで確定的なら商品名に型番だけを残す(「メディリフト プラス EPM-18BB」)。
+    「等」「など」付き・複数の場合は商品名から外し、ヒント(重複判定用)にだけ残す。"""
+    text = str(name or "")
+    match = _MODEL_ANNOTATION_RE.search(text)
+    if not match:
+        return text.strip(), []
+    inner = match.group(1)
+    models = [m for m in re.split(r"[、,，/／・\s]+", _MODEL_UNCERTAIN_RE.sub(" ", inner)) if re.search(r"\d", m)]
+    uncertain = bool(_MODEL_UNCERTAIN_RE.search(inner)) or len(models) != 1
+    replacement = "" if uncertain or not models else f" {models[0]}"
+    cleaned = re.sub(r"\s+", " ", (text[:match.start()] + replacement + text[match.end():])).strip()
+    return cleaned, models
 
 
 def rakuten_item_mentions_jan(item, jan):

@@ -143,7 +143,7 @@ class EarlyRejectFlowTests(OrchestratorTestBase):
         sid = self._staging_without_evidence(normal["product_name"])
         collected = []
 
-        def collect(brand, name, category, batch_id, existing_product=None):
+        def collect(brand, name, category, batch_id, existing_product=None, existing_jans=None):
             collected.append(name)
             return {"staging_id": sid, "stage1_status": "ok", "stage2_status": "ok",
                     "conflict_status": "new", "limit_exceeded": False}
@@ -171,7 +171,7 @@ class EarlyRejectFlowTests(OrchestratorTestBase):
         sid = self._staging_without_evidence(cand["product_name"])
         collected = []
 
-        def collect(brand, name, category, batch_id, existing_product=None):
+        def collect(brand, name, category, batch_id, existing_product=None, existing_jans=None):
             collected.append(name)
             return {"staging_id": sid, "stage1_status": "ok", "stage2_status": "ok",
                     "conflict_status": "new", "limit_exceeded": False}
