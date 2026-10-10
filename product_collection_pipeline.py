@@ -2475,6 +2475,59 @@ def rakuten_item_mentions_jan(item, jan):
     return bool(jan) and re.search(rf"(?<!\d){re.escape(jan)}(?!\d)", text) is not None
 
 
+# Step49.6: Product Master収集経路(このresolver)だけで使う、検証済みJANがある場合の
+# 語順不問の名称照合。「亜鉛（小林製薬の栄養補助食品）」と「小林製薬の栄養補助食品 亜鉛」の
+# ような語順違いを、JANが楽天候補に記載されている場合に限って同一商品名とみなす。
+# 診断時の照合(app.is_same_verified_rakuten_product)は変更しない。
+_NAME_PART_SEPARATORS_RE = re.compile(r"[\s　・･\-_()（）\[\]［］【】「」『』/／|｜,，、]+")
+_NAME_SPEC_RE = re.compile(r"\d+(?:\.\d+)?\s*(?:粒|錠|カプセル|包|袋|本|枚|日分|mg|g|ml|μg|mcg|iu)")
+
+
+def _compact_for_match(text):
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(text or "")).lower())
+
+
+def jan_verified_name_match(product_name, brand, item, jan):
+    """次をすべて満たす場合だけTrue:
+    - 検証済みJAN(jan)が楽天候補のタイトル/商品説明に記載されている
+    - 商品名を区切り記号・括弧で分けた各部分(2文字以上)がすべてタイトルにある(語順は問わない)
+    - ブランドの明示的な表記(括弧内外、app.explicit_brand_forms)のいずれかがタイトルにある
+    - 商品名に規格(粒数・日分・容量等)があれば、同じ規格がタイトルにある
+    販売形態・セット・JAN一致の判定はこの後の既存の段階でそのまま行う。"""
+    if not jan or not rakuten_item_mentions_jan(item, jan):
+        return False
+    title = _compact_for_match(item.get("itemName", ""))
+    if not title:
+        return False
+    folded_name = unicodedata.normalize("NFKC", str(product_name or "")).lower()
+    parts = [p for p in _NAME_PART_SEPARATORS_RE.split(folded_name) if len(p) >= 2]
+    if not parts or not all(_compact_for_match(p) in title for p in parts):
+        return False
+    forms = [_compact_for_match(f) for f in app.explicit_brand_forms(brand)]
+    if forms and not any(f in title for f in forms):
+        return False
+    specs = [_compact_for_match(m) for m in _NAME_SPEC_RE.findall(folded_name)]
+    return all(spec in title for spec in specs)
+
+
+_SPEC_PARTS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(粒|錠|カプセル|包|袋|本|枚|日分|mg|g|ml|μg|mcg|iu)")
+
+
+def name_title_spec_conflict(product_name, title):
+    """Step49.6: 商品名に規格(例: 120粒・60日分)があり、楽天タイトルに同じ単位の
+    別の値だけがある場合をTrue(明確な規格矛盾)とする。タイトルに同じ単位の
+    記載が無い場合は矛盾としない。"""
+    name_specs = {}
+    for value, unit in _SPEC_PARTS_RE.findall(unicodedata.normalize("NFKC", str(product_name or "")).lower()):
+        name_specs.setdefault(unit, set()).add(float(value))
+    if not name_specs:
+        return False
+    title_specs = {}
+    for value, unit in _SPEC_PARTS_RE.findall(unicodedata.normalize("NFKC", str(title or "")).lower()):
+        title_specs.setdefault(unit, set()).add(float(value))
+    return any(unit in title_specs and not (values & title_specs[unit]) for unit, values in name_specs.items())
+
+
 def resolve_item_code_for_product(brand, product_name, category, jan_code=None):
     """brand+product_nameで楽天候補を検索し、確信を持って1件に絞れる場合のみ
     その候補を返す。
@@ -2514,6 +2567,7 @@ def resolve_item_code_for_product(brand, product_name, category, jan_code=None):
     # による商品名一致判定を適用済みだが、item_codeをproduct_masterへ永続保存
     # する用途は診断時の一時表示より誤紐付けの許容度が低いため、ここでも
     # 同じ既存関数で二重に確認する(別の照合ロジックは作らない)。
+    jan_for_title = normalize_jan_code(jan_code)
     title_matched_pairs = [
         (score, item) for score, item in scored_items
         if app.is_same_verified_rakuten_product(
@@ -2521,7 +2575,12 @@ def resolve_item_code_for_product(brand, product_name, category, jan_code=None):
             rakuten_title=str(item.get("itemName", "") or ""),
             brand=brand,
             shop_name=str(item.get("shopName", "") or ""),
-        )
+        ) or jan_verified_name_match(product_name, brand, item, jan_for_title)
+    ]
+    # Step49.6: 商品名とタイトルで同じ単位の規格が食い違う候補は別規格として除く。
+    title_matched_pairs = [
+        (score, item) for score, item in title_matched_pairs
+        if not name_title_spec_conflict(product_name, str(item.get("itemName", "") or ""))
     ]
     diag["title_matched_count"] = len(title_matched_pairs)
     if not title_matched_pairs:
