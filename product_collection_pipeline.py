@@ -2528,7 +2528,106 @@ def name_title_spec_conflict(product_name, title):
     return any(unit in title_specs and not (values & title_specs[unit]) for unit, values in name_specs.items())
 
 
+def rakuten_jan_status(item, jan_code):
+    """Step49.7: 楽天候補に対するJANの状態(診断記録専用。判定には使わない)。
+    match=検証済みJANの記載あり / explicit_mismatch=別の正当なJANの記載あり /
+    absent=商品説明はあるがJANの記載なし / undeterminable=検証済みJANが無い・商品説明が取得されていない。"""
+    jan = normalize_jan_code(jan_code)
+    if not jan:
+        return "undeterminable"
+    if rakuten_item_mentions_jan(item, jan):
+        return "match"
+    caption = item.get("itemCaption")
+    if extract_jan_codes(f"{item.get('itemName', '') or ''} {caption or ''}") - {jan}:
+        return "explicit_mismatch"
+    return "undeterminable" if caption is None else "absent"
+
+
+def _resolver_stage_for_item(item, brand, product_name, category, jan_code):
+    """resolve本体と同じ判定関数・同じ順序で、候補がどの段階で外れるかを返す(診断記録専用)。"""
+    title = str(item.get("itemName", "") or "")
+    jan = normalize_jan_code(jan_code)
+    normal = app.is_same_verified_rakuten_product(product_name=product_name, rakuten_title=title, brand=brand,
+                                                  shop_name=str(item.get("shopName", "") or ""))
+    by_jan = not normal and jan_verified_name_match(product_name, brand, item, jan)
+    info = {"title_match": "normal" if normal else ("jan_order_insensitive" if by_jan else "no")}
+    if not (normal or by_jan):
+        return "title_mismatch", info
+    if name_title_spec_conflict(product_name, title):
+        return "spec_conflict", info
+    if category == "美容機器":
+        ok = device_identity_matches(product_name, title, brand)[0]
+        info["model_match"] = bool(ok)
+        if not ok:
+            return "device_model_mismatch", info
+    info["sale_condition"] = app.classify_rakuten_sale_condition(title)
+    if info["sale_condition"] != "new":
+        return "non_new_sale", info
+    if app._is_rakuten_set_item(title):
+        return "set_item", info
+    if jan and not rakuten_item_mentions_jan(item, jan):
+        return "jan_not_matched", info
+    return "eligible", info
+
+
+def _rakuten_match_summary(trace, result, brand, product_name, category, jan_code):
+    trace = trace or {"searches": [], "items": [], "omitted_items": 0, "cache_hit": False}
+    items = trace["items"]
+    fetch_stages = {}
+    score_rules = {}
+    for entry in items:
+        fetch_stages[entry["stage"]] = fetch_stages.get(entry["stage"], 0) + 1
+        if entry["stage"] == "score_reject":
+            score_rules[entry.get("rule") or "unknown"] = score_rules.get(entry.get("rule") or "unknown", 0) + 1
+    jan_counts = {"match": 0, "explicit_mismatch": 0, "absent": 0, "undeterminable": 0}
+    resolver_stages = {}
+    title_match = model_match = sale_new = single = 0
+    for entry in items:
+        if entry["stage"] != "searched_candidate":
+            continue
+        stage, info = _resolver_stage_for_item(entry["_item"], brand, product_name, category, jan_code)
+        entry["jan_status"] = rakuten_jan_status(entry["_item"], jan_code)
+        entry["resolver_stage"] = stage
+        entry.update(info)
+        jan_counts[entry["jan_status"]] += 1
+        resolver_stages[stage] = resolver_stages.get(stage, 0) + 1
+        title_match += stage not in ("title_mismatch", "spec_conflict")
+        model_match += info.get("model_match", stage not in ("title_mismatch", "spec_conflict")) is True
+        sale_new += info.get("sale_condition") == "new"
+        single += stage in ("eligible", "jan_not_matched")
+    traced_total = len(items)
+    return {
+        "search_count": len(trace["searches"]), "cache_hit": trace["cache_hit"],
+        "searched_item_count": sum(s["item_count"] for s in trace["searches"]),
+        "traced_item_count": traced_total, "omitted_item_count": trace["omitted_items"],
+        "brand_match_count": (traced_total - fetch_stages.get("brand_prefilter", 0)) if category == "美容機器" else None,
+        "fetch_stage_counts": fetch_stages, "score_reject_rules": score_rules,
+        "title_match_count": title_match, "model_match_count": model_match if category == "美容機器" else None,
+        "new_sale_count": sale_new, "single_item_count": single,
+        "jan_status_counts": jan_counts, "resolver_stage_counts": resolver_stages,
+        "final_reason": result.get("reason") or result.get("status"),
+    }
+
+
 def resolve_item_code_for_product(brand, product_name, category, jan_code=None):
+    """楽天照合(_resolve_item_code_for_product_impl)を実行し、Step49.7の診断記録
+    (候補ごとの除外理由・集計)を付けて返す。判定・採用条件は変えない。
+    集計(match_summary)は件数のみ。タイトル全文を含む候補ごとの記録は診断ログ
+    ([RAKUTEN MATCH TRACE])にだけ、件数・長さの上限付きで出す。"""
+    token = app.start_rakuten_match_trace()
+    try:
+        result = _resolve_item_code_for_product_impl(brand, product_name, category, jan_code=jan_code)
+    finally:
+        trace = app.stop_rakuten_match_trace(token)
+    summary = _rakuten_match_summary(trace, result, brand, product_name, category, jan_code)
+    log_items = [{k: v for k, v in entry.items() if not k.startswith("_")} for entry in (trace or {}).get("items", [])]
+    print("[RAKUTEN MATCH TRACE] " + json.dumps({"brand": brand, "product": product_name, "category": category,
+                                                  "summary": summary, "items": log_items}, ensure_ascii=False),
+          flush=True)
+    return dict(result, match_summary=summary)
+
+
+def _resolve_item_code_for_product_impl(brand, product_name, category, jan_code=None):
     """brand+product_nameで楽天候補を検索し、確信を持って1件に絞れる場合のみ
     その候補を返す。
 

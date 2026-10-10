@@ -38,6 +38,46 @@ _rakuten_item_cache = {}
 # 美容機器の select_best_beauty_device_candidate() もこのプールを再利用する
 # (ユーザーごとの最終順位はキャッシュせず、候補プールのみキャッシュする)。
 _rakuten_candidates_cache = {}
+
+# Step49.7: Product Master収集の楽天照合(product_collection_pipeline.resolve_item_code_
+# for_product)の実行中だけ有効な、候補ごとの除外理由の診断トレース。判定・戻り値は
+# 変えない。タイトルは診断ログ用に長さを制限して保持し、URL・商品説明・ショップ名・
+# APIパラメータ(認証情報)は保持しない。件数にも上限を設ける。
+import contextvars as _contextvars
+_RAKUTEN_MATCH_TRACE = _contextvars.ContextVar("rakuten_match_trace", default=None)
+RAKUTEN_TRACE_MAX_ITEMS = 40
+RAKUTEN_TRACE_TITLE_MAX_CHARS = 160
+
+
+def start_rakuten_match_trace():
+    return _RAKUTEN_MATCH_TRACE.set({"searches": [], "items": [], "omitted_items": 0, "cache_hit": False})
+
+
+def stop_rakuten_match_trace(token):
+    trace = _RAKUTEN_MATCH_TRACE.get()
+    _RAKUTEN_MATCH_TRACE.reset(token)
+    return trace
+
+
+def _rakuten_trace():
+    return _RAKUTEN_MATCH_TRACE.get()
+
+
+def _trace_rakuten_item(stage, item, **info):
+    trace = _rakuten_trace()
+    if trace is None:
+        return
+    key = (stage, str(item.get("itemCode", "") or ""))
+    if key in trace.setdefault("_seen", set()):
+        return  # 複数キーワードで同じ候補が出た場合は1回だけ記録する
+    trace["_seen"].add(key)
+    if len(trace["items"]) >= RAKUTEN_TRACE_MAX_ITEMS:
+        trace["omitted_items"] += 1
+        return
+    trace["items"].append(dict(
+        {"stage": stage, "item_code": str(item.get("itemCode", "") or ""),
+         "title": str(item.get("itemName", "") or "")[:RAKUTEN_TRACE_TITLE_MAX_CHARS]},
+        **info, _item=item))
 _rakuten_criteria_cache = {}
 _rakuten_criteria_call_count = 0
 MAX_RAKUTEN_CRITERIA_CALLS = 50
@@ -3175,7 +3215,16 @@ def is_same_product_for_market(ai_name, rakuten_title):
 
     return match_ratio >= 0.45
 
-def score_rakuten_item(item, product_name, brand="", category=""):
+def _score_reject(explain, rule, title, words=()):
+    """Step49.7: score_rakuten_item()のハード除外(-9999)理由を、explain(dict)が
+    渡された場合だけ記録する(判定・戻り値は変えない)。"""
+    if isinstance(explain, dict):
+        explain["rule"] = rule
+        explain["matched_words"] = [w for w in words if isinstance(w, str) and w in title][:10]
+    return -9999
+
+
+def score_rakuten_item(item, product_name, brand="", category="", explain=None):
     title = str(item.get("itemName", "") or "")
     title_norm = title.lower()
 
@@ -3188,7 +3237,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     )
 
     if not title or not name:
-        return -9999
+        return _score_reject(explain, "empty_title_or_name", title, ())
 
     # セット・まとめ買い商品は単品より大幅に低スコアにする（単品がなければセットを選ぶ）
     _SET_PENALTY_KEYWORDS = ["セット", "まとめ買い", "トライアルセット", "お試しセット"]
@@ -3244,7 +3293,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             elif category in ("ピーリング", "パック"):
                 name_match_score = 8
             else:
-                return -9999
+                return _score_reject(explain, "name_token_mismatch", title, ())
         else:
             name_match_score = 35 + (len(matched_tokens) * 12)
 
@@ -3288,10 +3337,10 @@ def score_rakuten_item(item, product_name, brand="", category=""):
     ]
 
     if any(word in title for word in hard_reject_words):
-        return -9999
+        return _score_reject(explain, "hard_reject_word", title, hard_reject_words)
 
     if infer_bundle_quantity_from_title(title) > 1:
-        return -9999
+        return _score_reject(explain, "bundle_quantity", title, ())
 
     if category == "美容液":
         _serum_wrong = [
@@ -3300,10 +3349,10 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             "オールインワン", "シートマスク", "フェイスマスク", "薬用マスク", "パック"
         ]
         if any(word in title for word in _serum_wrong):
-            return -9999
+            return _score_reject(explain, "category_wrong_word", title, _serum_wrong)
         _serum_required = ["美容液", "セラム", "エッセンス", "アンプル", "serum", "essence", "ampoule"]
         if not any(w.lower() in title_norm or w in title for w in _serum_required):
-            return -9999
+            return _score_reject(explain, "category_required_word_missing", title, ())
 
     elif category == "クリーム":
         cream_required_words = [
@@ -3331,21 +3380,21 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         ]
 
         if any(word in title for word in cream_wrong_words):
-            return -9999
+            return _score_reject(explain, "category_wrong_word", title, cream_wrong_words)
 
         if not any(word in title_norm or word in title for word in cream_required_words):
             if any(word in title for word in ["美容液", "セラム"]):
-                return -9999
+                return _score_reject(explain, "category_wrong_word", title, ["美容液", "セラム"])
             score_category_penalty = -12
         else:
             score_category_penalty = 0
 
     elif category == "日焼け止め":
         if any(word in title for word in ["シートマスク", "フェイスマスク", "薬用マスク", "パック"]):
-            return -9999
+            return _score_reject(explain, "category_wrong_word", title, ["シートマスク", "フェイスマスク", "薬用マスク", "パック"])
 
         if not any(word in title for word in ["日焼け止め", "UV", "uv", "SPF", "spf", "PA", "pa", "サンスクリーン"]):
-            return -9999
+            return _score_reject(explain, "category_required_word_missing", title, ())
 
     elif category == "パック":
         pack_words = [
@@ -3360,7 +3409,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         ]
 
         if not any(word in title for word in pack_words):
-            return -9999
+            return _score_reject(explain, "category_required_word_missing", title, ())
 
         hard_wrong_pack_words = [
             "洗顔",
@@ -3371,7 +3420,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         ]
 
         if any(word in title for word in hard_wrong_pack_words):
-            return -9999
+            return _score_reject(explain, "category_wrong_word", title, hard_wrong_pack_words)
 
         score_category_penalty = 0
 
@@ -3380,7 +3429,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
 
     elif category == "化粧水":
         if any(word in title for word in ["クリーム", "乳液", "ミルク", "美容液", "セラム", "シートマスク", "フェイスマスク", "パック"]):
-            return -9999
+            return _score_reject(explain, "category_wrong_word", title, ["クリーム", "乳液", "ミルク", "美容液", "セラム", "シートマスク", "フェイスマスク", "パック"])
 
     elif category == "ピーリング":
         # クレンジング・洗顔・保湿系はピーリングカテゴリから除外
@@ -3393,7 +3442,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             "シートマスク", "フェイスマスク", "パック",
         ]
         if any(word in title for word in _peel_wrong):
-            return -9999
+            return _score_reject(explain, "category_wrong_word", title, _peel_wrong)
         # ピーリング固有キーワードが1つもなければ除外
         _peel_required = [
             "ピーリング", "peel", "aha", "bha", "pha", "lha",
@@ -3402,7 +3451,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             "グリコール酸", "乳酸", "サリチル酸",
         ]
         if not any(w in title_norm or w in title for w in _peel_required):
-            return -9999
+            return _score_reject(explain, "category_required_word_missing", title, ())
 
     elif category == "乳液":
         # 乳液カテゴリ: 乳液/ミルク/エマルジョン系キーワードが必須
@@ -3410,9 +3459,9 @@ def score_rakuten_item(item, product_name, brand="", category=""):
         _emulsion_wrong = ["化粧水", "ローション", "トナー", "洗顔", "クレンジング",
                            "日焼け止め", "パック", "シートマスク"]
         if any(w in title for w in _emulsion_wrong):
-            return -9999
+            return _score_reject(explain, "category_wrong_word", title, _emulsion_wrong)
         if not any(w.lower() in title_norm or w in title for w in _emulsion_required):
-            return -9999
+            return _score_reject(explain, "category_required_word_missing", title, ())
 
     elif category == "洗顔":
         # 洗顔カテゴリ: 明確なクレンジング専用品・パック系のみ除外（クリーム洗顔等は許容）
@@ -3422,13 +3471,13 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             "シートマスク", "フェイスマスク", "パック",
         ]
         if any(word in title for word in _sengan_wrong):
-            return -9999
+            return _score_reject(explain, "category_wrong_word", title, _sengan_wrong)
 
     elif category == "クレンジング":
         # クレンジングカテゴリ: シートマスク・パック系のみ除外
         _cleansing_wrong = ["シートマスク", "フェイスマスク", "パック"]
         if any(word in title for word in _cleansing_wrong):
-            return -9999
+            return _score_reject(explain, "category_wrong_word", title, _cleansing_wrong)
 
     elif category == "サプリメント":
         # スキンケア・美容液・化粧品がヒットしないよう除外
@@ -3438,7 +3487,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             "美容機器", "美顔器", "スチーマー",
         ]
         if any(word in title for word in _supp_skincare_words):
-            return -9999
+            return _score_reject(explain, "supplement_skincare_word", title, _supp_skincare_words)
         # サプリらしいキーワードが1つもなければ低スコア
         _supp_ok_words = [
             "サプリ", "supplement", "錠", "粒", "カプセル", "mg", "μg", "mcg",
@@ -3461,7 +3510,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             "サプリ", "supplement", "錠", "粒", "カプセル",
         ]
         if any(word in title for word in _dev_skincare_words):
-            return -9999
+            return _score_reject(explain, "device_skincare_word", title, _dev_skincare_words)
         # 「超音波洗浄機」「イオン」等は顔用美容機器以外の同名商品
         # （メガネ・アクセサリー・入れ歯洗浄機、空気清浄機のイオン機能等）にも
         # ヒットするため、明確に用途違いと分かる語を含む商品を除外する
@@ -3473,7 +3522,7 @@ def score_rakuten_item(item, product_name, brand="", category=""):
             "空気清浄機", "加湿器", "イオンドライヤー",
         ]
         if any(word in title for word in _dev_wrong_use_words):
-            return -9999
+            return _score_reject(explain, "device_wrong_use_word", title, _dev_wrong_use_words)
         # 美容機器らしいキーワードがなければ低スコア
         _dev_ok_words = [
             "美顔器", "led", "LED", "ems", "EMS", "超音波", "イオン",
@@ -5428,6 +5477,8 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
     )
 
     if candidates_cache_key in _rakuten_candidates_cache:
+        if _rakuten_trace() is not None:
+            _rakuten_trace()["cache_hit"] = True
         print("[RAKUTEN CANDIDATES CACHE HIT]", product_name, flush=True)
         return _rakuten_candidates_cache[candidates_cache_key]
 
@@ -5621,6 +5672,8 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
                     _pl2 = _res2.json()
                     items = _pl2.get("items") or _pl2.get("Items") or []
 
+            if _rakuten_trace() is not None:
+                _rakuten_trace()["searches"].append({"keyword": keyword[:80], "item_count": len(items)})
             if not items:
                 continue
 
@@ -5638,6 +5691,7 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
                 # サプリメント・美容機器はスキンケア外カテゴリのためこのチェックをスキップ
                 if category and category not in ("サプリメント", "美容機器"):
                     if not _is_rakuten_item_valid_for_category(rakuten_title, category, strict=False):
+                        _trace_rakuten_item("category_filter", item)
                         continue
 
                 # --- title match チェック ---
@@ -5660,6 +5714,7 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
                         _tc = _compact_brand_text(rakuten_title)
                         _forms = [_compact_brand_text(f) for f in explicit_brand_forms(brand)]
                         if _forms and not any(f in _tc for f in _forms):
+                            _trace_rakuten_item("brand_prefilter", item, brand_forms=explicit_brand_forms(brand))
                             continue
                 elif not _bypass_title_match:
                     if not is_same_verified_rakuten_product(
@@ -5673,13 +5728,16 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
                             {"product": product_name, "brand": brand, "rakuten_title": rakuten_title},
                             flush=True
                         )
+                        _trace_rakuten_item("title_prefilter", item)
                         continue
 
+                _explain = {} if _rakuten_trace() is not None else None
                 score = score_rakuten_item(
                     item,
                     product_name=product_name,
                     brand=brand,
-                    category=category
+                    category=category,
+                    explain=_explain,
                 )
 
                 if _bypass_title_match or category == "美容機器":
@@ -5692,8 +5750,13 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
                 # バイパス時はスコア閾値を 0 に緩める（-9999 リジェクト以外は通す）
                 _min_score = 0 if (_bypass_title_match or category == "美容機器") else 20
                 if score < _min_score:
+                    if score <= -9000:
+                        _trace_rakuten_item("score_reject", item, **(_explain or {}))
+                    else:
+                        _trace_rakuten_item("score_below_threshold", item, score=score, min_score=_min_score)
                     continue
 
+                _trace_rakuten_item("searched_candidate", item, score=score)
                 scored_items.append((score, item))
 
             if not scored_items:

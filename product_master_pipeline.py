@@ -1122,6 +1122,7 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
                     and precheck_reason in _RAKUTEN_PRECHECK_EXCLUDE_REASONS):
                 actions.append({"action": "skipped_rakuten_precheck", "brand": brand, "name": name,
                                 "category": category, "rakuten_reason": precheck_reason,
+                                "rakuten_match_summary": precheck.get("match_summary"),
                                 "rakuten_api_calls": app.rakuten_api_call_delta(precheck_calls_before)})
                 continue
 
@@ -1239,6 +1240,8 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
                     "reason": "rakuten_new_listing_not_found" if deterministic else "rakuten_check_unavailable",
                     "rakuten_reason": rakuten_reason, "staging_id": staging_id,
                     "rakuten_api_calls": app.rakuten_api_call_delta(rakuten_calls_before),
+                    # Step49.7: 楽天照合の集計(件数のみ。タイトル全文は診断ログだけ)。
+                    "rakuten_match_summary": sale_resolution.get("match_summary"),
                     **({"reused_staging": True} if reuse_staging_id else {}),
                 }
                 if deterministic:
