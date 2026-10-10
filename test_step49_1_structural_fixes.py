@@ -22,6 +22,17 @@ CIT = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQ_s49
 FORBIDDEN = AssertionError("呼ばれないはず")
 
 
+def _precheck_only_resolver(calls):
+    """Step49.3: Stage1前の楽天事前確認(JANなし)だけを許可し、商品名を記録する。
+    検索0件(除外しない)を返す。reflect前の確認(JANあり等)は呼ばれないはず。"""
+    def resolve(brand, product_name, category, jan_code=None):
+        if jan_code is not None:
+            raise AssertionError("reflect前の楽天確認には進まないはず")
+        calls.append(product_name)
+        return {"status": "not_found", "initial_candidate_count": 0}
+    return resolve
+
+
 def _jan(body12):
     digits = [int(c) for c in body12]
     total = sum(d * (3 if i % 2 else 1) for i, d in enumerate(digits))
@@ -165,7 +176,7 @@ class FlowTests(OrchestratorTestBase):
              patch.object(pipeline, "collect_one_product", side_effect=collect), \
              patch.object(pipeline, "call_gemini_for_collection", side_effect=FORBIDDEN), \
              patch.object(pipeline.citation_verification, "fetch_html", side_effect=FORBIDDEN), \
-             patch.object(pipeline, "resolve_item_code_for_product", side_effect=FORBIDDEN), \
+             patch.object(pipeline, "resolve_item_code_for_product", side_effect=_precheck_only_resolver([])), \
              patch.object(pipeline, "reflect_staging_to_product_master", side_effect=FORBIDDEN):
             return orchestrator.process_coverage_gap_item(
                 {"category": "サプリメント", "target": "zinc", "shortage_count": 1}, "execute", budget.batch_id, budget,

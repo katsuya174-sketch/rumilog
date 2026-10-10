@@ -21,6 +21,17 @@ CIT = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/AUZIYQ_s48
 FORBIDDEN = AssertionError("early reject後に呼ばれないはず")
 
 
+def _precheck_only_resolver(calls):
+    """Step49.3: Stage1前の楽天事前確認(JANなし)だけを許可し、商品名を記録する。
+    検索0件(除外しない)を返す。reflect前の確認(JANあり等)は呼ばれないはず。"""
+    def resolve(brand, product_name, category, jan_code=None):
+        if jan_code is not None:
+            raise AssertionError("reflect前の楽天確認には進まないはず")
+        calls.append(product_name)
+        return {"status": "not_found", "initial_candidate_count": 0}
+    return resolve
+
+
 def _cand(name, evidence="L-システイン配合", brand="ブランド"):
     return {"brand": f"{brand}{TEST_NAME_SUFFIX}", "product_name": f"{name}{TEST_NAME_SUFFIX}",
             "target_evidence": evidence, "source_url": CIT + name}
@@ -93,6 +104,7 @@ class EarlyRejectFlowTests(OrchestratorTestBase):
 
     def _run(self, discovered, collect, max_consecutive_failures=3):
         budget = orchestrator.BatchBudget(self._new_batch_id("s485"), 5, 20, 0.50)
+        self.rakuten_prechecked = []
 
         # 検索・構造化だけを差し替え、候補の区分判定(discover_candidates_via_gemini)は実コードを通す。
         search = {"status": "ok", "raw_text": "", "citations": [{"uri": CIT, "title": "x"}], "search_queries": ["q"]}
@@ -110,7 +122,8 @@ class EarlyRejectFlowTests(OrchestratorTestBase):
                    patch.object(pipeline, "collect_one_product", side_effect=collect),
                    patch.object(pipeline, "call_gemini_for_collection", side_effect=FORBIDDEN),
                    patch.object(pipeline.citation_verification, "fetch_html", side_effect=FORBIDDEN),
-                   patch.object(pipeline, "resolve_item_code_for_product", side_effect=FORBIDDEN),
+                   patch.object(pipeline, "resolve_item_code_for_product",
+                                side_effect=_precheck_only_resolver(self.rakuten_prechecked)),
                    patch.object(pipeline, "reflect_staging_to_product_master", side_effect=FORBIDDEN)]
         for p in patches:
             p.start()
@@ -152,6 +165,7 @@ class EarlyRejectFlowTests(OrchestratorTestBase):
         actions, report = self._run(discovered, collect, max_consecutive_failures=1)
 
         self.assertEqual(collected, [normal["product_name"]])  # 医薬品候補はStage1(収集)へ進まない
+        self.assertEqual(self.rakuten_prechecked, [normal["product_name"]])  # 楽天事前確認にも進まない
         processed = [a for a in actions if a["action"] not in ("external_discovery_result",)]
         self.assertEqual([a["action"] for a in processed], ["not_reflected"])
         # Step48.2/48.3の最終eligibilityゲートは維持される。

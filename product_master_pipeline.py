@@ -286,6 +286,11 @@ _DETERMINISTIC_EVALUATION_FAILURES = {
     "no_extracted_fields": "category_validator",
     "supplement_not_eligible": "supplement_eligibility",
 }
+# Step49.3: Stage1前の楽天事前確認(JANなし)で除外してよい理由。検索結果があるのに
+# 商品名・型番・販売形態・単品の条件で確定的に不適合なものだけ(検索0件・APIエラー・
+# 確定一致・JAN不一致(Stage2のJANが必要)は除外しない)。
+_RAKUTEN_PRECHECK_EXCLUDE_REASONS = {"title_mismatch", "device_model_mismatch",
+                                     "only_non_new_sale_listings", "only_set_items"}
 _DETERMINISTIC_RAKUTEN_REASONS = {
     "title_mismatch", "device_model_mismatch", "only_non_new_sale_listings", "only_set_items",
     # Step47.6: 検索結果はあるが、検証済みJANと一致する候補が無い(同一商品・
@@ -1100,6 +1105,22 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
                             **({"staging_id": reuse_staging_id} if reuse_staging_id else {})})
             continue
 
+        # Step49.3: 美容機器/サプリの新規収集は、有料のStage1の前に楽天の新品通常販売
+        # listingを商品名だけで確認し、確定的な不適合のときだけStage1を行わない
+        # (最終的なJAN優先の確認はreflect前に従来どおり行う)。正常なフィルタ結果
+        # なので連続失敗・試行数には数えない。
+        rakuten_name = pipeline.split_discovery_product_name(name)[0]
+        if not reuse_staging_id and pipeline.requires_sale_listing_before_reflect(category):
+            precheck_calls_before = app.rakuten_api_call_snapshot()
+            precheck = pipeline.resolve_item_code_for_product(brand, rakuten_name, category, jan_code=None)
+            precheck_reason = precheck.get("reason")
+            if (precheck.get("status") != "confirmed" and precheck.get("initial_candidate_count", 0) > 0
+                    and precheck_reason in _RAKUTEN_PRECHECK_EXCLUDE_REASONS):
+                actions.append({"action": "skipped_rakuten_precheck", "brand": brand, "name": name,
+                                "category": category, "rakuten_reason": precheck_reason,
+                                "rakuten_api_calls": app.rakuten_api_call_delta(precheck_calls_before)})
+                continue
+
         budget.record_attempt()
         collect_result = {}
         # Step49.1: 美容機器/サプリは、既存Product MasterのJANと一致する候補を
@@ -1199,8 +1220,10 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
         rakuten_calls_before = app.rakuten_api_call_snapshot()
         if pipeline.requires_sale_listing_before_reflect(category):
             staged_jan = str(((_fetch_staging_row(staging_id) or {}).get("stage2_payload") or {}).get("jan_code") or "")
+            # Step49.3: 楽天照合には型番の説明注記を分離した商品名を使う(保存済みstagingの
+            # 商品名「…（型番：… 等）」にも適用)。
             sale_resolution = pipeline.resolve_item_code_for_product(
-                brand, name, category, jan_code=None if staged_jan.lower() in ("", "unknown") else staged_jan,
+                brand, rakuten_name, category, jan_code=None if staged_jan.lower() in ("", "unknown") else staged_jan,
             )
             if sale_resolution.get("status") != "confirmed":
                 consecutive_failures += 1
