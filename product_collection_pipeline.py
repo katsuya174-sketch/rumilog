@@ -2177,9 +2177,12 @@ def reflect_staging_to_product_master(staging_id, dry_run=True):
             if str(i.get("ingredient", "") or "").strip().lower() != "unknown"
         ]
         active_ingredients = [i.get("ingredient") for i in real_ingredients]
+        # Step49.4: 表示用の商品名からは型番の説明注記(「（型番：… 等）」)を除く
+        # (確定した型番1件は商品名に残す。注記が無い商品名は変わらない)。
+        display_name = split_discovery_product_name(product_name)[0] or product_name
         product_for_master = {
             "brand": brand,
-            "name": product_name,
+            "name": display_name,
             "category": category,
             "active_ingredients": active_ingredients,
             # 既存診断ロジック(normalize_ingredient_tag)が比較に使う統制タグ。
@@ -2221,7 +2224,7 @@ def reflect_staging_to_product_master(staging_id, dry_run=True):
         if category_attributes:
             product_for_master["category_attributes"] = category_attributes
 
-        identity_key = app._normalize_product_master_identity_key(brand, product_name, category)
+        identity_key = app._normalize_product_master_identity_key(brand, display_name, category)
         cur.execute("SELECT product_id FROM product_master WHERE identity_key = %s", (identity_key,))
         existing_row = cur.fetchone()
         reflect_action = "update" if existing_row else "insert"

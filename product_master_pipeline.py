@@ -201,6 +201,10 @@ def identity_keys_for(brand, name, category):
     """Step49.1: 重複判定用のidentity_key集合。通常のキーに加え、商品名の先頭に
     ブランド名が重複して付いている場合はそれを除いた商品名のキーも含める。"""
     keys = {app.make_verified_product_key({"brand": brand, "name": name, "category": category})}
+    # Step49.4: 型番の説明注記を除いた表示名(reflect時の商品名)のキーも含める。
+    display_name = pipeline.split_discovery_product_name(name)[0]
+    if display_name and display_name != name:
+        keys.add(app.make_verified_product_key({"brand": brand, "name": display_name, "category": category}))
     stripped = pipeline.brand_stripped_product_name(brand, name)
     if stripped:
         keys.add(app.make_verified_product_key({"brand": brand, "name": stripped, "category": category}))

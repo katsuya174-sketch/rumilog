@@ -3823,6 +3823,26 @@ def rakuten_request_keyword(keyword):
     return " ".join(kept) if kept else " ".join(parts)
 
 
+# Step49.5: ブランド名の明示的な表記。元の表記に加え、末尾に括弧注記が1つある場合は
+# 括弧外と括弧内をそれぞれ別の表記として扱う(例:「ヤーマン（YA-MAN）」→「ヤーマン」
+# 「YA-MAN」)。部分文字列の切り出し・略称・推測・対応表は使わない。空白を除いた長さが
+# 2文字未満の表記は使わない。
+_EXPLICIT_BRAND_ANNOTATION_RE = re.compile(r"^(.*?\S)\s*\(([^()]*)\)\s*$")
+
+
+def _compact_brand_text(text):
+    return re.sub(r"\s+", "", unicodedata.normalize("NFKC", str(text or "")).lower())
+
+
+def explicit_brand_forms(brand):
+    folded = unicodedata.normalize("NFKC", str(brand or "")).strip()
+    forms = [folded]
+    match = _EXPLICIT_BRAND_ANNOTATION_RE.match(folded)
+    if match:
+        forms += [match.group(1).strip(), match.group(2).strip()]
+    return [f for f in dict.fromkeys(forms) if len(_compact_brand_text(f)) >= 2]
+
+
 def clean_rakuten_keyword(keyword):
     if isinstance(keyword, list):
         keyword = " ".join(str(x) for x in keyword if str(x).strip())
@@ -5634,9 +5654,12 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
 
                 if category == "美容機器":
                     if brand:
-                        _bc = "".join(c for c in brand.lower() if c.strip())
-                        _tc = "".join(c for c in rakuten_title.lower() if c.strip())
-                        if _bc and _bc not in _tc:
+                        # Step49.5: 「ヤーマン（YA-MAN）」のような括弧注記付きブランドは、
+                        # 括弧外・括弧内の明示的な表記をそれぞれ照合する(連結した
+                        # 文字列そのままでは楽天タイトルに一致しないため)。
+                        _tc = _compact_brand_text(rakuten_title)
+                        _forms = [_compact_brand_text(f) for f in explicit_brand_forms(brand)]
+                        if _forms and not any(f in _tc for f in _forms):
                             continue
                 elif not _bypass_title_match:
                     if not is_same_verified_rakuten_product(
