@@ -70,7 +70,8 @@ class Case134Tests(unittest.TestCase):
                  self._listing("c:1", None)]                      # 商品説明なし
         items[2]["itemCaption"] = None
         result, log, _ = run(items, "YA-MAN TOKYO JAPAN（ヤーマン）", "RF美顔器 フォトプラス", JAN_134)
-        self.assertEqual(result["reason"], "jan_mismatch")
+        # Step50.1: JAN記載なし・判定不能の出品があるため、不合格ではなく保留。
+        self.assertEqual(result["reason"], "jan_absent_identity_unconfirmed")
         self.assertEqual(result["match_summary"]["jan_status_counts"],
                          {"match": 0, "explicit_mismatch": 1, "absent": 1, "undeterminable": 1})
         self.assertEqual({e["item_code"]: e["resolver_stage"] for e in log["items"]},

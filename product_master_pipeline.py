@@ -1229,11 +1229,18 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
         sale_resolution = None
         rakuten_calls_before = app.rakuten_api_call_snapshot()
         if pipeline.requires_sale_listing_before_reflect(category):
-            staged_jan = str(((_fetch_staging_row(staging_id) or {}).get("stage2_payload") or {}).get("jan_code") or "")
+            staged_row = _fetch_staging_row(staging_id) or {}
+            staged_payload = staged_row.get("stage2_payload") or {}
+            staged_jan = str(staged_payload.get("jan_code") or "")
+            # Step50.1: JANの記載が無い出品の照合に使う公式情報(Stage1本文・成分名)。
+            identity_context = {"stage1_text": staged_row.get("stage1_raw_text"),
+                                "active_ingredients": [i.get("ingredient") for i in staged_payload.get("active_ingredients") or []
+                                                       if isinstance(i, dict) and i.get("ingredient")]}
             # Step49.3: 楽天照合には型番の説明注記を分離した商品名を使う(保存済みstagingの
             # 商品名「…（型番：… 等）」にも適用)。
             sale_resolution = pipeline.resolve_item_code_for_product(
                 brand, rakuten_name, category, jan_code=None if staged_jan.lower() in ("", "unknown") else staged_jan,
+                identity_context=identity_context,
             )
             if sale_resolution.get("status") != "confirmed":
                 consecutive_failures += 1

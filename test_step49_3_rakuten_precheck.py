@@ -108,7 +108,7 @@ class StagingReuseNameTests(OrchestratorTestBase):
             conn.close()
         calls = []
 
-        def resolve(brand_, product_name, category, jan_code=None):
+        def resolve(brand_, product_name, category, jan_code=None, identity_context=None):
             calls.append((product_name, jan_code))
             return {"status": "not_found", "initial_candidate_count": 0}
         budget = orchestrator.BatchBudget(self._new_batch_id("s493-reuse"), 5, 20, 0.50)
