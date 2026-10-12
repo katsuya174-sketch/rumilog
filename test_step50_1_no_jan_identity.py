@@ -68,17 +68,23 @@ class NoJanIdentityTests(unittest.TestCase):
     def test_matching_listing_is_accepted(self):
         self.assertEqual(check(OK_TITLE), (True, None))
 
-    def test_other_variant_size_is_rejected(self):
-        self.assertEqual(check("森永乳業 ビヒダス 生きて届くビフィズス菌 15日分 ビフィズス菌 BB536")[1], "spec_conflict")
+    def test_other_size_of_same_product_is_accepted(self):
+        # Step52: 同じ商品の容量違い(公式本文に無い容量を含む)は受け入れる。
+        self.assertEqual(check("森永乳業 ビヒダス 生きて届くビフィズス菌 15日分 ビフィズス菌 BB536"), (True, None))
+        self.assertEqual(check("森永ビヒダス 生きて届く ビフィズス菌BB536 90日分"), (True, None))
+
+    def test_other_form_or_old_version_is_rejected(self):
+        self.assertEqual(check("森永ビヒダス 生きて届く ビフィズス菌BB536 顆粒 30包")[1], "variant_word:顆粒")
+        self.assertEqual(check("森永ビヒダス 生きて届く ビフィズス菌BB536 旧パッケージ 30カプセル")[1], "variant_word:old_version")
 
     def test_different_series_or_extra_ingredient_is_rejected(self):
         self.assertTrue(check("森永ビヒダス 生きて届く ビフィズス菌BB536 プレミアム 30カプセル")[1].startswith("series_word"))
         self.assertTrue(check("森永ビヒダス 生きて届く ビフィズス菌BB536 ＋ビタミンC 30カプセル")[1].startswith("extra_ingredient"))
 
-    def test_missing_information_is_held(self):
-        self.assertEqual(check("森永ビヒダス 生きて届く ビフィズス菌BB536 お徳用")[1], "listing_spec_missing")
-        self.assertEqual(check(OK_TITLE, context={"stage1_text": "1日1粒", "active_ingredients": []})[1],
-                         "official_variant_spec_unknown")
+    def test_missing_information(self):
+        # Step52: 容量の記載が無い出品・公式本文に容量が無い商品も、同じ商品なら受け入れる。公式情報が無ければ保留。
+        self.assertEqual(check("森永ビヒダス 生きて届く ビフィズス菌BB536 お徳用"), (True, None))
+        self.assertEqual(check(OK_TITLE, context={"stage1_text": "1日1粒", "active_ingredients": []}), (True, None))
         self.assertEqual(check(OK_TITLE, context=None)[1], "no_official_context")
 
     def test_brand_and_name_are_required(self):
@@ -94,14 +100,21 @@ class ResolverTests(unittest.TestCase):
 
     def test_no_jan_listing_is_confirmed(self):
         result = resolve([_item("ok:1", OK_TITLE, caption="機能性表示食品")])
-        self.assertEqual((result["status"], result["disambiguated_by"]), ("confirmed", "name_spec_without_jan"))
+        self.assertEqual((result["status"], result["disambiguated_by"]), ("confirmed", "name_without_jan"))
 
-    def test_jan_match_is_preferred(self):
-        result = resolve([_item("nj:1", OK_TITLE, caption="説明"), _item("j:1", OK_TITLE, caption=f"JAN {JAN}")])
-        self.assertEqual((result["item"]["itemCode"], result["disambiguated_by"]), ("j:1", "jan_code"))
+    def test_most_reviewed_listing_is_selected_among_identified(self):
+        # Step52: JAN一致を優先せず、同じ商品と確認できた出品の中でレビュー件数の多いものを選ぶ。
+        many = dict(_item("nj:1", OK_TITLE, caption="説明"), reviewCount=120)
+        result = resolve([many, _item("j:1", OK_TITLE, caption=f"JAN {JAN}")])
+        self.assertEqual((result["item"]["itemCode"], result["disambiguated_by"]), ("nj:1", "name_without_jan+review_selection"))
+
+    def test_official_size_variant_jan_is_accepted(self):
+        result = resolve([_item("v:1", "森永ビヒダス 生きて届く ビフィズス菌BB536 15日分", caption="JAN 4902720133760")])
+        self.assertEqual((result["status"], result["disambiguated_by"]), ("confirmed", "official_variant_jan"))
+        self.assertEqual(result["official_variant_jans"], ["4902720133760"])
 
     def test_explicit_other_jan_is_rejected(self):
-        for caption in ("JAN 4902720133760", "JANコード：4902720999999"):  # 正当な別JAN / 明記された別コード
+        for caption in ("JAN 4987035691914", "JANコード：4902720999999"):  # 公式本文に無い正当なJAN / 明記された別コード
             with self.subTest(caption=caption):
                 self.assertEqual(resolve([_item("m:1", OK_TITLE, caption=caption)])["reason"], "jan_mismatch")
 
@@ -111,10 +124,9 @@ class ResolverTests(unittest.TestCase):
         self.assertEqual(resolve([undeterminable])["reason"], "jan_absent_identity_unconfirmed")
         self.assertEqual(resolve([_item("n:1", OK_TITLE)], context=None)["reason"], "jan_absent_identity_unconfirmed")
 
-    def test_other_size_listing_alone_is_not_confirmed(self):
+    def test_other_size_listing_alone_is_confirmed(self):
         result = resolve([_item("v:1", "森永乳業 ビヒダス 生きて届くビフィズス菌 15日分 ビフィズス菌 BB536")])
-        self.assertEqual(result["status"], "not_found")
-        self.assertEqual(result["no_jan_rejections"], {"spec_conflict": 1})
+        self.assertEqual((result["status"], result["disambiguated_by"]), ("confirmed", "name_without_jan"))
 
     def test_post_reflect_verification_accepts_only_no_jan_absent(self):
         with patch.object(app, "fetch_rakuten_item_by_item_code",

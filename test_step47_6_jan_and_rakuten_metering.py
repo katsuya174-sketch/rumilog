@@ -54,7 +54,7 @@ class JanSelectionTests(unittest.TestCase):
 
     def test_multiple_jan_matches_use_merchant_tiebreak_among_them_only(self):
         result = resolve([(500, SIMILAR_OTHER_JAN), (247, CORRECT_90), (202, CORRECT_90_OTHER_SHOP)])
-        self.assertEqual(result["disambiguated_by"], "jan_code+merchant_tiebreak")
+        self.assertEqual(result["disambiguated_by"], "jan_code+review_selection")
         self.assertEqual({p["item_code"] for p in result["tiebreak_pool"]},
                          {"irisplaza-r:10166330", "akarie:10171576"})
         self.assertNotEqual(result["item"]["itemCode"], "other:200")

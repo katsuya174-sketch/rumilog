@@ -2647,12 +2647,20 @@ def jan_verified_name_match(product_name, brand, item, jan):
 _SPEC_PARTS_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(粒|錠|カプセル|包|袋|本|枚|日分|mg|g|ml|μg|mcg|iu)")
 
 
+# Step52: 内容量(粒数・日分・包数・g・ml)は同じ商品の容量違いとして扱い、規格矛盾に数えない。
+# 1粒あたりの含有量(mg・μg等)が違う場合は処方違いとして引き続き矛盾とする。
+_STRENGTH_UNITS = ("mg", "μg", "mcg", "iu")
+_PACKAGE_SIZE_RE = re.compile(r"(?:約|または|又は)?\s*\d+(?:[.,]\d+)?\s*(?:日分|粒|錠|カプセル|包|袋|本|枚)(?:入り?)?")
+
+
 def name_title_spec_conflict(product_name, title):
     """Step49.6: 商品名に規格(例: 120粒・60日分)があり、楽天タイトルに同じ単位の
     別の値だけがある場合をTrue(明確な規格矛盾)とする。タイトルに同じ単位の
-    記載が無い場合は矛盾としない。"""
+    記載が無い場合は矛盾としない。Step52: 内容量の単位は比較しない(含有量の単位だけ比較)。"""
     name_specs = {}
     for value, unit in _SPEC_PARTS_RE.findall(unicodedata.normalize("NFKC", str(product_name or "")).lower()):
+        if PM_SELECTION_FLAGS["accept_same_product_sizes"] and unit not in _STRENGTH_UNITS:
+            continue
         name_specs.setdefault(unit, set()).add(float(value))
     if not name_specs:
         return False
@@ -2759,6 +2767,11 @@ def no_jan_identity_check(item, brand, product_name, category, jan, context):
     if PM_MATCH_FLAGS["name_match_v2"] and not pm_title_name_match(product_name, title, brand, category,
                                                                    context.get("active_ingredients")):
         return False, "name_parts_not_in_title"
+    if PM_SELECTION_FLAGS["accept_same_product_sizes"]:
+        # Step52: 同じ商品なら容量は問わない(公式本文に無い容量も可)。別シリーズ・別形状・
+        # リニューアル前の商品を示す語がタイトルにあれば不合格。
+        conflict = variant_word_conflict(product_name, title, official_sibling_words(context["stage1_text"], product_name, brand, jan))
+        return (False, f"variant_word:{conflict}") if conflict else (True, None)
     ours = official_variant_specs(context["stage1_text"], jan)
     if not ours:
         return False, "official_variant_spec_unknown"
@@ -2771,6 +2784,137 @@ def no_jan_identity_check(item, brand, product_name, category, jan, context):
     if not listing & ours:
         return False, "spec_unconfirmed"
     return True, None
+
+
+# ===== Step52: 同じ商品の容量違いの出品を受け入れる(Product Master収集経路のみ) =====
+PM_SELECTION_FLAGS = {"accept_same_product_sizes": True, "review_first_selection": True}
+# 公式本文のJANの行で、容量の記載以外に許す語(JANの表記・つなぎの語)。
+_SIZE_LINE_FILLER_RE = re.compile(r"jan(?:コード)?|総重量|お?徳用|大容量|となります|です|は|の|※|約")
+# 別の形状・別の版を示す一般語(ブランドごとの対応表ではない)。商品名に無いのにタイトルにあれば別商品。
+_FORM_WORDS = ("ドリンク", "ゼリー", "顆粒", "粉末", "パウダー", "チュアブル", "グミ", "持続型", "タイムリリース", "液体")
+_OLD_VERSION_RE = re.compile(r"旧(?:品|パッケージ|処方|デザイン|タイプ|仕様|版|商品)|リニューアル前|[【\[（(]旧[】\]）)]")
+_SIBLING_STOP_WORDS = {"jan", "コード", "janコード", "製品", "商品", "タイプ", "など", "例", "サプリメント", "サプリ"}
+
+
+def _size_only_line(line, jan):
+    """JANの行が「JAN＋内容量」だけでできていれば、その内容量の集合。それ以外はNone。"""
+    folded = unicodedata.normalize("NFKC", line).lower()
+    sizes = {t for t in _spec_tokens(_DOSE_PHRASE_RE.sub(" ", folded)) if t[0] in ("days", "count", "pack", "g", "ml")}
+    rest = re.sub(rf"(?<!\d){jan}(?!\d)", " ", folded)
+    rest = _NO_JAN_SPEC_RE.sub(" ", rest)
+    rest = re.sub(r"\d+(?:\.\d+)?\s*(?:g|ml)", " ", rest)
+    rest = _SIZE_LINE_FILLER_RE.sub(" ", rest)
+    rest = re.sub(r"[\s\W_]+", "", rest)
+    return sizes if sizes and not rest else None
+
+
+def official_size_variant_jans(stage1_text, jan):
+    """公式本文で「JAN＋内容量」だけが書かれた行のJAN(この商品の容量違い)。この商品のJANは含めない。
+    別シリーズ・別形状・過去の仕様など内容量以外の説明がある行のJANは含めない。
+    同じ内容量に別々のJANが書かれている場合(旧品の可能性)はどちらも含めない。"""
+    by_size, out = {}, set()
+    for line in unicodedata.normalize("NFKC", str(stage1_text or "")).splitlines():
+        for code in extract_jan_codes(line):
+            sizes = _size_only_line(line, code)
+            if sizes is None:
+                continue
+            for size in sizes:
+                by_size.setdefault(size, set()).add(code)
+            out.add(code)
+    ambiguous = {c for codes in by_size.values() if len(codes) > 1 for c in codes}
+    return out - ambiguous - {jan}
+
+
+def official_sibling_words(stage1_text, product_name, brand, jan=""):
+    """公式本文のJANの記載のうち、内容量だけの記載ではないもの(別シリーズ・別形状・過去の仕様の説明)に
+    出てくる語で、この商品の名称・ブランド・この商品のJANの説明に無いもの。タイトルにあれば別商品の出品とみなす。
+    1行に複数の記載がある場合(「、」「<br>」等で区切られた行)は区切りごとに判定する。"""
+    name_text = _cm(f"{product_name} {brand}")
+    words, own = set(), set()
+    text = re.sub(r"<br\s*/?>", "\n", unicodedata.normalize("NFKC", str(stage1_text or "")), flags=re.IGNORECASE)
+    for line in text.splitlines():
+        if not extract_jan_codes(line):
+            continue
+        for segment in re.split(r"[、，,;；|]", line):
+            codes = extract_jan_codes(segment)
+            if not codes or all(_size_only_line(segment, c) is not None for c in codes):
+                continue
+            cleaned = _NO_JAN_SPEC_RE.sub(" ", re.sub(r"\d{8,13}", " ", segment.lower()))
+            found = {_cm(w) for w in _PM_NAME_SPLIT_RE.split(re.sub(r"[*:：「」｢｣。．.<>]", " ", cleaned))}
+            found = {w for w in found if len(w) >= 2 and not w.isdigit() and not re.fullmatch(r"[ぁ-ん]+", w)
+                     and w not in _SIBLING_STOP_WORDS and w not in name_text}
+            (own if jan and jan in codes else words).update(found)
+    return words - own
+
+
+def variant_word_conflict(product_name, title, sibling_words=()):
+    """タイトルに、商品名に無い別形状の語・リニューアル前を示す語・公式本文上の別商品の語があればその語。"""
+    folded_title = unicodedata.normalize("NFKC", str(title or ""))
+    if _OLD_VERSION_RE.search(folded_title):
+        return "old_version"
+    name, compact_title = _cm(product_name), _cm(title)
+    for word in _FORM_WORDS:
+        if word in compact_title and word not in name:
+            return word
+    return next((w for w in sorted(sibling_words) if w in compact_title and w not in name), None)
+
+
+# 一般的な栄養成分名(ブランドごとの対応表ではない)。JANで確認できない出品のタイトル本体に、
+# 商品名・成分に無いこれらの語があれば別商品(例: 「カルシウム／マグ」「マルチビタミン」)とみなす。
+_NUTRIENT_WORDS = ("カルシウム", "マグネシウム", "鉄", "葉酸", "イソフラボン", "ルテイン", "グルコサミン", "コンドロイチン",
+                   "コエンザイムq10", "マカ", "ブルーベリー", "dha", "epa", "乳酸菌", "ビフィズス菌", "セラミド", "プラセンタ",
+                   "ナットウキナーゼ", "ウコン", "アスタキサンチン", "マルチビタミン", "ビタミンa", "ビタミンb", "ビタミンc",
+                   "ビタミンd", "ビタミンe", "ビタミンk", "亜鉛", "ヒアルロン酸", "コラーゲン", "シスチン", "システイン")
+
+
+def _title_main_segment(title):
+    """楽天タイトルの本体(「|」「｜」より前。後ろは検索用の語の羅列であることが多い)。"""
+    return re.split(r"[|｜]", str(title or ""), maxsplit=1)[0]
+
+
+def no_jan_title_identity_conflict(product_name, title, active_ingredients=()):
+    """Step52: JANで確認できないサプリの出品について、タイトル本体に商品名が無い、または商品名・成分に無い
+    栄養成分名がタイトル本体にある場合、その理由。問題が無ければNone。"""
+    main = _title_main_segment(title)
+    groups = _name_part_groups(product_name, "サプリメント")
+    parts = [g["part"] for g in groups if "part" in g]
+    alts = [g["alt"] for g in groups if "alt" in g]
+    compact_main = _cm(main)
+    missing = [x for x in parts if x not in compact_main]
+    if (not parts and not alts) or (missing and not (alts and any(a in compact_main for a in alts)
+                                                     and all(_ascii_only(x) for x in missing))):
+        return "name_not_in_title_main"
+    product_text = _cm(" ".join([str(product_name or "")] + [str(a or "") for a in (active_ingredients or [])]))
+    extra = next((w for w in _NUTRIENT_WORDS if w in compact_main and w not in product_text), None)
+    return f"other_nutrient:{extra}" if extra else None
+
+
+def _mentioned_jans(item):
+    text = unicodedata.normalize("NFKC", f"{item.get('itemName', '') or ''} {item.get('itemCaption', '') or ''}")
+    labelled = set(re.findall(r"JAN(?:コード)?\s*[:：]?\s*(\d{13}|\d{8})(?!\d)", text, flags=re.IGNORECASE))
+    return extract_jan_codes(text) | labelled
+
+
+def official_shop_match(shop_name, brand):
+    """店舗名にブランドの明示的な表記(登録済みの別表記を含む)があればTrue(ブランド・メーカーの店舗)。"""
+    forms = list(app.explicit_brand_forms(brand))
+    entry = brand_alias_entry(brand)
+    if entry:
+        forms += entry.get("names", []) + entry.get("makers", [])
+    shop = _cm(shop_name)
+    return any(len(_cm(f)) >= 2 and _cm(f) in shop for f in forms)
+
+
+def select_listing_by_reviews(pairs, brand):
+    """Step52: 同じ商品と確認できた出品から1件を選ぶ。レビュー件数 → レビュー平均 → ブランド公式店 →
+    画像あり → itemCode(決定的) の順。容量・価格・送料は比べない。"""
+    def key(pair):
+        item = pair[1]
+        return (-app.safe_price(item.get("reviewCount", 0)), -app.safe_float(item.get("reviewAverage", 0)),
+                0 if official_shop_match(item.get("shopName", ""), brand) else 1,
+                0 if (item.get("mediumImageUrls") or item.get("smallImageUrls")) else 1,
+                str(item.get("itemCode", "") or ""))
+    return min(pairs, key=key)[1]
 
 
 def rakuten_jan_status(item, jan_code):
@@ -2812,6 +2956,9 @@ def _resolver_stage_for_item(item, brand, product_name, category, jan_code, iden
         return "non_new_sale", info
     if _pm_is_set(title):
         return "set_item", info
+    if PM_SELECTION_FLAGS["accept_same_product_sizes"]:
+        basis, why = listing_identity_basis(item, brand, product_name, category, jan, identity_context)
+        return (("eligible" if basis in ("jan_code", "product_without_jan") else f"eligible_{basis}") if basis else why), info
     if jan and not rakuten_item_mentions_jan(item, jan):
         # Step50.2: JAN段階の結果を区別して記録する(判定は_resolve本体のとおり)。
         status = rakuten_jan_status(item, jan)
@@ -2850,7 +2997,7 @@ def _rakuten_match_summary(trace, result, brand, product_name, category, jan_cod
         title_match += stage not in ("title_mismatch", "spec_conflict")
         model_match += info.get("model_match", stage not in ("title_mismatch", "spec_conflict")) is True
         sale_new += info.get("sale_condition") == "new"
-        single += stage == "eligible" or stage.startswith(("jan_", "no_jan_", "eligible_no_jan"))
+        single += stage not in ("title_mismatch", "spec_conflict", "device_model_mismatch", "non_new_sale", "set_item")
     traced_total = len(items)
     return {
         "search_count": len(trace["searches"]), "cache_hit": trace["cache_hit"],
@@ -2906,6 +3053,9 @@ def _name_part_groups(product_name, category=None):
     """商品名を照合用の部分に分ける。括弧内は直前の部分の別表記(どちらかが一致すればよい)、
     「サプリメント」「美顔器」等のカテゴリ語は省略可とする。"""
     folded = unicodedata.normalize("NFKC", str(product_name or "")).lower()
+    if PM_SELECTION_FLAGS["accept_same_product_sizes"]:
+        # Step52: 商品名に含まれる内容量(「120粒」「30日分」等)は容量違いの出品でも一致を求めない。
+        folded = _PACKAGE_SIZE_RE.sub(" ", folded)
     groups, outer = [], re.sub(r"\([^()]*\)", " ", folded)
     if category == "美容機器":
         # 型番(EPM-18BB・EH-SR85・KBE-2740/K等)は型番判定で照合するため、分割前に名称から除く。
@@ -3118,6 +3268,9 @@ def _resolve_item_code_for_product_impl(brand, product_name, category, jan_code=
     if not single_pairs:
         return {"status": "not_found", "reason": "only_set_items", **diag}
 
+    if PM_SELECTION_FLAGS["accept_same_product_sizes"]:
+        return _select_same_product_listing(single_pairs, brand, product_name, category, jan_code, identity_context, diag)
+
     # Step47.6: 検証済みJANがある商品は、JANが楽天候補(タイトル/商品説明)に
     # 記載された候補だけを同一商品・同一variantとして扱う。JAN一致が1件も
     # 無ければ(候補が1件だけでも)安全側でnot_found。JAN一致候補同士では
@@ -3178,6 +3331,99 @@ def _resolve_item_code_for_product_impl(brand, product_name, category, jan_code=
     }
 
 
+def listing_identity_basis(item, brand, product_name, category, jan_code, identity_context):
+    """Step52: JAN段階で、出品がこの商品(容量違いを含む)と同一である根拠。戻り値: (basis, reason)。
+    basis: jan_code=この商品のJAN / official_variant_jan=公式本文の容量違いのJAN /
+    name_without_jan=JANの記載が無く名称等で確認 / product_without_jan=この商品にJANが無く名称等で確認 / None=不合格・保留。"""
+    jan = normalize_jan_code(jan_code)
+    context = identity_context or {}
+    title = str(item.get("itemName", "") or "")
+    if jan and rakuten_item_mentions_jan(item, jan):
+        return "jan_code", None
+    stage1 = context.get("stage1_text") or ""
+    if category != "美容機器" and stage1:
+        conflict = variant_word_conflict(product_name, title, official_sibling_words(stage1, product_name, brand, jan))
+        if conflict:
+            return None, f"variant_word:{conflict}"
+    def title_conflict():
+        if category != "サプリメント":
+            return None
+        return no_jan_title_identity_conflict(product_name, title, context.get("active_ingredients"))
+    if not jan:
+        conflict = title_conflict()
+        return (None, f"variant_word:{conflict}") if conflict else ("product_without_jan", None)
+    status = rakuten_jan_status(item, jan)
+    if status == "explicit_mismatch":
+        variants = official_size_variant_jans(stage1, jan) if category != "美容機器" else set()
+        mentioned = _mentioned_jans(item)
+        if mentioned & variants and mentioned <= variants | {jan}:
+            return "official_variant_jan", None
+        return None, "jan_explicit_mismatch"
+    if status == "undeterminable" or identity_context is None:
+        return None, "jan_undeterminable" if status == "undeterminable" else "jan_absent_hold"
+    ok, why = no_jan_identity_check(item, brand, product_name, category, jan, identity_context)
+    if ok and title_conflict():
+        ok, why = False, title_conflict()
+    return ("name_without_jan", None) if ok else (None, f"no_jan_rejected:{why}")
+
+
+def _select_same_product_listing(single_pairs, brand, product_name, category, jan_code, identity_context, diag):
+    """Step52: 同じ商品(容量違いを含む)と確認できた出品をすべて候補にし、レビュー件数を優先して1件を選ぶ。"""
+    accepted, rejections = [], {}
+    for score, item in single_pairs:
+        basis, why = listing_identity_basis(item, brand, product_name, category, jan_code, identity_context)
+        if basis:
+            accepted.append((score, item, basis))
+            continue
+        key = why.split(":")[1] if why.startswith("no_jan_rejected:") else why.split(":")[0]
+        rejections[key] = rejections.get(key, 0) + 1
+    basis_counts = {}
+    for *_, b in accepted:
+        basis_counts[b] = basis_counts.get(b, 0) + 1
+    diag.update({"accepted_count": len(accepted), "listing_rejections": rejections, "accepted_basis_counts": basis_counts})
+    if not accepted:
+        if not normalize_jan_code(jan_code):
+            reason = "variant_word_conflict"
+        elif rejections.get("jan_explicit_mismatch", 0) == len(single_pairs):
+            reason = "jan_mismatch"
+        else:
+            reason = "jan_absent_identity_unconfirmed"  # JANの記載が無い・確認できない出品だけが残った(保留)
+        return {"status": "not_found", "reason": reason, **diag}
+    pairs = [(score, item) for score, item, _ in accepted]
+    best = select_listing_by_reviews(pairs, brand) if PM_SELECTION_FLAGS["review_first_selection"] \
+        else app._select_single_or_set_best(pairs)
+    basis = next(b for _, item, b in accepted if item is best)
+    result = {"status": "confirmed", "item": best, "disambiguated_by": basis if len(accepted) == 1 else f"{basis}+review_selection",
+              "identity_basis": basis, "candidate_count": len(accepted), **diag}
+    if basis == "official_variant_jan":
+        result["official_variant_jans"] = sorted(official_size_variant_jans((identity_context or {}).get("stage1_text"),
+                                                                            normalize_jan_code(jan_code)))
+    if len(accepted) > 1:
+        result["tiebreak_pool"] = [
+            {"item_code": item.get("itemCode", ""), "basis": b, "shop_name": item.get("shopName", ""),
+             "official_shop": official_shop_match(item.get("shopName", ""), brand),
+             "review_count": item.get("reviewCount", 0), "review_average": item.get("reviewAverage", 0),
+             "has_image": bool(item.get("mediumImageUrls") or item.get("smallImageUrls")), "price": item.get("itemPrice", 0)}
+            for _, item, b in accepted
+        ]
+    return result
+
+
+def _saved_resolution_identity_ok(resolution, jan):
+    """reflect前に確認済みの結果を保存してよいか(この商品のJAN、または記録された根拠が出品と矛盾しないこと)。"""
+    item = resolution.get("item") or {}
+    if rakuten_item_mentions_jan(item, jan):
+        return True
+    basis = resolution.get("identity_basis") or str(resolution.get("disambiguated_by") or "").split("+")[0]
+    if basis == "official_variant_jan":
+        variants = set(resolution.get("official_variant_jans") or [])
+        mentioned = _mentioned_jans(item)
+        return bool(mentioned & variants) and mentioned <= variants | {jan}
+    if basis in ("name_without_jan", "name_spec_without_jan"):
+        return rakuten_jan_status(item, jan) == "absent"
+    return False
+
+
 def verify_and_resolve_item_code(product_id, brand, product_name, category, jan_code=None, resolution=None):
     """resolve_item_code_for_product()で1件に確定した候補のみ、
     app.fetch_rakuten_item_by_item_code()で実在・価格・URLを再確認し、
@@ -3194,9 +3440,7 @@ def verify_and_resolve_item_code(product_id, brand, product_name, category, jan_
     if resolution is None:
         resolution = resolve_item_code_for_product(brand, product_name, category, jan_code=jan_code)
     elif resolution.get("status") == "confirmed" and normalize_jan_code(jan_code) \
-            and not rakuten_item_mentions_jan(resolution.get("item") or {}, normalize_jan_code(jan_code)) \
-            and not (str(resolution.get("disambiguated_by") or "").startswith("name_spec_without_jan")
-                     and rakuten_jan_status(resolution.get("item") or {}, jan_code) == "absent"):
+            and not _saved_resolution_identity_ok(resolution, normalize_jan_code(jan_code)):
         # Step47.6: 事前確認の結果を再利用する場合も、検証済みJANと一致しない
         # 候補は保存しない(JANを渡さずに得た結果の取り込みを防ぐ)。
         return {"status": "not_found", "reason": "jan_mismatch", "item_code": (resolution.get("item") or {}).get("itemCode")}

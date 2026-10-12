@@ -1012,8 +1012,8 @@ class ResolveItemCodeForProductTests(unittest.TestCase):
         with patch.object(app, "fetch_rakuten_candidates", return_value=[(50, item1), (45, item2)]):
             result = pipeline.resolve_item_code_for_product("TestBrand", "テスト美容液", "美容液")
         self.assertEqual(result["status"], "confirmed")
-        self.assertEqual(result["disambiguated_by"], "merchant_tiebreak")
-        self.assertEqual(result["item"]["itemCode"], "shop1:1001")  # スコアが高い方(既存タイブレーク基準)
+        self.assertEqual(result["disambiguated_by"], "product_without_jan+review_selection")
+        self.assertEqual(result["item"]["itemCode"], "shop1:1001")  # Step52: レビュー等が同じならitemCode順
 
     def test_set_item_mixed_in_is_excluded_before_merchant_tiebreak(self):
         # セット商品がスコア最高でも、タイブレーク対象には含めない
@@ -1027,7 +1027,7 @@ class ResolveItemCodeForProductTests(unittest.TestCase):
         ):
             result = pipeline.resolve_item_code_for_product("TestBrand", "テスト美容液", "美容液")
         self.assertEqual(result["status"], "confirmed")
-        self.assertEqual(result["disambiguated_by"], "merchant_tiebreak")
+        self.assertEqual(result["disambiguated_by"], "product_without_jan+review_selection")
         self.assertNotEqual(result["item"]["itemCode"], "shop9:9999")
         self.assertEqual(result["item"]["itemCode"], "shop1:1001")
 
@@ -1052,7 +1052,7 @@ class ResolveItemCodeForProductTests(unittest.TestCase):
             )
         self.assertEqual(result["status"], "confirmed")
         # Step47.6: JAN一致候補の中でのmerchant tie-break
-        self.assertEqual(result["disambiguated_by"], "jan_code+merchant_tiebreak")
+        self.assertEqual(result["disambiguated_by"], "jan_code+review_selection")
 
     def test_missing_jan_does_not_drop_candidates(self):
         # JAN記載なしの候補を、JAN不明であることを理由に落とさない。
@@ -1193,7 +1193,7 @@ class VerifyAndResolveItemCodeTests(unittest.TestCase, DbCleanupMixin):
                 product_id, "TestBrand", f"テスト美容液{self.TEST_SUFFIX}3b", "美容液",
             )
         self.assertEqual(result["status"], "resolved")
-        self.assertEqual(result["disambiguated_by"], "merchant_tiebreak")
+        self.assertEqual(result["disambiguated_by"], "product_without_jan+review_selection")
 
         conn = psycopg2.connect(os.environ["DATABASE_URL"])
         try:

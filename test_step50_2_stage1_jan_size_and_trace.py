@@ -52,10 +52,10 @@ class TraceLabelTests(unittest.TestCase):
         result = self.run_resolver(items)
         summary = pipeline._rakuten_match_summary(trace, result, BRAND, NAME, "サプリメント", JAN, CONTEXT)
         stages = {e["item_code"]: e["resolver_stage"] for e in trace["items"]}
-        self.assertEqual(stages, {"ok:1": "eligible_no_jan_spec_match", "v:1": "no_jan_rejected:spec_conflict"})
-        self.assertEqual(result["disambiguated_by"], "name_spec_without_jan")
-        self.assertEqual(summary["resolver_stage_counts"],
-                         {"eligible_no_jan_spec_match": 1, "no_jan_rejected:spec_conflict": 1})
+        # Step52: 同じ商品の容量違い(15日分)も受け入れる。
+        self.assertEqual(stages, {"ok:1": "eligible_name_without_jan", "v:1": "eligible_name_without_jan"})
+        self.assertEqual(result["disambiguated_by"], "name_without_jan+review_selection")
+        self.assertEqual(summary["resolver_stage_counts"], {"eligible_name_without_jan": 2})
 
     def test_jan_match_label_unchanged(self):
         item = _item("j:1", OK_TITLE, caption=f"JAN {JAN}")

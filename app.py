@@ -3217,7 +3217,8 @@ def is_same_product_for_market(ai_name, rakuten_title):
 
 # Step51: Product Master収集の楽天照合(product_collection_pipeline.resolve_item_code_for_product)の
 # 実行中だけ有効にする改善。診断時の楽天照合・採点には影響させない。
-PM_MATCH_FLAGS = {"score_context_words": True, "pm_set_detection": True, "identity_exempts_category_penalty": True}
+PM_MATCH_FLAGS = {"score_context_words": True, "pm_set_detection": True, "identity_exempts_category_penalty": True,
+                  "ignore_price_in_collection": True}
 _PM_COLLECTION_MODE = _contextvars.ContextVar("pm_collection_mode", default=False)
 # Step51.1: 収集時の照合対象商品の検証済みJAN(採点で同一性の確認に使う)。
 _PM_COLLECTION_JAN = _contextvars.ContextVar("pm_collection_jan", default="")
@@ -3644,6 +3645,9 @@ def score_rakuten_item(item, product_name, brand="", category="", explain=None):
 
     if price <= 0:
         score -= 30
+    elif _PM_COLLECTION_MODE.get() and PM_MATCH_FLAGS.get("ignore_price_in_collection", True):
+        # Step52: 収集時は容量・価格で出品を選ばない(大容量の出品が価格で閾値未満にならないようにする)。
+        pass
     elif price >= 12000:
         score -= 20
     elif price >= 8000:
@@ -5917,6 +5921,9 @@ def _build_rakuten_result(best, display_name):
         "image": image_url,
         "item_code": best.get("itemCode", ""),
         "shop_name": best.get("shopName", ""),
+        # Step52: Product Master由来の候補は正式名(ブランド・商品名)で表示する。
+        "pm_brand": best.get("_pm_brand", "") if best.get("_source") == "product_master" else "",
+        "pm_name": best.get("_pm_name", "") if best.get("_source") == "product_master" else "",
     }
 
 
@@ -8648,7 +8655,12 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
         # "ビタミンC サプリメント"等)のままにせず、適合度評価で選ばれた実在
         # 商品の実タイトルに差し替える。(他カテゴリはGemini出力の具体的な
         # 商品名をそのまま使うため対象外)
-        if category in ("美容機器", "サプリメント") and rakuten_item.get("rakuten_title"):
+        _official = (product_master_display_name(rakuten_item.get("pm_brand"), rakuten_item.get("pm_name"))
+                     if category in ("美容機器", "サプリメント") and PM_OFFICIAL_DISPLAY_NAME else None)
+        if _official:
+            # Step52: Product Master由来の商品は、楽天の出品タイトルではなく正式名(容量表記なし)で表示する。
+            step["brand"], step["product"] = _official
+        elif category in ("美容機器", "サプリメント") and rakuten_item.get("rakuten_title"):
             _raw_title = rakuten_item["rakuten_title"]
             _display_title = normalize_display_product_name(_raw_title)
             if _display_title:
@@ -8725,7 +8737,10 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
 
         # 旧verified_products_cache.json/product_masterへの並行蓄積
         # (accumulate_verified_product、合意事項)。
-        accumulate_verified_product(step, rakuten_item)
+        # Step52: Product Master由来の推薦は既にproduct_masterにある商品のため蓄積しない
+        # (診断時の値で収集済みの行を上書きしたり、表示名で重複行を作ったりしないため)。
+        if not rakuten_item.get("pm_name"):
+            accumulate_verified_product(step, rakuten_item)
 
     else:
         step["rakuten_link"] = existing_rakuten_link
@@ -19803,6 +19818,36 @@ def _clean_why_best_product_name(name):
 # 余裕を持った長さとして設定した(美容・医学的な閾値ではなく、
 # UI表示文字数の安全域)。
 DISPLAY_NAME_FALLBACK_LENGTH = 32
+
+# Step52: Product Master由来の美容機器・サプリは正式名で表示する。
+PM_OFFICIAL_DISPLAY_NAME = True
+# 内容量の表記(「30日分」「120粒」「（または60日分）」「徳用」等)。含有量(500mg等)は残す。
+_DISPLAY_SIZE_RE = re.compile(
+    r"[（(]\s*(?:約|または|又は)?\s*\d+(?:[.,]\d+)?\s*(?:日分|粒|錠|カプセル|包|袋|本|枚)(?:入り?)?\s*[)）]"
+    r"|(?:約|または|又は)?\s*\d+(?:[.,]\d+)?\s*(?:日分|粒|錠|カプセル|包|袋|本|枚)(?:入り?)?"
+    r"|お?徳用|大容量")
+
+
+def product_master_display_name(brand, name):
+    """Product Masterの正式名から表示用の(ブランド, 商品名)を作る。ブランドは括弧内の別表記を除いた表記、
+    商品名は先頭に重複したブランド表記と内容量の表記を除く(表記の照合はNFKCで行い、表示は元の文字のまま)。
+    作れなければNone。"""
+    brand, name = str(brand or "").strip(), str(name or "").strip()
+    if not brand or not name:
+        return None
+    display_brand = re.sub(r"\s*[（(][^（）()]*[)）]\s*", " ", brand).strip() or brand
+    folded_name = unicodedata.normalize("NFKC", name).lower()
+    forms = {unicodedata.normalize("NFKC", f).lower() for f in (brand, display_brand, *explicit_brand_forms(brand)) if f}
+    for form in sorted(forms, key=len, reverse=True):
+        if folded_name.startswith(form) and len(folded_name) > len(form) and len(folded_name) == len(name):
+            name = name[len(form):]
+            if form == unicodedata.normalize("NFKC", display_brand).lower():
+                name = re.sub(r"^\s*[（(][^（）()]*[)）]", "", name)  # 「iMUSE（イミューズ）」の括弧内の別表記
+            break
+    name = _DISPLAY_SIZE_RE.sub(" ", name)
+    name = re.sub(r"[（(]\s*[)）]", " ", name)
+    name = re.sub(r"[\s　]+", " ", name).strip(" 　・-/")
+    return (display_brand, name) if name else None
 
 
 def normalize_display_product_name(name):

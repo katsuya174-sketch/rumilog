@@ -55,12 +55,17 @@ class JanVerifiedNameMatchTests(unittest.TestCase):
         self.assertEqual(resolve([maca])["reason"], "title_mismatch")
 
     def test_spec_conflict_is_rejected(self):
+        # Step52: 内容量の違い(120粒/60粒)は同じ商品の容量違いとして扱い、含有量(mg)の違いは別処方として除く。
         result = resolve([_item("sp:1", "小林製薬の栄養補助食品 亜鉛 約30日分 60粒", caption=f"JAN {JAN}")],
                          name="亜鉛 120粒（小林製薬の栄養補助食品）")
+        self.assertEqual(result["status"], "confirmed")
+        result = resolve([_item("sp:2", "小林製薬の栄養補助食品 亜鉛 30mg 60粒", caption="説明")],
+                         name="亜鉛 15mg（小林製薬の栄養補助食品）")
         self.assertEqual(result["reason"], "title_mismatch")
 
     def test_spec_conflict_rule(self):
-        self.assertTrue(pipeline.name_title_spec_conflict("亜鉛 120粒", "亜鉛 60粒 お徳用"))
+        self.assertFalse(pipeline.name_title_spec_conflict("亜鉛 120粒", "亜鉛 60粒 お徳用"))  # Step52: 内容量は比べない
+        self.assertTrue(pipeline.name_title_spec_conflict("ビタミンC 1000mg", "ビタミンC 500mg 60粒"))
         self.assertFalse(pipeline.name_title_spec_conflict("亜鉛 120粒", "亜鉛 120粒 約60日分"))
         self.assertFalse(pipeline.name_title_spec_conflict("亜鉛 120粒", "亜鉛 お徳用"))      # 記載なしは矛盾としない
         self.assertFalse(pipeline.name_title_spec_conflict("亜鉛", "亜鉛 60粒"))              # 商品名に規格なし
