@@ -425,6 +425,9 @@ _CATEGORY_COLLECTION_CONFIGS = {
             "商品区分(医薬品(第1類・第2類・指定第2類・第3類医薬品等)・医薬部外品・機能性表示食品・"
             "栄養機能食品・健康食品・サプリメント等のうち、公式情報・商品表示に明記されている区分表示)",
             "含有成分とその含有量(1日あたり・1粒あたり等、公式の表示どおり)",
+            # Step50.2: JANの記載が無い楽天出品を規格で照合するため、販売規格ごとのJANと内容量を取得する。
+            "販売規格ごとのJANコードと内容量(公式表示どおり。粒数・カプセル数・錠数・重量(g)・容量(ml)・日分を"
+            "区別し、1つの規格ごとに「JANコード：内容量」の形で1行に書くこと。公式情報で確認できない規格・JANは書かない)",
             "1日の摂取目安量",
             "1回あたりの摂取量(粒数・mg等)",
             "摂取上の注意事項",
@@ -2742,7 +2745,7 @@ def rakuten_jan_status(item, jan_code):
     return "undeterminable" if caption is None else "absent"
 
 
-def _resolver_stage_for_item(item, brand, product_name, category, jan_code):
+def _resolver_stage_for_item(item, brand, product_name, category, jan_code, identity_context=None):
     """resolve本体と同じ判定関数・同じ順序で、候補がどの段階で外れるかを返す(診断記録専用)。"""
     title = str(item.get("itemName", "") or "")
     jan = normalize_jan_code(jan_code)
@@ -2765,11 +2768,20 @@ def _resolver_stage_for_item(item, brand, product_name, category, jan_code):
     if app._is_rakuten_set_item(title):
         return "set_item", info
     if jan and not rakuten_item_mentions_jan(item, jan):
-        return "jan_not_matched", info
+        # Step50.2: JAN段階の結果を区別して記録する(判定は_resolve本体のとおり)。
+        status = rakuten_jan_status(item, jan)
+        if status == "explicit_mismatch":
+            return "jan_explicit_mismatch", info
+        if status == "undeterminable":
+            return "jan_undeterminable", info
+        if identity_context is None:
+            return "jan_absent_hold", info
+        ok, why = no_jan_identity_check(item, brand, product_name, category, jan, identity_context)
+        return ("eligible_no_jan_spec_match", info) if ok else (f"no_jan_rejected:{why}", info)
     return "eligible", info
 
 
-def _rakuten_match_summary(trace, result, brand, product_name, category, jan_code):
+def _rakuten_match_summary(trace, result, brand, product_name, category, jan_code, identity_context=None):
     trace = trace or {"searches": [], "items": [], "omitted_items": 0, "cache_hit": False}
     items = trace["items"]
     fetch_stages = {}
@@ -2784,7 +2796,7 @@ def _rakuten_match_summary(trace, result, brand, product_name, category, jan_cod
     for entry in items:
         if entry["stage"] != "searched_candidate":
             continue
-        stage, info = _resolver_stage_for_item(entry["_item"], brand, product_name, category, jan_code)
+        stage, info = _resolver_stage_for_item(entry["_item"], brand, product_name, category, jan_code, identity_context)
         entry["jan_status"] = rakuten_jan_status(entry["_item"], jan_code)
         entry["resolver_stage"] = stage
         entry.update(info)
@@ -2793,7 +2805,7 @@ def _rakuten_match_summary(trace, result, brand, product_name, category, jan_cod
         title_match += stage not in ("title_mismatch", "spec_conflict")
         model_match += info.get("model_match", stage not in ("title_mismatch", "spec_conflict")) is True
         sale_new += info.get("sale_condition") == "new"
-        single += stage in ("eligible", "jan_not_matched")
+        single += stage == "eligible" or stage.startswith(("jan_", "no_jan_", "eligible_no_jan"))
     traced_total = len(items)
     return {
         "search_count": len(trace["searches"]), "cache_hit": trace["cache_hit"],
@@ -2819,7 +2831,7 @@ def resolve_item_code_for_product(brand, product_name, category, jan_code=None, 
                                                      identity_context=identity_context)
     finally:
         trace = app.stop_rakuten_match_trace(token)
-    summary = _rakuten_match_summary(trace, result, brand, product_name, category, jan_code)
+    summary = _rakuten_match_summary(trace, result, brand, product_name, category, jan_code, identity_context)
     log_items = [{k: v for k, v in entry.items() if not k.startswith("_")} for entry in (trace or {}).get("items", [])]
     print("[RAKUTEN MATCH TRACE] " + json.dumps({"brand": brand, "product": product_name, "category": category,
                                                   "summary": summary, "items": log_items}, ensure_ascii=False),

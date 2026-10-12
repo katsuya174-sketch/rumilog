@@ -74,8 +74,9 @@ class Case134Tests(unittest.TestCase):
         self.assertEqual(result["reason"], "jan_absent_identity_unconfirmed")
         self.assertEqual(result["match_summary"]["jan_status_counts"],
                          {"match": 0, "explicit_mismatch": 1, "absent": 1, "undeterminable": 1})
+        # Step50.2: JAN段階の結果を区別して記録する(公式情報の文脈なしの直接呼び出しではJAN記載なしは保留)。
         self.assertEqual({e["item_code"]: e["resolver_stage"] for e in log["items"]},
-                         {"a:1": "jan_not_matched", "b:1": "jan_not_matched", "c:1": "jan_not_matched"})
+                         {"a:1": "jan_explicit_mismatch", "b:1": "jan_absent_hold", "c:1": "jan_undeterminable"})
 
     def test_jan_match_is_recorded_and_decision_unchanged(self):
         result, log, _ = run([self._listing("ok:1", f"JAN {JAN_134}")], "YA-MAN TOKYO JAPAN（ヤーマン）",
