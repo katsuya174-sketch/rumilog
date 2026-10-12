@@ -75,9 +75,12 @@ class ClassificationTests(unittest.TestCase):
         self.assertEqual(result["status"], "undetermined")
 
     def test_non_transient_unverifiable_and_rejected_are_determinate(self):
-        result = self.classify("ヤーマン", [_cit(1, "a.example.com", _pv(None, fetch_status="unverifiable", reason="http_403")),
+        # Step50: 403は「確認保留」(transient)になったため、確定failureの例は404で確認する。
+        result = self.classify("ヤーマン", [_cit(1, "a.example.com", _pv(None, fetch_status="unverifiable", reason="http_404")),
                                            _cit(2, "b.example.com", _pv(None, fetch_status="rejected", reason="non_global_ip:10.0.0.1"))])
         self.assertEqual(result["status"], "failed")
+        pending = self.classify("ヤーマン", [_cit(1, "a.example.com", _pv(None, fetch_status="unverifiable", reason="http_403"))])
+        self.assertEqual(pending["status"], "undetermined")
 
     def test_saved_status_is_recomputed_with_step45_10_rules(self):
         # 保存値status="confirmed"(価格.comの旧誤判定)は使わず、現行判定器で再計算する。

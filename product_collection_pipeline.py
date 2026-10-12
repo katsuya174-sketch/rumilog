@@ -926,6 +926,86 @@ def _utcnow():
     return datetime.now(timezone.utc)
 
 
+# ===== Step50: 承認済みのブランド別表記・メーカー対応の登録(brand_aliases.json) =====
+# カタカナ⇔英字等の機械的な変換・推測はしない。根拠を確認し人が承認した対応関係
+# (status="approved")だけを、公式情報源の照合に使う。対応関係だけで商品を確認済みに
+# はしない(official_confirmation()が商品ごとの条件を追加で確認する)。
+BRAND_ALIASES_PATH = __import__("os").path.join(__import__("os").path.dirname(__import__("os").path.abspath(__file__)),
+                                                "brand_aliases.json")
+_BRAND_ALIAS_CACHE = {"mtime": None, "entries": []}
+
+
+def load_approved_brand_aliases(path=None):
+    """brand_aliases.jsonのうちstatus=="approved"の項目だけを返す(ファイルが無ければ空)。"""
+    os_ = __import__("os")
+    path = path or BRAND_ALIASES_PATH
+    try:
+        mtime = os_.path.getmtime(path)
+    except OSError:
+        return []
+    if _BRAND_ALIAS_CACHE["mtime"] != (path, mtime):
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        _BRAND_ALIAS_CACHE.update(mtime=(path, mtime), entries=[
+            e for e in data.get("entries", []) if isinstance(e, dict) and e.get("status") == "approved"])
+    return _BRAND_ALIAS_CACHE["entries"]
+
+
+def _brand_lookup_forms(brand):
+    """登録との照合に使うブランドの表記(元の表記・末尾注記を除いた表記・注記の中身)。"""
+    forms = set(official_brand_forms(brand))
+    match = _TRAILING_BRAND_ANNOTATION_RE.match(unicodedata.normalize("NFKC", str(brand or "")).strip())
+    if match:
+        inner = re.sub(r"^.*\(([^()]*)\)\s*$", r"\1", match.group(0)).strip()
+        if inner:
+            forms.add(inner)
+    return {k for k in (_normalize_brand_text(f) for f in forms) if len(k) >= _MIN_BRAND_MATCH_LENGTH}
+
+
+def brand_alias_entry(brand, entries=None):
+    """ブランド名に一致する承認済み登録項目。0件・複数件(曖昧)ならNone。"""
+    entries = load_approved_brand_aliases() if entries is None else entries
+    forms = _brand_lookup_forms(brand)
+    hits = [e for e in entries if forms & {_normalize_brand_text(n) for n in e.get("names", [])}]
+    return hits[0] if len(hits) == 1 else None
+
+
+def _spec_source_domains(payload, citations):
+    """商品の仕様(成分・カテゴリ固有項目)の根拠になったcitationのtitleドメイン集合。"""
+    uri_domain = {c.get("uri"): _citation_title_domain(c) for c in citations or [] if isinstance(c, dict)}
+    payload = payload or {}
+    urls = [i.get("source_url") for i in payload.get("active_ingredients") or [] if isinstance(i, dict)]
+    urls += [v.get("source_url") for v in (payload.get("category_attributes") or {}).values() if isinstance(v, dict)]
+    return {uri_domain.get(u) for u in urls if uri_domain.get(u)}
+
+
+def official_confirmation(brand, citations, payload=None, entries=None):
+    """公式情報源の確認(Step50)。
+    1. 既存の判定(is_official_source_confirmed)で確認できればbasis="direct"(従来どおり)。
+    2. できない場合、承認済み登録の別表記(alias)・メーカー名(maker)で、既存と同じ
+       照合(ドメイン名の完全一致・サイトの名乗り)を行う。ただし、その公式ドメインが
+       この商品の仕様の出典にもなっていること(商品ごとの条件)を必須とする。
+    条件を満たさなければ従来どおり不合格。"""
+    citations = [c for c in (citations or []) if isinstance(c, dict)]
+    if is_official_source_confirmed(brand, citations):
+        return {"confirmed": True, "basis": "direct"}
+    entry = brand_alias_entry(brand, entries)
+    if not entry:
+        return {"confirmed": False, "basis": None}
+    spec_domains = _spec_source_domains(payload, citations)
+    for basis, names in (("alias", entry.get("names", [])), ("maker", entry.get("makers", []))):
+        for name in names:
+            for citation in citations:
+                domain = _citation_title_domain(citation)
+                if not domain or domain not in spec_domains:
+                    continue
+                if _citation_title_confirms_brand(name, citation.get("title", "")) or _page_identity_confirms_brand(name, citation):
+                    return {"confirmed": True, "basis": basis, "matched_name": name, "domain": domain,
+                            "registry_id": entry.get("id")}
+    return {"confirmed": False, "basis": None, "registry_id": entry.get("id"),
+            "reason": "registered_names_not_confirmed_on_spec_source_domain"}
+
+
 def _verify_citation_page(brand, citation):
     fetched = citation_verification.fetch_html(citation.get("uri", ""))
     final_url = fetched.get("final_url") or ""
@@ -963,7 +1043,9 @@ def _verify_citation_page(brand, citation):
 # 判定ではなく、gate failure markerとも別(スケジューリング状態)。
 PAGE_RETRY_INTERVAL = timedelta(hours=24)
 PAGE_RETRY_MAX_ATTEMPTS = 2
-TRANSIENT_PAGE_REASONS = {"timeout", "connection_error"}
+# Step50: 403/429(アクセス拒否・回数制限)は商品の不適格ではなく「確認保留」として
+# 扱い、一時エラーと同じく期限・回数の範囲で再確認する(回避はしない)。
+TRANSIENT_PAGE_REASONS = {"timeout", "connection_error", "http_403", "http_429"}
 
 
 def is_transient_page_verification(verification):

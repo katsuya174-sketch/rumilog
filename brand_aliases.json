@@ -1,0 +1,411 @@
+{
+  "description": "Step50: 根拠を確認したブランドの別表記(aliases)・メーカー対応(makers)。status=='approved'の項目だけを公式情報源の照合に使う。対応関係だけで個々の商品を確認済みにはしない(その公式ドメインが商品の仕様の出典であることも必要)。namesは照合に使う同一ブランドの表記一覧(aliasesから導出)、makersはメーカー名一覧。",
+  "entries": [
+    {
+      "id": "panasonic",
+      "status": "approved",
+      "relation": "english_alias",
+      "names": [
+        "パナソニック",
+        "Panasonic"
+      ],
+      "makers": [],
+      "evidence_from_saved_data": [
+        {
+          "staging_id": 116,
+          "domain": "panasonic.jp",
+          "domain_is_spec_source": true,
+          "page_fetch": "ok",
+          "site_identity": [
+            "Panasonic"
+          ],
+          "stage2_brand": "パナソニック（Panasonic）"
+        },
+        {
+          "staging_id": 98,
+          "domain": "panasonic.jp",
+          "domain_is_spec_source": true,
+          "page_fetch": "ok",
+          "site_identity": [
+            "Panasonic"
+          ],
+          "stage2_brand": "パナソニック"
+        }
+      ],
+      "evidence_note": "panasonic.jp(サイトの名乗り: Panasonic)の商品ページ(EH-SR86)に「パナソニック」「Panasonic」の両表記が記載されている。同一ブランドの英字別名。",
+      "approved_by": "user (Step50方針承認・根拠確認による有効化)",
+      "approved_at": "2026-10-12T07:26:32+00:00",
+      "alias_relations": [
+        {
+          "name": "Panasonic",
+          "of": "パナソニック",
+          "type": "english_alias"
+        }
+      ],
+      "maker_relations": [],
+      "evidence": [
+        {
+          "final_url": "https://panasonic.jp/face/products/EH-SR86.html",
+          "status": "ok",
+          "reason": null,
+          "site_identity": [
+            "Panasonic"
+          ],
+          "names_in_page": {
+            "パナソニック": true,
+            "Panasonic": true
+          },
+          "makers_in_page": {},
+          "staging_id": 116,
+          "spec_source": true
+        },
+        {
+          "final_url": "https://panasonic.jp/face/products/EH-SR86/feature.html",
+          "status": "ok",
+          "reason": null,
+          "site_identity": [
+            "Panasonic"
+          ],
+          "names_in_page": {
+            "パナソニック": true,
+            "Panasonic": true
+          },
+          "makers_in_page": {},
+          "staging_id": 116,
+          "spec_source": true
+        }
+      ],
+      "evidence_checked_at": "2026-10-12T07:26:32+00:00"
+    },
+    {
+      "id": "morinaga-bifidus",
+      "status": "approved",
+      "relation": "maker_relation",
+      "names": [
+        "森永ビヒダス"
+      ],
+      "makers": [
+        "森永乳業"
+      ],
+      "evidence_from_saved_data": [
+        {
+          "staging_id": 127,
+          "domain": "morinagamilk.co.jp",
+          "domain_is_spec_source": true,
+          "page_fetch": "ok",
+          "site_identity": [
+            "森永乳業ウェブサイト"
+          ],
+          "stage2_brand": "森永ビヒダス"
+        }
+      ],
+      "evidence_note": "森永乳業の公式サイト(サイトの名乗り: 森永乳業ウェブサイト)のサプリメントブランドページに「森永ビヒダス」が掲載されている。メーカーとブランドの関係。",
+      "approved_by": "user (Step50方針承認・根拠確認による有効化)",
+      "approved_at": "2026-10-12T07:26:32+00:00",
+      "alias_relations": [],
+      "maker_relations": [
+        {
+          "maker": "森永乳業",
+          "type": "maker_relation"
+        }
+      ],
+      "evidence": [
+        {
+          "final_url": "https://www.morinagamilk.co.jp/products/healthfood/morinaga_supple/4013.html",
+          "status": "ok",
+          "reason": null,
+          "site_identity": [
+            "森永乳業ウェブサイト"
+          ],
+          "names_in_page": {
+            "森永ビヒダス": false
+          },
+          "makers_in_page": {
+            "森永乳業": true
+          },
+          "staging_id": 127,
+          "spec_source": true
+        },
+        {
+          "final_url": "https://www.morinagamilk.co.jp/products/brand/supplement/",
+          "status": "ok",
+          "reason": null,
+          "site_identity": [
+            "森永乳業ウェブサイト"
+          ],
+          "names_in_page": {
+            "森永ビヒダス": true
+          },
+          "makers_in_page": {
+            "森永乳業": true
+          },
+          "staging_id": 127,
+          "spec_source": true
+        }
+      ],
+      "evidence_checked_at": "2026-10-12T07:26:32+00:00"
+    },
+    {
+      "id": "imuse",
+      "status": "approved",
+      "relation": "english_alias+maker_relation",
+      "names": [
+        "iMUSE",
+        "イミューズ"
+      ],
+      "makers": [
+        "キリン"
+      ],
+      "evidence_from_saved_data": [
+        {
+          "staging_id": 128,
+          "domain": "kirin.co.jp",
+          "domain_is_spec_source": true,
+          "page_fetch": "ok",
+          "site_identity": [
+            "キリン"
+          ],
+          "stage2_brand": "iMUSE（イミューズ）"
+        }
+      ],
+      "evidence_note": "キリンの公式サイト(サイトの名乗り: キリン)の商品ページに「iMUSE」「イミューズ」の両表記が掲載されている。英字別名とメーカー関係。",
+      "approved_by": "user (Step50方針承認・根拠確認による有効化)",
+      "approved_at": "2026-10-12T07:26:32+00:00",
+      "alias_relations": [
+        {
+          "name": "iMUSE",
+          "of": "イミューズ",
+          "type": "english_alias"
+        }
+      ],
+      "maker_relations": [
+        {
+          "maker": "キリン",
+          "type": "maker_relation"
+        }
+      ],
+      "evidence": [
+        {
+          "final_url": "https://www.kirin.co.jp/healthy/detail/020_01.html",
+          "status": "ok",
+          "reason": null,
+          "site_identity": [
+            "キリン"
+          ],
+          "names_in_page": {
+            "iMUSE": true,
+            "イミューズ": true
+          },
+          "makers_in_page": {
+            "キリン": true
+          },
+          "staging_id": 128,
+          "spec_source": true
+        },
+        {
+          "final_url": "https://kirin-kyowahakko-bio.kirin.co.jp/Shohhin/sno_55",
+          "status": "ok",
+          "reason": null,
+          "site_identity": [],
+          "names_in_page": {
+            "iMUSE": true,
+            "イミューズ": false
+          },
+          "makers_in_page": {
+            "キリン": true
+          },
+          "staging_id": 128,
+          "spec_source": true
+        }
+      ],
+      "evidence_checked_at": "2026-10-12T07:26:32+00:00"
+    },
+    {
+      "id": "nippi-collagen",
+      "status": "approved",
+      "relation": "formal_name_alias",
+      "names": [
+        "ニッピコラーゲン化粧品",
+        "ニッピコラーゲン"
+      ],
+      "makers": [],
+      "evidence_from_saved_data": [
+        {
+          "staging_id": 121,
+          "domain": "nip-col.jp",
+          "domain_is_spec_source": true,
+          "page_fetch": "ok",
+          "site_identity": [
+            "ニッピコラーゲン"
+          ],
+          "stage2_brand": "ニッピコラーゲン化粧品"
+        }
+      ],
+      "evidence_note": "nip-col.jp(サイトの名乗り: ニッピコラーゲン / 商品ページ: ニッピコラーゲン化粧品【公式】通販サイト)の会社概要に正式名称「ニッピコラーゲン化粧品」が記載されている。正式名称と略称。",
+      "approved_by": "user (Step50方針承認・根拠確認による有効化)",
+      "approved_at": "2026-10-12T07:26:32+00:00",
+      "alias_relations": [
+        {
+          "name": "ニッピコラーゲン",
+          "of": "ニッピコラーゲン化粧品",
+          "type": "formal_name_alias"
+        }
+      ],
+      "maker_relations": [],
+      "evidence": [
+        {
+          "final_url": "https://www.nip-col.jp/ext/info/companyprofile.html",
+          "status": "ok",
+          "reason": null,
+          "site_identity": [
+            "ニッピコラーゲン"
+          ],
+          "names_in_page": {
+            "ニッピコラーゲン化粧品": true,
+            "ニッピコラーゲン": true
+          },
+          "makers_in_page": {},
+          "staging_id": 121,
+          "spec_source": true
+        },
+        {
+          "final_url": "https://www.nip-col.jp/item/8100.html",
+          "status": "ok",
+          "reason": null,
+          "site_identity": [
+            "ニッピコラーゲン化粧品【公式】通販サイト"
+          ],
+          "names_in_page": {
+            "ニッピコラーゲン化粧品": true,
+            "ニッピコラーゲン": true
+          },
+          "makers_in_page": {},
+          "staging_id": 121,
+          "spec_source": true
+        }
+      ],
+      "evidence_checked_at": "2026-10-12T07:26:32+00:00"
+    },
+    {
+      "id": "dear-natura",
+      "status": "proposed",
+      "relation": "english_alias+maker_relation",
+      "names": [
+        "ディアナチュラ",
+        "Dear-Natura"
+      ],
+      "makers": [
+        "アサヒグループ食品"
+      ],
+      "evidence_from_saved_data": [
+        {
+          "staging_id": 112,
+          "domain": "dear-natura.com",
+          "domain_is_spec_source": true,
+          "page_fetch": "http_403",
+          "site_identity": [],
+          "stage2_brand": "Dear-Natura"
+        },
+        {
+          "staging_id": 126,
+          "domain": "dear-natura.com",
+          "domain_is_spec_source": true,
+          "page_fetch": "not_checked",
+          "site_identity": [],
+          "stage2_brand": "Dear-Natura"
+        },
+        {
+          "staging_id": 131,
+          "domain": "dear-natura.com",
+          "domain_is_spec_source": true,
+          "page_fetch": "not_checked",
+          "site_identity": [],
+          "stage2_brand": "Dear-Natura"
+        },
+        {
+          "staging_id": 135,
+          "domain": "dear-natura.com",
+          "domain_is_spec_source": false,
+          "page_fetch": "http_403",
+          "site_identity": [],
+          "stage2_brand": "ディアナチュラ"
+        },
+        {
+          "staging_id": 136,
+          "domain": "dear-natura.com",
+          "domain_is_spec_source": true,
+          "page_fetch": "http_403",
+          "site_identity": [],
+          "stage2_brand": "Dear-Natura（ディアナチュラ）"
+        },
+        {
+          "staging_id": 138,
+          "domain": "dear-natura.com",
+          "domain_is_spec_source": false,
+          "page_fetch": "not_checked",
+          "site_identity": [],
+          "stage2_brand": "Dear-Natura"
+        }
+      ],
+      "evidence_note": "公式URL(www.dear-natura.com / www.asahi-gf.co.jp の dear-natura 商品ページ)は特定できたが、両サイトとも403でページ内容を確認できない。根拠不足のため未承認。",
+      "approved_by": null,
+      "approved_at": null,
+      "alias_relations": [
+        {
+          "name": "Dear-Natura",
+          "of": "ディアナチュラ",
+          "type": "english_alias"
+        }
+      ],
+      "maker_relations": [
+        {
+          "maker": "アサヒグループ食品",
+          "type": "maker_relation"
+        }
+      ],
+      "evidence": [
+        {
+          "final_url": "https://www.asahi-gf.co.jp/products/health/supplement/dear-natura/bottle/4946842650354.html",
+          "status": "unverifiable",
+          "reason": "http_403",
+          "site_identity": null,
+          "names_in_page": null,
+          "makers_in_page": null,
+          "staging_id": 112,
+          "spec_source": false
+        },
+        {
+          "final_url": "https://www.dear-natura.com/product/detail/vitamin-d-bottle",
+          "status": "unverifiable",
+          "reason": "http_403",
+          "site_identity": null,
+          "names_in_page": null,
+          "makers_in_page": null,
+          "staging_id": 112,
+          "spec_source": true
+        },
+        {
+          "final_url": "https://www.asahi-gf.co.jp/products/health/supplement/dear-natura/bottle/4946842635962.html",
+          "status": "unverifiable",
+          "reason": "http_403",
+          "site_identity": null,
+          "names_in_page": null,
+          "makers_in_page": null,
+          "staging_id": 126,
+          "spec_source": false
+        },
+        {
+          "final_url": "https://www.dear-natura.com/product/detail/hyaluronic-bottle",
+          "status": "unverifiable",
+          "reason": "http_403",
+          "site_identity": null,
+          "names_in_page": null,
+          "makers_in_page": null,
+          "staging_id": 126,
+          "spec_source": true
+        }
+      ],
+      "evidence_checked_at": "2026-10-12T07:26:32+00:00"
+    }
+  ]
+}

@@ -911,7 +911,8 @@ def _is_confident_enough(staging_row, brand, category):
     # Step45.3: 保存値(収集時点の判定)ではなく、保存済みの実citationから
     # 現行のis_official_source_confirmed()で毎回決定論的に再計算する
     # (staging再利用時も新しい判定ルールで評価される)。
-    if not pipeline.is_official_source_confirmed(brand, staging_row.get("stage1_citations") or []):
+    # Step50: 承認済みの別表記・メーカー対応も使う(商品ごとの条件付き)。
+    if not pipeline.official_confirmation(brand, staging_row.get("stage1_citations") or [], payload)["confirmed"]:
         return False, "official_source_not_confirmed_variant_uncertain"
     return True, None
 
@@ -942,7 +943,8 @@ def _ensure_staging_page_verification(staging_id, brand):
     検証済みなら保存値をそのまま使い、HTTPは再実行しない。"""
     row = _fetch_staging_row(staging_id)
     citations = row.get("stage1_citations") if row else None
-    if not row or _staging_reuse_data_problem(row) or pipeline.is_official_source_confirmed(brand, citations):
+    if not row or _staging_reuse_data_problem(row) or pipeline.official_confirmation(
+            brand, citations, row.get("stage2_payload"))["confirmed"]:
         return row
     if pipeline.has_page_verification(citations):
         # Step45.13: 評価済みのcitationは再取得せず、transientだけを期限・回数の
@@ -1001,13 +1003,14 @@ def evaluate_staging_for_reflect(staging_id, brand, name, category, conflict_sta
     category_check = _category_attributes_check(category, row.get("stage2_payload") or {})
     reflectable = row.get("stage2_status") == "ok" and confident and category_check["valid"]
     citations = row.get("stage1_citations") or []
+    official = pipeline.official_confirmation(brand, citations, row.get("stage2_payload") or {})
     return {
         "reflectable": reflectable, "data_complete": True, "staging_id": staging_id,
         "reason": None if reflectable else (reason or "category_validator_failed"),
         # 公式未確認かつcitation先ページ確認がまだ(dry-runではHTTPを行わない)。
-        "page_verification_pending": (not pipeline.is_official_source_confirmed(brand, citations)
-                                      and not pipeline.has_page_verification(citations)),
-        "official_source_confirmed": pipeline.is_official_source_confirmed(brand, row.get("stage1_citations") or []),
+        "page_verification_pending": (not official["confirmed"] and not pipeline.has_page_verification(citations)),
+        "official_source_confirmed": official["confirmed"],
+        "official_basis": official.get("basis"),
         "category_validator": category_check, "conflict_status": conflict_status,
         **({"product_classification": product_class} if product_class is not None else {}),
     }
@@ -1199,6 +1202,8 @@ def process_coverage_gap_item(item, mode, batch_id, budget, candidate_source,
                 official_evidence = classify_official_evidence(brand, row_citations)
                 not_reflected["official_evidence"] = {
                     k: official_evidence[k] for k in ("status", "not_confirmed", "transient_unverified", "unverified")}
+                # Step50: 未確定(一時エラー・403等の確認保留を含む)は「確認保留」、確定failureは「不合格」。
+                not_reflected["official_check"] = "pending" if official_evidence["status"] == "undetermined" else "failed"
                 if official_evidence["status"] == "failed":
                     not_reflected["gate_failure_marker"] = _record_gate_failure(staging_id, gate, evaluation["reason"])
             elif gate:

@@ -73,7 +73,7 @@ class GateTestBase(OrchestratorTestBase):
         patches = [patch.object(pipeline, "call_gemini_for_collection", side_effect=FORBIDDEN),
                    patch.object(pipeline, "collect_one_product", side_effect=FORBIDDEN),
                    patch.object(pipeline.citation_verification, "fetch_html",
-                                return_value={"status": "unverifiable", "reason": "http_403", "final_url": ""}),
+                                return_value={"status": "unverifiable", "reason": "http_404", "final_url": ""}),  # Step50: 403は確認保留
                    *extra]
         for p in patches:
             p.start()
