@@ -514,7 +514,7 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
     try:
         cur = conn.cursor()
         cur.execute(
-            "SELECT staging_id, brand, product_name, stage2_payload, stage1_citations "
+            "SELECT staging_id, brand, product_name, stage2_payload, stage1_citations, stage1_raw_text "
             "FROM product_collection_staging "
             "WHERE category = %s AND stage2_status = 'ok' "
             "AND conflict_status IS DISTINCT FROM 'needs_review' AND reflected_at IS NULL "
@@ -527,7 +527,7 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
 
     candidates = []
     transient_count = 0
-    for staging_id, brand, name, payload, citations in rows:
+    for staging_id, brand, name, payload, citations, stage1_text in rows:
         payload = payload or {}
         ingredient_names = [
             i.get("ingredient") for i in (payload.get("active_ingredients") or [])
@@ -550,7 +550,7 @@ def _staging_reuse_candidates(category, target, excluded_keys, limit, on_exclude
             )),
             "category_attributes": dict(
                 pipeline.flatten_category_attributes(payload.get("category_attributes")),
-                **({"primary_ingredient_tags": pipeline.supplement_primary_tags_for_payload(name, payload)}
+                **({"primary_ingredient_tags": pipeline.supplement_primary_tags_for_payload(name, payload, stage1_text)}
                    if category == "サプリメント" else {}),
             ),
         }

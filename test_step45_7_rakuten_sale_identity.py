@@ -114,7 +114,9 @@ class ResolverOrderTests(unittest.TestCase):
     def test_device_model_number_mismatch_is_not_saved(self):
         other = _rakuten_item(item_code="pana:75", item_name="パナソニック 美顔器 ソニックRFリフト EH-SR75")
         result = self._resolve([(80, other)], brand="パナソニック", name="バイタリフト RF EH-SR85")
-        self.assertEqual((result["status"], result["reason"]), ("not_found", "device_model_mismatch"))
+        # Step51: 収集時の名称照合で、商品名(バイタリフト)が無い別モデルは名称段階で除外される。
+        self.assertEqual(result["status"], "not_found")
+        self.assertIn(result["reason"], ("title_mismatch", "device_model_mismatch"))
 
     def test_set_exclusion_still_applies_after_sale_condition(self):
         bundle = _rakuten_item(item_code="yaman:4", item_name="ヤーマン フォトプラスEX 美顔器 ギフトセット")

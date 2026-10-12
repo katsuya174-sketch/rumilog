@@ -65,7 +65,7 @@ class OfficialSourceRuleTests(unittest.TestCase):
 class StagingReuseTests(OrchestratorTestBase):
 
     def _insert(self, label, citations, category="サプリメント", payload=None, stage2_status="ok"):
-        brand, name = f"BR{label}{TEST_NAME_SUFFIX}", f"商品{label}{TEST_NAME_SUFFIX}"
+        brand, name = f"BR{label}{TEST_NAME_SUFFIX}", f"ビタミンC {label}{TEST_NAME_SUFFIX}"  # Step51: 商品名に主要成分
         payload = payload if payload is not None else {
             "active_ingredients": [{"ingredient": "アスコルビン酸",
                                     "source_url": (citations[0].get("uri", "") if citations else "")}],

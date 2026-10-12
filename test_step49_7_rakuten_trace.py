@@ -45,13 +45,17 @@ OFFICIAL_115 = _item("yaman-official:1", "美顔器 ウェアラブル ハンズ
 class Case115Tests(unittest.TestCase):
 
     def test_skincare_word_rejection_is_identifiable(self):
+        # Step51: 収集時は、美容機器の語があるタイトルの機能説明(「専用美容液と併用」)をスキンケア商品とみなさない。
         result, log, line = run([OFFICIAL_115], "ヤーマン（YA-MAN）", "メディリフト プラス EPM-18BB", JAN_115)
-        self.assertEqual(result["status"], "not_found")  # 判定は従来どおり
-        entry = log["items"][0]
-        self.assertEqual((entry["stage"], entry["rule"], entry["matched_words"]),
-                         ("score_reject", "device_skincare_word", ["美容液"]))
-        self.assertEqual(entry["title"], OFFICIAL_115["itemName"])  # タイトル全文(上限内)
-        summary = result["match_summary"]
+        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(log["items"][0]["resolver_stage"], "eligible")
+        skincare = _item("sk:1", "ヤーマン メディリフト プラス 専用 美容液 EPM-18BB 50ml", caption=f"JAN {JAN_115}")
+        # 美容機器の語が無いスキンケア商品(専用美容液)は従来どおり除外され、規則名で特定できる。
+        result2, log2, line = run([skincare], "ヤーマン（YA-MAN）", "メディリフト プラス EPM-18BB", JAN_115)
+        entry = log2["items"][0]
+        self.assertEqual((entry["stage"], entry["rule"]), ("score_reject", "device_skincare_word"))
+        self.assertEqual(entry["title"], skincare["itemName"])  # タイトル全文(上限内)
+        summary = result2["match_summary"]
         self.assertEqual(summary["score_reject_rules"], {"device_skincare_word": 1})
         self.assertEqual((summary["search_count"], summary["brand_match_count"]), (4, 1))  # 同一候補は1回
         self.assertEqual(summary["final_reason"], "not_found")
@@ -89,8 +93,8 @@ class Case134Tests(unittest.TestCase):
         _, log115, _ = run([OFFICIAL_115], "ヤーマン（YA-MAN）", "メディリフト プラス EPM-18BB", JAN_115)
         _, log134, _ = run([self._listing("a:1", "JAN 4540790999994")], "YA-MAN TOKYO JAPAN（ヤーマン）",
                            "RF美顔器 フォトプラス", JAN_134)
-        self.assertEqual(log115["summary"]["final_reason"], "not_found")
-        self.assertEqual(log115["items"][0]["stage"], "score_reject")
+        self.assertEqual(log115["summary"]["final_reason"], "confirmed")  # Step51: 機能説明の語では除外しない
+        self.assertEqual(log115["items"][0]["resolver_stage"], "eligible")
         self.assertEqual(log134["summary"]["final_reason"], "jan_mismatch")
         self.assertEqual(log134["items"][0]["jan_status"], "explicit_mismatch")
 

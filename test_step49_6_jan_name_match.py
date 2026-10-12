@@ -37,15 +37,18 @@ class JanVerifiedNameMatchTests(unittest.TestCase):
         self.assertEqual((result["status"], result["item"]["itemCode"]), ("confirmed", "ok:1"))
 
     def test_without_jan_in_listing_is_rejected(self):
+        # Step51: 語順違いは名称照合で一致するが、JANの記載が無く公式の規格情報も無いため保留(採用しない)。
         no_jan = _item("nj:1", REVERSED["itemName"], caption="")
-        self.assertEqual(resolve([no_jan])["reason"], "title_mismatch")
+        self.assertEqual(resolve([no_jan])["reason"], "jan_absent_identity_unconfirmed")
 
     def test_other_jan_is_rejected(self):
         other = _item("oj:1", REVERSED["itemName"], caption="JANコード：4987072099999")
-        self.assertEqual(resolve([other])["reason"], "title_mismatch")
+        # Step51: 名称は一致するが、明記された別JANのため不合格。
+        self.assertEqual(resolve([other])["reason"], "jan_mismatch")
 
-    def test_without_verified_jan_old_rule_applies(self):
-        self.assertEqual(resolve([REVERSED], jan=None)["reason"], "title_mismatch")
+    def test_without_verified_jan_name_v2_applies(self):
+        # Step51: 検証済みJANの無い商品でも、収集時の名称照合(全部分・ブランド・シリーズ語/余分な成分なし)で一致する。
+        self.assertEqual(resolve([REVERSED], jan=None)["status"], "confirmed")
 
     def test_other_product_is_rejected(self):
         maca = _item("mz:1", "小林製薬の栄養補助食品 マカ・亜鉛 プレミアム 90粒", caption="JAN 4987072099998")

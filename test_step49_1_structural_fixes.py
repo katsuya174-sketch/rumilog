@@ -114,7 +114,8 @@ class CollagenNormalizationTests(unittest.TestCase):
     def test_supplement_primary_tag(self):
         payload = {"active_ingredients": [{"ingredient": "コラーゲンペプチド"}, {"ingredient": "ビタミンC"}],
                    "category_attributes": {"primary_ingredients": {"value": "コラーゲンペプチド、ビタミンC"}}}
-        self.assertEqual(pipeline.supplement_primary_tags_for_payload("X", payload), ["collagen", "vitamin_c"])
+        # Step51: 主要成分は商品名に表れる成分(または機能性関与成分)だけ。副成分のビタミンCは含めない。
+        self.assertEqual(pipeline.supplement_primary_tags_for_payload("ディープチャージ コラーゲン", payload), ["collagen"])
 
 
 class JanAndNameTests(unittest.TestCase):

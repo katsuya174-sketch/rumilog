@@ -3215,6 +3215,33 @@ def is_same_product_for_market(ai_name, rakuten_title):
 
     return match_ratio >= 0.45
 
+# Step51: Product Master収集の楽天照合(product_collection_pipeline.resolve_item_code_for_product)の
+# 実行中だけ有効にする改善。診断時の楽天照合・採点には影響させない。
+PM_MATCH_FLAGS = {"score_context_words": True, "pm_set_detection": True}
+_PM_COLLECTION_MODE = _contextvars.ContextVar("pm_collection_mode", default=False)
+_SHIPPING_QUANTITY_RE = re.compile(r"(?:合計|最大|お一人様|1便で|1便につき)?\s*\d+\s*(?:個|点|本)\s*まで(?:OK|ok|可|発送可)?")
+_PROMO_SEGMENT_RE = re.compile(r"[【\[［(（][^】\]］)）]*(?:プレゼント|特典|サンプル|クーポン|レビュー|ポイント|送料)[^】\]］)）]*[】\]］)）]")
+_COMBINED_USE_RE = re.compile(r"[^\s｜|/／、,]{0,12}(?:併用|対応|使用)(?:OK|ok|可|可能)")
+_DEVICE_KEYWORDS = ("美顔器", "美容器", "美容機器", "超音波", "ems", "led", "rf", "ラジオ波", "イオン導入", "マイクロカレント", "微弱電流")
+
+
+def _pm_context_title(title):
+    """配送条件・販促・併用の説明を除いたタイトル(除外語の判定用)。"""
+    t = _SHIPPING_QUANTITY_RE.sub(" ", title)
+    t = _PROMO_SEGMENT_RE.sub(" ", t)
+    return _COMBINED_USE_RE.sub(" ", t)
+
+
+_PM_SET_RE = re.compile(r"セット|まとめ買い|[×x*＊]\s*\d+\s*(?:個|コ|本|袋|箱|点)|\d+\s*[-~〜]\s*\d+\s*(?:個|セット)|\d+\s*コ\s*(?:入|組)")
+
+
+def pm_is_set_item(title):
+    """Step51: Product Master収集用のセット判定。既存の判定に加え、付属品とのセット(セラムセット等)・
+    数量表記(×2コ・1-3セット等)もセットとする(単品だけを採用するため)。"""
+    title = unicodedata.normalize("NFKC", str(title or ""))
+    return _is_rakuten_set_item(title) or bool(_PM_SET_RE.search(_SHIPPING_QUANTITY_RE.sub(" ", title)))
+
+
 def _score_reject(explain, rule, title, words=()):
     """Step49.7: score_rakuten_item()のハード除外(-9999)理由を、explain(dict)が
     渡された場合だけ記録する(判定・戻り値は変えない)。"""
@@ -3336,8 +3363,10 @@ def score_rakuten_item(item, product_name, brand="", category="", explain=None):
         "単品での購入不可",
     ]
 
-    if any(word in title for word in hard_reject_words):
-        return _score_reject(explain, "hard_reject_word", title, hard_reject_words)
+    _pm_ctx = _PM_COLLECTION_MODE.get() and PM_MATCH_FLAGS["score_context_words"]
+    _title_for_words = _pm_context_title(title) if _pm_ctx else title
+    if any(word in _title_for_words for word in hard_reject_words):
+        return _score_reject(explain, "hard_reject_word", _title_for_words, hard_reject_words)
 
     if infer_bundle_quantity_from_title(title) > 1:
         return _score_reject(explain, "bundle_quantity", title, ())
@@ -3509,8 +3538,12 @@ def score_rakuten_item(item, product_name, brand="", category="", explain=None):
             "シートマスク", "フェイスパック", "泥パック", "クレイマスク", "泥マスク",
             "サプリ", "supplement", "錠", "粒", "カプセル",
         ]
-        if any(word in title for word in _dev_skincare_words):
-            return _score_reject(explain, "device_skincare_word", title, _dev_skincare_words)
+        # Step51(収集時のみ): 販促・併用の説明を除き、美容機器の語があるタイトルでは
+        # 機能説明(「ディープクレンジング」等)をスキンケア商品とみなさない。セット品は別判定で除外する。
+        _dev_title = _title_for_words if _pm_ctx else title
+        _is_device_title = _pm_ctx and any(k in _dev_title.lower() for k in _DEVICE_KEYWORDS)
+        if not _is_device_title and any(word in _dev_title for word in _dev_skincare_words):
+            return _score_reject(explain, "device_skincare_word", _dev_title, _dev_skincare_words)
         # 「超音波洗浄機」「イオン」等は顔用美容機器以外の同名商品
         # （メガネ・アクセサリー・入れ歯洗浄機、空気清浄機のイオン機能等）にも
         # ヒットするため、明確に用途違いと分かる語を含む商品を除外する
