@@ -2872,10 +2872,12 @@ def resolve_item_code_for_product(brand, product_name, category, jan_code=None, 
     ([RAKUTEN MATCH TRACE])にだけ、件数・長さの上限付きで出す。"""
     token = app.start_rakuten_match_trace()
     mode_token = app._PM_COLLECTION_MODE.set(True)  # Step51: 収集時のみの採点改善を有効化
+    jan_token = app._PM_COLLECTION_JAN.set(normalize_jan_code(jan_code))  # Step51.1: 採点での同一性確認用
     try:
         result = _resolve_item_code_for_product_impl(brand, product_name, category, jan_code=jan_code,
                                                      identity_context=identity_context)
     finally:
+        app._PM_COLLECTION_JAN.reset(jan_token)
         app._PM_COLLECTION_MODE.reset(mode_token)
         trace = app.stop_rakuten_match_trace(token)
     summary = _rakuten_match_summary(trace, result, brand, product_name, category, jan_code, identity_context)
@@ -2936,6 +2938,11 @@ def pm_title_name_match(product_name, title, brand, category=None, active_ingred
         forms += entry.get("names", [])
     if not any(len(_cm(f)) >= 2 and _cm(f) in compact_title for f in forms):
         return False
+    # Step51.1: 美容機器で型番がタイトルに完全一致する場合は、型番を同一性の根拠とし、
+    # 商品名の他の部分(説明語・カナ/英字の表記違い)の一致は求めない(別モデル・色違いは型番判定で除外)。
+    ours = full_model_numbers(product_name) if category == "美容機器" else set()
+    if ours and ours <= full_model_numbers(title):
+        return True
     if _series_or_extra_ingredient_conflict(product_name, title, category, active_ingredients):
         return False
     groups = _name_part_groups(product_name, category)

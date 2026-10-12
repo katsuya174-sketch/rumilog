@@ -3217,8 +3217,29 @@ def is_same_product_for_market(ai_name, rakuten_title):
 
 # Step51: Product Master収集の楽天照合(product_collection_pipeline.resolve_item_code_for_product)の
 # 実行中だけ有効にする改善。診断時の楽天照合・採点には影響させない。
-PM_MATCH_FLAGS = {"score_context_words": True, "pm_set_detection": True}
+PM_MATCH_FLAGS = {"score_context_words": True, "pm_set_detection": True, "identity_exempts_category_penalty": True}
 _PM_COLLECTION_MODE = _contextvars.ContextVar("pm_collection_mode", default=False)
+# Step51.1: 収集時の照合対象商品の検証済みJAN(採点で同一性の確認に使う)。
+_PM_COLLECTION_JAN = _contextvars.ContextVar("pm_collection_jan", default="")
+_PM_FULL_MODEL_RE = re.compile(r"(?<![a-z0-9])([a-z]{1,6}\d{2,6}[a-z0-9]{0,4})(?![a-z0-9])")
+
+
+def _pm_full_models(text):
+    """型番(末尾まで・ハイフン等除去。「KBE-2740/K」の/Kを含む)。product_collection_pipeline.full_model_numbers()と同じ規則。"""
+    folded = re.sub(r"(\d)\s*/\s*([a-z])(?![a-z0-9])", r"\1\2", unicodedata.normalize("NFKC", str(text or "")).lower())
+    folded = re.sub(r"[‐‑‒–—\-]", "", folded)
+    return set(_PM_FULL_MODEL_RE.findall(re.sub(r"[/／()（）\[\]【】、,|｜]+", " ", folded)))
+
+
+def _pm_identity_confirmed_in_title(item, product_name):
+    """収集時、出品が型番の完全一致または商品のJAN記載で同一商品と確認できるか。"""
+    title = str(item.get("itemName", "") or "")
+    ours = _pm_full_models(product_name)
+    if ours and ours <= _pm_full_models(title):
+        return True
+    jan = _PM_COLLECTION_JAN.get()
+    text = unicodedata.normalize("NFKC", f"{title} {item.get('itemCaption') or ''}")
+    return bool(jan) and re.search(rf"(?<!\d){re.escape(jan)}(?!\d)", text) is not None
 _SHIPPING_QUANTITY_RE = re.compile(r"(?:合計|最大|お一人様|1便で|1便につき)?\s*\d+\s*(?:個|点|本)\s*まで(?:OK|ok|可|発送可)?")
 _PROMO_SEGMENT_RE = re.compile(r"[【\[［(（][^】\]］)）]*(?:プレゼント|特典|サンプル|クーポン|レビュー|ポイント|送料)[^】\]］)）]*[】\]］)）]")
 _COMBINED_USE_RE = re.compile(r"[^\s｜|/／、,]{0,12}(?:併用|対応|使用)(?:OK|ok|可|可能)")
@@ -3571,6 +3592,11 @@ def score_rakuten_item(item, product_name, brand="", category="", explain=None):
         _dev_face_words = ["顔", "フェイス", "face", "美顔", "毛穴"]
         if not any(w.lower() in title_norm or w in title for w in _dev_face_words):
             score_category_penalty -= 20
+        # Step51.1(収集時のみ): 型番の完全一致または商品のJAN記載で同一商品と確認できる出品は、
+        # カテゴリ語・顔の語が無いことによる減点をしない(別商品の混入を防ぐための減点のため)。
+        if (_PM_COLLECTION_MODE.get() and PM_MATCH_FLAGS.get("identity_exempts_category_penalty", True)
+                and _pm_identity_confirmed_in_title(item, product_name)):
+            score_category_penalty = 0
 
     else:
         score_category_penalty = 0
