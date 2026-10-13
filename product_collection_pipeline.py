@@ -2677,7 +2677,7 @@ def name_title_spec_conflict(product_name, title):
 _NO_JAN_SPEC_RE = re.compile(r"(\d+(?:[.,]\d+)?)\s*(日分|粒|錠|カプセル|包|袋|本|枚|mg|g|ml)")
 # 商品シリーズの修飾語。カナ表記と英字表記は同じ修飾語として扱う(一般語の固定一覧で、ブランドの対応表ではない)。
 _SERIES_WORD_GROUPS = (("プレミアム", "premium"), ("ゴールド", "gold"), ("プラス", "plus"), ("ダブル", "double"),
-                       ("ネオ", "neo"), ("プロ", "pro"), ("ライト", "lite"), ("スーパー", "super"),
+                       ("ネオ", "neo"), ("プロ", "pro", "プロフェッショナル", "professional"), ("ライト", "lite"), ("スーパー", "super"),
                        ("アドバンス", "advance"), ("ex",), ("dx",), ("極",))
 _SERIES_WORDS = tuple(w for g in _SERIES_WORD_GROUPS for w in g)
 
@@ -2759,10 +2759,9 @@ def no_jan_identity_check(item, brand, product_name, category, jan, context):
     conflict = series_word_conflict(product_name, title)
     if conflict:
         return False, f"series_word:{conflict}"
-    product_tags = set(app.compute_ingredient_tags(list(context.get("active_ingredients") or []) + parts))
-    title_tags = set(app.compute_ingredient_tags([w for w in re.split(r"[\s　・･()（）\[\]【】/|｜×,，、]+", title) if len(w) >= 2]))
-    if title_tags - product_tags:
-        return False, "extra_ingredient:" + ",".join(sorted(title_tags - product_tags))
+    extra = _extra_ingredient_tags(product_name, title, context.get("active_ingredients"), category)
+    if extra:
+        return False, "extra_ingredient:" + ",".join(sorted(extra))
     # Step51: 名称は収集時の名称照合(括弧内の別表記・カテゴリ語の省略に対応)と同じ規則で確認する。
     if PM_MATCH_FLAGS["name_match_v2"] and not pm_title_name_match(product_name, title, brand, category,
                                                                    context.get("active_ingredients")):
@@ -2872,6 +2871,42 @@ def _title_main_segment(title):
     return re.split(r"[|｜]", str(title or ""), maxsplit=1)[0]
 
 
+_CM_SKIP_RE = re.compile(r"[\s\-‐‑‒–—_.・･]")
+
+
+def title_identity_segment(title, product_name, category="サプリメント"):
+    """Step53: タイトルのうち商品を特定している部分(「|」より前、かつ商品名の後で最初に出る内容量の表記より前)。
+    内容量より後ろは検索用の語の羅列であることが多いため、余分な成分名の確認から外す。
+    商品名・内容量が見つからなければ「|」より前の全体。戻り値はNFKC・小文字の文字列。"""
+    folded = unicodedata.normalize("NFKC", _title_main_segment(title)).lower()
+    chars, index = [], []
+    for i, ch in enumerate(folded):
+        if not _CM_SKIP_RE.match(ch):
+            chars.append(ch)
+            index.append(i)
+    compact = "".join(chars)
+    ends = []
+    for group in _name_part_groups(product_name, category):
+        key = group.get("part") or group.get("alt")
+        pos = compact.find(key) if key else -1
+        if pos >= 0:
+            ends.append(pos + len(key))
+    if not ends:
+        return folded
+    size = _PACKAGE_SIZE_RE.search(compact, max(ends))
+    return folded[:index[size.start()]] if size else folded
+
+
+def _extra_ingredient_tags(product_name, title, active_ingredients, category="サプリメント"):
+    """商品名・成分に無い成分タグのうち、タイトルの商品を特定している部分にあるもの。"""
+    folded_name = unicodedata.normalize("NFKC", str(product_name or "")).lower()
+    parts = [x for x in _PM_NAME_SPLIT_RE.split(folded_name) if len(x) >= 2]
+    product_tags = set(app.compute_ingredient_tags(list(active_ingredients or []) + parts))
+    segment = title_identity_segment(title, product_name, category)
+    title_tags = set(app.compute_ingredient_tags([w for w in re.split(r"[\s　・･()（）\[\]【】/|｜×,，、]+", segment) if len(w) >= 2]))
+    return title_tags - product_tags
+
+
 def no_jan_title_identity_conflict(product_name, title, active_ingredients=()):
     """Step52: JANで確認できないサプリの出品について、タイトル本体に商品名が無い、または商品名・成分に無い
     栄養成分名がタイトル本体にある場合、その理由。問題が無ければNone。"""
@@ -2885,7 +2920,8 @@ def no_jan_title_identity_conflict(product_name, title, active_ingredients=()):
                                                      and all(_ascii_only(x) for x in missing))):
         return "name_not_in_title_main"
     product_text = _cm(" ".join([str(product_name or "")] + [str(a or "") for a in (active_ingredients or [])]))
-    extra = next((w for w in _NUTRIENT_WORDS if w in compact_main and w not in product_text), None)
+    compact_segment = _cm(title_identity_segment(title, product_name, "サプリメント"))
+    extra = next((w for w in _NUTRIENT_WORDS if w in compact_segment and w not in product_text), None)
     return f"other_nutrient:{extra}" if extra else None
 
 
@@ -2893,6 +2929,37 @@ def _mentioned_jans(item):
     text = unicodedata.normalize("NFKC", f"{item.get('itemName', '') or ''} {item.get('itemCaption', '') or ''}")
     labelled = set(re.findall(r"JAN(?:コード)?\s*[:：]?\s*(\d{13}|\d{8})(?!\d)", text, flags=re.IGNORECASE))
     return extract_jan_codes(text) | labelled
+
+
+# 色の一般語(ブランドごとの対応表ではない)。JANで確認できない美容機器の出品の色違いを見分ける。
+_COLOR_WORDS = (("ブラック", "black"), ("ホワイト", "white"), ("ピンク", "pink"), ("ゴールド", "gold"), ("シルバー", "silver"),
+                ("ブラウン", "brown"), ("レッド", "red"), ("ブルー", "blue"), ("グリーン", "green"), ("ネイビー", "navy"),
+                ("グレー", "gray", "grey"), ("ベージュ",), ("パープル", "purple"), ("イエロー", "yellow"), ("オレンジ", "orange"),
+                ("ローズ", "rose"), ("ラベンダー", "lavender"), ("ミント", "mint"))
+
+
+def color_groups(text):
+    """タイトル等に含まれる色(色の一般語のグループ番号の集合)。英字はスペース区切りの単語として照合する。"""
+    folded = unicodedata.normalize("NFKC", str(text or "")).lower()
+    spaced = " " + re.sub(r"[^0-9a-zぁ-んァ-ヶー一-龥]+", " ", folded) + " "
+    compact = re.sub(r"\s+", "", folded)
+    return {i for i, group in enumerate(_COLOR_WORDS)
+            if any((f" {w} " in spaced) if w.isascii() else (w in compact) for w in group)}
+
+
+def device_color_conflict(title, product_name, reference_titles):
+    """JANで確認できない美容機器の出品の色の確認。この商品の色(商品名の色、または同じ検索結果でJANが一致した
+    出品のタイトルの色)以外の色がタイトルにあれば、その理由。JAN一致の出品が無く色が分からない場合も保留。"""
+    models = full_model_numbers(product_name)
+    if models and all(re.search(r"\d[a-z]+$", m) for m in models):
+        return None   # 型番の末尾の記号で色まで特定されている(KBE-2740/K等)。色違いは型番の照合で除外済み
+    extra = color_groups(title) - color_groups(product_name)
+    if not extra:
+        return None
+    if not reference_titles:
+        return "device_color_unverified"
+    known = set().union(*(color_groups(t) for t in reference_titles))
+    return "device_color_mismatch" if extra - known else None
 
 
 def official_shop_match(shop_name, brand):
@@ -2952,6 +3019,8 @@ def _resolver_stage_for_item(item, brand, product_name, category, jan_code, iden
         if not ok:
             return "device_model_mismatch", info
     info["sale_condition"] = app.classify_rakuten_sale_condition(title)
+    if info["sale_condition"] == "new" and pm_irregular_sale(title):
+        info["sale_condition"] = "irregular"
     if info["sale_condition"] != "new":
         return "non_new_sale", info
     if _pm_is_set(title):
@@ -3009,7 +3078,29 @@ def _rakuten_match_summary(trace, result, brand, product_name, category, jan_cod
         "new_sale_count": sale_new, "single_item_count": single,
         "jan_status_counts": jan_counts, "resolver_stage_counts": resolver_stages,
         "final_reason": result.get("reason") or result.get("status"),
+        "keyword_stats": _keyword_stats(trace, result),
     }
+
+
+def _keyword_stats(trace, result):
+    """Step53: 検索語ごとの呼び出し回数(ページ数)・取得件数・新たに見つかった出品数・採用候補になった出品数。"""
+    def label(keyword):   # 調査ログにJANの値を出さない
+        return "JAN" if re.fullmatch(r"\d{8}|\d{13}", str(keyword or "")) else keyword
+    stats = {}
+    for search in trace.get("searches", []):
+        st = stats.setdefault(label(search["keyword"]), {"calls": 0, "fetched": 0, "new_items": 0, "accepted": 0, "total_count": None})
+        st["calls"] += 1
+        st["fetched"] += search.get("item_count", 0)
+        st["total_count"] = search.get("total_count", st["total_count"])
+    first = {code: label(kw) for code, kw in trace.get("item_keyword", {}).items()}
+    for keyword in first.values():
+        stats.setdefault(keyword, {"calls": 0, "fetched": 0, "new_items": 0, "accepted": 0, "total_count": None})["new_items"] += 1
+    accepted = [p["item_code"] for p in result.get("tiebreak_pool") or []] or \
+        ([result["item"].get("itemCode")] if result.get("status") == "confirmed" and result.get("item") else [])
+    for code in accepted:
+        if code in first:
+            stats[first[code]]["accepted"] += 1
+    return stats
 
 
 def resolve_item_code_for_product(brand, product_name, category, jan_code=None, identity_context=None):
@@ -3112,12 +3203,8 @@ def _series_or_extra_ingredient_conflict(product_name, title, category, active_i
     folded_name = unicodedata.normalize("NFKC", str(product_name or "")).lower()
     if series_word_conflict(product_name, title):
         return True
-    if category == "サプリメント":
-        parts = [x for x in _PM_NAME_SPLIT_RE.split(folded_name) if len(x) >= 2]
-        product_tags = set(app.compute_ingredient_tags(list(active_ingredients or []) + parts))
-        title_tags = set(app.compute_ingredient_tags([w for w in re.split(r"[\s　・･()（）\[\]【】/|｜×,，、]+", str(title or "")) if len(w) >= 2]))
-        if title_tags - product_tags:
-            return True
+    if category == "サプリメント" and _extra_ingredient_tags(product_name, title, active_ingredients, category):
+        return True
     return False
 
 
@@ -3178,6 +3265,17 @@ def _pm_device_ok(product_name, title, brand, item, jan):
     if PM_MATCH_FLAGS["model_v2"]:
         return pm_device_identity(product_name, title, brand, item, jan)
     return device_identity_matches(product_name, title, brand)
+
+
+# Step53: 通常の新品販売ではない出品(収集時のみ)。期限を書いているだけの出品(「賞味期限2029.01」)は除かない。
+_PM_IRREGULAR_SALE_RE = re.compile(
+    r"アウトレット|訳あり|訳アリ|ワケあり|ワケアリ|わけあり|期限(?:間近|切迫|短|が近)|"
+    r"(?:外箱|箱|パッケージ|外装)\s*(?:擦れ|すれ|潰れ|つぶれ|傷|キズ|汚れ|破れ|ダメージ|不良|凹み|へこみ)|難あり|"
+    r"新品未開封|未開封品|試供品|非売品")
+
+
+def pm_irregular_sale(title):
+    return bool(_PM_IRREGULAR_SALE_RE.search(unicodedata.normalize("NFKC", str(title or ""))))
 
 
 def _pm_is_set(title):
@@ -3255,6 +3353,7 @@ def _resolve_item_code_for_product_impl(brand, product_name, category, jan_code=
     new_sale_pairs = [
         (score, item) for score, item in title_matched_pairs
         if app.classify_rakuten_sale_condition(str(item.get("itemName", "") or "")) == "new"
+        and not pm_irregular_sale(item.get("itemName", ""))
     ]
     diag["new_sale_count"] = len(new_sale_pairs)
     if not new_sale_pairs:
@@ -3370,8 +3469,15 @@ def listing_identity_basis(item, brand, product_name, category, jan_code, identi
 def _select_same_product_listing(single_pairs, brand, product_name, category, jan_code, identity_context, diag):
     """Step52: 同じ商品(容量違いを含む)と確認できた出品をすべて候補にし、レビュー件数を優先して1件を選ぶ。"""
     accepted, rejections = [], {}
+    jan = normalize_jan_code(jan_code)
+    # 美容機器の色違いの確認に使う、この商品のJANが記載された出品のタイトル。
+    jan_titles = [str(i.get("itemName", "") or "") for _, i in single_pairs if jan and rakuten_item_mentions_jan(i, jan)]
     for score, item in single_pairs:
         basis, why = listing_identity_basis(item, brand, product_name, category, jan_code, identity_context)
+        if basis and category == "美容機器" and basis != "jan_code":
+            color = device_color_conflict(item.get("itemName", ""), product_name, jan_titles)
+            if color:
+                basis, why = None, color
         if basis:
             accepted.append((score, item, basis))
             continue

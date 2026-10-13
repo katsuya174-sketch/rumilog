@@ -216,6 +216,109 @@ class ProductMasterNotOverwrittenTests(unittest.TestCase):
         self.assertEqual((result["brand"], result["product"]), ("DHC", "ヒアルロン酸"))
         accumulate.assert_not_called()
 
+    def test_product_master_origin_flag_blocks_accumulation_even_without_name(self):
+        pm = {"itemName": "x", "itemCode": "s:1", "itemPrice": 100, "_source": "product_master", "_pm_brand": "", "_pm_name": ""}
+        self.assertTrue(app._build_rakuten_result(pm, "x")["from_product_master"])
+        self.assertFalse(app._build_rakuten_result(dict(pm, _source="live"), "x")["from_product_master"])
+
+
+class DeviceColorAndUsedTests(unittest.TestCase):
+    """美容機器の色違い(JANで確認できない出品)と、中古品の除外。"""
+
+    BRAND, NAME, JAN = "Panasonic（パナソニック）", "リフトケア美顔器 バイタリフト RF EH-SR85", "4549980667286"
+
+    def resolve_device(self, items, jan=JAN):
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[(100, i) for i in items]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            return pipeline.resolve_item_code_for_product(self.BRAND, self.NAME, "美容機器", jan_code=jan,
+                                                          identity_context={"stage1_text": "", "active_ingredients": []})
+
+    def test_other_color_without_jan_is_not_selected_over_jan_match(self):
+        black_jan = _item("blk:1", "Panasonic リフトケア美顔器 バイタリフトRF ブラック EH-SR85-K", caption=f"JAN {self.JAN}", reviews=1)
+        pink = _item("pink:1", "パナソニック リフトケア美顔器 バイタリフトRF EH-SR85 ピンク", reviews=50)
+        black = _item("blk:2", "パナソニック 美顔器 EH-SR85 ブラック バイタリフトRF", reviews=20)
+        result = self.resolve_device([black_jan, pink, black])
+        self.assertEqual(result["item"]["itemCode"], "blk:2")          # 同じ色(ブラック)ならJANなしでも可・レビュー数で選ぶ
+        self.assertEqual(result["listing_rejections"], {"device_color_mismatch": 1})
+
+    def test_color_cannot_be_verified_without_any_jan_match(self):
+        result = self.resolve_device([_item("pink:1", "パナソニック リフトケア美顔器 バイタリフトRF EH-SR85 ピンク", reviews=50)])
+        self.assertEqual(result["status"], "not_found")
+        self.assertEqual(self.resolve_device([_item("plain:1", "パナソニック リフトケア美顔器 バイタリフトRF EH-SR85")])["status"],
+                         "confirmed")                                  # 色の記載が無い出品は従来どおり
+
+    def test_model_with_color_suffix_needs_no_color_check(self):
+        # 実データ(PM88)。型番の「/K」で色が特定されているため、タイトルの色の語で保留しない。
+        title = "KOIZUMI コイズミ ピーリング＆超音波美顔器 KBE-2740/K ブラック KBE2740K おうちエステ 超音波 小泉成器"
+        with patch.object(app, "fetch_rakuten_candidates", return_value=[(100, _item("k:1", title))]), \
+                contextlib.redirect_stdout(io.StringIO()):
+            result = pipeline.resolve_item_code_for_product("コイズミ（KOIZUMI）", "ピーリング＆超音波美顔器 KBE-2740/K", "美容機器",
+                                                            jan_code="4981747083005",
+                                                            identity_context={"stage1_text": "", "active_ingredients": []})
+        self.assertEqual(result["status"], "confirmed")
+        self.assertIsNone(pipeline.device_color_conflict("EH-SR85 ピンク", "バイタリフト RF EH-SR85-K", []))
+        self.assertEqual(pipeline.device_color_conflict("EH-SR85 ピンク", "バイタリフト RF EH-SR85", []), "device_color_unverified")
+
+    def test_used_listing_is_excluded_even_with_most_reviews(self):
+        result = resolve("DHC", "ヒアルロン酸", [_item("used:1", "【中古】DHC ヒアルロン酸 60日分", reviews=900),
+                                                _item("ok:1", "DHC ヒアルロン酸 60日分", reviews=3)],
+                         jan="4511413403310", stage1=DHC_HYALURONIC, actives=["ヒアルロン酸"])
+        self.assertEqual(result["item"]["itemCode"], "ok:1")
+
+    def test_color_words(self):
+        self.assertEqual(pipeline.color_groups("YA-MAN Photo PLUS EX ブラック"), {0})
+        self.assertEqual(pipeline.color_groups("ReFa CARAT RAY"), set())   # 英字の部分一致では色としない
+        self.assertEqual(pipeline.color_groups("Pink Gold"), {2, 3})
+
+
+class CollectedRowIsNotOverwrittenTests(unittest.TestCase):
+    """収集済み(ai_precollected)の行は、診断時の蓄積(diagnosis_time)で上書きされない(テスト用DB)。"""
+
+    SUFFIX = "_step52_audit"
+
+    def tearDown(self):
+        import psycopg2
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            conn.cursor().execute("DELETE FROM product_master WHERE name LIKE %s", (f"%{self.SUFFIX}%",))
+            conn.commit()
+        finally:
+            conn.close()
+
+    def row(self, name):
+        import psycopg2
+        conn = psycopg2.connect(os.environ["DATABASE_URL"])
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT data_source, active_ingredients, concerns FROM product_master WHERE name = %s", (name,))
+            return cur.fetchone()
+        finally:
+            conn.close()
+
+    def product(self, name, ingredients, concerns=()):
+        return {"brand": "DHC", "name": name, "category": "サプリメント", "active_ingredients": list(ingredients),
+                "concerns": list(concerns)}
+
+    def test_diagnosis_time_upsert_does_not_overwrite_collected_row(self):
+        name = "ヒアルロン酸" + self.SUFFIX
+        with contextlib.redirect_stdout(io.StringIO()):
+            pid = app.upsert_product_master(self.product(name, ["ヒアルロン酸", "ビタミンB2"]), data_source="ai_precollected")
+            self.assertIsNotNone(pid)
+            self.assertIsNone(app.upsert_product_master(self.product(name, [], ["dryness"]), data_source="diagnosis_time"))
+            self.assertIsNone(app.upsert_product_master(self.product(name, []), data_source="migrated_json"))
+        self.assertEqual(self.row(name), ("ai_precollected", ["ヒアルロン酸", "ビタミンB2"], []))
+        with contextlib.redirect_stdout(io.StringIO()):   # 収集の反映による更新は従来どおり
+            self.assertEqual(app.upsert_product_master(self.product(name, ["ヒアルロン酸"]), data_source="ai_precollected"), pid)
+        self.assertEqual(self.row(name)[1], ["ヒアルロン酸"])
+
+    def test_diagnosis_time_rows_are_still_updated(self):
+        name = "ビタミンC" + self.SUFFIX
+        with contextlib.redirect_stdout(io.StringIO()):
+            pid = app.upsert_product_master(self.product(name, ["ビタミンC"]), data_source="diagnosis_time")
+            self.assertEqual(app.upsert_product_master(self.product(name, ["ビタミンC", "ビタミンE"]),
+                                                       data_source="diagnosis_time"), pid)
+        self.assertEqual(self.row(name)[1], ["ビタミンC", "ビタミンE"])
+
 
 if __name__ == "__main__":
     unittest.main()

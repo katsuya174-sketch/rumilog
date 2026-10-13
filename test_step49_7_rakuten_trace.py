@@ -57,7 +57,8 @@ class Case115Tests(unittest.TestCase):
         self.assertEqual(entry["title"], skincare["itemName"])  # タイトル全文(上限内)
         summary = result2["match_summary"]
         self.assertEqual(summary["score_reject_rules"], {"device_skincare_word": 1})
-        self.assertEqual((summary["search_count"], summary["brand_match_count"]), (4, 1))  # 同一候補は1回
+        # Step53: 美容機器の収集時は「ブランド＋商品名」「ブランド＋型番」の2つで検索する。同一候補は1回だけ記録。
+        self.assertEqual((summary["search_count"], summary["brand_match_count"]), (2, 1))
         self.assertEqual(summary["final_reason"], "not_found")
         for secret in ("https://", "accessKey", "applicationId", "公式ショップ", JAN_115):
             self.assertNotIn(secret, line)

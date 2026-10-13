@@ -3218,7 +3218,7 @@ def is_same_product_for_market(ai_name, rakuten_title):
 # Step51: Product Master収集の楽天照合(product_collection_pipeline.resolve_item_code_for_product)の
 # 実行中だけ有効にする改善。診断時の楽天照合・採点には影響させない。
 PM_MATCH_FLAGS = {"score_context_words": True, "pm_set_detection": True, "identity_exempts_category_penalty": True,
-                  "ignore_price_in_collection": True}
+                  "ignore_price_in_collection": True, "broad_collection_search": True, "trial_size_in_collection": True}
 _PM_COLLECTION_MODE = _contextvars.ContextVar("pm_collection_mode", default=False)
 # Step51.1: 収集時の照合対象商品の検証済みJAN(採点で同一性の確認に使う)。
 _PM_COLLECTION_JAN = _contextvars.ContextVar("pm_collection_jan", default="")
@@ -3257,11 +3257,28 @@ def _pm_context_title(title):
 _PM_SET_RE = re.compile(r"セット|まとめ買い|[×x*＊]\s*\d+\s*(?:個|コ|本|袋|箱|点)|\d+\s*[-~〜]\s*\d+\s*(?:個|セット)|\d+\s*コ\s*(?:入|組)")
 
 
+# Step53: お試し・トライアルのうち、セット・キット等の組み合わせ商品(収集時も除外する)。
+_PM_TRIAL_SET_RE = re.compile(r"(?:お試し|トライアル)\s*(?:用\s*)?(?:セット|キット|BOX|ボックス|組|パック\s*セット)", re.IGNORECASE)
+# Step53: 数量が固定されたまとめ売り(「3袋」「2袋入」「2箱」「×2」等)。「350mg×60粒」のような内容量の表記は除く。
+_PM_FIXED_QUANTITY_RE = re.compile(r"(?<![\d.])(?:[2-9]|\d{2,})\s*(?:袋|箱)"
+                                   r"|[×xX＊*]\s*(?:[2-9]|\d{2,})(?![\d.])(?!\s*(?:粒|錠|カプセル|包|本|枚|mg|g|ml|日|μg|mcg|cm|mm))")
+# 1個から買えることが書かれた出品(数量を選べる出品)。
+_PM_SINGLE_PURCHASABLE_RE = re.compile(
+    r"(?<!\d)1\s*(?:個|袋|箱|本|コ)?\s*[-~〜/／・、]\s*\d+\s*(?:個|袋|箱|本|コ|セット)|単品|1\s*(?:個|袋|箱|本)から|選べる")
+# 付属品・別の商品との組み合わせ(数量に関係なく単品ではない)。
+_PM_COMPOSITION_SET_RE = re.compile(r"(?:セラム|美容液|ジェル|クリーム|トライアル|お試し|ギフト|スターター|専用)\s*セット|キット|詰め合わせ")
+
+
 def pm_is_set_item(title):
     """Step51: Product Master収集用のセット判定。既存の判定に加え、付属品とのセット(セラムセット等)・
-    数量表記(×2コ・1-3セット等)もセットとする(単品だけを採用するため)。"""
+    数量表記(×2コ・1-3セット等)もセットとする(単品だけを採用するため)。
+    Step53: 1個から買えることがタイトルに書かれた出品(「1-3セット」「単品」「選べる」等)は、付属品との
+    組み合わせでない限りセットとしない。数量が固定されたまとめ売り(「3袋」等)はセットとする。"""
     title = unicodedata.normalize("NFKC", str(title or ""))
-    return _is_rakuten_set_item(title) or bool(_PM_SET_RE.search(_SHIPPING_QUANTITY_RE.sub(" ", title)))
+    text = _SHIPPING_QUANTITY_RE.sub(" ", title)
+    if _PM_SINGLE_PURCHASABLE_RE.search(text):
+        return bool(_PM_COMPOSITION_SET_RE.search(text))
+    return _is_rakuten_set_item(title) or bool(_PM_SET_RE.search(text)) or bool(_PM_FIXED_QUANTITY_RE.search(text))
 
 
 def _score_reject(explain, rule, title, words=()):
@@ -3387,6 +3404,12 @@ def score_rakuten_item(item, product_name, brand="", category="", explain=None):
 
     _pm_ctx = _PM_COLLECTION_MODE.get() and PM_MATCH_FLAGS["score_context_words"]
     _title_for_words = _pm_context_title(title) if _pm_ctx else title
+    if _PM_COLLECTION_MODE.get() and PM_MATCH_FLAGS.get("trial_size_in_collection", True):
+        # Step53(ユーザー判断): 収集時は、お試し・トライアルサイズを通常品と同じ商品の容量違いとして扱う
+        # (商品一致の判定は他の出品と同じ)。お試しセット・トライアルキット等は引き続き除外する。
+        if _PM_TRIAL_SET_RE.search(_title_for_words):
+            return _score_reject(explain, "hard_reject_word", _title_for_words, ["お試し", "トライアル"])
+        hard_reject_words = [w for w in hard_reject_words if w not in ("お試し", "トライアル")]
     if any(word in _title_for_words for word in hard_reject_words):
         return _score_reject(explain, "hard_reject_word", _title_for_words, hard_reject_words)
 
@@ -4284,6 +4307,8 @@ def _product_master_upsert_sql(product, identity_key, jan_code, brand, name, cat
             verified_at = GREATEST(product_master.verified_at, EXCLUDED.verified_at),
             category_attributes = COALESCE(EXCLUDED.category_attributes, product_master.category_attributes),
             updated_at = NOW()
+        -- Step52監査: 収集済み(ai_precollected)の行は収集の反映からだけ更新する(診断時の蓄積等で上書きしない)。
+        WHERE product_master.data_source IS DISTINCT FROM 'ai_precollected' OR EXCLUDED.data_source = 'ai_precollected'
         RETURNING product_id
     """, (
         identity_key, jan_code, brand, name, category,
@@ -5517,6 +5542,208 @@ def rakuten_api_call_delta(before):
     return {k: v for k, v in delta.items() if v}
 
 
+def _score_rakuten_search_item(raw_item, product_name, category, brand):
+    """楽天検索結果の1件を、診断・収集共通の事前絞り込みと採点に通す。通れば(score, item)、通らなければNone。
+    (fetch_rakuten_candidates()の1件ごとの処理を切り出したもの。判定内容は変えていない)"""
+    item = raw_item.get("Item", raw_item) if isinstance(raw_item, dict) else raw_item
+
+    if not isinstance(item, dict):
+        return None
+
+    rakuten_title = str(item.get("itemName", "") or "").strip()
+
+    # 非スキンケア商品を即リジェクト（口腔洗浄機・家電等の混入防止）
+    # サプリメント・美容機器はスキンケア外カテゴリのためこのチェックをスキップ
+    if category and category not in ("サプリメント", "美容機器"):
+        if not _is_rakuten_item_valid_for_category(rakuten_title, category, strict=False):
+            _trace_rakuten_item("category_filter", item)
+            return None
+
+    # --- title match チェック ---
+    # 美容機器: 製品名がカテゴリ説明語（「RF美顔器」等）のためブランド一致のみ
+    # 成分名+カテゴリ名パターン（「セラミド 乳液」「ナイアシンアミド 美容液」等）:
+    #   楽天タイトルに成分名が含まれないため is_same_verified_rakuten_product が
+    #   全件 False になる → score_rakuten_item のカテゴリ固有チェックに委ねる
+    # サプリメント: ブランド表記揺れが多く pre-filter なし
+    # 上記以外の具体的な製品名: is_same_verified_rakuten_product で照合
+    _bypass_title_match = (
+        category == "サプリメント"
+        or _is_ingredient_category_name(product_name)
+    )
+
+    if category == "美容機器":
+        if brand:
+            # Step49.5: 「ヤーマン（YA-MAN）」のような括弧注記付きブランドは、
+            # 括弧外・括弧内の明示的な表記をそれぞれ照合する(連結した
+            # 文字列そのままでは楽天タイトルに一致しないため)。
+            _tc = _compact_brand_text(rakuten_title)
+            _forms = [_compact_brand_text(f) for f in explicit_brand_forms(brand)]
+            if _forms and not any(f in _tc for f in _forms):
+                _trace_rakuten_item("brand_prefilter", item, brand_forms=explicit_brand_forms(brand))
+                return None
+    elif not _bypass_title_match:
+        if not is_same_verified_rakuten_product(
+            product_name=product_name,
+            rakuten_title=rakuten_title,
+            brand=brand,
+            shop_name=str(item.get("shopName", "") or "")
+        ):
+            print(
+                "[RAKUTEN REJECT TITLE MISMATCH]",
+                {"product": product_name, "brand": brand, "rakuten_title": rakuten_title},
+                flush=True
+            )
+            _trace_rakuten_item("title_prefilter", item)
+            return None
+
+    _explain = {} if _rakuten_trace() is not None else None
+    score = score_rakuten_item(
+        item,
+        product_name=product_name,
+        brand=brand,
+        category=category,
+        explain=_explain,
+    )
+
+    if _bypass_title_match or category == "美容機器":
+        print(
+            f"[RAKUTEN BYPASS SCORE] cat={category} bypass={_bypass_title_match} "
+            f"score={score} title={rakuten_title[:50]}",
+            flush=True
+        )
+
+    # バイパス時はスコア閾値を 0 に緩める（-9999 リジェクト以外は通す）
+    _min_score = 0 if (_bypass_title_match or category == "美容機器") else 20
+    if score < _min_score:
+        if score <= -9000:
+            _trace_rakuten_item("score_reject", item, **(_explain or {}))
+        else:
+            _trace_rakuten_item("score_below_threshold", item, score=score, min_score=_min_score)
+        return None
+
+    _trace_rakuten_item("searched_candidate", item, score=score)
+    return score, item
+
+
+# ===== Step53: Product Master収集時の楽天検索(取得範囲の拡大・複数検索語の併用) =====
+# 診断時の検索(fetch_rakuten_candidates()の従来経路)は変えない。
+COLLECTION_SEARCH_HITS = 30
+COLLECTION_SEARCH_MAX_PAGES = 3
+_COLLECTION_MODEL_RE = re.compile(r"(?<![A-Za-z0-9])[A-Za-z]{1,6}(?:-[A-Za-z]{1,4})?-?\d{2,6}[A-Za-z0-9]{0,4}(?:-[A-Za-z0-9]{1,3}|/[A-Za-z])?(?![A-Za-z0-9])")
+
+
+def collection_search_keywords(product_name, brand, category, jan=""):
+    """収集時の検索語: 「ブランド＋商品名」を基本に、美容機器は「ブランド＋型番」、それ以外はJANがあればJANでも検索する。"""
+    folded_brand = unicodedata.normalize("NFKC", str(brand or "")).strip()
+    match = _EXPLICIT_BRAND_ANNOTATION_RE.match(folded_brand)
+    primary = (match.group(1).strip() if match else folded_brand)
+    name = unicodedata.normalize("NFKC", str(product_name or "")).strip()
+    forms = [_compact_brand_text(f) for f in explicit_brand_forms(brand)]
+    has_brand = any(f and f in _compact_brand_text(name) for f in forms)
+    raw = [name if has_brand or not primary else f"{primary} {name}"]
+    if category == "美容機器":
+        raw += [f"{primary} {m}".strip() for m in _COLLECTION_MODEL_RE.findall(name)]
+    elif jan:
+        # Step53の実測: JANでの検索はサプリでは採用候補を増やした(14回の呼び出しで53件)が、
+        # 美容機器では0件だったため、美容機器ではJANで検索しない(呼び出し回数を抑える)。
+        raw.append(str(jan))
+    out, seen = [], set()
+    for kw in raw:
+        kw = rakuten_request_keyword(clean_rakuten_keyword(kw))
+        key = normalize_product_name(kw)
+        if kw and key not in seen:
+            seen.add(key)
+            out.append(kw)
+    return out
+
+
+def _rakuten_search_request(endpoint, params, headers):
+    """検索1回(429は待って1回だけ再試行、続けば一時停止)。戻り値: (status, payload)。statusは"cooldown"もあり得る。"""
+    global RAKUTEN_COOLDOWN_UNTIL
+    wait_for_rakuten_rate_limit()
+    res = _rakuten_api_get("item_search", endpoint, params=params, headers=headers, timeout=(2, 6))
+    if res.status_code == 429:
+        retry_seconds = 10
+        retry_match = re.search(r"Try again in ([0-9\.]+) seconds?", res.text, re.IGNORECASE)
+        if retry_match:
+            try:
+                retry_seconds = max(3, float(retry_match.group(1)) + 2)
+            except Exception:
+                retry_seconds = 10
+        print(f"[RAKUTEN 429] collection search: sleeping {retry_seconds}s then retrying once", flush=True)
+        time.sleep(retry_seconds)
+        wait_for_rakuten_rate_limit()
+        res = _rakuten_api_get("item_search", endpoint, params=params, headers=headers, timeout=(2, 6))
+        if res.status_code == 429:
+            RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
+            return "cooldown", None
+    if res.status_code != 200:
+        print(f"[RAKUTEN COLLECTION SEARCH STATUS] {res.status_code}", flush=True)
+        return res.status_code, None
+    return 200, res.json()
+
+
+def _fetch_rakuten_candidates_collection(product_name, category, brand, jan, endpoint, headers, fallback_keywords):
+    """収集時の検索。各検索語について1ページ30件、総ヒット数に必要なページだけ(最大3ページ)取得し、
+    最初の検索語で候補が見つかっても打ち切らない。結果は商品コードで重複排除する。
+    収集用の検索語で1件もヒットしない場合だけ、従来の検索語を順に試す。"""
+    scored, seen_codes = [], set()
+
+    def search(keyword):
+        fetched, total = 0, None
+        for page in range(1, COLLECTION_SEARCH_MAX_PAGES + 1):
+            params = {"applicationId": RAKUTEN_APP_ID, "accessKey": RAKUTEN_ACCESS_KEY, "keyword": keyword,
+                      "hits": COLLECTION_SEARCH_HITS, "page": page, "format": "json", "formatVersion": 2, "imageFlag": 1}
+            if RAKUTEN_AFFILIATE_ID:
+                params["affiliateId"] = RAKUTEN_AFFILIATE_ID
+            print(f"[RAKUTEN COLLECTION SEARCH] {keyword} page={page}", flush=True)
+            try:
+                status, payload = _rakuten_search_request(endpoint, params, headers)
+                if status != 200:
+                    return total, "cooldown" if status == "cooldown" else "error"
+                items = payload.get("items") or payload.get("Items") or []
+            except requests.exceptions.RequestException as e:
+                print("[RAKUTEN API REQUEST ERROR]", e, flush=True)
+                return total, "error"
+            except Exception as e:   # 従来の検索と同じく、想定外の例外でも収集全体は止めない
+                print("[RAKUTEN API UNKNOWN ERROR]", repr(e), flush=True)
+                return total, "error"
+            # 総ヒット数が返らない場合は、受け取った件数をヒット数として扱う
+            count = payload.get("count") if isinstance(payload, dict) else None
+            total = count if isinstance(count, int) else max(total or 0, fetched + len(items))
+            if _rakuten_trace() is not None:
+                _rakuten_trace()["searches"].append({"keyword": keyword[:80], "page": page, "item_count": len(items),
+                                                     "total_count": total})
+            for raw_item in items:
+                item = raw_item.get("Item", raw_item) if isinstance(raw_item, dict) else raw_item
+                code = str((item or {}).get("itemCode", "") or "") if isinstance(item, dict) else ""
+                if not code or code in seen_codes:
+                    continue
+                seen_codes.add(code)
+                if _rakuten_trace() is not None:
+                    _rakuten_trace().setdefault("item_keyword", {})[code] = keyword[:80]
+                result = _score_rakuten_search_item(item, product_name, category, brand)
+                if result is not None:
+                    scored.append(result)
+            fetched += len(items)
+            if len(items) < COLLECTION_SEARCH_HITS or not total or fetched >= total:
+                break
+        return total, "ok"
+
+    any_hit = False
+    for keyword in collection_search_keywords(product_name, brand, category, jan):
+        total, state = search(keyword)
+        any_hit = any_hit or bool(total)
+        if state == "cooldown":
+            return scored
+    if not any_hit:
+        for keyword in fallback_keywords:
+            total, state = search(keyword)
+            if state == "cooldown" or total:
+                break
+    return scored
+
+
 def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_focus="", purpose=""):
     """
     楽天API検索→実在検証(score_rakuten_item)までを行う共通ヘルパー。
@@ -5537,6 +5764,8 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
         normalize_product_name(brand),
         normalize_product_name(ingredient_focus),
         normalize_product_name(purpose),
+        # Step53: 収集時の検索結果は診断時と別にキャッシュする(取得範囲・検索語が違うため)
+        ("collection", _PM_COLLECTION_JAN.get()) if _PM_COLLECTION_MODE.get() and PM_MATCH_FLAGS.get("broad_collection_search", True) else None,
     )
 
     if candidates_cache_key in _rakuten_candidates_cache:
@@ -5595,6 +5824,14 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
         ingredient_focus=ingredient_focus,
         purpose=purpose
     )
+
+    if _PM_COLLECTION_MODE.get() and PM_MATCH_FLAGS.get("broad_collection_search", True):
+        # Step53: Product Master収集時は取得範囲を広げ、複数の検索語の結果を合わせて使う(診断時は従来どおり)。
+        fallback = [rakuten_request_keyword(clean_rakuten_keyword(k)) for k in raw_keywords][:5]
+        result = _fetch_rakuten_candidates_collection(product_name, category, brand, _PM_COLLECTION_JAN.get(),
+                                                      endpoint, headers, [k for k in fallback if k])
+        _rakuten_candidates_cache[candidates_cache_key] = result
+        return result
 
     keywords = []
     seen_keywords = set()
@@ -5743,85 +5980,11 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
             scored_items = []
 
             for raw_item in items:
-                item = raw_item.get("Item", raw_item) if isinstance(raw_item, dict) else raw_item
+                scored = _score_rakuten_search_item(raw_item, product_name, category, brand)
+                if scored is not None:
+                    scored_items.append(scored)
 
-                if not isinstance(item, dict):
-                    continue
-
-                rakuten_title = str(item.get("itemName", "") or "").strip()
-
-                # 非スキンケア商品を即リジェクト（口腔洗浄機・家電等の混入防止）
-                # サプリメント・美容機器はスキンケア外カテゴリのためこのチェックをスキップ
-                if category and category not in ("サプリメント", "美容機器"):
-                    if not _is_rakuten_item_valid_for_category(rakuten_title, category, strict=False):
-                        _trace_rakuten_item("category_filter", item)
-                        continue
-
-                # --- title match チェック ---
-                # 美容機器: 製品名がカテゴリ説明語（「RF美顔器」等）のためブランド一致のみ
-                # 成分名+カテゴリ名パターン（「セラミド 乳液」「ナイアシンアミド 美容液」等）:
-                #   楽天タイトルに成分名が含まれないため is_same_verified_rakuten_product が
-                #   全件 False になる → score_rakuten_item のカテゴリ固有チェックに委ねる
-                # サプリメント: ブランド表記揺れが多く pre-filter なし
-                # 上記以外の具体的な製品名: is_same_verified_rakuten_product で照合
-                _bypass_title_match = (
-                    category == "サプリメント"
-                    or _is_ingredient_category_name(product_name)
-                )
-
-                if category == "美容機器":
-                    if brand:
-                        # Step49.5: 「ヤーマン（YA-MAN）」のような括弧注記付きブランドは、
-                        # 括弧外・括弧内の明示的な表記をそれぞれ照合する(連結した
-                        # 文字列そのままでは楽天タイトルに一致しないため)。
-                        _tc = _compact_brand_text(rakuten_title)
-                        _forms = [_compact_brand_text(f) for f in explicit_brand_forms(brand)]
-                        if _forms and not any(f in _tc for f in _forms):
-                            _trace_rakuten_item("brand_prefilter", item, brand_forms=explicit_brand_forms(brand))
-                            continue
-                elif not _bypass_title_match:
-                    if not is_same_verified_rakuten_product(
-                        product_name=product_name,
-                        rakuten_title=rakuten_title,
-                        brand=brand,
-                        shop_name=str(item.get("shopName", "") or "")
-                    ):
-                        print(
-                            "[RAKUTEN REJECT TITLE MISMATCH]",
-                            {"product": product_name, "brand": brand, "rakuten_title": rakuten_title},
-                            flush=True
-                        )
-                        _trace_rakuten_item("title_prefilter", item)
-                        continue
-
-                _explain = {} if _rakuten_trace() is not None else None
-                score = score_rakuten_item(
-                    item,
-                    product_name=product_name,
-                    brand=brand,
-                    category=category,
-                    explain=_explain,
-                )
-
-                if _bypass_title_match or category == "美容機器":
-                    print(
-                        f"[RAKUTEN BYPASS SCORE] cat={category} bypass={_bypass_title_match} "
-                        f"score={score} title={rakuten_title[:50]}",
-                        flush=True
-                    )
-
-                # バイパス時はスコア閾値を 0 に緩める（-9999 リジェクト以外は通す）
-                _min_score = 0 if (_bypass_title_match or category == "美容機器") else 20
-                if score < _min_score:
-                    if score <= -9000:
-                        _trace_rakuten_item("score_reject", item, **(_explain or {}))
-                    else:
-                        _trace_rakuten_item("score_below_threshold", item, score=score, min_score=_min_score)
-                    continue
-
-                _trace_rakuten_item("searched_candidate", item, score=score)
-                scored_items.append((score, item))
-
+            _bypass_title_match = category == "サプリメント" or _is_ingredient_category_name(product_name)
             if not scored_items:
                 if _bypass_title_match or category == "美容機器":
                     print(
@@ -5924,6 +6087,7 @@ def _build_rakuten_result(best, display_name):
         # Step52: Product Master由来の候補は正式名(ブランド・商品名)で表示する。
         "pm_brand": best.get("_pm_brand", "") if best.get("_source") == "product_master" else "",
         "pm_name": best.get("_pm_name", "") if best.get("_source") == "product_master" else "",
+        "from_product_master": best.get("_source") == "product_master",
     }
 
 
@@ -8739,7 +8903,7 @@ def attach_affiliate_links_to_step(step, affiliate_ai_db, user_data=None, budget
         # (accumulate_verified_product、合意事項)。
         # Step52: Product Master由来の推薦は既にproduct_masterにある商品のため蓄積しない
         # (診断時の値で収集済みの行を上書きしたり、表示名で重複行を作ったりしないため)。
-        if not rakuten_item.get("pm_name"):
+        if not (rakuten_item.get("from_product_master") or rakuten_item.get("pm_name")):
             accumulate_verified_product(step, rakuten_item)
 
     else:

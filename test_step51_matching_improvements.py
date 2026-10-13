@@ -103,13 +103,17 @@ class C3C6ModelTests(unittest.TestCase):
 class C4SetTests(unittest.TestCase):
 
     def test_count_and_accessory_sets(self):
-        for title in ("DHC ヒアルロン酸 60日分(120粒*2コセット)", "1-3セット DHC ヒアルロン酸 60日分 120粒",
-                      "キリン iMUSE プラズマ乳酸菌サプリメント 7日分(28粒入)×30個セット", "メディリフト プラス セラムセット EPM18BB2"):
+        for title in ("DHC ヒアルロン酸 60日分(120粒*2コセット)", "ビヒダス 30日分 3袋 ビフィズス菌 BB536 森永",
+                      "キリン iMUSE プラズマ乳酸菌サプリメント 7日分(28粒入)×30個セット", "メディリフト プラス セラムセット EPM18BB2",
+                      "1-3セット メディリフト プラス セラムセット", "DHC ヒアルロン酸 40粒入り 2袋入"):
             with self.subTest(title=title):
                 self.assertTrue(app.pm_is_set_item(title))
 
     def test_singles_and_shipping_notes_are_not_sets(self):
-        for title in ("DHC ヒアルロン酸 60日分(120粒)", "【メール便1便で合計4個までOK】DHC 亜鉛 60日分 60粒"):
+        # Step53(ユーザー判断): 1個から買えることが書かれた出品(数量を選べる出品)はセットとしない。
+        for title in ("DHC ヒアルロン酸 60日分(120粒)", "【メール便1便で合計4個までOK】DHC 亜鉛 60日分 60粒",
+                      "1-3セット DHC ヒアルロン酸 60日分 120粒", "DHC 亜鉛 60日分 単品/3個セット 選べる",
+                      "森永 ビヒダス 30粒入 1袋", "DHC ヒアルロン酸 120粒入"):
             with self.subTest(title=title):
                 self.assertFalse(app.pm_is_set_item(title))
 

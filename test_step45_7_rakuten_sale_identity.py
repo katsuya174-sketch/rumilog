@@ -131,10 +131,11 @@ class ResolverOrderTests(unittest.TestCase):
         result = self._resolve([(90, used)], brand="TestBrand", name="テスト美容液", category="美容液")
         self.assertEqual(result["reason"], "only_non_new_sale_listings")
 
-    def test_supplement_outlet_wording_is_not_excluded(self):
+    def test_supplement_outlet_wording_is_excluded_in_collection(self):
+        # Step53(ユーザー判断): 収集時は、アウトレット・訳あり等の通常の新品販売ではない出品を採用しない。
         item = _rakuten_item(item_code="s:1", item_name="DHC ビタミンC ハードカプセル 90日分 アウトレット 訳あり")
         result = self._resolve([(50, item)], brand="DHC", name="ビタミンC（ハードカプセル）", category="サプリメント")
-        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(result["reason"], "only_non_new_sale_listings")
 
 
 if __name__ == "__main__":
