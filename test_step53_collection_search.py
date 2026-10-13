@@ -237,6 +237,63 @@ class AuditFoundCasesTests(unittest.TestCase):
                 self.assertFalse(app.pm_is_set_item(title))
 
 
+class SecretRedactionTests(unittest.TestCase):
+    """楽天APIの通信エラーで、認証情報(URLのクエリ)をログ・戻り値に出さない。実楽天APIには接続しない。"""
+
+    KEY, APP = "pk_TESTSECRETVALUE123", "app-TESTAPPID-456"
+
+    def error(self, *a, **k):
+        import requests
+        raise requests.exceptions.ConnectTimeout(
+            "HTTPSConnectionPool(host='openapi.rakuten.co.jp', port=443): Max retries exceeded with url: "
+            f"/ichibams/api/IchibaItem/Search/20260401?applicationId={self.APP}&accessKey={self.KEY}&itemCode=x%3A1 "
+            "(Caused by ConnectTimeoutError(...))")
+
+    def assert_clean(self, text):
+        self.assertNotIn(self.KEY, text)
+        self.assertNotIn(self.APP, text)
+
+    def run_with_keys(self, func):
+        out = io.StringIO()
+        with patch.object(app, "RAKUTEN_ACCESS_KEY", self.KEY), patch.object(app, "RAKUTEN_APP_ID", self.APP), \
+                patch.object(app, "_rakuten_api_get", side_effect=self.error), \
+                patch.object(app, "wait_for_rakuten_rate_limit", return_value=None), contextlib.redirect_stdout(out):
+            result = func()
+        return result, out.getvalue()
+
+    def test_safe_error_keeps_type_and_host_but_hides_keys(self):
+        try:
+            self.error()
+        except Exception as e:
+            with patch.object(app, "RAKUTEN_ACCESS_KEY", self.KEY), patch.object(app, "RAKUTEN_APP_ID", self.APP):
+                text = app.safe_rakuten_error(e)
+        self.assert_clean(text)
+        self.assertIn("ConnectTimeout", text)
+        self.assertIn("openapi.rakuten.co.jp", text)
+        self.assertIn("accessKey=***", text)
+
+    def test_collection_and_diagnosis_search_logs_are_clean(self):
+        for collection in (True, False):
+            with self.subTest(collection=collection):
+                app._rakuten_candidates_cache.clear()
+                token = app._PM_COLLECTION_MODE.set(collection)
+                try:
+                    result, log = self.run_with_keys(
+                        lambda: app.fetch_rakuten_candidates(product_name="ビタミンD", category="サプリメント", brand="ファンケル"))
+                finally:
+                    app._PM_COLLECTION_MODE.reset(token)
+                    app._rakuten_candidates_cache.clear()
+                self.assertEqual(result, [])
+                self.assertIn("ERROR", log)
+                self.assert_clean(log)
+
+    def test_item_code_lookup_log_and_return_value_are_clean(self):
+        result, log = self.run_with_keys(lambda: app.fetch_rakuten_item_by_item_code("x:1"))
+        self.assertFalse(result["ok"])
+        self.assert_clean(log)
+        self.assert_clean(str(result))
+
+
 class DeterministicSelectionTests(unittest.TestCase):
     """同じ候補集合なら、並び順に関係なく必ず同じ出品を選ぶ(検索結果の変動は別問題)。"""
 

@@ -5531,6 +5531,21 @@ def _rakuten_api_get(kind, endpoint, **kwargs):
     return requests.get(endpoint, **kwargs)
 
 
+_RAKUTEN_SECRET_PARAM_RE = re.compile(r"((?:accessKey|applicationId|affiliateId)=)[^&\s'\"\)]+", re.IGNORECASE)
+
+
+def safe_rakuten_error(e):
+    """楽天API呼び出しの例外を、ログ・戻り値に出してよい文字列にする。楽天の認証情報はURLのクエリで
+    送っており、requestsの例外文字列にはURLがそのまま入るため、accessKey/applicationId/affiliateIdの値と、
+    設定された各キーの値そのものを伏せる。"""
+    text = f"{type(e).__name__}: {e}"
+    text = _RAKUTEN_SECRET_PARAM_RE.sub(r"\1***", text)
+    for secret in (RAKUTEN_ACCESS_KEY, RAKUTEN_APP_ID, RAKUTEN_AFFILIATE_ID):
+        if secret and len(str(secret)) >= 6:
+            text = text.replace(str(secret), "***")
+    return text
+
+
 def rakuten_api_call_snapshot():
     """現在までの実楽天APIリクエスト数(kind別)のコピー。差分で区間の回数を測る。"""
     return dict(RAKUTEN_API_CALLS)
@@ -5703,10 +5718,10 @@ def _fetch_rakuten_candidates_collection(product_name, category, brand, jan, end
                     return total, "cooldown" if status == "cooldown" else "error"
                 items = payload.get("items") or payload.get("Items") or []
             except requests.exceptions.RequestException as e:
-                print("[RAKUTEN API REQUEST ERROR]", e, flush=True)
+                print("[RAKUTEN API REQUEST ERROR]", safe_rakuten_error(e), flush=True)
                 return total, "error"
             except Exception as e:   # 従来の検索と同じく、想定外の例外でも収集全体は止めない
-                print("[RAKUTEN API UNKNOWN ERROR]", repr(e), flush=True)
+                print("[RAKUTEN API UNKNOWN ERROR]", safe_rakuten_error(e), flush=True)
                 return total, "error"
             # 総ヒット数が返らない場合は、受け取った件数をヒット数として扱う
             count = payload.get("count") if isinstance(payload, dict) else None
@@ -5929,7 +5944,7 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
                         )
                         print(f"[RAKUTEN RETRY STATUS] {res.status_code}", flush=True)
                     except Exception as _retry_e:
-                        print(f"[RAKUTEN RETRY ERROR] {_retry_e}", flush=True)
+                        print(f"[RAKUTEN RETRY ERROR] {safe_rakuten_error(_retry_e)}", flush=True)
                         # ② リトライ自体が例外 → クールダウン設定して諦める
                         RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
                         return []
@@ -5997,11 +6012,11 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
             return scored_items
 
         except requests.exceptions.RequestException as e:
-            print("[RAKUTEN API REQUEST ERROR]", e, flush=True)
+            print("[RAKUTEN API REQUEST ERROR]", safe_rakuten_error(e), flush=True)
             continue
 
         except Exception as e:
-            print("[RAKUTEN API UNKNOWN ERROR]", repr(e), flush=True)
+            print("[RAKUTEN API UNKNOWN ERROR]", safe_rakuten_error(e), flush=True)
             continue
 
     print(
@@ -6171,8 +6186,8 @@ def fetch_rakuten_item_by_item_code(item_code):
         wait_for_rakuten_rate_limit()
         res = _rakuten_api_get("item_code_lookup", endpoint, params=params, headers=headers, timeout=(2, 4))
     except Exception as e:
-        print(f"[ITEM CODE VERIFY] request exception for item_code={item_code}: {repr(e)}", flush=True)
-        return {"http_status": 0, "ok": False, "rakuten_error": repr(e), "item": None}
+        print(f"[ITEM CODE VERIFY] request exception for item_code={item_code}: {safe_rakuten_error(e)}", flush=True)
+        return {"http_status": 0, "ok": False, "rakuten_error": safe_rakuten_error(e), "item": None}
 
     print(f"[ITEM CODE VERIFY] item_code={item_code} status={res.status_code}", flush=True)
 
@@ -6191,7 +6206,7 @@ def fetch_rakuten_item_by_item_code(item_code):
         return {
             "http_status": res.status_code,
             "ok": False,
-            "rakuten_error": f"JSON decode error: {repr(e)}",
+            "rakuten_error": f"JSON decode error: {safe_rakuten_error(e)}",
             "item": None,
         }
 
@@ -7553,7 +7568,7 @@ def _rakuten_criteria_search_single(keyword, category):
                 # 保存すると、同じ診断内で同じキーワードが後で使われた場合
                 # （429がすぐ解消していても）永久に空扱いになり、
                 # そのステップの楽天バックフィル候補が失われ続けてしまう。
-                print(f"[RAKUTEN CRITERIA RETRY ERROR] {_re}", flush=True)
+                print(f"[RAKUTEN CRITERIA RETRY ERROR] {safe_rakuten_error(_re)}", flush=True)
                 RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
                 return []
             if res.status_code == 429:
@@ -7661,7 +7676,7 @@ def _rakuten_criteria_search_single(keyword, category):
         return results
 
     except Exception as e:
-        print(f"[RAKUTEN CRITERIA ERROR] {repr(e)} total={time.time()-_t_func_start:.2f}s", flush=True)
+        print(f"[RAKUTEN CRITERIA ERROR] {safe_rakuten_error(e)} total={time.time()-_t_func_start:.2f}s", flush=True)
         _rakuten_criteria_cache[cache_key] = []
         return []
 
@@ -17542,7 +17557,7 @@ def _batch_prewarm_rakuten_search_cache(steps, improvement_plan):
             flush=True
         )
     except Exception as e:
-        print(f"[RAKUTEN BATCH PREWARM ERROR] {repr(e)}", flush=True)
+        print(f"[RAKUTEN BATCH PREWARM ERROR] {safe_rakuten_error(e)}", flush=True)
     finally:
         if conn:
             conn.close()
