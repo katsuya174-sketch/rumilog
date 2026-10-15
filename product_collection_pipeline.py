@@ -2786,7 +2786,7 @@ def no_jan_identity_check(item, brand, product_name, category, jan, context):
 
 
 # ===== Step52: 同じ商品の容量違いの出品を受け入れる(Product Master収集経路のみ) =====
-PM_SELECTION_FLAGS = {"accept_same_product_sizes": True, "review_first_selection": True}
+PM_SELECTION_FLAGS = {"accept_same_product_sizes": True, "review_first_selection": True, "cheapest_page_check": True}
 # 公式本文のJANの行で、容量の記載以外に許す語(JANの表記・つなぎの語)。
 _SIZE_LINE_FILLER_RE = re.compile(r"jan(?:コード)?|総重量|お?徳用|大容量|となります|です|は|の|※|約")
 # 別の形状・別の版を示す一般語(ブランドごとの対応表ではない)。商品名に無いのにタイトルにあれば別商品。
@@ -2932,27 +2932,16 @@ def _mentioned_jans(item):
 
 
 # 色の一般語(ブランドごとの対応表ではない)。JANで確認できない美容機器の出品の色違いを見分ける。
-_COLOR_WORDS = (("ブラック", "black"), ("ホワイト", "white"), ("ピンク", "pink"), ("ゴールド", "gold"), ("シルバー", "silver"),
-                ("ブラウン", "brown"), ("レッド", "red"), ("ブルー", "blue"), ("グリーン", "green"), ("ネイビー", "navy"),
-                ("グレー", "gray", "grey"), ("ベージュ",), ("パープル", "purple"), ("イエロー", "yellow"), ("オレンジ", "orange"),
-                ("ローズ", "rose"), ("ラベンダー", "lavender"), ("ミント", "mint"))
-
-
-def color_groups(text):
-    """タイトル等に含まれる色(色の一般語のグループ番号の集合)。英字はスペース区切りの単語として照合する。"""
-    folded = unicodedata.normalize("NFKC", str(text or "")).lower()
-    spaced = " " + re.sub(r"[^0-9a-zぁ-んァ-ヶー一-龥]+", " ", folded) + " "
-    compact = re.sub(r"\s+", "", folded)
-    return {i for i, group in enumerate(_COLOR_WORDS)
-            if any((f" {w} " in spaced) if w.isascii() else (w in compact) for w in group)}
+_COLOR_WORDS = app.DEVICE_COLOR_WORDS   # Step54: 診断時と共通
+color_groups = app.device_color_groups
 
 
 def device_color_conflict(title, product_name, reference_titles):
-    """JANで確認できない美容機器の出品の色の確認。この商品の色(商品名の色、または同じ検索結果でJANが一致した
-    出品のタイトルの色)以外の色がタイトルにあれば、その理由。JAN一致の出品が無く色が分からない場合も保留。"""
+    """JANで確認できない美容機器の出品の色の確認(型番の無い商品だけ)。この商品の色(商品名の色、または同じ検索結果で
+    JANが一致した出品のタイトルの色)以外の色がタイトルにあれば、その理由。JAN一致の出品が無く色が分からない場合も保留。"""
     models = full_model_numbers(product_name)
-    if models and all(re.search(r"\d[a-z]+$", m) for m in models):
-        return None   # 型番の末尾の記号で色まで特定されている(KBE-2740/K等)。色違いは型番の照合で除外済み
+    if models:
+        return None   # Step54: 型番のある商品は、同じ型式の色違いを採用する(型番の照合で別の型式は除外済み)
     extra = color_groups(title) - color_groups(product_name)
     if not extra:
         return None
@@ -2972,16 +2961,93 @@ def official_shop_match(shop_name, brand):
     return any(len(_cm(f)) >= 2 and _cm(f) in shop for f in forms)
 
 
-def select_listing_by_reviews(pairs, brand):
-    """Step52: 同じ商品と確認できた出品から1件を選ぶ。レビュー件数 → レビュー平均 → ブランド公式店 →
-    画像あり → itemCode(決定的) の順。容量・価格・送料は比べない。"""
+def select_listing_by_reviews(pairs, brand, page_check=None, checks=None):
+    """Step52/54: 同じ商品と確認できた出品から1件を選ぶ。レビュー件数 → 価格(安い順。送料込み・送料別を区別しない) →
+    レビュー平均 → ブランド公式店 → 画像あり → itemCode(決定的) の順。
+    page_check(Step54)を渡した場合、レビュー件数が最多で同数の出品が複数あり価格で選ぶときは、安い順に販売ページを
+    確認し、確認できた最初の出品を選ぶ(すべて確認できなければNone=保留)。checksに確認結果を記録する。"""
     def key(pair):
         item = pair[1]
-        return (-app.safe_price(item.get("reviewCount", 0)), -app.safe_float(item.get("reviewAverage", 0)),
+        return (-app.safe_price(item.get("reviewCount", 0)), app.safe_price(item.get("itemPrice", 0)) or float("inf"),
+                -app.safe_float(item.get("reviewAverage", 0)),
                 0 if official_shop_match(item.get("shopName", ""), brand) else 1,
                 0 if (item.get("mediumImageUrls") or item.get("smallImageUrls")) else 1,
                 str(item.get("itemCode", "") or ""))
-    return min(pairs, key=key)[1]
+    ordered = [item for _, item in sorted(pairs, key=key)]
+    top = app.safe_price(ordered[0].get("reviewCount", 0))
+    tied = [item for item in ordered if app.safe_price(item.get("reviewCount", 0)) == top]
+    if page_check is None or len(tied) == 1:
+        return ordered[0]
+    for item in tied:
+        ok, reason = page_check(item)
+        if checks is not None:
+            checks.append({"item_code": str(item.get("itemCode", "") or ""), "ok": ok, "reason": reason})
+        if ok:
+            return item
+    return None
+
+
+# ===== Step54: 価格で選ぶ出品の販売ページの確認(新品の通常販売・価格・在庫) =====
+_LISTING_PAGE_HOST = "https://item.rakuten.co.jp/"
+
+
+def _listing_page_url(item):
+    """出品の販売ページのURL(アフィリエイトURLの場合は中の商品ページ)。楽天市場の商品ページ以外はNone。"""
+    url = str(item.get("itemUrl", "") or "")
+    if url.startswith("https://hb.afl.rakuten.co.jp/"):
+        from urllib.parse import parse_qs
+        url = (parse_qs(urlsplit(url).query).get("pc") or [""])[0]
+    return url if url.startswith(_LISTING_PAGE_HOST) else None
+
+
+def _fetch_listing_page(item):
+    """販売ページのHTML(取得できなければNone)。URL・例外の本文はログに出さない(アフィリエイトIDを含むため)。"""
+    url = _listing_page_url(item)
+    if not url:
+        return None
+    try:
+        import requests
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+    except Exception:
+        return None
+    if res.status_code != 200:
+        return None
+    raw = res.content
+    charset = re.search(rb'charset=["\']?([A-Za-z0-9_\-]+)', raw[:4000])
+    try:
+        return raw.decode(charset.group(1).decode() if charset else "utf-8", "replace")
+    except LookupError:
+        return raw.decode("utf-8", "replace")
+
+
+def listing_page_check(item, page=None):
+    """販売ページで、通常販売(予約・定期等でない)・API価格の販売単位があること・その在庫があることを確認する。
+    戻り値: (ok, reason)。ページの形式が読めない場合は確認できない(False)とする。"""
+    html = _fetch_listing_page(item) if page is None else page
+    if not html:
+        return False, "page_unavailable"
+    sell = re.search(r'"sellType":"([A-Z_]+)"', html)
+    if not sell:
+        return False, "page_format_unknown"
+    if sell.group(1) != "NORMAL":
+        return False, "not_normal_sale"
+    price = app.safe_price(item.get("itemPrice", 0))
+    inventories = {sku: int(qty) for sku, qty in
+                   re.findall(r'"sku":"([^"]+)","inventoryId":"[^"]*","quantity":(\d+)', html)}
+    sku_prices = re.findall(r'"variantId":"([^"]+)","selectorValues":\[[^\]]*\](?:(?!"variantId").){0,3000}?"taxIncludedPrice":([\d.]+)',
+                            html, flags=re.S)
+    if sku_prices:
+        matching = {v for v, p in sku_prices if int(float(p)) == price}
+        if not matching:
+            return False, "price_not_on_page"
+        if not any(v in inventories for v in matching):
+            return False, "stock_unknown"
+        return (True, "ok") if any(inventories.get(v, 0) > 0 for v in matching) else (False, "out_of_stock")
+    if price not in {int(float(p)) for p in re.findall(r'"taxIncludedPrice":([\d.]+)', html)}:
+        return False, "price_not_on_page"
+    if not inventories:
+        return False, "stock_unknown"
+    return (True, "ok") if sum(inventories.values()) > 0 else (False, "out_of_stock")
 
 
 def rakuten_jan_status(item, jan_code):
@@ -3002,7 +3068,7 @@ def rakuten_jan_status(item, jan_code):
     return "undeterminable" if caption is None else "absent"
 
 
-def _resolver_stage_for_item(item, brand, product_name, category, jan_code, identity_context=None):
+def _resolver_stage_for_item(item, brand, product_name, category, jan_code, identity_context=None, reference_items=()):
     """resolve本体と同じ判定関数・同じ順序で、候補がどの段階で外れるかを返す(診断記録専用)。"""
     title = str(item.get("itemName", "") or "")
     jan = normalize_jan_code(jan_code)
@@ -3013,7 +3079,7 @@ def _resolver_stage_for_item(item, brand, product_name, category, jan_code, iden
     if name_title_spec_conflict(product_name, title):
         return "spec_conflict", info
     if category == "美容機器":
-        ok, why = _pm_device_ok(product_name, title, brand, item, jan)
+        ok, why = _pm_device_ok(product_name, title, brand, item, jan, reference_items)
         info["model_match"] = bool(ok)
         info["model_reason"] = why
         if not ok:
@@ -3026,7 +3092,7 @@ def _resolver_stage_for_item(item, brand, product_name, category, jan_code, iden
     if _pm_is_set(title):
         return "set_item", info
     if PM_SELECTION_FLAGS["accept_same_product_sizes"]:
-        basis, why = listing_identity_basis(item, brand, product_name, category, jan, identity_context)
+        basis, why = listing_identity_basis(item, brand, product_name, category, jan, identity_context, reference_items)
         return (("eligible" if basis in ("jan_code", "product_without_jan") else f"eligible_{basis}") if basis else why), info
     if jan and not rakuten_item_mentions_jan(item, jan):
         # Step50.2: JAN段階の結果を区別して記録する(判定は_resolve本体のとおり)。
@@ -3054,10 +3120,12 @@ def _rakuten_match_summary(trace, result, brand, product_name, category, jan_cod
     jan_counts = {"match": 0, "explicit_mismatch": 0, "absent": 0, "undeterminable": 0}
     resolver_stages = {}
     title_match = model_match = sale_new = single = 0
+    references = [e["_item"] for e in items if e["stage"] == "searched_candidate"]
     for entry in items:
         if entry["stage"] != "searched_candidate":
             continue
-        stage, info = _resolver_stage_for_item(entry["_item"], brand, product_name, category, jan_code, identity_context)
+        stage, info = _resolver_stage_for_item(entry["_item"], brand, product_name, category, jan_code, identity_context,
+                                               references)
         entry["jan_status"] = rakuten_jan_status(entry["_item"], jan_code)
         entry["resolver_stage"] = stage
         entry.update(info)
@@ -3182,8 +3250,8 @@ def pm_title_name_match(product_name, title, brand, category=None, active_ingred
     # Step51.1: 美容機器で型番がタイトルに完全一致する場合は、型番を同一性の根拠とし、
     # 商品名の他の部分(説明語・カナ/英字の表記違い)の一致は求めない(別モデル・色違いは型番判定で除外)。
     ours = full_model_numbers(product_name) if category == "美容機器" else set()
-    if ours and ours <= full_model_numbers(title):
-        return True
+    if ours and (ours <= full_model_numbers(title) or _color_variant_models(ours, full_model_numbers(title))):
+        return True   # Step54: 同じ型式の色違いも型番で照合する(色の語「ゴールド」等をシリーズ語として扱わない)
     if _series_or_extra_ingredient_conflict(product_name, title, category, active_ingredients):
         return False
     groups = _name_part_groups(product_name, category)
@@ -3222,27 +3290,45 @@ def full_model_numbers(text):
     return set(_FULL_MODEL_RE.findall(_model_text(folded)))
 
 
-def pm_device_identity(product_name, title, brand, item, jan):
+_color_suffix_pair = app.device_color_suffix_pair   # Step54: 診断時と共通
+
+
+def _color_variant_models(ours, theirs):
+    """この商品の型番のうちタイトルに無いものが、すべてタイトルの型番の色記号違いか(同じ型式の色違い)。"""
+    missing = [m for m in ours if m not in theirs]
+    return bool(missing) and all(any(_color_suffix_pair(m, t) for t in theirs) for m in missing)
+
+
+def device_color_variant(product_name, item, reference_items=()):
+    """Step54: 出品が同じ型式の色違いで、色違いに由来すると確認できるか(型番の末尾の色記号だけが違い、色記号付きの
+    型番と色の対応が出品自身または同じ検索結果の出品のタイトルで明確)。JANが色ごとに異なっていてもよい。診断時と同じ判定(app.device_model_check)。"""
+    return app.device_model_check(product_name, item, reference_items)[1] == "color_variant"
+
+
+def pm_device_identity(product_name, title, brand, item, jan, reference_items=()):
     """Step51: 収集時の美容機器の同一性。戻り値: (ok, reason)。
-    型番あり: 末尾まで完全一致で同一。末尾1文字(色記号)だけ違う場合は、JANが一致する出品だけ採用。
+    型番あり: 末尾まで完全一致で同一。末尾1文字(色記号)だけ違う場合は、JANが一致するか、型番と色の対応が明確な出品を採用。
     型番なし: タイトルに型番があればJANが一致する出品だけ採用、無ければ従来の名称判定。"""
     ours = full_model_numbers(product_name)
     theirs = full_model_numbers(title)
     jan_ok = bool(jan) and rakuten_item_mentions_jan(item, jan)
     def color_of_ours(t):
-        return any((t[:-1] == m and t[-1].isalpha()) or (m[:-1] == t and m[-1].isalpha()) for m in ours)
+        return any(_color_suffix_pair(m, t) for m in ours)
     if ours:
         if ours <= theirs:
             prefixes = {re.match(r"[a-z]+", m).group(0) for m in ours}
             if any(re.match(r"[a-z]+", m).group(0) in prefixes and not color_of_ours(m) for m in theirs - ours):
                 return False, "conflicting_model_number"
             return True, "model_number_match"
-        color = all(any(t[:-1] == m and t[-1].isalpha() for t in theirs) or any(m[:-1] == t and m[-1].isalpha() for t in theirs)
-                    for m in ours if m not in theirs)
-        if color:
-            if not PM_MATCH_FLAGS["color_variant_requires_jan"] or jan_ok:
-                return True, "color_variant_jan_match" if jan_ok else "color_variant"
-            return False, "color_variant_without_jan"
+        if _color_variant_models(ours, theirs):
+            # Step54: 同じ型式の色違い(型番の末尾の色記号だけが違う)は、JANが一致するか、出品に色の記載があり
+            # 色違いに由来すると確認できれば採用する(JANが色ごとに異なっていてもよい)。
+            if jan_ok:
+                return True, "color_variant_jan_match"
+            if not PM_MATCH_FLAGS["color_variant_requires_jan"] \
+                    or device_color_variant(product_name, dict(item, itemName=title), reference_items):
+                return True, "color_variant"
+            return False, "color_variant_unconfirmed"
         return False, "model_number_mismatch"
     if theirs:
         return (True, "model_by_jan") if jan_ok else (False, "title_has_model_product_has_none")
@@ -3261,9 +3347,9 @@ def _pm_title_ok(product_name, title, brand, item, jan, category=None, active_in
     return normal or jan_verified_name_match(product_name, brand, item, jan), "normal" if normal else "jan_order_insensitive"
 
 
-def _pm_device_ok(product_name, title, brand, item, jan):
+def _pm_device_ok(product_name, title, brand, item, jan, reference_items=()):
     if PM_MATCH_FLAGS["model_v2"]:
-        return pm_device_identity(product_name, title, brand, item, jan)
+        return pm_device_identity(product_name, title, brand, item, jan, reference_items)
     return device_identity_matches(product_name, title, brand)
 
 
@@ -3314,6 +3400,7 @@ def _resolve_item_code_for_product_impl(brand, product_name, category, jan_code=
         product_name=product_name, category=category, brand=brand
     )
     diag = {"initial_candidate_count": len(scored_items), "title_matched_count": 0, "single_item_count": 0}
+    references = [item for _, item in scored_items]   # Step54: 美容機器の色違いの確認に使う、同じ検索結果の出品
     if not scored_items:
         return {"status": "not_found", **diag}
 
@@ -3342,7 +3429,7 @@ def _resolve_item_code_for_product_impl(brand, product_name, category, jan_code=
     if category == "美容機器":
         title_matched_pairs = [
             (score, item) for score, item in title_matched_pairs
-            if _pm_device_ok(product_name, str(item.get("itemName", "") or ""), brand, item, jan_for_title)[0]
+            if _pm_device_ok(product_name, str(item.get("itemName", "") or ""), brand, item, jan_for_title, references)[0]
         ]
         diag["device_identity_matched_count"] = len(title_matched_pairs)
         if not title_matched_pairs:
@@ -3368,7 +3455,8 @@ def _resolve_item_code_for_product_impl(brand, product_name, category, jan_code=
         return {"status": "not_found", "reason": "only_set_items", **diag}
 
     if PM_SELECTION_FLAGS["accept_same_product_sizes"]:
-        return _select_same_product_listing(single_pairs, brand, product_name, category, jan_code, identity_context, diag)
+        return _select_same_product_listing(single_pairs, brand, product_name, category, jan_code, identity_context, diag,
+                                            references)
 
     # Step47.6: 検証済みJANがある商品は、JANが楽天候補(タイトル/商品説明)に
     # 記載された候補だけを同一商品・同一variantとして扱う。JAN一致が1件も
@@ -3430,7 +3518,7 @@ def _resolve_item_code_for_product_impl(brand, product_name, category, jan_code=
     }
 
 
-def listing_identity_basis(item, brand, product_name, category, jan_code, identity_context):
+def listing_identity_basis(item, brand, product_name, category, jan_code, identity_context, reference_items=()):
     """Step52: JAN段階で、出品がこの商品(容量違いを含む)と同一である根拠。戻り値: (basis, reason)。
     basis: jan_code=この商品のJAN / official_variant_jan=公式本文の容量違いのJAN /
     name_without_jan=JANの記載が無く名称等で確認 / product_without_jan=この商品にJANが無く名称等で確認 / None=不合格・保留。"""
@@ -3439,6 +3527,8 @@ def listing_identity_basis(item, brand, product_name, category, jan_code, identi
     title = str(item.get("itemName", "") or "")
     if jan and rakuten_item_mentions_jan(item, jan):
         return "jan_code", None
+    if category == "美容機器" and device_color_variant(product_name, item, reference_items):
+        return "color_variant", None   # Step54: 同じ型式の色違い(JANが色ごとに異なっていてもよい)
     stage1 = context.get("stage1_text") or ""
     if category != "美容機器" and stage1:
         conflict = variant_word_conflict(product_name, title, official_sibling_words(stage1, product_name, brand, jan))
@@ -3466,14 +3556,15 @@ def listing_identity_basis(item, brand, product_name, category, jan_code, identi
     return ("name_without_jan", None) if ok else (None, f"no_jan_rejected:{why}")
 
 
-def _select_same_product_listing(single_pairs, brand, product_name, category, jan_code, identity_context, diag):
+def _select_same_product_listing(single_pairs, brand, product_name, category, jan_code, identity_context, diag,
+                                 reference_items=()):
     """Step52: 同じ商品(容量違いを含む)と確認できた出品をすべて候補にし、レビュー件数を優先して1件を選ぶ。"""
     accepted, rejections = [], {}
     jan = normalize_jan_code(jan_code)
     # 美容機器の色違いの確認に使う、この商品のJANが記載された出品のタイトル。
     jan_titles = [str(i.get("itemName", "") or "") for _, i in single_pairs if jan and rakuten_item_mentions_jan(i, jan)]
     for score, item in single_pairs:
-        basis, why = listing_identity_basis(item, brand, product_name, category, jan_code, identity_context)
+        basis, why = listing_identity_basis(item, brand, product_name, category, jan_code, identity_context, reference_items)
         if basis and category == "美容機器" and basis != "jan_code":
             color = device_color_conflict(item.get("itemName", ""), product_name, jan_titles)
             if color:
@@ -3496,8 +3587,15 @@ def _select_same_product_listing(single_pairs, brand, product_name, category, ja
             reason = "jan_absent_identity_unconfirmed"  # JANの記載が無い・確認できない出品だけが残った(保留)
         return {"status": "not_found", "reason": reason, **diag}
     pairs = [(score, item) for score, item, _ in accepted]
-    best = select_listing_by_reviews(pairs, brand) if PM_SELECTION_FLAGS["review_first_selection"] \
+    page_checks = []
+    best = select_listing_by_reviews(pairs, brand, listing_page_check if PM_SELECTION_FLAGS["cheapest_page_check"] else None,
+                                     page_checks) if PM_SELECTION_FLAGS["review_first_selection"] \
         else app._select_single_or_set_best(pairs)
+    if page_checks:
+        diag["listing_page_checks"] = page_checks
+    if best is None:
+        # Step54: 価格で選ぶ出品の販売ページをどれも確認できなかった(保留)。
+        return {"status": "not_found", "reason": "listing_page_unconfirmed", "candidate_count": len(accepted), **diag}
     basis = next(b for _, item, b in accepted if item is best)
     result = {"status": "confirmed", "item": best, "disambiguated_by": basis if len(accepted) == 1 else f"{basis}+review_selection",
               "identity_basis": basis, "candidate_count": len(accepted), **diag}

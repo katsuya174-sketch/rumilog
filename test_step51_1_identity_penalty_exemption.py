@@ -65,7 +65,8 @@ class ModelMatchNameTests(unittest.TestCase):
         self.assertFalse(pipeline.pm_title_name_match("バイタリフト RF EH-SR85", "互換品 EH-SR85 対応", "パナソニック", "美容機器"))
         self.assertFalse(pipeline.pm_title_name_match("バイタリフト RF EH-SR85", "パナソニック バイタリフト EH-SR75", "パナソニック", "美容機器"))
         self.assertTrue(app.pm_is_set_item("【ヤーマン公式】《メディリフト プラス セラムセット EPM18BB》"))
-        item = {"itemName": "パナソニック バイタリフト RF ブラック EH-SR85-K", "itemCaption": "説明"}
+        # Step54: 色の記載が無い色記号違いは、色違いに由来すると確認できないため採用しない。
+        item = {"itemName": "パナソニック バイタリフト RF EH-SR85-K", "itemCaption": "説明"}
         self.assertFalse(pipeline.pm_device_identity("バイタリフト RF EH-SR85", item["itemName"], "パナソニック", item, JAN)[0])
 
     def test_supplements_still_need_name_parts(self):

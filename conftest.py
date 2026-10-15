@@ -74,3 +74,20 @@ def block_real_citation_page_fetch():
     with patch.object(citation_verification, "_getaddrinfo", side_effect=blocked), \
             patch.object(citation_verification, "_open_url", side_effect=blocked):
         yield
+
+
+@pytest.fixture(autouse=True)
+def fake_listing_page_fetch():
+    """Step54: 価格で選ぶ出品の販売ページ確認(product_collection_pipeline._fetch_listing_page)が自動テストから
+    実楽天へ到達しないようにする。既定では出品のAPI価格どおりの通常販売・在庫ありのページを返す。
+    販売ページ確認そのもののテストは_fetch_listing_pageを個別にpatchする。"""
+    import app
+    import product_collection_pipeline as pipeline
+
+    def fake(item):
+        price = app.safe_price(item.get("itemPrice", 0))
+        return ('{"taxIncludedPrice":%d.0,"sellType":"NORMAL","sku":[],"variantId":"v1",'
+                '"variantMappedInventories":[{"sku":"v1","inventoryId":"i1","quantity":3}]}' % price)
+
+    with patch.object(pipeline, "_fetch_listing_page", side_effect=fake):
+        yield

@@ -3232,6 +3232,89 @@ def _pm_full_models(text):
     return set(_PM_FULL_MODEL_RE.findall(re.sub(r"[/／()（）\[\]【】、,|｜]+", " ", folded)))
 
 
+# Step54: 色の一般語(ブランドごとの対応表ではない)。収集時(product_collection_pipeline)と診断時で共通。
+DEVICE_COLOR_WORDS = (("ブラック", "black"), ("ホワイト", "white"), ("ピンク", "pink"), ("ゴールド", "gold"), ("シルバー", "silver"),
+                      ("ブラウン", "brown"), ("レッド", "red"), ("ブルー", "blue"), ("グリーン", "green"), ("ネイビー", "navy"),
+                      ("グレー", "gray", "grey"), ("ベージュ",), ("パープル", "purple"), ("イエロー", "yellow"), ("オレンジ", "orange"),
+                      ("ローズ", "rose"), ("ラベンダー", "lavender"), ("ミント", "mint"))
+
+
+def device_color_groups(text):
+    """タイトル等に含まれる色(色の一般語のグループ番号の集合)。英字はスペース区切りの単語として照合する。"""
+    folded = unicodedata.normalize("NFKC", str(text or "")).lower()
+    spaced = " " + re.sub(r"[^0-9a-zぁ-んァ-ヶー一-龥]+", " ", folded) + " "
+    compact = re.sub(r"\s+", "", folded)
+    return {i for i, group in enumerate(DEVICE_COLOR_WORDS)
+            if any((f" {w} " in spaced) if w.isascii() else (w in compact) for w in group)}
+
+
+def device_color_suffix_pair(m, t):
+    """2つの型番が、末尾の英字1文字(色記号)の有無・違いだけで異なるか(EH-SR75とEH-SR75-N、KBE-2740/KとKBE-2740/W)。"""
+    if m == t:
+        return False
+    if (t[:-1] == m and t[-1].isalpha()) or (m[:-1] == t and m[-1].isalpha()):
+        return True
+    return len(m) == len(t) and m[:-1] == t[:-1] and m[-1].isalpha() and t[-1].isalpha() and m[-2].isdigit()
+
+
+def _device_model_color(model, item, reference_items):
+    """Step54: 色記号付きの型番(model)と色の対応が明確か。この出品と同じ検索結果の出品のうち、タイトルにこの型番が
+    ある出品の色がすべて同じ1色で、この型番と複数の色を併記した出品も無いときだけ、その色を返す
+    (対応が不明・食い違う場合はNone)。商品説明は使わない(仕様欄の色一覧等で対応がぶれるため)。"""
+    colors = set()
+    for it in [item, *(reference_items or ())]:
+        if not isinstance(it, dict):
+            continue
+        title = str(it.get("itemName", "") or "")
+        if model not in _pm_full_models(title):
+            continue
+        groups = device_color_groups(title)
+        if len(groups) > 1:
+            return None
+        colors |= groups
+    return next(iter(colors)) if len(colors) == 1 else None
+
+
+def device_model_check(product_name, item, reference_items=()):
+    """Step54: 美容機器の出品が商品名の型番と同じ型式か。戻り値: (ok, reason)。商品名に型番が無ければ判定しない。
+    型番が末尾まで一致すれば同じ型式。末尾の色記号だけが違う場合は、色違いに由来すると確認できるとき
+    (色記号付きの型番と色の対応が、出品自身または同じ検索結果の出品のタイトルで明確なとき)だけ、同じ型式の色違いとして
+    許容する。それ以外(別の型番・型番の記載なし)は別機種として除外する。"""
+    ours = _pm_full_models(product_name)
+    if not ours:
+        return True, "no_model_in_name"
+    title = str(item.get("itemName", "") or "")
+    theirs = _pm_full_models(title)
+    if ours <= theirs:
+        prefixes = {re.match(r"[a-z]+", m).group(0) for m in ours}
+        if any(re.match(r"[a-z]+", t).group(0) in prefixes and not any(device_color_suffix_pair(m, t) for m in ours)
+               for t in theirs - ours):
+            return False, "conflicting_model_number"
+        return True, "model_number_match"
+    missing = [m for m in ours if m not in theirs]
+    if all(any(device_color_suffix_pair(m, t) for t in theirs) for m in missing):
+        # 色記号が付いている側の型番(出品が基本型番だけなら商品名側)の色の対応を確認する。
+        suffixed = {t if len(t) >= len(m) else m for m in missing for t in theirs if device_color_suffix_pair(m, t)}
+        if all(_device_model_color(x, item, reference_items) is not None for x in suffixed):
+            return True, "color_variant"
+        return False, "color_variant_unconfirmed"
+    return False, "model_number_mismatch"
+
+
+def filter_device_candidates_by_model(scored_items, product_name):
+    """Step54: 診断時の美容機器の候補を型番で絞る(同じ型式の色違いは許容、別機種は除外)。色違いの確認には
+    同じ検索結果の出品を使う。収集時はJANも使う型番判定(product_collection_pipeline.pm_device_identity)で照合する。"""
+    references = [item for _, item in scored_items]
+    kept = []
+    for score, item in scored_items:
+        ok, reason = device_model_check(product_name, item, references)
+        if ok:
+            kept.append((score, item))
+        else:
+            _trace_rakuten_item("device_model_filter", item, reason=reason)
+    return kept
+
+
 def _pm_identity_confirmed_in_title(item, product_name):
     """収集時、出品が型番の完全一致または商品のJAN記載で同一商品と確認できるか。"""
     title = str(item.get("itemName", "") or "")
@@ -3630,7 +3713,10 @@ def score_rakuten_item(item, product_name, brand="", category="", explain=None):
 
     if brand:
         brand_compact = compact_text(brand)
-        if brand_compact and brand_compact in title_compact:
+        # Step54: 美容機器は承認済みの別表記(Panasonic⇔パナソニック等)も同じブランドとして扱う(事前絞り込みと同じ)。
+        _brand_alias_hit = category == "美容機器" and any(
+            compact_text(f) and compact_text(f) in title_compact for f in brand_match_forms(brand))
+        if brand_compact and (brand_compact in title_compact or _brand_alias_hit):
             # サプリ・美容機器はブランド指定が商品選定の主軸のため加点を強化
             score += 60 if category in ("サプリメント", "美容機器") else 25
         elif brand_compact and category == "美容機器":
@@ -3976,6 +4062,39 @@ def explicit_brand_forms(brand):
     if match:
         forms += [match.group(1).strip(), match.group(2).strip()]
     return [f for f in dict.fromkeys(forms) if len(_compact_brand_text(f)) >= 2]
+
+
+# Step54: 承認済みのブランド別表記(brand_aliases.json の status="approved")。表記の推測・変換はしない。
+BRAND_ALIASES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brand_aliases.json")
+_APPROVED_BRAND_NAMES_CACHE = {"key": None, "groups": []}
+
+
+def _approved_brand_name_groups():
+    try:
+        key = os.path.getmtime(BRAND_ALIASES_FILE)
+    except OSError:
+        return []
+    if _APPROVED_BRAND_NAMES_CACHE["key"] != key:
+        try:
+            with open(BRAND_ALIASES_FILE, encoding="utf-8") as f:
+                entries = json.load(f).get("entries", [])
+        except (OSError, ValueError, AttributeError):
+            entries = []
+        groups = [[str(n) for n in e.get("names", []) if str(n).strip()] for e in entries
+                  if isinstance(e, dict) and e.get("status") == "approved"]
+        _APPROVED_BRAND_NAMES_CACHE.update(key=key, groups=[g for g in groups if g])
+    return _APPROVED_BRAND_NAMES_CACHE["groups"]
+
+
+def brand_match_forms(brand):
+    """ブランドの明示的な表記に、承認済みの別表記(Panasonic⇔パナソニック等)を加えたもの。
+    一致する登録が1件だけのときに限り加える(曖昧なら加えない)。"""
+    forms = explicit_brand_forms(brand)
+    compact = {_compact_brand_text(f) for f in forms}
+    hits = [g for g in _approved_brand_name_groups() if compact & {_compact_brand_text(n) for n in g}]
+    if len(hits) == 1:
+        forms += [n for n in hits[0] if len(_compact_brand_text(n)) >= 2]
+    return list(dict.fromkeys(forms))
 
 
 def clean_rakuten_keyword(keyword):
@@ -5656,11 +5775,13 @@ def _score_rakuten_search_item(raw_item, product_name, category, brand):
             # Step49.5: 「ヤーマン（YA-MAN）」のような括弧注記付きブランドは、
             # 括弧外・括弧内の明示的な表記をそれぞれ照合する(連結した
             # 文字列そのままでは楽天タイトルに一致しないため)。
+            # Step54: 承認済みの別表記(Panasonic⇔パナソニック等)も同じブランドとして扱う。
             _tc = _compact_brand_text(rakuten_title)
-            _forms = [_compact_brand_text(f) for f in explicit_brand_forms(brand)]
+            _forms = [_compact_brand_text(f) for f in brand_match_forms(brand)]
             if _forms and not any(f in _tc for f in _forms):
-                _trace_rakuten_item("brand_prefilter", item, brand_forms=explicit_brand_forms(brand))
+                _trace_rakuten_item("brand_prefilter", item, brand_forms=brand_match_forms(brand))
                 return None
+
     elif not _bypass_title_match:
         if not is_same_verified_rakuten_product(
             product_name=product_name,
@@ -6063,6 +6184,9 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
                 scored = _score_rakuten_search_item(raw_item, product_name, category, brand)
                 if scored is not None:
                     scored_items.append(scored)
+
+            if category == "美容機器":
+                scored_items = filter_device_candidates_by_model(scored_items, product_name)
 
             _bypass_title_match = category == "サプリメント" or _is_ingredient_category_name(product_name)
             if not scored_items:

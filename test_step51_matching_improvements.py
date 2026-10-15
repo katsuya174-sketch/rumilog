@@ -88,9 +88,11 @@ class C3C6ModelTests(unittest.TestCase):
     def test_different_suffix_is_a_different_model(self):
         self.assertFalse(self.identity("メディリフト プラス EPM-18BB", "メディリフト プラス セラムセット EPM18BB2")[0])
 
-    def test_color_variant_requires_jan(self):
-        self.assertEqual(self.identity("バイタリフト RF EH-SR85", "バイタリフト RF ブラック EH-SR85-K"), (False, "color_variant_without_jan"))
-        self.assertTrue(self.identity("バイタリフト RF EH-SR85", "バイタリフト RF ブラック EH-SR85-K", jan_in_title=True)[0])
+    def test_color_variant_requires_jan_or_color_evidence(self):
+        # Step54: 同じ型式の色違いは、JANが一致するか、出品に色の記載があれば採用する。
+        self.assertEqual(self.identity("バイタリフト RF EH-SR85", "バイタリフト RF ブラック EH-SR85-K"), (True, "color_variant"))
+        self.assertEqual(self.identity("バイタリフト RF EH-SR85", "バイタリフト RF EH-SR85-K"), (False, "color_variant_unconfirmed"))
+        self.assertTrue(self.identity("バイタリフト RF EH-SR85", "バイタリフト RF EH-SR85-K", jan_in_title=True)[0])
 
     def test_product_without_model_needs_jan_when_title_has_model(self):
         self.assertFalse(self.identity("リファカラットレイ", "リファ ReFa CARAT RAY リファカラットレイ RF-PC2019B")[0])

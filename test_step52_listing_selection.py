@@ -233,19 +233,27 @@ class DeviceColorAndUsedTests(unittest.TestCase):
             return pipeline.resolve_item_code_for_product(self.BRAND, self.NAME, "美容機器", jan_code=jan,
                                                           identity_context={"stage1_text": "", "active_ingredients": []})
 
-    def test_other_color_without_jan_is_not_selected_over_jan_match(self):
+    def test_same_model_other_color_is_accepted(self):
+        # Step54: 同じ型式の色違いは採用し、レビュー数で選ぶ(JANが一致する出品があっても優先しない)。
         black_jan = _item("blk:1", "Panasonic リフトケア美顔器 バイタリフトRF ブラック EH-SR85-K", caption=f"JAN {self.JAN}", reviews=1)
         pink = _item("pink:1", "パナソニック リフトケア美顔器 バイタリフトRF EH-SR85 ピンク", reviews=50)
         black = _item("blk:2", "パナソニック 美顔器 EH-SR85 ブラック バイタリフトRF", reviews=20)
         result = self.resolve_device([black_jan, pink, black])
-        self.assertEqual(result["item"]["itemCode"], "blk:2")          # 同じ色(ブラック)ならJANなしでも可・レビュー数で選ぶ
-        self.assertEqual(result["listing_rejections"], {"device_color_mismatch": 1})
+        self.assertEqual(result["item"]["itemCode"], "pink:1")
+        self.assertEqual(result["listing_rejections"], {})
 
-    def test_color_cannot_be_verified_without_any_jan_match(self):
+    def test_same_model_color_accepted_without_any_jan_match(self):
         result = self.resolve_device([_item("pink:1", "パナソニック リフトケア美顔器 バイタリフトRF EH-SR85 ピンク", reviews=50)])
-        self.assertEqual(result["status"], "not_found")
+        self.assertEqual(result["status"], "confirmed")
         self.assertEqual(self.resolve_device([_item("plain:1", "パナソニック リフトケア美顔器 バイタリフトRF EH-SR85")])["status"],
-                         "confirmed")                                  # 色の記載が無い出品は従来どおり
+                         "confirmed")
+
+    def test_color_variant_with_other_jan_is_accepted_only_with_color_evidence(self):
+        # 色記号違い(EH-SR85-P)で別のJANが書かれた出品: 色の記載があれば色違いとして採用、無ければ採用しない。
+        pink = _item("pink:1", "パナソニック バイタリフトRF EH-SR85-P ピンク", caption="JAN 4549980667293", reviews=5)
+        self.assertEqual(self.resolve_device([pink])["item"]["itemCode"], "pink:1")
+        bare = _item("p:2", "パナソニック バイタリフトRF EH-SR85-P", caption="JAN 4549980667293", reviews=5)
+        self.assertEqual(self.resolve_device([bare])["status"], "not_found")
 
     def test_model_with_color_suffix_needs_no_color_check(self):
         # 実データ(PM88)。型番の「/K」で色が特定されているため、タイトルの色の語で保留しない。
@@ -257,7 +265,9 @@ class DeviceColorAndUsedTests(unittest.TestCase):
                                                             identity_context={"stage1_text": "", "active_ingredients": []})
         self.assertEqual(result["status"], "confirmed")
         self.assertIsNone(pipeline.device_color_conflict("EH-SR85 ピンク", "バイタリフト RF EH-SR85-K", []))
-        self.assertEqual(pipeline.device_color_conflict("EH-SR85 ピンク", "バイタリフト RF EH-SR85", []), "device_color_unverified")
+        self.assertIsNone(pipeline.device_color_conflict("EH-SR85 ピンク", "バイタリフト RF EH-SR85", []))
+        # 型番の無い商品は従来どおり、色が確認できなければ保留する。
+        self.assertEqual(pipeline.device_color_conflict("リファ ピンク", "リファカラット", []), "device_color_unverified")
 
     def test_used_listing_is_excluded_even_with_most_reviews(self):
         result = resolve("DHC", "ヒアルロン酸", [_item("used:1", "【中古】DHC ヒアルロン酸 60日分", reviews=900),
