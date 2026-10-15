@@ -5531,19 +5531,84 @@ def _rakuten_api_get(kind, endpoint, **kwargs):
     return requests.get(endpoint, **kwargs)
 
 
-_RAKUTEN_SECRET_PARAM_RE = re.compile(r"((?:accessKey|applicationId|affiliateId)=)[^&\s'\"\)]+", re.IGNORECASE)
+_URL_QUERY_IN_MESSAGE_RE = re.compile(r"[?&][A-Za-z_][A-Za-z0-9_]*=")
 
 
-def safe_rakuten_error(e):
-    """楽天API呼び出しの例外を、ログ・戻り値に出してよい文字列にする。楽天の認証情報はURLのクエリで
-    送っており、requestsの例外文字列にはURLがそのまま入るため、accessKey/applicationId/affiliateIdの値と、
-    設定された各キーの値そのものを伏せる。"""
-    text = f"{type(e).__name__}: {e}"
-    text = _RAKUTEN_SECRET_PARAM_RE.sub(r"\1***", text)
-    for secret in (RAKUTEN_ACCESS_KEY, RAKUTEN_APP_ID, RAKUTEN_AFFILIATE_ID):
-        if secret and len(str(secret)) >= 6:
-            text = text.replace(str(secret), "***")
-    return text
+def _external_request_error(exc):
+    """外部通信のエラー(requests/urllib3の例外、楽天やURLのクエリを含むメッセージ)か。メッセージにURL
+    (楽天の場合は認証情報入り)が入り得るため、トレースバックではメッセージを出さない。"""
+    module = type(exc).__module__ or ""
+    if module.split(".")[0] in ("requests", "urllib3"):
+        return True
+    text = str(exc)
+    return "rakuten" in text.lower() or bool(_URL_QUERY_IN_MESSAGE_RE.search(text))
+
+
+def safe_exception_text(exc):
+    """例外のメッセージをログに出すときに使う。外部通信のエラーは本文を省略し、それ以外はそのまま返す。"""
+    if _external_request_error(exc):
+        return f"{type(exc).__name__}: (外部通信のエラーのため本文を省略)"
+    return repr(exc)
+
+
+def print_safe_traceback(file=None):
+    """print_safe_traceback()の代わり(画面処理用)。呼び出し位置(ファイル・行・関数・コード行)と例外の種類は
+    従来どおり出し、外部通信のエラーのメッセージだけを省略する(楽天の認証情報を含むURLを出さないため)。
+    それ以外の例外はメッセージもそのまま出す。"""
+    import sys as _sys
+    out = file or _sys.stderr
+    exc = _sys.exc_info()[1]
+    if exc is None:
+        return
+    chain, seen = [], set()
+    while exc is not None and id(exc) not in seen and len(chain) < 10:
+        seen.add(id(exc))
+        chain.append(exc)
+        exc = exc.__cause__ or (None if exc.__suppress_context__ else exc.__context__)
+    lines = []
+    for i, item in enumerate(reversed(chain)):
+        if i:
+            lines.append("\nDuring handling of the above exception, another exception occurred:\n\n")
+        lines.append("Traceback (most recent call last):\n")
+        lines.extend(traceback.format_list(traceback.extract_tb(item.__traceback__)))
+        message = "(外部通信のエラーのため本文を省略)" if _external_request_error(item) else str(item)
+        lines.append(f"{type(item).__module__}.{type(item).__name__}: {message}\n")
+    print("".join(lines), file=out, flush=True)
+
+
+RAKUTEN_API_HOST = "openapi.rakuten.co.jp"
+_RAKUTEN_ERROR_CODE_RE = re.compile(r"[A-Za-z][A-Za-z0-9_\-]{0,39}")
+
+
+def _rakuten_error_code(body):
+    """楽天のエラー応答(JSON)からエラーコードだけを取り出す。英数字の短い値以外・JSONでない応答はNone。"""
+    try:
+        data = json.loads(body) if isinstance(body, (str, bytes)) else body
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    nested = data.get("errors") if isinstance(data.get("errors"), dict) else {}
+    for value in (data.get("error"), data.get("errorCode"), nested.get("errorCode"), nested.get("error")):
+        if isinstance(value, (str, int)) and _RAKUTEN_ERROR_CODE_RE.fullmatch(str(value)):
+            return str(value)
+    return None
+
+
+def rakuten_error_summary(op, error=None, status=None, body=None):
+    """楽天API呼び出しのエラーをログ・戻り値に出す文字列。許可した項目(処理名・例外の種類・HTTPステータス・
+    エラーコード・固定のホスト名)だけで組み立て、例外の文字列・URL・応答本文は使わない
+    (楽天の認証情報はURLのクエリで送っており、例外の文字列にはURLがそのまま入るため)。"""
+    parts = [f"op={op}"]
+    if error is not None:
+        parts.append(f"error={type(error).__name__}")
+    if status is not None:
+        parts.append(f"status={int(status)}")
+    code = _rakuten_error_code(body) if body is not None else None
+    if code:
+        parts.append(f"errorCode={code}")
+    parts.append(f"host={RAKUTEN_API_HOST}")
+    return " ".join(parts)
 
 
 def rakuten_api_call_snapshot():
@@ -5718,10 +5783,10 @@ def _fetch_rakuten_candidates_collection(product_name, category, brand, jan, end
                     return total, "cooldown" if status == "cooldown" else "error"
                 items = payload.get("items") or payload.get("Items") or []
             except requests.exceptions.RequestException as e:
-                print("[RAKUTEN API REQUEST ERROR]", safe_rakuten_error(e), flush=True)
+                print("[RAKUTEN API ERROR]", rakuten_error_summary("collection_search", error=e), flush=True)
                 return total, "error"
             except Exception as e:   # 従来の検索と同じく、想定外の例外でも収集全体は止めない
-                print("[RAKUTEN API UNKNOWN ERROR]", safe_rakuten_error(e), flush=True)
+                print("[RAKUTEN API ERROR]", rakuten_error_summary("collection_search", error=e), flush=True)
                 return total, "error"
             # 総ヒット数が返らない場合は、受け取った件数をヒット数として扱う
             count = payload.get("count") if isinstance(payload, dict) else None
@@ -5915,7 +5980,7 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
             print(f"[RAKUTEN API STATUS] {res.status_code}", flush=True)
 
             if res.status_code != 200:
-                print("[RAKUTEN API ERROR BODY]", res.text, flush=True)
+                print("[RAKUTEN API ERROR]", rakuten_error_summary("item_search", status=res.status_code, body=res.text), flush=True)
 
                 if res.status_code == 429:
                     retry_seconds = 10
@@ -5944,7 +6009,7 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
                         )
                         print(f"[RAKUTEN RETRY STATUS] {res.status_code}", flush=True)
                     except Exception as _retry_e:
-                        print(f"[RAKUTEN RETRY ERROR] {safe_rakuten_error(_retry_e)}", flush=True)
+                        print("[RAKUTEN RETRY ERROR]", rakuten_error_summary("item_search_retry", error=_retry_e), flush=True)
                         # ② リトライ自体が例外 → クールダウン設定して諦める
                         RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
                         return []
@@ -6012,11 +6077,11 @@ def fetch_rakuten_candidates(product_name, category="", brand="", ingredient_foc
             return scored_items
 
         except requests.exceptions.RequestException as e:
-            print("[RAKUTEN API REQUEST ERROR]", safe_rakuten_error(e), flush=True)
+            print("[RAKUTEN API ERROR]", rakuten_error_summary("item_search", error=e), flush=True)
             continue
 
         except Exception as e:
-            print("[RAKUTEN API UNKNOWN ERROR]", safe_rakuten_error(e), flush=True)
+            print("[RAKUTEN API ERROR]", rakuten_error_summary("item_search", error=e), flush=True)
             continue
 
     print(
@@ -6186,17 +6251,17 @@ def fetch_rakuten_item_by_item_code(item_code):
         wait_for_rakuten_rate_limit()
         res = _rakuten_api_get("item_code_lookup", endpoint, params=params, headers=headers, timeout=(2, 4))
     except Exception as e:
-        print(f"[ITEM CODE VERIFY] request exception for item_code={item_code}: {safe_rakuten_error(e)}", flush=True)
-        return {"http_status": 0, "ok": False, "rakuten_error": safe_rakuten_error(e), "item": None}
+        print(f"[ITEM CODE VERIFY] item_code={item_code}", rakuten_error_summary("item_code_lookup", error=e), flush=True)
+        return {"http_status": 0, "ok": False, "rakuten_error": rakuten_error_summary("item_code_lookup", error=e), "item": None}
 
     print(f"[ITEM CODE VERIFY] item_code={item_code} status={res.status_code}", flush=True)
 
     if res.status_code != 200:
-        print(f"[ITEM CODE VERIFY] error body: {res.text[:500]}", flush=True)
+        print(f"[ITEM CODE VERIFY] item_code={item_code}", rakuten_error_summary("item_code_lookup", status=res.status_code, body=res.text), flush=True)
         return {
             "http_status": res.status_code,
             "ok": False,
-            "rakuten_error": res.text[:1000],
+            "rakuten_error": rakuten_error_summary("item_code_lookup", status=res.status_code, body=res.text),
             "item": None,
         }
 
@@ -6206,7 +6271,7 @@ def fetch_rakuten_item_by_item_code(item_code):
         return {
             "http_status": res.status_code,
             "ok": False,
-            "rakuten_error": f"JSON decode error: {safe_rakuten_error(e)}",
+            "rakuten_error": rakuten_error_summary("item_code_lookup", error=e, status=res.status_code),
             "item": None,
         }
 
@@ -7568,7 +7633,7 @@ def _rakuten_criteria_search_single(keyword, category):
                 # 保存すると、同じ診断内で同じキーワードが後で使われた場合
                 # （429がすぐ解消していても）永久に空扱いになり、
                 # そのステップの楽天バックフィル候補が失われ続けてしまう。
-                print(f"[RAKUTEN CRITERIA RETRY ERROR] {safe_rakuten_error(_re)}", flush=True)
+                print("[RAKUTEN CRITERIA RETRY ERROR]", rakuten_error_summary("criteria_search_retry", error=_re), flush=True)
                 RAKUTEN_COOLDOWN_UNTIL = time.time() + retry_seconds
                 return []
             if res.status_code == 429:
@@ -7676,7 +7741,7 @@ def _rakuten_criteria_search_single(keyword, category):
         return results
 
     except Exception as e:
-        print(f"[RAKUTEN CRITERIA ERROR] {safe_rakuten_error(e)} total={time.time()-_t_func_start:.2f}s", flush=True)
+        print(f"[RAKUTEN CRITERIA ERROR] {rakuten_error_summary('criteria_search', error=e)} total={time.time()-_t_func_start:.2f}s", flush=True)
         _rakuten_criteria_cache[cache_key] = []
         return []
 
@@ -17557,7 +17622,7 @@ def _batch_prewarm_rakuten_search_cache(steps, improvement_plan):
             flush=True
         )
     except Exception as e:
-        print(f"[RAKUTEN BATCH PREWARM ERROR] {safe_rakuten_error(e)}", flush=True)
+        print("[RAKUTEN BATCH PREWARM ERROR]", rakuten_error_summary("batch_prewarm", error=e), flush=True)
     finally:
         if conn:
             conn.close()
@@ -17607,7 +17672,7 @@ def prefetch_rakuten_for_all_steps(data, improvement_plan, max_workers=3):
             )
             return result
         except Exception as e:
-            print(f"[PREFETCH ERROR] {repr(e)}", flush=True)
+            print(f"[PREFETCH ERROR] {safe_exception_text(e)}", flush=True)
             return []
 
     # 同一(category, ingredient_focus)キー（_get_step_rakuten_key）を持つ
@@ -25647,7 +25712,7 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
     except Exception as e:
         print("===== LAB ERROR =====")
         print(e)
-        traceback.print_exc()
+        print_safe_traceback()
         print("=====================")
 
         message = classify_gemini_error(str(e))
@@ -25804,7 +25869,7 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
     except Exception as e:
         print("===== PRODUCT SELECTION ERROR =====")
         print(e)
-        traceback.print_exc()
+        print_safe_traceback()
         print("====================================")
         raise DiagnosisError(
             "PRODUCT_SELECTION_ERROR",
@@ -26093,7 +26158,7 @@ def run_diagnosis_core(user_data, front_img, left_img, right_img, force_refresh,
     except Exception as e:
         print("===== RESULT SAVE ERROR =====")
         print(e)
-        traceback.print_exc()
+        print_safe_traceback()
         print("=============================")
         # 保存に失敗しても結果表示は止めない
     _lab_segment("db_save")
@@ -26239,15 +26304,15 @@ def lab_test_function():
 
         except ValueError as e:
             print("\n===== LAB VALUE ERROR =====")
-            print(str(e))
-            traceback.print_exc()
+            print(safe_exception_text(e))
+            print_safe_traceback()
             print("===========================\n")
             return f"<pre>{traceback.format_exc()}</pre>"
 
         except Exception as e:
             print("\n===== LAB ERROR =====")
             print("ERROR:", e)
-            traceback.print_exc()
+            print_safe_traceback()
             print("=====================\n")
 
             user_error = build_user_friendly_error_message(
@@ -26360,7 +26425,7 @@ def api_create_diagnosis():
         validate_lab_dependencies()
         user_data = extract_user_data(request)
     except Exception as e:
-        traceback.print_exc()
+        print_safe_traceback()
         return _api_error("INPUT_MISSING", str(e), 400)
 
     is_valid, validation_message = validate_questionnaire_values(user_data)
@@ -26393,7 +26458,7 @@ def api_create_diagnosis():
     except DiagnosisError as e:
         return _api_error(e.code, e.message, e.http_status)
     except Exception as e:
-        traceback.print_exc()
+        print_safe_traceback()
         return _api_error(
             "INTERNAL_ERROR",
             build_user_friendly_error_message(str(e)),
@@ -26851,7 +26916,7 @@ def stripe_webhook():
 
     except Exception as e:
         print(f"[STRIPE WEBHOOK 処理エラー] event={event_type} error={repr(e)}", flush=True)
-        traceback.print_exc()
+        print_safe_traceback()
         return jsonify({"error": "internal processing error"}), 500
 
     return jsonify({"status": "ok"})
@@ -27927,7 +27992,7 @@ def build_history_dashboard(history_data, is_premium, is_creator):
     except Exception as e:
         print("===== HISTORY DASHBOARD BUILD ERROR =====")
         print(e)
-        traceback.print_exc()
+        print_safe_traceback()
         print("==========================================")
         return {
             "prepared": [],
@@ -27996,7 +28061,7 @@ def history():
     except Exception as e:
         print("===== HISTORY ROUTE ERROR =====")
         print(e)
-        traceback.print_exc()
+        print_safe_traceback()
         print("===============================")
 
         return render_template(
@@ -28107,7 +28172,7 @@ def api_history():
     except Exception as e:
         print("===== API HISTORY ROUTE ERROR =====")
         print(e)
-        traceback.print_exc()
+        print_safe_traceback()
         print("====================================")
         return _api_error("INTERNAL_ERROR", build_user_friendly_error_message(str(e)), 500)
 
@@ -28162,7 +28227,7 @@ def api_history_detail(result_id):
     except Exception as e:
         print("===== API HISTORY DETAIL ROUTE ERROR =====")
         print(e)
-        traceback.print_exc()
+        print_safe_traceback()
         print("===========================================")
         return _api_error("INTERNAL_ERROR", build_user_friendly_error_message(str(e)), 500)
 
@@ -28494,7 +28559,7 @@ def api_premium_verify_purchase():
     try:
         payload = verifier.verify_and_decode_signed_transaction(signed_transaction)
     except VerificationException as e:
-        traceback.print_exc()
+        print_safe_traceback()
         # {e}自体はApple SDKの内部例外詳細(開発者向け)のため翻訳せず、
         # 定型の案内部分のみをローカライズする。
         return _api_error("INVALID_TRANSACTION", gettext("購入情報を検証できませんでした: %(detail)s", detail=str(e)), 400)
@@ -28625,12 +28690,12 @@ def api_premium_verify_purchase_android():
         # 無効・偽装・失効済みのpurchase_token等、Google側がリクエスト自体を拒否した場合。
         # {e}自体はGoogle APIの内部例外詳細(開発者向け)のため翻訳せず、
         # 定型の案内部分のみをローカライズする。
-        traceback.print_exc()
+        print_safe_traceback()
         return _api_error("INVALID_TRANSACTION", gettext("購入情報を検証できませんでした: %(detail)s", detail=str(e)), 400)
     except Exception as e:
         # ネットワーク断・Google側の一時的な障害等、tokenの正当性とは無関係な失敗。
         # クライアント側でリトライ可能なエラーとして扱えるよう400ではなく503を返す。
-        traceback.print_exc()
+        print_safe_traceback()
         return _api_error("VERIFICATION_FAILED", gettext("購入情報の検証中にエラーが発生しました: %(detail)s", detail=str(e)), 503)
 
     line_items = purchase.get("lineItems") or []
@@ -28650,7 +28715,7 @@ def api_premium_verify_purchase_android():
         # datetime.fromisoformat()は'Z'を受け付けないため、明示的に+00:00へ変換する。
         expiry_dt_utc = datetime.fromisoformat(expiry_time_raw.replace("Z", "+00:00"))
     except (ValueError, AttributeError):
-        traceback.print_exc()
+        print_safe_traceback()
         return _api_error("INVALID_TRANSACTION", gettext("購入情報を検証できませんでした"), 400)
 
     # 他の課金経路(validate_premium_key()のdatetime.now()比較、Apple版の
@@ -28719,7 +28784,7 @@ def result_detail(result_id):
     except Exception as e:
         print("===== HISTORY DETAIL ERROR =====", flush=True)
         print(e, flush=True)
-        traceback.print_exc()
+        print_safe_traceback()
         print("================================", flush=True)
         return gettext("エラーが発生しました"), 500
 
@@ -28806,7 +28871,7 @@ def history_detail(result_id):
     except Exception as e:
         print("===== HISTORY DETAIL ERROR =====")
         print(e)
-        traceback.print_exc()
+        print_safe_traceback()
         print("================================")
         return "履歴詳細の読み込みに失敗しました", 500
 

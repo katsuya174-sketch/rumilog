@@ -76,7 +76,9 @@ class FetchRakutenItemByItemCodeTests(unittest.TestCase):
 
         self.assertEqual(result["http_status"], 400)
         self.assertFalse(result["ok"])
-        self.assertIn("wrong parameter", result["rakuten_error"])
+        # 秘密情報対策: 応答本文は戻り値に入れず、許可した項目(処理名・ステータス・ホスト)だけにする。
+        self.assertNotIn("wrong parameter", result["rakuten_error"])
+        self.assertIn("status=400", result["rakuten_error"])
         self.assertIsNone(result["item"])
 
     def test_request_exception_is_handled_gracefully(self):
@@ -85,7 +87,9 @@ class FetchRakutenItemByItemCodeTests(unittest.TestCase):
 
         self.assertEqual(result["http_status"], 0)
         self.assertFalse(result["ok"])
-        self.assertIn("network down", result["rakuten_error"])
+        # 秘密情報対策: 例外の文字列は戻り値に入れず、例外の種類だけを入れる。
+        self.assertNotIn("network down", result["rakuten_error"])
+        self.assertIn("error=ConnectionError", result["rakuten_error"])
 
     def test_sends_item_code_only_not_keyword(self):
         mock_response = MagicMock()

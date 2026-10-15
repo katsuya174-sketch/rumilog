@@ -238,60 +238,122 @@ class AuditFoundCasesTests(unittest.TestCase):
 
 
 class SecretRedactionTests(unittest.TestCase):
-    """楽天APIの通信エラーで、認証情報(URLのクエリ)をログ・戻り値に出さない。実楽天APIには接続しない。"""
+    """楽天APIの通信エラー・エラー応答・画面処理への例外伝播で、認証情報をログ・戻り値に出さない。
+    実楽天APIには接続しない(キーは偽の値)。"""
 
     KEY, APP = "pk_TESTSECRETVALUE123", "app-TESTAPPID-456"
 
-    def error(self, *a, **k):
+    def url(self):
+        return (f"/ichibams/api/IchibaItem/Search/20260401?applicationId={self.APP}&accessKey={self.KEY}"
+                "&itemCode=x%3A1&newParam=unknownsecret")
+
+    def timeout(self, *a, **k):
         import requests
         raise requests.exceptions.ConnectTimeout(
-            "HTTPSConnectionPool(host='openapi.rakuten.co.jp', port=443): Max retries exceeded with url: "
-            f"/ichibams/api/IchibaItem/Search/20260401?applicationId={self.APP}&accessKey={self.KEY}&itemCode=x%3A1 "
-            "(Caused by ConnectTimeoutError(...))")
+            f"HTTPSConnectionPool(host='openapi.rakuten.co.jp', port=443): Max retries exceeded with url: {self.url()}")
+
+    def http_error(self, body, status=500):
+        def respond(*a, **k):
+            return MagicMock(status_code=status, text=body, json=MagicMock(side_effect=ValueError("no json")))
+        return respond
 
     def assert_clean(self, text):
-        self.assertNotIn(self.KEY, text)
-        self.assertNotIn(self.APP, text)
+        for secret in (self.KEY, self.APP, "unknownsecret", "accessKey="):
+            self.assertNotIn(secret, text)
 
-    def run_with_keys(self, func):
-        out = io.StringIO()
+    def run_with(self, func, side_effect):
+        out, err = io.StringIO(), io.StringIO()
         with patch.object(app, "RAKUTEN_ACCESS_KEY", self.KEY), patch.object(app, "RAKUTEN_APP_ID", self.APP), \
-                patch.object(app, "_rakuten_api_get", side_effect=self.error), \
-                patch.object(app, "wait_for_rakuten_rate_limit", return_value=None), contextlib.redirect_stdout(out):
+                patch.object(app, "_rakuten_api_get", side_effect=side_effect), \
+                patch.object(app.requests, "get", side_effect=side_effect), \
+                patch.object(app, "wait_for_rakuten_rate_limit", return_value=None), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             result = func()
-        return result, out.getvalue()
+        return result, out.getvalue() + err.getvalue()
 
-    def test_safe_error_keeps_type_and_host_but_hides_keys(self):
+    def search(self, collection):
+        app._rakuten_candidates_cache.clear()
+        token = app._PM_COLLECTION_MODE.set(collection)
         try:
-            self.error()
-        except Exception as e:
-            with patch.object(app, "RAKUTEN_ACCESS_KEY", self.KEY), patch.object(app, "RAKUTEN_APP_ID", self.APP):
-                text = app.safe_rakuten_error(e)
-        self.assert_clean(text)
-        self.assertIn("ConnectTimeout", text)
-        self.assertIn("openapi.rakuten.co.jp", text)
-        self.assertIn("accessKey=***", text)
+            return app.fetch_rakuten_candidates(product_name="ビタミンD", category="サプリメント", brand="ファンケル")
+        finally:
+            app._PM_COLLECTION_MODE.reset(token)
+            app._rakuten_candidates_cache.clear()
 
-    def test_collection_and_diagnosis_search_logs_are_clean(self):
-        for collection in (True, False):
-            with self.subTest(collection=collection):
-                app._rakuten_candidates_cache.clear()
-                token = app._PM_COLLECTION_MODE.set(collection)
-                try:
-                    result, log = self.run_with_keys(
-                        lambda: app.fetch_rakuten_candidates(product_name="ビタミンD", category="サプリメント", brand="ファンケル"))
-                finally:
-                    app._PM_COLLECTION_MODE.reset(token)
-                    app._rakuten_candidates_cache.clear()
-                self.assertEqual(result, [])
-                self.assertIn("ERROR", log)
+    def test_timeout_in_search_and_item_code_lookup(self):
+        for name, func in (("収集時の検索", lambda: self.search(True)), ("診断時の検索", lambda: self.search(False)),
+                           ("商品コード照会", lambda: app.fetch_rakuten_item_by_item_code("x:1"))):
+            with self.subTest(path=name):
+                result, log = self.run_with(func, self.timeout)
+                self.assertIn("error=ConnectTimeout", log)
+                self.assertIn("host=openapi.rakuten.co.jp", log)
                 self.assert_clean(log)
+                self.assert_clean(str(result))
 
-    def test_item_code_lookup_log_and_return_value_are_clean(self):
-        result, log = self.run_with_keys(lambda: app.fetch_rakuten_item_by_item_code("x:1"))
-        self.assertFalse(result["ok"])
-        self.assert_clean(log)
-        self.assert_clean(str(result))
+    def test_http_error_body_is_not_output(self):
+        body = '{"errors": {"errorCode": "wrong_parameter", "errorMessage": "accessKey=%s is invalid"}}' % self.KEY
+        for name, func in (("診断時の検索", lambda: self.search(False)), ("商品コード照会", lambda: app.fetch_rakuten_item_by_item_code("x:1"))):
+            with self.subTest(path=name):
+                result, log = self.run_with(func, self.http_error(body, status=400))
+                self.assertIn("status=400", log)
+                self.assertIn("errorCode=wrong_parameter", log)   # 許可した項目だけは障害調査用に残る
+                self.assert_clean(log)
+                self.assert_clean(str(result))
+                self.assertNotIn("errorMessage", log + str(result))
+
+    def test_malformed_error_responses(self):
+        for body in (f"<html>accessKey={self.KEY}</html>", '{"error": "unknownsecret value with spaces"}',
+                     '{"errorCode": "%s%s"}' % ("x" * 45, self.KEY), "", "null", "[1,2]"):
+            with self.subTest(body=body[:20]):
+                result, log = self.run_with(lambda: app.fetch_rakuten_item_by_item_code("x:1"), self.http_error(body))
+                self.assertFalse(result["ok"])
+                self.assertNotIn("errorCode=", result["rakuten_error"])
+                self.assert_clean(log)
+                self.assert_clean(str(result))
+
+    def test_exception_propagated_to_handler_does_not_leak(self):
+        def rakuten_call():
+            self.timeout()
+
+        def handler_body():
+            try:
+                rakuten_call()
+            except Exception as e:
+                raise RuntimeError("商品選定に失敗") from e
+
+        err = io.StringIO()
+        try:
+            handler_body()
+        except Exception:
+            app.print_safe_traceback(file=err)   # 画面処理(ルート)と同じ呼び方
+        text = err.getvalue()
+        self.assert_clean(text)
+        self.assertIn("requests.exceptions.ConnectTimeout", text)
+        self.assertIn("RuntimeError: 商品選定に失敗", text)          # 楽天以外の例外のメッセージは残す
+        self.assertIn("rakuten_call", text)                          # 呼び出し位置も残す
+
+    def test_safe_exception_text(self):
+        import requests
+        try:
+            self.timeout()
+        except Exception as e:
+            self.assert_clean(app.safe_exception_text(e))
+        bad_url = requests.exceptions.InvalidURL(f"Invalid URL {self.url()}")   # ValueErrorの一種
+        self.assert_clean(app.safe_exception_text(bad_url))
+        self.assertIn("missing_key", app.safe_exception_text(KeyError("missing_key")))   # それ以外は本文を残す
+
+    def test_other_exceptions_keep_full_message(self):
+        err = io.StringIO()
+        try:
+            {}["missing_key"]
+        except Exception:
+            app.print_safe_traceback(file=err)
+        self.assertIn("KeyError: 'missing_key'", err.getvalue())
+
+    def test_no_raw_traceback_printing_remains_in_app(self):
+        source = open(app.__file__, encoding="utf-8").read()
+        self.assertNotIn("traceback.print_exc()", source)
+        self.assertNotIn("print_exception(", source)
 
 
 class DeterministicSelectionTests(unittest.TestCase):
