@@ -937,22 +937,19 @@ def _staging_reuse_data_problem(staging_row):
 
 
 def _ensure_staging_page_verification(staging_id, brand):
-    """Step45.5: staging再利用(execute)時、保存済みcitationにpage_verification
-    がまだ無く、title判定でも公式確認できない場合だけ、citation先ページを
-    一度確認して結果をstage1_citationsへ保存する(Gemini費用なし)。既に
-    検証済みなら保存値をそのまま使い、HTTPは再実行しない。"""
+    """Step45.5/55: staging再利用(execute)時、公式確認できていない場合だけ、citation先ページを確認して
+    結果をstage1_citationsへ保存する(Gemini費用なし)。確認済みのドメインは再取得しない
+    (一時エラーは期限・回数の範囲で再確認)。"""
     row = _fetch_staging_row(staging_id)
     citations = row.get("stage1_citations") if row else None
     if not row or _staging_reuse_data_problem(row) or pipeline.official_confirmation(
             brand, citations, row.get("stage2_payload"))["confirmed"]:
         return row
-    if pipeline.has_page_verification(citations):
-        # Step45.13: 評価済みのcitationは再取得せず、transientだけを期限・回数の
-        # 範囲内で再確認する。
-        verified, changed = pipeline.retry_transient_page_verifications(brand, citations)
-    else:
-        verified = pipeline.attach_citation_page_verification(brand, citations)
-        changed = verified is not citations
+    # Step55: 期限が来た一時エラーの再確認に加え、まだ確認していないドメイン(仕様の出典ドメインは上限なし)も
+    # 確認する。他のstaging行の確認結果を再利用し、同じサイトへの不要な通信を減らす。
+    verified, changed, _ = pipeline.refresh_page_verifications(
+        brand, citations, row.get("stage2_payload"), cache=pipeline.load_page_verification_cache(),
+        stage1_text=row.get("stage1_raw_text"))
     if changed:
         pipeline.update_staging_citations(staging_id, verified)
         row = dict(row, stage1_citations=verified)

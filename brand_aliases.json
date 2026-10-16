@@ -288,7 +288,7 @@
     },
     {
       "id": "dear-natura",
-      "status": "proposed",
+      "status": "approved",
       "relation": "english_alias+maker_relation",
       "names": [
         "ディアナチュラ",
@@ -347,9 +347,9 @@
           "stage2_brand": "Dear-Natura"
         }
       ],
-      "evidence_note": "公式URL(www.dear-natura.com / www.asahi-gf.co.jp の dear-natura 商品ページ)は特定できたが、両サイトとも403でページ内容を確認できない。根拠不足のため未承認。",
-      "approved_by": null,
-      "approved_at": null,
+      "evidence_note": "公式URL(www.dear-natura.com / www.asahi-gf.co.jp の dear-natura 商品ページ)は特定できたが、両サイトとも403でページ内容を確認できない。根拠不足のため未承認。 2026-10-16: ユーザーの判断で承認(公式ドメインのドメイン名による確認。ページ内容は403のため未確認のまま)。",
+      "approved_by": "user (2026-10-16 ディアナチュラの別表記の承認)",
+      "approved_at": "2026-10-16T06:26:53+00:00",
       "alias_relations": [
         {
           "name": "Dear-Natura",

@@ -95,7 +95,8 @@ class RetryTests(unittest.TestCase):
         pv = out[0]["page_verification"]
         self.assertEqual((pv["retry_count"], pv.get("transient_exhausted")), (2, True))
         out, changed, calls3 = self._retry("パナソニック", out, FORBIDDEN, now=NOW + timedelta(days=5))
-        self.assertEqual((len(calls), len(calls2), calls3, changed), (1, 1, [], False))
+        # Step55: 期限が来た再確認1回の中で、timeoutは回数を制限してすぐに再試行する(1 + 2回)。
+        self.assertEqual((len(calls), len(calls2), calls3, changed), (3, 3, [], False))
         evidence = orchestrator.classify_official_evidence("パナソニック", out)
         self.assertEqual(evidence["status"], "undetermined")  # 非公式(failed)にはしない
         self.assertEqual(evidence["transient_exhausted"], ["ksdenki.com"])

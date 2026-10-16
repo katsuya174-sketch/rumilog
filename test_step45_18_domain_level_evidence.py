@@ -115,7 +115,7 @@ class SafetyRegressionTests(unittest.TestCase):
             return {"status": cv.UNVERIFIABLE, "reason": "timeout", "final_url": ""}
         with patch.object(cv, "fetch_html", side_effect=fetch), patch.object(pipeline, "_utcnow", return_value=now):
             out, _ = pipeline.retry_transient_page_verifications("パナソニック", cits, now=now)
-        self.assertEqual(calls, [CIT + "1"])
+        self.assertEqual(calls, [CIT + "1"] * 3)   # Step55: timeoutはその場で回数を制限して再試行(1 + 2回)
         self.assertEqual(out[0]["page_verification"]["retry_count"], 1)
         self.assertNotIn("page_verification", out[1])
 

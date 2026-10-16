@@ -911,7 +911,10 @@ def _page_identity_confirms_brand(brand, citation):
     # ことがあるため(例: 価格.com「価格.com - パナソニック …」)、使わない。
     # 証明できなければnot_confirmed(fail closed)。
     fields = [identity.get("og_site_name"), *(identity.get("jsonld_names") or [])]
-    return any(isinstance(f, str) and _free_text_confirms_brand(brand, _corporate_designators_as_spaces(f))
+    # Step55: ブランド名側の法人格表記(「株式会社ドクターセレクト」等)も、名乗り側と同じく境界として扱う
+    # (名乗り側だけ置き換えると、同じ法人名どうしでも一致しなかったため)。
+    brand_core = _corporate_designators_as_spaces(brand).strip() or brand
+    return any(isinstance(f, str) and _free_text_confirms_brand(brand_core, _corporate_designators_as_spaces(f))
                for f in fields)
 
 
@@ -1009,13 +1012,38 @@ def official_confirmation(brand, citations, payload=None, entries=None):
             "reason": "registered_names_not_confirmed_on_spec_source_domain"}
 
 
+# Step55: 一時的な取得失敗(timeout・通信エラー・5xx)は、同じ確認の中で回数を制限して再試行する。
+# 403/429(アクセス拒否・回数制限)はすぐには再試行しない(従来どおり期限・回数の範囲の再確認だけ)。
+PAGE_IMMEDIATE_RETRIES = 2
+PAGE_IMMEDIATE_RETRY_WAIT_SECONDS = (2, 5)
+_page_retry_sleep = time.sleep
+
+
+def _immediately_retryable(fetched):
+    reason = str(fetched.get("reason") or "")
+    return fetched.get("status") == citation_verification.UNVERIFIABLE and (
+        reason in ("timeout", "connection_error") or reason.startswith("http_5"))
+
+
+def _fetch_page_with_retry(uri):
+    """戻り値: (fetched, attempts)。"""
+    attempts = 0
+    while True:
+        fetched = citation_verification.fetch_html(uri)
+        attempts += 1
+        if not _immediately_retryable(fetched) or attempts > PAGE_IMMEDIATE_RETRIES:
+            return fetched, attempts
+        _page_retry_sleep(PAGE_IMMEDIATE_RETRY_WAIT_SECONDS[min(attempts - 1, len(PAGE_IMMEDIATE_RETRY_WAIT_SECONDS) - 1)])
+
+
 def _verify_citation_page(brand, citation):
-    fetched = citation_verification.fetch_html(citation.get("uri", ""))
+    fetched, attempts = _fetch_page_with_retry(citation.get("uri", ""))
     final_url = fetched.get("final_url") or ""
     record = {
         "fetch_status": fetched["status"],
         "final_domain": fetched.get("final_domain") or (urlsplit(final_url).hostname or None),
         "checked_at": _utcnow().isoformat(),
+        "attempts": attempts,
     }
     if fetched["status"] != citation_verification.OK:
         record.update({"status": fetched["status"], "reason": fetched.get("reason")})
@@ -1157,6 +1185,159 @@ def attach_citation_page_verification(brand, citations):
         if citation["page_verification"].get("status") == "confirmed":
             break
     return out
+
+
+# ===== Step55: 公式情報の確認の見落とし防止・再利用 =====
+# (1) 仕様の出典になったドメイン(商品ごとの公式確認の条件にもなる)は、ドメイン数の上限に関係なく確認する。
+#     それ以外は従来どおり MAX_PAGE_VERIFICATION_DOMAINS まで。再確認時は、まだ確認していないドメインも確認する。
+# (2) 他のstaging行で確認済みの同じドメインの結果を再利用する(HTTPを行わない)。取得に成功した結果は
+#     サイトの名乗りを現在のブランドで判定し直す(PAGE_REUSE_TTL以内。同じドメインの記録で最終ドメイン・名乗りが
+#     すべて同じ場合だけ)。403・timeout等の取得失敗は、
+#     PAGE_RETRY_INTERVAL以内なら同じ結果として扱い、同じサイトへすぐに再アクセスしない。
+# (3) 確認結果(理由・試行回数・再利用元)は各citationのpage_verificationに保存する。
+PAGE_REUSE_TTL = timedelta(days=30)
+
+
+def _ok_record_matches_domain(record, domain):
+    if record.get("fetch_status") != citation_verification.OK:
+        return False
+    if not _domain_within(record.get("final_domain"), domain):
+        return False
+    canonical = record.get("canonical_domain")
+    return not canonical or _domain_within(canonical, domain)
+
+
+def build_page_verification_cache(rows):
+    """rows: [(staging_id, stage1_citations)]。ドメイン → [(確認時刻, page_verification, staging_id)](新しい順)。
+    他の行から再利用した記録は元の確認として数えない(再利用の連鎖で古い結果が延命しないため)。"""
+    cache = {}
+    for staging_id, citations in rows or []:
+        for citation in citations or []:
+            if not isinstance(citation, dict) or not isinstance(citation.get("page_verification"), dict):
+                continue
+            record = citation["page_verification"]
+            domain = _citation_title_domain(citation)
+            if not domain or record.get("reused_from_staging") is not None:
+                continue
+            checked = _parse_time(record.get("last_attempt_at") or record.get("checked_at"))
+            if checked is not None:
+                cache.setdefault(domain, []).append((checked, record, staging_id))
+    for entries in cache.values():
+        entries.sort(key=lambda e: e[0], reverse=True)
+    return cache
+
+
+def cached_page_verification(cache, domain, now=None):
+    """再利用できる同じドメインの確認結果(無ければNone)。"""
+    now = now or _utcnow()
+    ok = [(checked, record, staging_id) for checked, record, staging_id in (cache or {}).get(domain, [])
+          if _ok_record_matches_domain(record, domain)]
+    # 同じドメインでも、サブドメインやページによってサイトの名乗りが違う場合(例: yahoo.co.jp の
+    # 「Yahoo!ショッピング」と「LOHACO by ASKUL」)は、ドメイン単位の結果として扱えないため再利用しない。
+    variants = {json.dumps([r.get("final_domain"), r.get("canonical_domain"), r.get("site_identity")], ensure_ascii=False,
+                           sort_keys=True, default=str) for _, r, _ in ok}
+    if len(variants) == 1:
+        checked, record, staging_id = ok[0]
+        if now - checked <= PAGE_REUSE_TTL:
+            return dict(record, reused_from_staging=staging_id, reused_at=now.isoformat())
+    if ok:
+        return None
+    for checked, record, staging_id in (cache or {}).get(domain, []):
+        if is_transient_page_verification(record) and now - checked < PAGE_RETRY_INTERVAL:
+            return dict(record, reused_from_staging=staging_id, reused_at=now.isoformat())
+    return None
+
+
+_ASCII_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9]*(?:[-.][A-Za-z0-9]+)*")
+_DOMAIN_GENERIC_LABELS = {"www", "co", "or", "ne", "ac", "go", "com", "jp", "net", "org", "shop", "store", "official"}
+
+
+def relevant_domains(brand, product_name, stage1_text, citations):
+    """Step55: 製品専用サイト・ブランドのサイトなど、この商品との関連が明確なドメイン。ドメイン名(ハイフン除去)が、
+    ブランド名・商品名、またはStage1本文のうちブランド名を含む行に書かれた英字表記(連続する1〜3語の連結)と
+    一致するもの(例: 「株式会社ユニッシュ E-Polation Supreme製品ページ」→ e-polation-supreme.jp)。
+    確認の順序にだけ使い、公式かどうかの判定には使わない(判定は従来どおりサイトの名乗り・登録済みの別表記)。"""
+    forms = [f for f in {_corporate_designators_as_spaces(x).strip() for x in official_brand_forms(brand)} if len(f) >= 2]
+    sources = [str(brand or ""), str(product_name or "")]
+    sources += [line for line in str(stage1_text or "").splitlines() if any(f in line for f in forms)]
+    phrases = set()
+    for text in sources:
+        words = ["".join(ch for ch in w.lower() if ch.isalnum()) for w in _ASCII_WORD_RE.findall(unicodedata.normalize("NFKC", text))]
+        for i in range(len(words)):
+            for n in (1, 2, 3):
+                phrase = "".join(words[i:i + n])
+                if len(words[i:i + n]) == n and len(phrase) >= 4:
+                    phrases.add(phrase)
+    found = set()
+    for citation in citations or []:
+        domain = _citation_title_domain(citation) if isinstance(citation, dict) else None
+        if not domain:
+            continue
+        labels = [l.replace("-", "") for l in domain.split(".")[:-1] if l not in _DOMAIN_GENERIC_LABELS]
+        if any(l in phrases for l in labels):
+            found.add(domain)
+    return found
+
+
+def refresh_page_verifications(brand, citations, payload=None, cache=None, now=None, product_name=None, stage1_text=None):
+    """Step55: 公式確認が取れていないstagingのcitationを再確認する。戻り値: (citations, changed, log)。
+    順序: 期限が来た一時エラーの再確認 → まだ確認していないドメイン(仕様の出典ドメイン → 製品専用サイト等の関連が
+    明確なドメイン(relevant_domains)の順で上限なし、それ以外は引用の多い順に上限まで)。各ドメインはまず他の行の
+    確認結果を再利用し、無ければ取得する。公式確認できた時点で終了。"""
+    now = now or _utcnow()
+    log = []
+    if not brand or not citations or official_confirmation(brand, citations, payload)["confirmed"]:
+        return citations, False, log
+    out, changed = retry_transient_page_verifications(brand, citations, now=now)
+    if changed:
+        log.append({"action": "transient_retry"})
+    if official_confirmation(brand, out, payload)["confirmed"]:
+        return out, changed, log
+    out = [dict(c) if isinstance(c, dict) else c for c in out]
+    spec = _spec_source_domains(payload, out)
+    related = relevant_domains(brand, product_name or (payload or {}).get("product_name"), stage1_text, out) - spec
+    priority = spec | related
+    checked = {_citation_title_domain(c) for c in out
+               if isinstance(c, dict) and isinstance(c.get("page_verification"), dict)}
+    other_checked = len([d for d in checked if d and d not in priority])
+    order = _page_verification_order(out)
+    rank = lambda c: 0 if _citation_title_domain(c) in spec else 1 if _citation_title_domain(c) in related else 2
+    order = sorted(order, key=rank)   # sortedは安定(同じ優先度の中では引用の多い順を保つ)
+    for citation in order:
+        domain = _citation_title_domain(citation)
+        if domain in checked:
+            continue
+        if domain not in priority:
+            if other_checked >= MAX_PAGE_VERIFICATION_DOMAINS:
+                log.append({"domain": domain, "action": "skipped_domain_limit"})
+                continue
+            other_checked += 1
+        checked.add(domain)
+        record = cached_page_verification(cache, domain, now)
+        action = "reused" if record else "fetched"
+        if record is None:
+            record = _verify_citation_page(brand, citation)
+        citation["page_verification"] = record
+        changed = True
+        log.append({"domain": domain, "action": action, "spec_source": domain in spec, "related": domain in related,
+                    "status": record.get("status"),
+                    "reason": record.get("reason"), "attempts": record.get("attempts")})
+        print(f"[CITATION PAGE CHECK] brand={brand} domain={domain} action={action} status={record.get('status')} "
+              f"reason={record.get('reason')}", flush=True)
+        if official_confirmation(brand, out, payload)["confirmed"]:
+            break
+    return out, changed, log
+
+
+def load_page_verification_cache():
+    """全staging行の保存済みpage_verificationから再利用用のキャッシュを作る(読み取りのみ)。"""
+    conn = psycopg2.connect(app.DATABASE_URL)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT staging_id, stage1_citations FROM product_collection_staging WHERE stage1_citations IS NOT NULL")
+        return build_page_verification_cache(cur.fetchall())
+    finally:
+        conn.close()
 
 
 def update_staging_citations(staging_id, citations):
@@ -1425,6 +1606,25 @@ def functional_ingredient_tags(stage1_text):
     return tags
 
 
+def _primary_ingredients_unknown(stage2_payload):
+    """Stage2のprimary_ingredients項目はあるが、値が根拠なし(unknown・空)か。"""
+    attrs = (stage2_payload or {}).get("category_attributes") or {}
+    if "primary_ingredients" not in attrs:
+        return False
+    field = attrs.get("primary_ingredients")
+    value = field.get("value") if isinstance(field, dict) else field
+    return not value or str(value).strip().lower() == "unknown"
+
+
+def _sourced_active_ingredient_tags(stage2_payload):
+    """出典URL付きの有効成分(Stage2の照合でStage1の実citationに存在した出典)の成分タグ。"""
+    names = [i.get("ingredient") for i in ((stage2_payload or {}).get("active_ingredients") or [])
+             if isinstance(i, dict) and i.get("ingredient")
+             and str(i.get("source_url") or "").startswith("https://")
+             and str(i.get("ingredient")).strip().lower() != "unknown"]
+    return set(app.compute_ingredient_tags(names))
+
+
 def supplement_primary_tags_for_payload(product_name, stage2_payload, stage1_text=None):
     """Stage2のprimary_ingredientsを第一優先とし、その項目が欠落している既存
     データだけapp.supplement_primary_tags_from_name()で補完する(Step47.2)。
@@ -1435,6 +1635,9 @@ def supplement_primary_tags_for_payload(product_name, stage2_payload, stage1_tex
         if PRIMARY_V2["enabled"]:
             allowed = _name_ingredient_tags(product_name) | functional_ingredient_tags(stage1_text)
             tags = [t for t in tags if t in allowed or (t == "probiotics" and allowed & {"lactobacillus", "bifida"})]
+        if not tags and _primary_ingredients_unknown(stage2_payload):
+            # Step56: 主要成分が根拠なし(unknown)の場合は、商品名と出典付きの有効成分の両方で確認できる成分だけで補う。
+            tags = sorted(_name_ingredient_tags(product_name) & _sourced_active_ingredient_tags(stage2_payload))
         return tags
     names = [i.get("ingredient") for i in ((stage2_payload or {}).get("active_ingredients") or [])
              if isinstance(i, dict) and i.get("ingredient")]

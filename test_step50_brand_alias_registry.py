@@ -101,18 +101,21 @@ class RegistryFileTests(unittest.TestCase):
 
     def test_repository_approved_entries_have_verified_evidence(self):
         # 有効化された項目はすべて、取得できた公式ページのURLと確認内容を持つ。
-        # 根拠を確認できなかった項目(dear-natura: 403)は有効化しない。
+        # 例外: dear-natura は公式ページが403で内容を確認できないが、2026-10-16にユーザーの判断で承認した
+        # (公式ドメインのドメイン名による確認)。承認者・承認日時・経緯の記載を必須とする。
         with open(pipeline.BRAND_ALIASES_PATH, encoding="utf-8") as f:
             entries = json.load(f)["entries"]
         approved = [e for e in entries if e["status"] == "approved"]
-        self.assertEqual(sorted(e["id"] for e in approved), ["imuse", "morinaga-bifidus", "nippi-collagen", "panasonic"])
-        for e in approved:
+        self.assertEqual(sorted(e["id"] for e in approved),
+                         ["dear-natura", "imuse", "morinaga-bifidus", "nippi-collagen", "panasonic"])
+        dear = next(e for e in approved if e["id"] == "dear-natura")
+        self.assertTrue(dear["approved_by"].startswith("user") and dear["approved_at"] and "ユーザーの判断で承認" in dear["evidence_note"])
+        for e in [e for e in approved if e["id"] != "dear-natura"]:
             with self.subTest(entry=e["id"]):
                 ok_pages = [p for p in e["evidence"] if p["status"] == "ok" and p["final_url"].startswith("https://")]
                 self.assertTrue(ok_pages)
                 self.assertTrue(e["evidence_note"] and e["approved_at"])
                 self.assertTrue(e["alias_relations"] or e["maker_relations"])
-        self.assertEqual(next(e for e in entries if e["id"] == "dear-natura")["status"], "proposed")
 
 
 class PendingTests(unittest.TestCase):

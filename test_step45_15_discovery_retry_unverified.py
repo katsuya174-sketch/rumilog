@@ -69,7 +69,7 @@ class UnverifiedClassificationTests(unittest.TestCase):
 
 class UnverifiedMarkerTests(OrchestratorTestBase):
 
-    def _insert_and_execute(self, label, citations):
+    def _insert_and_execute(self, label, citations, fetch=None):
         brand, name = f"パナソニック{label}{TEST_NAME_SUFFIX}", f"RF機{label}{TEST_NAME_SUFFIX}"
         payload = {"active_ingredients": [], "formulation_features": [],
                    "category_attributes": {"method": {"value": "RF", "confidence": "high", "source_url": citations[0]["uri"]}}}
@@ -83,7 +83,7 @@ class UnverifiedMarkerTests(OrchestratorTestBase):
         finally:
             conn.close()
         budget = orchestrator.BatchBudget(self._new_batch_id("s4515-exec"), 5, 20, 0.50)
-        with patch.object(pipeline.citation_verification, "fetch_html", side_effect=AssertionError("no http")), \
+        with patch.object(pipeline.citation_verification, "fetch_html", side_effect=fetch or AssertionError("no http")), \
              patch.object(pipeline, "resolve_item_code_for_product", side_effect=AssertionError("no rakuten")):
             actions = orchestrator.process_coverage_gap_item(
                 {"category": "美容機器", "target": "RF", "shortage_count": 1}, "execute", budget.batch_id, budget,
@@ -94,10 +94,17 @@ class UnverifiedMarkerTests(OrchestratorTestBase):
         return actions, row["stage2_payload"].get(orchestrator.GATE_FAILURE_MARKER_KEY)
 
     def test_partially_verified_staging_gets_no_marker(self):
+        # Step55: 未確認のドメインは再利用時に確認する。確認が一時エラーなら未確定のまま(markerなし)。
         cits = [_cit(1, "kakaku.com", _done("kakaku.com", "価格.com")), _cit(2, "panasonic.jp")]
-        actions, marker = self._insert_and_execute("Partial", cits)
+        fetched = []
+
+        def timeout(url):
+            fetched.append(url)
+            return {"status": "unverifiable", "reason": "timeout", "final_url": url}
+        actions, marker = self._insert_and_execute("Partial", cits, fetch=timeout)
+        self.assertEqual(len(fetched), 3)   # 1回 + その場の再試行2回
         self.assertEqual(actions[0]["official_evidence"]["status"], "undetermined")
-        self.assertEqual(actions[0]["official_evidence"]["unverified"], ["panasonic.jp"])
+        self.assertEqual(actions[0]["official_evidence"]["transient_unverified"], ["panasonic.jp"])
         self.assertIsNone(marker)
 
     def test_fully_verified_false_staging_gets_marker(self):

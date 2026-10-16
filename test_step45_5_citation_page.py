@@ -254,7 +254,8 @@ class PageVerificationDecisionTests(unittest.TestCase):
             REDIRECT + "b": _ok("www.ya-man.co.jp", _html(og="ヤーマン株式会社")),
         })
         self.assertTrue(ok)
-        self.assertEqual(fetched, [REDIRECT + "a", REDIRECT + "b"])  # 確認後は3件目を取得しない
+        # Step55: timeoutはその場で回数を制限して再試行(1 + 2回)してから次へ。確認後は3件目を取得しない。
+        self.assertEqual(fetched, [REDIRECT + "a"] * 3 + [REDIRECT + "b"])
         self.assertEqual(verified[0]["page_verification"]["status"], cv.UNVERIFIABLE)
         self.assertNotIn("page_verification", verified[2])
 

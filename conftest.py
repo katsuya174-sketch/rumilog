@@ -91,3 +91,12 @@ def fake_listing_page_fetch():
 
     with patch.object(pipeline, "_fetch_listing_page", side_effect=fake):
         yield
+
+
+@pytest.fixture(autouse=True)
+def no_wait_page_retry():
+    """Step55: 公式ページ確認のその場の再試行で、テスト中に実際に待たない。"""
+    import product_collection_pipeline as pipeline
+
+    with patch.object(pipeline, "_page_retry_sleep", lambda seconds: None):
+        yield
